@@ -2,6 +2,7 @@
 
 #include "Camera/CameraComponent.h"
 #include "Components/SphereComponent.h"
+#include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -157,6 +158,7 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	UInputAction* PutAction = MakeAction(TEXT("IA_ZG_Put"), EInputActionValueType::Boolean);
 	UInputAction* BulletTimeAction = MakeAction(TEXT("IA_ZG_BulletTime"), EInputActionValueType::Boolean);
 	UInputAction* CrowbarAction = MakeAction(TEXT("IA_ZG_Crowbar"), EInputActionValueType::Boolean);
+	UInputAction* TetherAction = MakeAction(TEXT("IA_ZG_Tether"), EInputActionValueType::Boolean);
 
 	Map(LookAction, EKeys::Mouse2D, false, false);
 	// WASD onto one 2D axis: D is +X, W is +Y (swizzled), A and S negated.
@@ -173,6 +175,7 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Map(PutAction, EKeys::F, false, false);
 	Map(BulletTimeAction, EKeys::Q, false, false);
 	Map(CrowbarAction, EKeys::G, false, false);
+	Map(TetherAction, EKeys::T, false, false);
 
 	Input->BindAction(LookAction, ETriggerEvent::Triggered, this, &AJamZeroGPawn::Look);
 	Input->BindAction(ThrustAction, ETriggerEvent::Triggered, this, &AJamZeroGPawn::Thrust);
@@ -186,6 +189,7 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Started, this, &AJamZeroGPawn::BulletTimePressed);
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &AJamZeroGPawn::BulletTimeReleased);
 	Input->BindAction(CrowbarAction, ETriggerEvent::Started, this, &AJamZeroGPawn::ToggleCrowbar);
+	Input->BindAction(TetherAction, ETriggerEvent::Started, this, &AJamZeroGPawn::ToggleTether);
 }
 
 void AJamZeroGPawn::PawnClientRestart()
@@ -424,6 +428,89 @@ void AJamZeroGPawn::Release()
 	GrabbedBody = nullptr;
 }
 
+void AJamZeroGPawn::ToggleTether()
+{
+	if (TetheredBody.IsValid())
+	{
+		DetachTether();
+		return;
+	}
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamTetherLook), /*bTraceComplex=*/false, this);
+	FHitResult Hit;
+	if (GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation(), ViewLocation() + ViewDirection() * TetherReachCm, ECC_Visibility, Params))
+	{
+		AttachTether(Hit.GetComponent());
+	}
+	else
+	{
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG tether: nothing within %.0f cm"), TetherReachCm);
+	}
+}
+
+bool AJamZeroGPawn::AttachTether(UPrimitiveComponent* Target)
+{
+	if (!Target || !Target->IsSimulatingPhysics() || Target == Body)
+	{
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG tether: %s is not a loose body"), *GetNameSafe(Target ? Target->GetOwner() : nullptr));
+		return false;
+	}
+	DetachTether();
+	// A rope is a distance limit, not a spring: slack until TetherLengthCm, then
+	// a soft spherical limit between the pawn's centre and the part's origin.
+	TetherConstraint = NewObject<UPhysicsConstraintComponent>(this);
+	TetherConstraint->SetupAttachment(Body);
+	TetherConstraint->RegisterComponent();
+	TetherConstraint->SetWorldLocation(Body->GetComponentLocation());
+	TetherConstraint->SetLinearXLimit(LCM_Limited, TetherLengthCm);
+	TetherConstraint->SetLinearYLimit(LCM_Limited, TetherLengthCm);
+	TetherConstraint->SetLinearZLimit(LCM_Limited, TetherLengthCm);
+	TetherConstraint->SetAngularSwing1Limit(ACM_Free, 0.0f);
+	TetherConstraint->SetAngularSwing2Limit(ACM_Free, 0.0f);
+	TetherConstraint->SetAngularTwistLimit(ACM_Free, 0.0f);
+	FLinearConstraint& Limit = TetherConstraint->ConstraintInstance.ProfileInstance.LinearLimit;
+	Limit.bSoftConstraint = TetherStiffness > 0.0f;
+	Limit.Stiffness = TetherStiffness;
+	Limit.Damping = TetherDamping;
+	TetherConstraint->SetConstrainedComponents(Body, NAME_None, Target, NAME_None);
+	// Frame 2 from the pawn's position in the part's space to the part's origin.
+	TetherConstraint->SetConstraintReferencePosition(EConstraintFrame::Frame2, FVector::ZeroVector);
+	TetheredBody = Target;
+	Target->WakeAllRigidBodies();
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG tether: on %s, %.0f kg, %.0f cm away, rope %.0f cm"), *GetNameSafe(Target->GetOwner()),
+		Target->GetMass(), FVector::Dist(Body->GetComponentLocation(), Target->GetComponentLocation()), TetherLengthCm);
+	return true;
+}
+
+void AJamZeroGPawn::DetachTether()
+{
+	if (TetherConstraint)
+	{
+		TetherConstraint->BreakConstraint();
+		TetherConstraint->DestroyComponent();
+		TetherConstraint = nullptr;
+	}
+	if (TetheredBody.IsValid())
+	{
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG tether: cut from %s"), *GetNameSafe(TetheredBody->GetOwner()));
+	}
+	TetheredBody = nullptr;
+}
+
+void AJamZeroGPawn::DrawTether() const
+{
+	const UPrimitiveComponent* Tethered = TetheredBody.Get();
+	if (!Tethered)
+	{
+		return;
+	}
+	// ponytail: a debug line (Development builds), straight; a UCableComponent
+	// (CableComponent plugin) if the rope must sag or ship in Shipping.
+	const FVector From = Body->GetComponentLocation() - FVector(0.0f, 0.0f, 20.0f);
+	const FVector To = Tethered->GetComponentLocation();
+	const bool bTaut = FVector::Dist(From, To) >= TetherLengthCm * 0.97f;
+	DrawDebugLine(GetWorld(), From, To, bTaut ? FColor(255, 150, 40) : FColor(150, 150, 150), false, -1.0f, 0, bTaut ? 3.0f : 1.5f);
+}
+
 void AJamZeroGPawn::ThrowHeld()
 {
 	UPrimitiveComponent* PropBody = GrabbedBody.Get();
@@ -474,6 +561,11 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 	{
 		Release();
 	}
+	if (TetherConstraint && !TetheredBody.IsValid())
+	{
+		DetachTether();
+	}
+	DrawTether();
 	RefreshGrabCandidate();
 	ApplyThrusters(DeltaSeconds);
 	if (MaxSpeedCm > 0.0f)
@@ -639,6 +731,32 @@ namespace
 			Stage, Pawn->GetWorld()->GetGravityZ(), Velocity.X, Velocity.Y, Velocity.Z, Velocity.Size(), Pawn->Oxygen->Seconds);
 	}
 
+	/** The rope: the part 5 m to the side, the pawn pushes off; once the rope is taut the part follows. */
+	void ProbeTether(AJamZeroGPawn* Pawn, UPrimitiveComponent* Part)
+	{
+		Pawn->Body->SetWorldLocation(FVector::ZeroVector, false, nullptr, ETeleportType::TeleportPhysics);
+		Pawn->Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		Part->SetWorldLocation(FVector(0.0f, -500.0f, 0.0f), false, nullptr, ETeleportType::TeleportPhysics);
+		Part->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		Part->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		Pawn->AttachTether(Part);
+		Pawn->Push();
+		for (const float Seconds : { 1.0f, 3.0f, 5.0f })
+		{
+			FTimerHandle After;
+			Pawn->GetWorld()->GetTimerManager().SetTimer(After, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Part, Seconds]()
+			{
+				UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [tether +%.0f s]: rope %.0f cm (length %.0f), pawn %.0f cm/s, part %.0f kg %.0f cm/s"),
+					Seconds, FVector::Dist(Pawn->Body->GetComponentLocation(), Part->GetComponentLocation()), Pawn->TetherLengthCm,
+					Pawn->GetBodyVelocity().Size(), Part->GetMass(), Part->GetPhysicsLinearVelocity().Size());
+				if (Seconds >= 5.0f)
+				{
+					Pawn->DetachTether();
+				}
+			}), Seconds, false);
+		}
+	}
+
 	/**
 	 * Back to the start at rest, the heaviest loose prop brought beside the pawn
 	 * and grabbed, then a push off the anchor: pawn and prop should leave
@@ -685,6 +803,7 @@ namespace
 				if (Seconds >= 3.0f)
 				{
 					Pawn->Release();
+					ProbeTether(Pawn, Heaviest);
 				}
 			}), Seconds, false);
 		}

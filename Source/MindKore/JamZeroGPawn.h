@@ -34,6 +34,10 @@ struct FInputActionValue;
  * and the prop at the grab point with a soft linear spring (angular free), so
  * a heavy part drags the pawn as much as the pawn drags it. E, F or RMB lets
  * go; LMB throws with equal and opposite impulses.
+ *
+ * Towing: T throws a rope (a soft spherical distance limit, TetherLengthCm)
+ * to the loose body under the view within TetherReachCm; the part follows on
+ * the rope wherever you push or thrust. T again cuts it.
  * Weak thrusters (WASD, Space/Ctrl, view-relative) and the stabiliser (X) are
  * a safety net that costs oxygen.
  *
@@ -118,6 +122,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "1.0"))
 	float MaxThrowSpeedCm = 1100.0f;
 
+	// --- tether (T) ---------------------------------------------------------------
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Tether", meta = (ClampMin = "10.0"))
+	float TetherReachCm = 600.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Tether", meta = (ClampMin = "10.0"))
+	float TetherLengthCm = 800.0f;
+
+	/** Soft limit spring when the rope is taut (Chaos soft linear limit). 0 = a hard limit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Tether", meta = (ClampMin = "0.0"))
+	float TetherStiffness = 500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Tether", meta = (ClampMin = "0.0"))
+	float TetherDamping = 50.0f;
+
 	// --- shot (LMB, empty hands) ------------------------------------------------
 
 	/** kg cm/s against the view: 6000 / 100 kg = 60 cm/s. */
@@ -190,6 +209,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG")
 	UPrimitiveComponent* GetGrabbed() const { return GrabbedBody.Get(); }
 
+	/** Rope to Target's origin. False when Target does not simulate or is out of reach. */
+	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
+	bool AttachTether(UPrimitiveComponent* Target);
+
+	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
+	void DetachTether();
+
+	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG")
+	UPrimitiveComponent* GetTethered() const { return TetheredBody.Get(); }
+
 	/** The simulated body E would grab now (null when none or something is held). */
 	UPrimitiveComponent* GetGrabCandidate() const { return GrabCandidate.Get(); }
 
@@ -228,6 +257,11 @@ protected:
 	TObjectPtr<UPhysicsConstraintComponent> GrabConstraint = nullptr;
 
 	TWeakObjectPtr<UPrimitiveComponent> GrabbedBody;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UPhysicsConstraintComponent> TetherConstraint = nullptr;
+
+	TWeakObjectPtr<UPrimitiveComponent> TetheredBody;
 	TWeakObjectPtr<UPrimitiveComponent> GrabCandidate;
 	FVector GrabCandidatePoint = FVector::ZeroVector;
 
@@ -244,6 +278,8 @@ private:
 	void PrimaryPressed();
 	void PushPressed();
 	void PutDown();
+	void ToggleTether();
+	void DrawTether() const;
 	void Use();
 	void BulletTimePressed();
 	void BulletTimeReleased();
