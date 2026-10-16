@@ -9,7 +9,8 @@ A dark, closed 80 x 80 x 50 m box centred on the origin. WorldSettings: global
 gravity 0 and the AJamZeroGGameMode override. Inside: floating junk
 (AMKPhysicsProp, 5-500 kg; AJamZeroGGameMode gives it drift and spin on
 StartPlay), static 4 m anchor blocks to push off, a rocket stand-in at the far
-+X end, oxygen canisters, a glass pane in a floating frame, an impact dummy
++X end with the dock zone and four tagged ship parts (Ship.Part) 20-40 m away,
+oxygen canisters, a glass pane in a floating frame, an impact dummy
 and the PlayerStart at the origin facing +X, 1 m from the first anchor's face.
 Everything is seeded: the same map every run.
 """
@@ -145,9 +146,26 @@ label_text("GLASS", V(0, 1190, 130), -90, 30)
 spawn(unreal.MKImpactDummy, V(0, -1200, -120), 90, "Dummy")
 label_text("DUMMY", V(0, -1190, 140), 90, 30)
 
+# --- ship parts and the dock --------------------------------------------------------
+# Loot: big tagged parts 20-40 m from the rocket, to be towed or pushed into the dock.
+dock = spawn(unreal.JamDockZone, V(2600, 0, 0), 0, "Dock_Ship")
+dock.set_editor_property("required_count", 4)
+label_text("DOCK", V(2600, 0, 900), 180)
+PARTS = [(V(1000, 1500, 0), "cube", (2.0, 2.5, 3.0), 300.0), (V(0, -1500, -600), "cylinder", (2.2, 2.2, 4.0), 800.0),
+         (V(500, 2500, 1200), "cube", (3.5, 2.0, 2.0), 500.0), (V(1300, -400, -1500), "cylinder", (3.0, 3.0, 2.0), 200.0)]
+for i, (loc, kind, scale, mass) in enumerate(PARTS):
+    part = spawn(unreal.MKPhysicsProp, loc, 0, "ShipPart_%d_%dkg" % (i, mass))
+    body = part.get_editor_property("body")
+    body.modify()
+    body.set_static_mesh(CUBE if kind == "cube" else CYL)
+    part.set_actor_scale3d(V(*scale))
+    part.set_editor_property("mass_kg", mass)
+    part.set_editor_property("tags", ["Ship.Part"])
+    zero_damping(body)
+
 # --- junk -----------------------------------------------------------------------------
 KEEP_CLEAR = [(V(0, 0, 0), 700.0), (V(0, 1200, 0), 300.0), (V(0, -1200, 0), 300.0), (ROCKET, 600.0)] + \
-             [(a, 450.0) for a in ANCHORS]
+             [(a, 450.0) for a in ANCHORS] + [(loc, 400.0) for loc, _, _, _ in PARTS] + [(V(2600, 0, 0), 900.0)]
 
 
 def clear(p):

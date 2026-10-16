@@ -6,6 +6,7 @@
 #include "EngineUtils.h"
 #include "JamCharacter.h"
 #include "JamCollisionImpact.h"
+#include "JamDockZone.h"
 #include "JamOxygen.h"
 #include "JamZeroGPawn.h"
 #include "MKPhysicsProp.h"
@@ -153,6 +154,11 @@ void AJamZeroGHUD::DrawHUD()
 	if (Pawn->HasCrowbar())
 	{
 		State += TEXT("   crowbar");
+	}
+	for (TActorIterator<AJamDockZone> Dock(GetWorld()); Dock; ++Dock)
+	{
+		State += FString::Printf(TEXT("   Детали: %d/%d%s"), Dock->GetCount(), Dock->RequiredCount, Dock->IsCompleted() ? TEXT(" - готово") : TEXT(""));
+		break;
 	}
 	if (Pawn->Oxygen->IsDead())
 	{

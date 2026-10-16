@@ -1,27 +1,32 @@
 * text=auto
 
-# Unreal and other binary files: never diffed or merged as text. No LFS.
-*.uasset binary
-*.umap binary
-*.fbx binary
-*.obj binary
-*.wav binary
-*.ogg binary
-*.mp3 binary
-*.png binary
-*.jpg binary
-*.tga binary
-*.exr binary
-*.hdr binary
-*.psd binary
-*.blend binary
-*.ttf binary
-*.otf binary
-
-# Team art: the only folder stored in Git LFS (Content/JamArt/, see README.md).
-# Files committed before LFS stay in plain git. Binary assets cannot be merged,
-# so .uasset/.umap here are lockable: read-only until `git lfs lock`.
-Content/JamArt/** filter=lfs diff=lfs merge=lfs -text
-Content/JamArt/**/*.uasset filter=lfs diff=lfs merge=lfs -text lockable
-Content/JamArt/**/*.umap filter=lfs diff=lfs merge=lfs -text lockable
-Content/JamArt/README.md !filter !diff !merge text
+# Every binary file goes through Git LFS (owner's decision 2026-10-16).
+# Binary assets cannot be merged, so .uasset/.umap are lockable:
+# `git lfs lock <path>` before editing (see README.md, Git LFS section).
+*.uasset filter=lfs diff=lfs merge=lfs -text lockable
+*.umap filter=lfs diff=lfs merge=lfs -text lockable
+*.fbx filter=lfs diff=lfs merge=lfs -text
+*.obj filter=lfs diff=lfs merge=lfs -text
+*.wav filter=lfs diff=lfs merge=lfs -text
+*.ogg filter=lfs diff=lfs merge=lfs -text
+*.mp3 filter=lfs diff=lfs merge=lfs -text
+*.png filter=lfs diff=lfs merge=lfs -text
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.jpeg filter=lfs diff=lfs merge=lfs -text
+*.tga filter=lfs diff=lfs merge=lfs -text
+*.exr filter=lfs diff=lfs merge=lfs -text
+*.hdr filter=lfs diff=lfs merge=lfs -text
+*.psd filter=lfs diff=lfs merge=lfs -text
+*.blend filter=lfs diff=lfs merge=lfs -text
+*.ttf filter=lfs diff=lfs merge=lfs -text
+*.otf filter=lfs diff=lfs merge=lfs -text
+*.bmp filter=lfs diff=lfs merge=lfs -text
+*.tif filter=lfs diff=lfs merge=lfs -text
+*.tiff filter=lfs diff=lfs merge=lfs -text
+*.abc filter=lfs diff=lfs merge=lfs -text
+*.glb filter=lfs diff=lfs merge=lfs -text
+*.gltf filter=lfs diff=lfs merge=lfs -text
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.webm filter=lfs diff=lfs merge=lfs -text
+*.bin filter=lfs diff=lfs merge=lfs -text
+*.zip filter=lfs diff=lfs merge=lfs -text

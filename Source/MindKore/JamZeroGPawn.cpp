@@ -13,6 +13,7 @@
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "JamDockZone.h"
 #include "JamOxygen.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -886,6 +887,35 @@ namespace
 			Stage, Pawn->GetWorld()->GetGravityZ(), Velocity.X, Velocity.Y, Velocity.Z, Velocity.Size(), Pawn->Oxygen->Seconds);
 	}
 
+	/** The dock: one Ship.Part put inside the zone at rest; the count is logged before and after. */
+	void ProbeDock(AJamZeroGPawn* Pawn)
+	{
+		UWorld* World = Pawn->GetWorld();
+		AJamDockZone* Dock = nullptr;
+		AActor* Part = nullptr;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			Dock = Dock ? Dock : Cast<AJamDockZone>(*It);
+			Part = Part ? Part : (It->ActorHasTag(TEXT("Ship.Part")) ? *It : nullptr);
+		}
+		UPrimitiveComponent* Root = Part ? Cast<UPrimitiveComponent>(Part->GetRootComponent()) : nullptr;
+		if (!Dock || !Root)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("ZeroG probe: no dock zone or no Ship.Part"));
+			return;
+		}
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [dock]: %d/%d before; moving %s (%.0f kg) inside"), Dock->GetCount(),
+			Dock->RequiredCount, *Part->GetName(), Root->GetMass());
+		Root->SetWorldLocation(Dock->GetActorLocation() - FVector(0.0f, 0.0f, 500.0f), false, nullptr, ETeleportType::TeleportPhysics);
+		Root->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		FTimerHandle After;
+		World->GetTimerManager().SetTimer(After, FTimerDelegate::CreateWeakLambda(Dock, [Dock, Root]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [dock]: %d/%d after 1 s, part drifting at %.0f cm/s"), Dock->GetCount(),
+				Dock->RequiredCount, Root->GetPhysicsLinearVelocity().Size());
+		}), 1.0f, false);
+	}
+
 	/**
 	 * Glass: a 4 kg canister at 200 cm/s (under the impulse threshold), then the
 	 * heaviest small body (bounding radius < 70 cm) at 800 cm/s, both thrown at
@@ -948,6 +978,7 @@ namespace
 				{
 					LogProbe(TEXT("after crash"), Pawn);
 					UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [crash]: health %.0f"), Pawn->Vitals->Health);
+					ProbeDock(Pawn);
 				}), 1.0f, false);
 			}), 2.0f, false);
 		}), 2.5f, false);
