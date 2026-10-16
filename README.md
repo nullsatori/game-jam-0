@@ -19,7 +19,9 @@ MindKore: взаимодействие «посмотрел — нажал E», 
    Или ПКМ по `MKJamStarter.uproject` → Generate Visual Studio project files →
    собрать `MKJamStarterEditor` в Development Editor.
 3. Открыть `MKJamStarter.uproject`. Стартовая карта —
-   `/Game/Jam/Maps/Lvl_Jam_TestRoom`, режим игры — `AJamGameMode`.
+   `/Game/Jam/Maps/Lvl_Jam_ZeroG` (невесомость, режим `AJamZeroGGameMode`
+   задан в её WorldSettings). Наземная тестовая комната —
+   `/Game/Jam/Maps/Lvl_Jam_TestRoom` (режим по умолчанию `AJamGameMode`).
 
 Модуль называется `MindKore` (папка `Source/MindKore`), чтобы перенесённый код,
 `MINDKORE_API`, `LogMindKore` и пути `/Game/MindKore/...` работали без правок.
@@ -28,6 +30,13 @@ MindKore: взаимодействие «посмотрел — нажал E», 
 по умолчанию.
 
 ## Управление
+
+Невесомость (`Lvl_Jam_ZeroG`): мышь — обзор, ПКМ — оттолкнуться, ЛКМ —
+выстрел с отдачей / бросок с отдачей, E — взять, F — отпустить, WASD и
+Space/Ctrl — слабые двигатели, X — стабилизатор, Q — замедление, G — лом.
+Подробно — [ZeroG](Docs/ZeroG.md).
+
+Наземная комната (`Lvl_Jam_TestRoom`):
 
 | Клавиша | Действие |
 |---|---|
@@ -76,6 +85,7 @@ UnrealEditor-Cmd.exe <путь>\MKJamStarter.uproject -ExecutePythonScript="<п�
 [Impacts-Vitals](Docs/Impacts-Vitals.md) ·
 [BulletTime](Docs/BulletTime.md) ·
 [JamCharacter](Docs/JamCharacter.md) ·
+[ZeroG](Docs/ZeroG.md) ·
 [CREDITS](CREDITS.md)
 
 ## Тяжёлый арт
