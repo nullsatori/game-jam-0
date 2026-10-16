@@ -79,14 +79,24 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UJamOxygenComponent> Oxygen = nullptr;
 
+	/** Space again in the air on a planetoid (radial gravity): a jet leap straight up from the surface, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Walker", meta = (ClampMin = "0.0"))
+	float JetExitSpeedCm = 1600.0f;
+
+	/** Set every tick by AJamShipGameMode: the walker stands in a radial (planetoid) zone, where the jet leap works. */
+	bool bInRadialGravity = false;
+
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void Jump() override;
 };
 
 /**
- * Turns the view relative to the walker's gravity (Epic's custom-gravity
- * controller pattern): on the planetoid the mouse looks around the local
- * up, and a change of gravity carries the view along instead of snapping it.
- * With gravity straight down it is the stock behaviour.
+ * Turns the view relative to the walker's gravity: the view is kept as pitch
+ * and yaw in a frame that is carried along (quaternions) as gravity turns,
+ * and that gravity eases toward the pawn's - so on the planetoid the mouse
+ * looks around the local up, landing turns the world under you smoothly,
+ * and walking around the sphere keeps the view level. With gravity straight
+ * down it behaves as the stock controller.
  */
 UCLASS()
 class MINDKORE_API AJamShipController : public APlayerController
@@ -94,10 +104,22 @@ class MINDKORE_API AJamShipController : public APlayerController
 	GENERATED_BODY()
 
 public:
+	/** How fast the view's "down" follows a change of gravity, 1/s: 4 is ~95 % in 0.75 s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Walker", meta = (ClampMin = "0.1"))
+	float GravityAlignRate = 4.0f;
+
 	virtual void UpdateRotation(float DeltaTime) override;
 
+	/** The gravity direction the view uses now (eased toward the pawn's). */
+	FVector GetViewGravity() const { return SmoothedGravity; }
+
 private:
-	FVector LastFrameGravity = FVector::ZeroVector;
+	FVector SmoothedGravity = FVector::ZeroVector;
+	/** World from the view's local frame, carried along as gravity turns. */
+	FQuat GravityFrame = FQuat::Identity;
+	/** The view in that frame: pitch and yaw, no roll. */
+	FRotator RelativeView = FRotator::ZeroRotator;
+	FRotator LastWrittenRotation = FRotator(1000.0f, 0.0f, 0.0f);
 };
 
 /**

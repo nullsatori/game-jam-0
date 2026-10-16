@@ -74,11 +74,13 @@ def block(label, centre, size, rot=None, mesh=None, material=None, shadow=True, 
 
 
 def tint(name, rgb):
+    """A colour instance of BasicShapeMaterial; made once, its colour rewritten every build."""
     path = MATS + "/" + name
     if eal.does_asset_exist(path):
-        return unreal.load_asset(path)
-    mi = tools.create_asset(name, MATS, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
-    mel.set_material_instance_parent(mi, unreal.load_asset("/Engine/BasicShapes/BasicShapeMaterial"))
+        mi = unreal.load_asset(path)
+    else:
+        mi = tools.create_asset(name, MATS, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
+        mel.set_material_instance_parent(mi, unreal.load_asset("/Engine/BasicShapes/BasicShapeMaterial"))
     mel.set_material_instance_vector_parameter_value(mi, "Color", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
     eal.save_asset(path, False)
     log("made " + path)
@@ -200,14 +202,14 @@ FUEL = tint("MI_Jam_Fuel", (0.95, 0.8, 0.1))
 OXYGEN = tint("MI_Jam_O2", (0.1, 0.35, 0.95))
 DOCK = tint("MI_Jam_Dock", (0.2, 0.9, 0.3))
 ROCK = tint("MI_Jam_Rock", (0.33, 0.31, 0.28))
-FLESH = tint("MI_Jam_Flesh", (0.62, 0.3, 0.32))
+FLESH = tint("MI_Jam_Flesh", (0.45, 0.05, 0.08))  # dark saturated red-pink: stays fleshy under the teal key
 EMISSIVE = emissive_base("M_Jam_Emissive", False)
 EMISSIVE_2S = emissive_base("M_Jam_Emissive2S", True)
-STAR = glow("MI_Jam_Star", EMISSIVE, (0.55, 0.92, 1.0), 60.0)
+STAR = glow("MI_Jam_Star", EMISSIVE, (0.1, 0.75, 1.0), 12.0)  # teal like its light; still blooms
 STARS = glow("MI_Jam_Stars", EMISSIVE, (0.85, 0.9, 1.0), 25.0)
 DOME = glow("MI_Jam_SkyDome", EMISSIVE_2S, (0.035, 0.02, 0.07), 1.0)
 EYE = glow("MI_Jam_EyeGlow", EMISSIVE, (0.7, 0.03, 0.02), 6.0)
-LAMP = glow("MI_Jam_PanelLamp", EMISSIVE, (1.0, 0.08, 0.05), 3.0)
+LAMP = glow("MI_Jam_PanelLamp", EMISSIVE, (1.0, 0.02, 0.01), 2.0)
 CARGO = tint("MI_Jam_Cargo", (0.9, 0.75, 0.3))
 CABIN = tint("MI_Jam_Cabin", (0.55, 0.53, 0.5))
 
@@ -363,10 +365,10 @@ wall_with_door("Airlock_Outer", 1200, 120, 100)
 door("Door_Inner", 1400)
 door("Door_Outer", 1200, "Jam.Suit", "Нужен скафандр")
 AMBER = (1.0, 0.62, 0.28)
-point_light("Light_Cabin_Front", V(1850, 0, 120), AMBER, 8.0, 900.0)
-point_light("Light_Cabin_Back", V(1550, 0, 120), AMBER, 5.0, 900.0)
-point_light("Light_Airlock", V(1300, 0, 80), AMBER, 4.0, 500.0)
-point_light("Light_Emergency", V(1450, -230, 120), (1.0, 0.08, 0.05), 6.0, 600.0, shadows=False)
+point_light("Light_Cabin_Front", V(1850, 0, 120), AMBER, 4.0, 900.0)
+point_light("Light_Cabin_Back", V(1550, 0, 120), AMBER, 2.5, 900.0)
+point_light("Light_Airlock", V(1300, 0, 80), AMBER, 2.0, 500.0)
+point_light("Light_Emergency", V(1450, -230, 120), (1.0, 0.0, 0.0), 10.0, 600.0, shadows=False)
 
 cabin_zone = spawn(unreal.JamGravityZone, V(1700, 0, 0), None, "Gravity_Cabin")
 set_extent(cabin_zone, "zone", (300, 250, 150))
@@ -470,16 +472,23 @@ for j, loc in enumerate([V(0, -6000, 0), V(300, -6200, 200)]):
     prop("FuelTank_%d" % j, loc, CYL, (120, 120, 300), 300, FUEL, ["Ship.Fuel", "Jam.NoDrift"])
 label_text("FUEL TANKS", V(150, -6000, 350), 90, 50)
 
-# --- the planetoid: living, warm, breathable (primitive for now: no walking on it) ---------------------
-# A static sphere and a breathable shell 10 m above its surface: inside, breathing
-# restores oxygen. The player stays in zero-G near it (owner, 16.10).
+# --- the planetoid: living, breathable, walkable --------------------------------------------------
+# Within 8 m of the surface the player walks on it (radial gravity 980 toward the
+# centre; the view's up eases to the surface normal); within 10 m breathing
+# restores oxygen. A jump, then Space again in the air, is a jet leap off it.
 PLANET, PR = (0.0, 10000.0, -1000.0), 3000.0
 block("Planetoid", V(*PLANET), (2 * PR, 2 * PR, 2 * PR), None, SPHERE, FLESH)
+walk_shell = spawn(unreal.JamGravityZone, V(*PLANET), None, "Gravity_Planetoid")
+walk_shell.set_editor_property("sphere_radius_cm", PR + 800.0)
+walk_shell.set_editor_property("radial", True)
+walk_shell.set_editor_property("gravity_cm", 980.0)
+walk_shell.set_editor_property("refill_per_second", 5.0)
+walk_shell.set_editor_property("hud_text", unreal.Text("Можно дышать"))
 air_shell = spawn(unreal.JamGravityZone, V(*PLANET), None, "Air_Planetoid")
 air_shell.set_editor_property("sphere_radius_cm", PR + 1000.0)
 air_shell.set_editor_property("walk", False)
 air_shell.set_editor_property("refill_per_second", 5.0)
-air_shell.set_editor_property("hud_text", unreal.Text("Тепло, можно дышать"))
+air_shell.set_editor_property("hud_text", unreal.Text("Можно дышать"))
 
 
 def on_surface(direction, height):

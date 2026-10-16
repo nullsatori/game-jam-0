@@ -187,7 +187,7 @@ void AJamShipPanel::Tick(float DeltaSeconds)
 		if (LampMaterials[Index])
 		{
 			const bool bDone = (State & (1 << Index)) != 0;
-			LampMaterials[Index]->SetVectorParameterValue(TEXT("Color"), bDone ? FLinearColor(0.1f, 1.0f, 0.2f) : FLinearColor(1.0f, 0.08f, 0.05f));
+			LampMaterials[Index]->SetVectorParameterValue(TEXT("Color"), bDone ? FLinearColor(0.05f, 1.0f, 0.1f) : FLinearColor(1.0f, 0.02f, 0.01f));
 		}
 	}
 	UE_LOG(LogMindKore, Log, TEXT("Panel %s: hull %s (%d/%d), fuel %s, navigation %s"), *GetName(),
