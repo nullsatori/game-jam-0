@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "JamCharacter.h"
+#include "JamCollisionImpact.h"
 #include "JamOxygen.h"
 #include "JamZeroGPawn.h"
 #include "MKPhysicsProp.h"
@@ -92,6 +93,12 @@ void AJamZeroGGameMode::StartPlay()
 		PropBody->SetPhysicsLinearVelocity(Random.GetUnitVector() * Random.FRandRange(0.0f, InitialDriftMaxCm));
 		PropBody->SetPhysicsAngularVelocityInDegrees(Random.GetUnitVector() * Random.FRandRange(0.0f, InitialSpinMaxDeg));
 		PropBody->WakeAllRigidBodies();
+		// Its collisions become blows: a heavy fast prop breaks glass and hurts.
+		if (!It->FindComponentByClass<UJamCollisionImpactComponent>())
+		{
+			UJamCollisionImpactComponent* Impacts = NewObject<UJamCollisionImpactComponent>(*It);
+			Impacts->RegisterComponent();
+		}
 		++Count;
 	}
 	UE_LOG(LogMindKore, Log, TEXT("ZeroG mode: world gravity Z %.1f, %d props set drifting (up to %.0f cm/s)"),

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
+#include "JamCollisionImpact.h"
 #include "MKImpactReceiver.h"
 #include "JamZeroGPawn.generated.h"
 
@@ -42,6 +43,10 @@ struct FInputActionValue;
  * LMB and RMB act on release: while one is held the pawn draws where the
  * action will send it (push off, recoil) or where the throw sends the held
  * prop - a dotted line, the first contact marked, one bounce after it.
+ *
+ * Crashes count: a hit above FeedbackMinSpeedCm thumps (sound, camera shake),
+ * the blow is delivered to what was hit (CrashImpact, the same path as a
+ * round), and above CrashDamageMinSpeedCm the pawn hurts itself.
  * Weak thrusters (WASD, Space/Ctrl, view-relative) and the stabiliser (X) are
  * a safety net that costs oxygen.
  *
@@ -150,6 +155,34 @@ public:
 	/** Normal velocity kept on the predicted bounce (the real one depends on both materials). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Prediction", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float PredictRestitution = 0.3f;
+
+	// --- crashes ------------------------------------------------------------------
+
+	/** The pawn's blows on what it hits (glass breaks, dummies hurt). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Crash")
+	FJamCollisionImpactSettings CrashImpact;
+
+	/** A hit faster than this thumps: sound and camera shake, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Crash", meta = (ClampMin = "0.0"))
+	float FeedbackMinSpeedCm = 250.0f;
+
+	/** A hit faster than this hurts the pawn itself, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Crash", meta = (ClampMin = "0.0"))
+	float CrashDamageMinSpeedCm = 600.0f;
+
+	/** Self damage per cm/s over CrashDamageMinSpeedCm. The speed is the velocity change along the normal, bounce included: a head-on 1000 cm/s at restitution 0.3 reads ~1300 and costs ~35. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Crash", meta = (ClampMin = "0.0"))
+	float CrashDamagePerCmS = 0.05f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Crash")
+	TObjectPtr<USoundBase> CrashSound = nullptr;
+
+	/** Camera shake amplitude per 1000 cm/s of hit, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Crash", meta = (ClampMin = "0.0"))
+	float ShakeCmPer1000 = 4.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Crash", meta = (ClampMin = "0.0"))
+	float ShakeSeconds = 0.25f;
 
 	// --- shot (LMB, empty hands) ------------------------------------------------
 
@@ -295,6 +328,12 @@ private:
 	void PrimaryPressed();
 	void PushPressed();
 	void PutDown();
+	UFUNCTION()
+	void HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp,
+		FVector NormalImpulse, const FHitResult& Hit);
+	double LastCrashSeconds = -100.0;
+	float ShakeRemaining = 0.0f;
+	float ShakeAmplitude = 0.0f;
 	void DrawPrediction() const;
 	void DrawPath(const FVector& Start, const FVector& Velocity, float RadiusCm, const AActor* Ignored, const FColor& Color) const;
 

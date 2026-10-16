@@ -77,6 +77,42 @@
 демпфирование 0, CCD включён, вращение заблокировано (`bLock*Rotation`).
 Пустой кислород выключает двигатели и стабилизатор.
 
+## Столкновения
+
+Удар — это событие, а не только физика. Файлы `JamCollisionImpact.h/.cpp`:
+`JamDeliverCollisionImpact` и `UJamCollisionImpactComponent` (режим
+`AJamZeroGGameMode` вешает его на каждый `AMKPhysicsProp` на старте).
+
+- Скорость удара = контактный импульс / своя масса (изменение скорости по
+  нормали, отскок включён: лобовые 1000 см/с при restitution 0.3 читаются
+  как ~1300).
+- Выше `MinSpeedCm` (300) **и** `MinImpulse` (5000 кг·см/с) удар уходит в
+  `MKResolveImpactFromHit` + `MKDeliverResolvedImpact` как Blunt: стекло
+  бьётся (радиус `BluntBreakRadiusCm`), манекен и пешка получают урон
+  `импульс × DamagePerImpulse` (0.0005). Физический импульс не добавляется —
+  столкновение уже толкнуло оба тела. `CooldownSeconds` 0.15 — одно событие
+  на тело.
+- Пешка (`CrashImpact` — те же настройки для её ударов): от
+  `FeedbackMinSpeedCm` (250) — звук `SC_MK_Hit_Armor` (громкость по
+  скорости) и тряска камеры (`ShakeCmPer1000` 4 см, `ShakeSeconds` 0.25);
+  от `CrashDamageMinSpeedCm` (600) — урон себе
+  `(скорость − 600) × CrashDamagePerCmS` (0.05).
+
+Смоук:
+
+```
+ZeroG probe [glass]: pane 30000 cm2; light JamOxygenCanister_0 4 kg at 200 cm/s
+ZeroG probe [glass]: after the light one 30000 cm2; heavy MKPhysicsProp_39 126 kg at 800 cm/s
+Collision impact: MKPhysicsProp_39 -> MKGlassPane_0 at 888 cm/s, impulse 111780 kg cm/s, damage 55.9, delivered
+ZeroG probe [glass]: after the heavy one 19644 cm2
+Collision impact: JamZeroGPawn_0 -> StaticMeshActor_6 at 1300 cm/s, impulse 130000 kg cm/s, damage 65.0, no receiver
+ZeroG crash: StaticMeshActor_6 at 1300 cm/s, self damage 35.0
+```
+
+Если в пешку прилетает тяжёлый предмет, урон приходит дважды: от удара
+предмета (его компонент) и от собственного «краша» пешки, если её скорость
+изменилась больше чем на 600 см/с.
+
 ## Как сделать невесомый уровень
 
 1. WorldSettings: `bGlobalGravitySet = true`, `GlobalGravityZ = 0`,

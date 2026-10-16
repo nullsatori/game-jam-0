@@ -17,6 +17,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "MKFastener.h"
+#include "MKGlassPane.h"
 #include "MKImpactDelivery.h"
 #include "MKInteractionComponent.h"
 #include "MKKeyring.h"
@@ -79,6 +80,10 @@ AJamZeroGPawn::AJamZeroGPawn()
 			ShotSounds.Add(Sound);
 		}
 	}
+	// A plate struck: the armour hit cue (CC0 donors, see CREDITS.md).
+	static ConstructorHelpers::FObjectFinder<USoundBase> Crash(
+		TEXT("/Game/MindKore/Audio/Impact/SC_MK_Hit_Armor.SC_MK_Hit_Armor"));
+	CrashSound = Crash.Object;
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Decal(
 		TEXT("/Game/MindKore/Impacts/Decals/M_Decal_Default.M_Decal_Default"));
 	DefaultImpactDecal = Decal.Object;
@@ -101,6 +106,8 @@ void AJamZeroGPawn::BeginPlay()
 	BodyMaterial->Friction = BodyFriction;
 	BodyMaterial->Restitution = BodyRestitution;
 	Body->SetPhysMaterialOverride(BodyMaterial);
+	Body->SetNotifyRigidBodyCollision(true);
+	Body->OnComponentHit.AddDynamic(this, &AJamZeroGPawn::HandleBodyHit);
 	if (BulletTimeMaterial)
 	{
 		BulletTimeMID = UMaterialInstanceDynamic::Create(BulletTimeMaterial, this);
@@ -528,6 +535,33 @@ void AJamZeroGPawn::DrawTether() const
 	DrawDebugLine(GetWorld(), From, To, bTaut ? FColor(255, 150, 40) : FColor(150, 150, 150), false, -1.0f, 0, bTaut ? 3.0f : 1.5f);
 }
 
+void AJamZeroGPawn::HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp,
+	FVector NormalImpulse, const FHitResult& Hit)
+{
+	if (OtherComp && OtherComp == GrabbedBody.Get())
+	{
+		return;
+	}
+	float SpeedCm = 0.0f;
+	JamDeliverCollisionImpact(this, Body, Hit, NormalImpulse, CrashImpact, LastCrashSeconds, SpeedCm);
+	if (SpeedCm < FeedbackMinSpeedCm || ShakeRemaining > ShakeSeconds * 0.5f)
+	{
+		return; // A touch, or the same crash still shaking.
+	}
+	if (CrashSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, CrashSound, Hit.ImpactPoint, FMath::Clamp(SpeedCm / 1000.0f, 0.2f, 1.0f));
+	}
+	ShakeRemaining = ShakeSeconds;
+	ShakeAmplitude = ShakeCmPer1000 * SpeedCm / 1000.0f;
+	if (SpeedCm >= CrashDamageMinSpeedCm)
+	{
+		const float Damage = (SpeedCm - CrashDamageMinSpeedCm) * CrashDamagePerCmS;
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG crash: %s at %.0f cm/s, self damage %.1f"), *GetNameSafe(OtherActor), SpeedCm, Damage);
+		Vitals->ApplyIncoming(Damage, EMKImpactKind::Blunt, /*bBlocked=*/false, FGuid());
+	}
+}
+
 void AJamZeroGPawn::ProbeAim(bool bAim, bool bPush)
 {
 	Aim = !bAim ? EAim::None : bPush ? EAim::Push : EAim::Primary;
@@ -682,6 +716,11 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 	}
 	DrawTether();
 	DrawPrediction();
+	// Camera shake: a fading random offset of the lens; the body never turns.
+	ShakeRemaining = FMath::Max(0.0f, ShakeRemaining - DeltaSeconds);
+	Camera->SetRelativeLocation(ShakeRemaining > 0.0f
+		? FMath::VRand() * ShakeAmplitude * (ShakeRemaining / FMath::Max(ShakeSeconds, 0.01f))
+		: FVector::ZeroVector);
 	RefreshGrabCandidate();
 	ApplyThrusters(DeltaSeconds);
 	if (MaxSpeedCm > 0.0f)
@@ -847,6 +886,73 @@ namespace
 			Stage, Pawn->GetWorld()->GetGravityZ(), Velocity.X, Velocity.Y, Velocity.Z, Velocity.Size(), Pawn->Oxygen->Seconds);
 	}
 
+	/**
+	 * Glass: a 4 kg canister at 200 cm/s (under the impulse threshold), then the
+	 * heaviest small body (bounding radius < 70 cm) at 800 cm/s, both thrown at
+	 * the pane; the pane's remaining area is logged after each. Then the pawn
+	 * is flung at the anchor at 1000 cm/s for a crash.
+	 */
+	void ProbeCollisions(AJamZeroGPawn* Pawn)
+	{
+		UWorld* World = Pawn->GetWorld();
+		AMKGlassPane* Pane = nullptr;
+		UPrimitiveComponent* Light = nullptr;
+		UPrimitiveComponent* Heavy = nullptr;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			Pane = Pane ? Pane : Cast<AMKGlassPane>(*It);
+			UPrimitiveComponent* Root = Cast<UPrimitiveComponent>(It->GetRootComponent());
+			if (!Root || Root == Pawn->Body || !Root->IsSimulatingPhysics())
+			{
+				continue;
+			}
+			if (It->IsA<AJamOxygenCanister>())
+			{
+				Light = Light ? Light : Root;
+			}
+			else if (Root->Bounds.SphereRadius < 70.0f && (!Heavy || Root->GetMass() > Heavy->GetMass()))
+			{
+				Heavy = Root;
+			}
+		}
+		if (!Pane || !Light || !Heavy)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("ZeroG probe: collisions need a pane, a canister and a small heavy body"));
+			return;
+		}
+		const FVector Target = Pane->GetActorLocation();
+		const auto Throw = [Target](UPrimitiveComponent* Thing, float Speed)
+		{
+			Thing->SetWorldLocation(Target - FVector(0.0f, 300.0f, 0.0f), false, nullptr, ETeleportType::TeleportPhysics);
+			Thing->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+			Thing->SetPhysicsLinearVelocity(FVector(0.0f, Speed, 0.0f));
+		};
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [glass]: pane %.0f cm2; light %s %.0f kg at 200 cm/s"), Pane->GetRemainingAreaCm2(),
+			*GetNameSafe(Light->GetOwner()), Light->GetMass());
+		Throw(Light, 200.0f);
+		FTimerHandle AfterLight;
+		World->GetTimerManager().SetTimer(AfterLight, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Pane, Heavy, Throw]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [glass]: after the light one %.0f cm2; heavy %s %.0f kg at 800 cm/s"),
+				Pane->GetRemainingAreaCm2(), *GetNameSafe(Heavy->GetOwner()), Heavy->GetMass());
+			Throw(Heavy, 800.0f);
+			FTimerHandle AfterHeavy;
+			Pawn->GetWorld()->GetTimerManager().SetTimer(AfterHeavy, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Pane]()
+			{
+				UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [glass]: after the heavy one %.0f cm2"), Pane->GetRemainingAreaCm2());
+				Pawn->Body->SetWorldLocation(FVector(-200.0f, 0.0f, 0.0f), false, nullptr, ETeleportType::TeleportPhysics);
+				Pawn->Body->SetPhysicsLinearVelocity(FVector(1000.0f, 0.0f, 0.0f));
+				UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [crash]: pawn flung at the anchor at 1000 cm/s, health %.0f"), Pawn->Vitals->Health);
+				FTimerHandle AfterCrash;
+				Pawn->GetWorld()->GetTimerManager().SetTimer(AfterCrash, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn]()
+				{
+					LogProbe(TEXT("after crash"), Pawn);
+					UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [crash]: health %.0f"), Pawn->Vitals->Health);
+				}), 1.0f, false);
+			}), 2.0f, false);
+		}), 2.5f, false);
+	}
+
 	/** The rope: the part 5 m to the side, the pawn pushes off; once the rope is taut the part follows. */
 	void ProbeTether(AJamZeroGPawn* Pawn, UPrimitiveComponent* Part)
 	{
@@ -868,6 +974,7 @@ namespace
 				if (Seconds >= 5.0f)
 				{
 					Pawn->DetachTether();
+					ProbeCollisions(Pawn);
 				}
 			}), Seconds, false);
 		}
