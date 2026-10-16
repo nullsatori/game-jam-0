@@ -44,6 +44,14 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UCameraComponent> Camera = nullptr;
 
+	/** Horizontal field of view, degrees: MindKore's bodycam (UMKCameraComponent::BodyCamFov). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|View", meta = (ClampMin = "60.0", ClampMax = "150.0"))
+	float CameraFOV = 134.0f;
+
+	/** MindKore's barrel lens pass (M_MK_LensDistort); keeps the 134-degree frame from looking stretched. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|View")
+	bool bLensDistortion = true;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UMKInteractionComponent> Interaction = nullptr;
 

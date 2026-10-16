@@ -1,5 +1,7 @@
 #include "JamZeroGPawn.h"
 
+#include "JamLens.h"
+
 #include "Camera/CameraComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SphereComponent.h"
@@ -159,7 +161,7 @@ void AJamZeroGPawn::BeginPlay()
 {
 	Super::BeginPlay();
 	Body->SetMassOverrideInKg(NAME_None, BodyMassKg, true);
-	Camera->SetFieldOfView(CameraFOV);
+	JamApplyBodycamLens(*Camera, CameraFOV, bLensDistortion);
 	if (UMaterialInterface* Speck = DustMaterial.LoadSynchronous())
 	{
 		Dust->SetMaterial(0, Speck);

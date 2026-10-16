@@ -1,5 +1,7 @@
 #include "JamCharacter.h"
 
+#include "JamLens.h"
+
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "EnhancedInputComponent.h"
@@ -84,6 +86,7 @@ AJamCharacter::AJamCharacter(const FObjectInitializer& ObjectInitializer)
 void AJamCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	JamApplyBodycamLens(*Camera, CameraFOV, bLensDistortion);
 	if (BulletTimeMaterial)
 	{
 		BulletTimeMID = UMaterialInstanceDynamic::Create(BulletTimeMaterial, this);

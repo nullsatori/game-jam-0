@@ -159,9 +159,13 @@ public:
 
 	// --- view ---------------------------------------------------------------
 
-	/** Horizontal field of view, degrees. */
+	/** Horizontal field of view, degrees: MindKore's bodycam (UMKCameraComponent::BodyCamFov). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "60.0", ClampMax = "150.0"))
-	float CameraFOV = 105.0f;
+	float CameraFOV = 134.0f;
+
+	/** MindKore's barrel lens pass (M_MK_LensDistort); keeps the 134-degree frame from looking stretched. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View")
+	bool bLensDistortion = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "0"))
 	int32 DustCount = 300;
