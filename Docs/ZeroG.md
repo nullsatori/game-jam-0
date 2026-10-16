@@ -11,12 +11,13 @@
   пружиной в точке захвата — тяжёлая деталь тянет тебя так же, как ты её;
 - **бросить** то, что держишь (ЛКМ): предмет получает импульс, ты — такой же
   обратный;
-- **отдача выстрела** (ЛКМ с пустыми руками): ~60 см/с назад, стоит O2;
+- **отдача выстрела** (ЛКМ с пустыми руками): от 15 см/с (пистолет) до 4 м/с
+  (снапа) назад — см. [RecoilWeapons](RecoilWeapons.md); кислород не тратит;
 - **слабые двигатели** (WASD, Space/Ctrl — относительно взгляда) и
   **стабилизатор** (X — гасит скорость к нулю): страховка, жгут кислород.
 
-Кислород — 180 с. Дыхание тратит 1/с, двигатели 2/с, стабилизатор 3/с,
-выстрел 3. Ноль — удушье 10 HP/с; смерть — уровень перезапускается через 3 с.
+Кислород — 180 с. Дыхание тратит 1/с, двигатели 2/с, стабилизатор 3/с;
+стволы — бесплатно. Ноль — удушье 10 HP/с; смерть — уровень перезапускается через 3 с.
 Баллон O2 (E) даёт +60 с.
 
 ## Управление
@@ -27,6 +28,8 @@
 | ПКМ (держать — прицел, отпустить — действие) | оттолкнуться; рисуется путь |
 | ЛКМ (держать — прицел, отпустить — действие) | выстрел с отдачей; с предметом — бросок с отдачей; рисуется путь |
 | T | трос на тело в 6 м / отцепить (см. [Tether-Prediction](Tether-Prediction.md)) |
+| 1 / 2 / 3, колесо | пистолет / дробовик / снапа |
+| R | перезарядка |
 | E | схватить свободное тело / отпустить; баллон O2 и интерактив — их действие |
 | F | отпустить |
 | ПКМ, когда держишь | отпустить |
@@ -61,13 +64,12 @@
 | `PushReachCm` | 180 | дальность толчка (трасса Visibility от камеры) |
 | `PushImpulse` | 30000 | от статики: 300 см/с; телу массы m даётся +импульс, себе −импульс |
 | `PushCooldownSeconds` | 0.35 | |
-| `ShotRecoilImpulse` | 6000 | отдача: 60 см/с |
-| `ShotRangeCm`, `ShotDamage`, `ShotImpulseNewtonSeconds` | 8000, 60, 12 | тестовый хитскан (как у `AJamCharacter`); здесь пуля ещё и толкает хлам |
+| `Weapons` | 3 ствола | см. [RecoilWeapons](RecoilWeapons.md) |
 | `ThrustAccelCm` | 150 | см/с², пока зажата клавиша |
 | `StabiliserAccelCm` | 200 | см/с² к нулю |
 | `bThrustersEnabled` | true | выключить двигатели совсем |
 | `UJamOxygenComponent::CapacitySeconds` | 180 | |
-| `BreathingPerSecond` / `ThrusterPerSecond` / `StabiliserPerSecond` / `ShotCost` | 1 / 2 / 3 / 3 | |
+| `BreathingPerSecond` / `ThrusterPerSecond` / `StabiliserPerSecond` | 1 / 2 / 3 | |
 | `SuffocationDamagePerSecond` | 10 | платится раз в секунду через `UMKVitalsComponent` |
 | `RestartDelaySeconds` | 3 | после смерти — `APlayerController::RestartLevel` |
 | `AJamOxygenCanister::RefillSeconds` | 60 | |
@@ -131,12 +133,13 @@ ZeroG crash: StaticMeshActor_6 at 1300 cm/s, self damage 35.0
 координат, 6 тусклых ламп, 40 предметов хлама 5–500 кг (кубы, цилиндры,
 бочки), 5 опорных блоков 4 × 4 × 4 м (первый — в 1 м перед стартом),
 «ракета» — цилиндр 3 × 15 м на +X с надписью ROCKET, 4 баллона O2 возле
-старта, стекло 200 × 150 в рамке (+Y), манекен (−Y). Всё с фиксированным
+старта, стекло 200 × 150 в рамке (+Y), манекен (−Y) и ещё три манекена,
+висящих в объёме (мишени). Всё с фиксированным
 сидом.
 
 ## Проверка
 
-`jam.ZeroG.Probe` — толчок от того, что перед камерой, через 0.25 с выстрел,
+`jam.ZeroG.Probe` — толчок от того, что перед камерой, затем выстрелы пистолета и снапы,
 скорость пешки в лог до и после. Смоук `-game -nullrhi` на старте карты:
 
 ```
@@ -144,7 +147,10 @@ ZeroG mode: world gravity Z 0.0, 44 props set drifting (up to 20 cm/s)
 ZeroG probe [before]: ... pawn velocity (0, 0, 0) = 0 cm/s, O2 180.0 s
 ZeroG push: off StaticMeshActor_6 (static, 0 kg), impulse 30000 kg cm/s
 ZeroG probe [after push]: ... pawn velocity (-300, 0, 0) = 300 cm/s
-ZeroG probe [after shot]: ... pawn velocity (-360, 0, 0) = 360 cm/s, O2 176.5 s
+ZeroG weapon: Пистолет fired, 1 pellet(s), recoil 1500 kg cm/s, 11/60 left
+ZeroG probe [after pistol]: ... pawn velocity (-315, 0, 0) = 315 cm/s
+ZeroG weapon: Снапа fired, 1 pellet(s), recoil 40000 kg cm/s, 3/16 left
+ZeroG probe [after sniper]: ... pawn velocity (-715, 0, 0) = 715 cm/s
 ZeroG grab: MKPhysicsProp_16, 407 kg
 ZeroG probe [coupled push +0.5 s]: pawn 59 cm/s, held ... 407 kg 88 cm/s (expected both near 59), momentum 30000 kg cm/s, joint stretch -13 cm
 ZeroG probe [coupled push +3.0 s]: pawn 55 cm/s, held ... 407 kg 60 cm/s (expected both near 59), momentum 29940 kg cm/s, joint stretch -1 cm

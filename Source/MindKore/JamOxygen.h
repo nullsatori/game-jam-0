@@ -7,7 +7,7 @@
 
 /**
  * The suit's oxygen, in seconds of breathing. Breathing drains 1/s; the
- * owner spends more for thrusters, shots and the stabiliser (Spend). Empty:
+ * owner spends more for thrusters and the stabiliser (Spend); guns are free. Empty:
  * the owner's UMKVitalsComponent takes SuffocationDamagePerSecond, paid once
  * a second. Vitals at zero: this component is the zero-G mode's death owner -
  * it disables the player's input and restarts the level after RestartDelaySeconds.
@@ -31,9 +31,6 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Oxygen", meta = (ClampMin = "0.0"))
 	float StabiliserPerSecond = 3.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Oxygen", meta = (ClampMin = "0.0"))
-	float ShotCost = 3.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Oxygen", meta = (ClampMin = "0.0"))
 	float SuffocationDamagePerSecond = 10.0f;

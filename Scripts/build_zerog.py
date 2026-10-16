@@ -193,6 +193,10 @@ while count < 40:
     count += 1
 log("junk: %d props" % count)
 
+# --- someone to shoot: more floating dummies (after the junk, so its seed is unchanged) ---
+for i, (loc, yaw) in enumerate([(V(-1500, 0, 600), 0), (V(1500, 1200, -400), 200), (V(-800, -2600, -900), 60)]):
+    spawn(unreal.MKImpactDummy, loc, yaw, "Dummy_Floating_%d" % i)
+
 # --- save -------------------------------------------------------------------------------
 assert ues.get_editor_world().get_outer().get_path_name() == MAP
 if not les.save_current_level():

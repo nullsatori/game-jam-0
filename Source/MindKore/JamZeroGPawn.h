@@ -51,8 +51,65 @@ struct FInputActionValue;
  * a safety net that costs oxygen.
  *
  * All velocity changes go into the body as impulses in kg cm/s, so they read
- * the body's mass (default 100 kg): ShotRecoilImpulse 6000 is 60 cm/s.
+ * the body's mass (default 100 kg): the sniper's recoil 40000 is 4 m/s.
+ *
+ * Guns are movement: three weapons (1/2/3, mouse wheel), each an FJamWeapon
+ * of tunables. Every shot kicks the pawn back along the view and pushes what
+ * it hits; R reloads. Guns cost no oxygen.
  */
+/** One gun of the zero-G pawn. Impulses are kg cm/s (velocity change = impulse / mass). */
+USTRUCT(BlueprintType)
+struct FJamWeapon
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon")
+	FText Name;
+
+	/** Per pellet, before the hit zone's multiplier. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
+	float Damage = 25.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.01"))
+	float FireInterval = 0.15f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "1"))
+	int32 MagazineSize = 12;
+
+	/** Rounds outside the magazine at the start. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0"))
+	int32 Reserve = 60;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
+	float ReloadSeconds = 1.2f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "1"))
+	int32 Pellets = 1;
+
+	/** Half-angle of the pellet cone, degrees. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
+	float SpreadDeg = 0.0f;
+
+	/** Kick on the pawn per shot, along -view. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
+	float RecoilImpulse = 1500.0f;
+
+	/** Push on a hit body per pellet, at the hit point. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
+	float HitImpulse = 3000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "100.0"))
+	float RangeCm = 8000.0f;
+
+	/** Pitch of the blast sound: a small gun cracks, a big one booms. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.1"))
+	float SoundPitch = 1.0f;
+
+	/** Rounds in the magazine now. Set to MagazineSize on BeginPlay. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapon")
+	int32 Ammo = 0;
+};
+
 UCLASS()
 class MINDKORE_API AJamZeroGPawn : public APawn, public IMKImpactReceiver
 {
@@ -184,20 +241,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Crash", meta = (ClampMin = "0.0"))
 	float ShakeSeconds = 0.25f;
 
-	// --- shot (LMB, empty hands) ------------------------------------------------
+	// --- guns (LMB, empty hands) ------------------------------------------------
 
-	/** kg cm/s against the view: 6000 / 100 kg = 60 cm/s. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot", meta = (ClampMin = "0.0"))
-	float ShotRecoilImpulse = 6000.0f;
+	/** 1 pistol, 2 shotgun, 3 sniper by default. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot")
+	TArray<FJamWeapon> Weapons;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot", meta = (ClampMin = "100.0"))
-	float ShotRangeCm = 8000.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot", meta = (ClampMin = "0.0"))
-	float ShotDamage = 60.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot", meta = (ClampMin = "0.0"))
-	float ShotImpulseNewtonSeconds = 12.0f;
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|ZeroG|Shot")
+	int32 CurrentWeapon = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot")
 	TObjectPtr<UMKImpactDataAsset> ImpactData = nullptr;
@@ -238,9 +289,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
 	bool Push();
 
-	/** The test hitscan plus recoil and its oxygen cost. */
+	/** Fire the current weapon: hitscan pellets, recoil, a push on what is hit. False when it cannot fire yet. */
 	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
-	void Fire();
+	bool Fire();
+
+	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
+	void SelectWeapon(int32 Index);
+
+	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
+	void Reload();
+
+	const FJamWeapon* GetWeapon() const { return Weapons.IsValidIndex(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr; }
+
+	/** Seconds left of a reload; 0 when not reloading. */
+	float GetReloadRemaining() const;
 
 	/** Join Target to the body at Point (world). False when something is held, Target does not simulate or is absurdly heavy. */
 	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
@@ -328,6 +390,9 @@ private:
 	void PrimaryPressed();
 	void PushPressed();
 	void PutDown();
+	void FireRay(const FJamWeapon& Weapon, const FVector& Direction);
+	double NextShotSeconds = 0.0;
+	double ReloadEndSeconds = 0.0;
 	UFUNCTION()
 	void HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp,
 		FVector NormalImpulse, const FHitResult& Hit);
