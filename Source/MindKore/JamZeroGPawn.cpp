@@ -15,7 +15,6 @@
 #include "JamOxygen.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "MKCarryComponent.h"
 #include "MKFastener.h"
 #include "MKImpactDelivery.h"
 #include "MKInteractionComponent.h"
@@ -25,6 +24,7 @@
 #include "MKVitals.h"
 #include "MindKore.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
+#include "PhysicsEngine/PhysicsConstraintComponent.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
@@ -59,7 +59,6 @@ AJamZeroGPawn::AJamZeroGPawn()
 	Camera->bUsePawnControlRotation = true;
 
 	Interaction = CreateDefaultSubobject<UMKInteractionComponent>(TEXT("Interaction"));
-	Carry = CreateDefaultSubobject<UMKCarryComponent>(TEXT("Carry"));
 	Keyring = CreateDefaultSubobject<UMKKeyringComponent>(TEXT("Keyring"));
 	Vitals = CreateDefaultSubobject<UMKVitalsComponent>(TEXT("Vitals"));
 	Oxygen = CreateDefaultSubobject<UJamOxygenComponent>(TEXT("Oxygen"));
@@ -222,12 +221,27 @@ void AJamZeroGPawn::Lift(const FInputActionValue& Value)
 
 void AJamZeroGPawn::Use()
 {
-	Interaction->Interact();
+	// Holding: E lets go. Otherwise what the object offers (a canister, a door)
+	// comes first; a loose body that offers nothing is grabbed.
+	if (GrabbedBody.IsValid())
+	{
+		Release();
+		return;
+	}
+	if (Interaction->CurrentOffer.IsOffered())
+	{
+		Interaction->Interact();
+		return;
+	}
+	if (UPrimitiveComponent* Candidate = GrabCandidate.Get())
+	{
+		Grab(Candidate, GrabCandidatePoint);
+	}
 }
 
 void AJamZeroGPawn::PrimaryPressed()
 {
-	if (Carry->IsHolding())
+	if (GrabbedBody.IsValid())
 	{
 		ThrowHeld();
 		return;
@@ -237,12 +251,17 @@ void AJamZeroGPawn::PrimaryPressed()
 
 void AJamZeroGPawn::PushPressed()
 {
+	if (GrabbedBody.IsValid())
+	{
+		Release();
+		return;
+	}
 	Push();
 }
 
 void AJamZeroGPawn::PutDown()
 {
-	Carry->Put();
+	Release();
 }
 
 void AJamZeroGPawn::ToggleCrowbar()
@@ -311,7 +330,7 @@ bool AJamZeroGPawn::Push()
 	}
 	const FVector Direction = ViewDirection();
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamPush), /*bTraceComplex=*/false, this);
-	if (const UMKPhysicsPropComponent* Held = Carry->GetHeld())
+	if (const UPrimitiveComponent* Held = GrabbedBody.Get())
 	{
 		Params.AddIgnoredActor(Held->GetOwner());
 	}
@@ -336,22 +355,91 @@ bool AJamZeroGPawn::Push()
 	return true;
 }
 
+void AJamZeroGPawn::RefreshGrabCandidate()
+{
+	GrabCandidate = nullptr;
+	if (GrabbedBody.IsValid())
+	{
+		return;
+	}
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamGrabLook), /*bTraceComplex=*/false, this);
+	FHitResult Hit;
+	if (GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation(), ViewLocation() + ViewDirection() * GrabReachCm, ECC_Visibility, Params)
+		&& Hit.GetComponent() && Hit.GetComponent()->IsSimulatingPhysics())
+	{
+		GrabCandidate = Hit.GetComponent();
+		GrabCandidatePoint = Hit.ImpactPoint;
+	}
+}
+
+bool AJamZeroGPawn::Grab(UPrimitiveComponent* Target, FVector Point)
+{
+	if (GrabbedBody.IsValid() || !Target || !Target->IsSimulatingPhysics() || Target == Body)
+	{
+		return false;
+	}
+	if (Target->GetMass() > MaxGrabMassKg)
+	{
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: %s refused, %.0f kg is over %.0f kg"), *GetNameSafe(Target->GetOwner()),
+			Target->GetMass(), MaxGrabMassKg);
+		return false;
+	}
+	// One joint between the two bodies at the grab point: a spring on the
+	// position, nothing on the rotation. Both ends feel it, so momentum is
+	// shared - not a handle that moves the prop and leaves the pawn alone.
+	GrabConstraint = NewObject<UPhysicsConstraintComponent>(this);
+	GrabConstraint->SetupAttachment(Body);
+	GrabConstraint->RegisterComponent();
+	GrabConstraint->SetWorldLocation(Point);
+	GrabConstraint->SetDisableCollision(true);
+	GrabConstraint->SetLinearXLimit(LCM_Free, 0.0f);
+	GrabConstraint->SetLinearYLimit(LCM_Free, 0.0f);
+	GrabConstraint->SetLinearZLimit(LCM_Free, 0.0f);
+	GrabConstraint->SetAngularSwing1Limit(ACM_Free, 0.0f);
+	GrabConstraint->SetAngularSwing2Limit(ACM_Free, 0.0f);
+	GrabConstraint->SetAngularTwistLimit(ACM_Free, 0.0f);
+	GrabConstraint->SetLinearPositionDrive(true, true, true);
+	GrabConstraint->SetLinearVelocityDrive(true, true, true);
+	GrabConstraint->SetLinearDriveParams(GrabStiffness, GrabDamping, /*ForceLimit=*/0.0f);
+	GrabConstraint->SetConstrainedComponents(Body, NAME_None, Target, NAME_None);
+	GrabbedBody = Target;
+	GrabCandidate = nullptr;
+	Target->WakeAllRigidBodies();
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: %s, %.0f kg"), *GetNameSafe(Target->GetOwner()), Target->GetMass());
+	return true;
+}
+
+void AJamZeroGPawn::Release()
+{
+	if (GrabConstraint)
+	{
+		GrabConstraint->BreakConstraint();
+		GrabConstraint->DestroyComponent();
+		GrabConstraint = nullptr;
+	}
+	if (GrabbedBody.IsValid())
+	{
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: let go of %s"), *GetNameSafe(GrabbedBody->GetOwner()));
+	}
+	GrabbedBody = nullptr;
+}
+
 void AJamZeroGPawn::ThrowHeld()
 {
-	UMKPhysicsPropComponent* Held = Carry->GetHeld();
-	UPrimitiveComponent* PropBody = Held ? Held->GetBody() : nullptr;
+	UPrimitiveComponent* PropBody = GrabbedBody.Get();
 	if (!PropBody)
 	{
 		return;
 	}
-	const FVector Before = PropBody->GetPhysicsLinearVelocity();
+	const FVector Direction = ViewDirection();
 	const float MassKg = PropBody->GetMass();
-	Carry->Throw();
-	// Throw sets the prop's velocity once; the pawn takes the opposite momentum.
-	const FVector Reaction = -(PropBody->GetPhysicsLinearVelocity() - Before) * MassKg;
-	AddBodyImpulse(Reaction);
-	UE_LOG(LogMindKore, Log, TEXT("ZeroG throw: %s %.1f kg, reaction %.0f kg cm/s"), *GetNameSafe(PropBody->GetOwner()),
-		MassKg, Reaction.Size());
+	// Equal and opposite; a light prop gets less than ThrowImpulse so it does not exceed MaxThrowSpeedCm.
+	const float Impulse = FMath::Min(ThrowImpulse, MassKg * MaxThrowSpeedCm);
+	Release();
+	PropBody->AddImpulse(Direction * Impulse);
+	AddBodyImpulse(-Direction * Impulse);
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG throw: %s %.1f kg, impulse %.0f kg cm/s (prop +%.0f cm/s, pawn -%.0f cm/s)"),
+		*GetNameSafe(PropBody->GetOwner()), MassKg, Impulse, Impulse / FMath::Max(MassKg, 0.01f), Impulse / Body->GetMass());
 }
 
 void AJamZeroGPawn::ApplyThrusters(float DeltaSeconds)
@@ -382,6 +470,11 @@ void AJamZeroGPawn::ApplyThrusters(float DeltaSeconds)
 void AJamZeroGPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (GrabConstraint && !GrabbedBody.IsValid())
+	{
+		Release();
+	}
+	RefreshGrabCandidate();
 	ApplyThrusters(DeltaSeconds);
 	if (MaxSpeedCm > 0.0f)
 	{
@@ -396,8 +489,8 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 
 float AJamZeroGPawn::GetHeldMassKg() const
 {
-	const UMKPhysicsPropComponent* Held = Carry->GetHeld();
-	return Held ? Held->GetMassKg() : 0.0f;
+	const UPrimitiveComponent* Held = GrabbedBody.Get();
+	return Held ? Held->GetMass() : 0.0f;
 }
 
 float AJamZeroGPawn::GetPushCooldownRemaining() const
@@ -546,6 +639,57 @@ namespace
 			Stage, Pawn->GetWorld()->GetGravityZ(), Velocity.X, Velocity.Y, Velocity.Z, Velocity.Size(), Pawn->Oxygen->Seconds);
 	}
 
+	/**
+	 * Back to the start at rest, the heaviest loose prop brought beside the pawn
+	 * and grabbed, then a push off the anchor: pawn and prop should leave
+	 * together at about PushImpulse / (pawn mass + prop mass).
+	 */
+	void ProbeCoupledPush(AJamZeroGPawn* Pawn)
+	{
+		UWorld* World = Pawn->GetWorld();
+		UPrimitiveComponent* Heaviest = nullptr;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			UPrimitiveComponent* Root = Cast<UPrimitiveComponent>(It->GetRootComponent());
+			if (Root && Root != Pawn->Body && Root->IsSimulatingPhysics() && (!Heaviest || Root->GetMass() > Heaviest->GetMass()))
+			{
+				Heaviest = Root;
+			}
+		}
+		if (!Heaviest)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("ZeroG probe: no loose body to grab"));
+			return;
+		}
+		Pawn->Body->SetWorldLocation(FVector::ZeroVector, false, nullptr, ETeleportType::TeleportPhysics);
+		Pawn->Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		Heaviest->SetWorldLocation(FVector(-300.0f, -300.0f, 0.0f), false, nullptr, ETeleportType::TeleportPhysics);
+		Heaviest->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		Heaviest->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		Pawn->Grab(Heaviest, Heaviest->GetComponentLocation());
+		Pawn->Push();
+		const float Expected = Pawn->PushImpulse / (Pawn->Body->GetMass() + Heaviest->GetMass());
+		const float RestDistance = FVector::Dist(Pawn->Body->GetComponentLocation(), Heaviest->GetComponentLocation());
+		// Sampled at 0.5, 1, 2 and 3 s; the last one lets go.
+		for (const float Seconds : { 0.5f, 1.0f, 2.0f, 3.0f })
+		{
+			FTimerHandle After;
+			World->GetTimerManager().SetTimer(After, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Heaviest, Expected, RestDistance, Seconds]()
+			{
+				const FVector PawnVelocity = Pawn->GetBodyVelocity();
+				const FVector PropVelocity = Heaviest->GetPhysicsLinearVelocity();
+				const float Momentum = (PawnVelocity * Pawn->Body->GetMass() + PropVelocity * Heaviest->GetMass()).Size();
+				UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [coupled push +%.1f s]: pawn %.0f cm/s, held %s %.0f kg %.0f cm/s (expected both near %.0f), momentum %.0f kg cm/s, joint stretch %.0f cm"),
+					Seconds, PawnVelocity.Size(), *GetNameSafe(Heaviest->GetOwner()), Heaviest->GetMass(), PropVelocity.Size(), Expected,
+					Momentum, FVector::Dist(Pawn->Body->GetComponentLocation(), Heaviest->GetComponentLocation()) - RestDistance);
+				if (Seconds >= 3.0f)
+				{
+					Pawn->Release();
+				}
+			}), Seconds, false);
+		}
+	}
+
 	/** jam.ZeroG.Probe: push off what is in view, then shoot, logging the pawn's velocity around each. */
 	void RunZeroGProbe(UWorld* World)
 	{
@@ -571,6 +715,7 @@ namespace
 			Pawn->GetWorld()->GetTimerManager().SetTimer(AfterShot, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn]()
 			{
 				LogProbe(TEXT("after shot"), Pawn);
+				ProbeCoupledPush(Pawn);
 			}), 0.25f, false);
 		}), 0.25f, false);
 	}

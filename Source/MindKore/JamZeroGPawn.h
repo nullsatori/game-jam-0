@@ -11,7 +11,7 @@ class UInputMappingContext;
 class UJamOxygenComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
-class UMKCarryComponent;
+class UPhysicsConstraintComponent;
 class UMKImpactDataAsset;
 class UMKInteractionComponent;
 class UMKKeyringComponent;
@@ -29,6 +29,11 @@ struct FInputActionValue;
  * Ways to move, strongest first: push off what is in reach (RMB) - against a
  * wall you fly, against light junk the junk flies; throw what you hold (LMB),
  * taking the opposite momentum; the recoil of a shot (LMB, empty hands).
+ *
+ * Holding is physical: a grab (E on a simulated body) joins the pawn's body
+ * and the prop at the grab point with a soft linear spring (angular free), so
+ * a heavy part drags the pawn as much as the pawn drags it. E, F or RMB lets
+ * go; LMB throws with equal and opposite impulses.
  * Weak thrusters (WASD, Space/Ctrl, view-relative) and the stabiliser (X) are
  * a safety net that costs oxygen.
  *
@@ -51,9 +56,6 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UMKInteractionComponent> Interaction = nullptr;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
-	TObjectPtr<UMKCarryComponent> Carry = nullptr;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UMKKeyringComponent> Keyring = nullptr;
@@ -90,6 +92,31 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Push", meta = (ClampMin = "0.0"))
 	float PushCooldownSeconds = 0.35f;
+
+	// --- grab (E) and throw (LMB while holding) --------------------------------
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "10.0"))
+	float GrabReachCm = 250.0f;
+
+	/** Only absurd masses are refused: a heavy part is grabbed and drags you. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "1.0"))
+	float MaxGrabMassKg = 5000.0f;
+
+	/** Spring of the grab joint (Chaos linear drive, acceleration mode). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "0.0"))
+	float GrabStiffness = 3000.0f;
+
+	/** Damping of the grab joint (Chaos linear drive, acceleration mode). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "0.0"))
+	float GrabDamping = 300.0f;
+
+	/** kg cm/s given to the prop and taken by the pawn on a throw. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "0.0"))
+	float ThrowImpulse = 8000.0f;
+
+	/** A light prop is not thrown faster than this (the impulse shrinks to fit). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "1.0"))
+	float MaxThrowSpeedCm = 1100.0f;
 
 	// --- shot (LMB, empty hands) ------------------------------------------------
 
@@ -149,9 +176,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
 	void Fire();
 
+	/** Join Target to the body at Point (world). False when something is held, Target does not simulate or is absurdly heavy. */
+	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
+	bool Grab(UPrimitiveComponent* Target, FVector Point);
+
+	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
+	void Release();
+
 	/** Throw the held prop and take the opposite momentum. */
 	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
 	void ThrowHeld();
+
+	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG")
+	UPrimitiveComponent* GetGrabbed() const { return GrabbedBody.Get(); }
+
+	/** The simulated body E would grab now (null when none or something is held). */
+	UPrimitiveComponent* GetGrabCandidate() const { return GrabCandidate.Get(); }
 
 	UFUNCTION(BlueprintCallable, Category = "Jam")
 	void ToggleCrowbar();
@@ -182,6 +222,14 @@ protected:
 
 	FVector ViewLocation() const;
 	FVector ViewDirection() const;
+	void RefreshGrabCandidate();
+
+	UPROPERTY(Transient)
+	TObjectPtr<UPhysicsConstraintComponent> GrabConstraint = nullptr;
+
+	TWeakObjectPtr<UPrimitiveComponent> GrabbedBody;
+	TWeakObjectPtr<UPrimitiveComponent> GrabCandidate;
+	FVector GrabCandidatePoint = FVector::ZeroVector;
 
 	// Input state, consumed in Tick.
 	FVector ThrustInput = FVector::ZeroVector;
