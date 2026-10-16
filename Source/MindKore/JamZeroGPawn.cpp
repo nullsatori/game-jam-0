@@ -183,8 +183,25 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindActionValueLambda(StabiliseAction, ETriggerEvent::Started, [this](const FInputActionValue&) { bStabilising = true; });
 	Input->BindActionValueLambda(StabiliseAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { bStabilising = false; });
 	Input->BindAction(UseAction, ETriggerEvent::Started, this, &AJamZeroGPawn::Use);
-	Input->BindAction(PrimaryAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PrimaryPressed);
-	Input->BindAction(PushAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PushPressed);
+	// Press aims (the path is drawn), release acts.
+	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Started, [this](const FInputActionValue&) { Aim = EAim::Primary; });
+	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Completed, [this](const FInputActionValue&)
+	{
+		if (Aim == EAim::Primary)
+		{
+			PrimaryPressed();
+		}
+		Aim = EAim::None;
+	});
+	Input->BindActionValueLambda(PushAction, ETriggerEvent::Started, [this](const FInputActionValue&) { Aim = EAim::Push; });
+	Input->BindActionValueLambda(PushAction, ETriggerEvent::Completed, [this](const FInputActionValue&)
+	{
+		if (Aim == EAim::Push)
+		{
+			PushPressed();
+		}
+		Aim = EAim::None;
+	});
 	Input->BindAction(PutAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PutDown);
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Started, this, &AJamZeroGPawn::BulletTimePressed);
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &AJamZeroGPawn::BulletTimeReleased);
@@ -511,6 +528,104 @@ void AJamZeroGPawn::DrawTether() const
 	DrawDebugLine(GetWorld(), From, To, bTaut ? FColor(255, 150, 40) : FColor(150, 150, 150), false, -1.0f, 0, bTaut ? 3.0f : 1.5f);
 }
 
+void AJamZeroGPawn::ProbeAim(bool bAim, bool bPush)
+{
+	Aim = !bAim ? EAim::None : bPush ? EAim::Push : EAim::Primary;
+	bLogNextPrediction = bAim;
+}
+
+void AJamZeroGPawn::DrawPrediction() const
+{
+	if (Aim == EAim::None)
+	{
+		return;
+	}
+	const FVector Direction = ViewDirection();
+	UPrimitiveComponent* Held = GrabbedBody.Get();
+	if (Held && Aim == EAim::Primary)
+	{
+		// The throw: where the prop goes.
+		const float MassKg = FMath::Max(Held->GetMass(), 0.01f);
+		const float Impulse = FMath::Min(ThrowImpulse, MassKg * MaxThrowSpeedCm);
+		DrawPath(Held->GetComponentLocation(), Held->GetPhysicsLinearVelocity() + Direction * Impulse / MassKg,
+			Held->Bounds.SphereRadius, Held->GetOwner(), FColor(120, 220, 255));
+		return;
+	}
+	if (Held)
+	{
+		return; // RMB while holding lets go: nothing to predict.
+	}
+	float Impulse = ShotRecoilImpulse;
+	if (Aim == EAim::Push)
+	{
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(JamPushAim), /*bTraceComplex=*/false, this);
+		FHitResult Hit;
+		Impulse = GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation(), ViewLocation() + Direction * PushReachCm, ECC_Visibility, Params)
+			? PushImpulse : 0.0f;
+	}
+	if (Impulse > 0.0f)
+	{
+		DrawPath(Body->GetComponentLocation(), GetBodyVelocity() - Direction * Impulse / Body->GetMass(),
+			Body->GetScaledSphereRadius(), nullptr, FColor(255, 200, 80));
+	}
+}
+
+void AJamZeroGPawn::DrawPath(const FVector& Start, const FVector& Velocity, float RadiusCm, const AActor* Ignored, const FColor& Color) const
+{
+	// ponytail: straight segments and one reflection, drawn with debug lines
+	// (Development builds); no spin, no drag, the other body treated as static.
+	UWorld* World = GetWorld();
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamPredict), /*bTraceComplex=*/false, this);
+	if (Ignored)
+	{
+		Params.AddIgnoredActor(Ignored);
+	}
+	FVector Position = Start;
+	FVector Speed = Velocity;
+	float Seconds = PredictSeconds;
+	for (int32 Bounce = 0; Bounce < 2 && Speed.SizeSquared() > 1.0f; ++Bounce)
+	{
+		const FVector End = Position + Speed * Seconds;
+		FHitResult Hit;
+		const bool bHit = World->SweepSingleByChannel(Hit, Position, End, FQuat::Identity, ECC_PhysicsBody,
+			FCollisionShape::MakeSphere(RadiusCm), Params);
+		const FVector Stop = bHit ? FVector(Hit.Location) : End;
+		// Dashes of 25 cm every 40 cm.
+		const float Length = FVector::Dist(Position, Stop);
+		const FVector Along = (Stop - Position).GetSafeNormal();
+		for (float At = 0.0f; At < Length; At += 40.0f)
+		{
+			DrawDebugLine(World, Position + Along * At, Position + Along * FMath::Min(At + 25.0f, Length), Color, false, -1.0f, 0, 2.0f);
+		}
+		if (!bHit)
+		{
+			if (Bounce == 0 && bLogNextPrediction)
+			{
+				bLogNextPrediction = false;
+				UE_LOG(LogMindKore, Log, TEXT("ZeroG prediction: from (%.0f, %.0f, %.0f) at (%.0f, %.0f, %.0f) cm/s, no contact within %.1f s, ends at (%.0f, %.0f, %.0f)"),
+					Start.X, Start.Y, Start.Z, Velocity.X, Velocity.Y, Velocity.Z, PredictSeconds, End.X, End.Y, End.Z);
+			}
+			return;
+		}
+		if (Bounce == 0 && bLogNextPrediction)
+		{
+			bLogNextPrediction = false;
+			UE_LOG(LogMindKore, Log, TEXT("ZeroG prediction: from (%.0f, %.0f, %.0f) at %.0f cm/s, first contact %s at (%.0f, %.0f, %.0f) in %.2f s"),
+				Start.X, Start.Y, Start.Z, Velocity.Size(), *GetNameSafe(Hit.GetActor()), Hit.ImpactPoint.X, Hit.ImpactPoint.Y,
+				Hit.ImpactPoint.Z, PredictSeconds * Hit.Time);
+		}
+		if (Bounce == 0)
+		{
+			DrawDebugSphere(World, Hit.ImpactPoint, 15.0f, 8, FColor(255, 60, 40), false, -1.0f, 0, 2.0f);
+		}
+		const FVector Normal = Hit.ImpactNormal;
+		const FVector Into = Normal * FVector::DotProduct(Speed, Normal);
+		Speed = (Speed - Into) - Into * PredictRestitution;
+		Seconds *= 1.0f - Hit.Time;
+		Position = FVector(Hit.Location) + Normal * 0.5f;
+	}
+}
+
 void AJamZeroGPawn::ThrowHeld()
 {
 	UPrimitiveComponent* PropBody = GrabbedBody.Get();
@@ -566,6 +681,7 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 		DetachTether();
 	}
 	DrawTether();
+	DrawPrediction();
 	RefreshGrabCandidate();
 	ApplyThrusters(DeltaSeconds);
 	if (MaxSpeedCm > 0.0f)
@@ -824,6 +940,10 @@ namespace
 			return;
 		}
 		LogProbe(TEXT("before"), Pawn);
+		// One frame of aiming the push: the predicted path logs its first contact.
+		Pawn->ProbeAim(true, true);
+		Pawn->Tick(0.0f);
+		Pawn->ProbeAim(false, true);
 		Pawn->Push();
 		FTimerHandle AfterPush;
 		World->GetTimerManager().SetTimer(AfterPush, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn]()

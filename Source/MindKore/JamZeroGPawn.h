@@ -38,6 +38,10 @@ struct FInputActionValue;
  * Towing: T throws a rope (a soft spherical distance limit, TetherLengthCm)
  * to the loose body under the view within TetherReachCm; the part follows on
  * the rope wherever you push or thrust. T again cuts it.
+ *
+ * LMB and RMB act on release: while one is held the pawn draws where the
+ * action will send it (push off, recoil) or where the throw sends the held
+ * prop - a dotted line, the first contact marked, one bounce after it.
  * Weak thrusters (WASD, Space/Ctrl, view-relative) and the stabiliser (X) are
  * a safety net that costs oxygen.
  *
@@ -136,6 +140,16 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Tether", meta = (ClampMin = "0.0"))
 	float TetherDamping = 50.0f;
+
+	// --- prediction (while LMB/RMB is held) ---------------------------------------
+
+	/** How far ahead the path is drawn, seconds of flight. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Prediction", meta = (ClampMin = "0.1"))
+	float PredictSeconds = 5.0f;
+
+	/** Normal velocity kept on the predicted bounce (the real one depends on both materials). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Prediction", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float PredictRestitution = 0.3f;
 
 	// --- shot (LMB, empty hands) ------------------------------------------------
 
@@ -237,6 +251,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG")
 	float GetPushCooldownRemaining() const;
 
+	/** Console probe: aim (true = push, false = primary) or stop aiming; the next drawn path logs its first contact. */
+	void ProbeAim(bool bAim, bool bPush);
+
 	virtual void ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& ResolvedImpact) override;
 
 	virtual void Tick(float DeltaSeconds) override;
@@ -278,6 +295,12 @@ private:
 	void PrimaryPressed();
 	void PushPressed();
 	void PutDown();
+	void DrawPrediction() const;
+	void DrawPath(const FVector& Start, const FVector& Velocity, float RadiusCm, const AActor* Ignored, const FColor& Color) const;
+
+	enum class EAim : uint8 { None, Primary, Push };
+	EAim Aim = EAim::None;
+	mutable bool bLogNextPrediction = false;
 	void ToggleTether();
 	void DrawTether() const;
 	void Use();

@@ -32,8 +32,9 @@ MindKore: взаимодействие «посмотрел — нажал E», 
 ## Управление
 
 Невесомость (`Lvl_Jam_ZeroG`): мышь — обзор, ПКМ — оттолкнуться, ЛКМ —
-выстрел с отдачей / бросок с отдачей, E — взять, F — отпустить, WASD и
-Space/Ctrl — слабые двигатели, X — стабилизатор, Q — замедление, G — лом.
+выстрел с отдачей / бросок с отдачей (обе срабатывают на отпускании, пока
+зажаты — рисуется путь), E — схватить / отпустить, T — трос, F — отпустить,
+WASD и Space/Ctrl — слабые двигатели, X — стабилизатор, Q — замедление, G — лом.
 Подробно — [ZeroG](Docs/ZeroG.md).
 
 Наземная комната (`Lvl_Jam_TestRoom`):
@@ -86,6 +87,7 @@ UnrealEditor-Cmd.exe <путь>\MKJamStarter.uproject -ExecutePythonScript="<п�
 [BulletTime](Docs/BulletTime.md) ·
 [JamCharacter](Docs/JamCharacter.md) ·
 [ZeroG](Docs/ZeroG.md) ·
+[Tether-Prediction](Docs/Tether-Prediction.md) ·
 [CREDITS](CREDITS.md)
 
 ## Тяжёлый арт
