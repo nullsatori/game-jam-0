@@ -2,7 +2,9 @@
 
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
+#include "Camera/CameraComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "EngineUtils.h"
 #include "JamCharacter.h"
 #include "JamCollisionImpact.h"
@@ -118,6 +120,34 @@ void AJamZeroGHUD::DrawHUD()
 	const float CenterY = Canvas->ClipY * 0.5f;
 	DrawRect(FLinearColor(1.0f, 1.0f, 1.0f, 0.8f), CenterX - 2.0f, CenterY - 2.0f, 4.0f, 4.0f);
 	UFont* Font = GEngine->GetMediumFont();
+
+	// Where you are drifting: a diamond on the prograde point (camera + velocity
+	// direction), or a cross on the retrograde point when the motion is behind
+	// the view; the speed next to it.
+	const FVector Velocity = Pawn->GetBodyVelocity();
+	if (PlayerOwner && Velocity.Size() > 10.0f)
+	{
+		const FVector Eye = Pawn->Camera->GetComponentLocation();
+		const FVector Along = Velocity.GetSafeNormal() * 1000.0f;
+		const FString Speed = FString::Printf(TEXT("%.1f m/s"), Velocity.Size() / 100.0f);
+		FVector2D Screen;
+		if (PlayerOwner->ProjectWorldLocationToScreen(Eye + Along, Screen, false))
+		{
+			const FLinearColor Green(0.4f, 1.0f, 0.5f);
+			DrawLine(Screen.X - 10.0f, Screen.Y, Screen.X, Screen.Y - 10.0f, Green, 2.0f);
+			DrawLine(Screen.X, Screen.Y - 10.0f, Screen.X + 10.0f, Screen.Y, Green, 2.0f);
+			DrawLine(Screen.X + 10.0f, Screen.Y, Screen.X, Screen.Y + 10.0f, Green, 2.0f);
+			DrawLine(Screen.X, Screen.Y + 10.0f, Screen.X - 10.0f, Screen.Y, Green, 2.0f);
+			DrawText(Speed, Green, Screen.X + 14.0f, Screen.Y - 8.0f, Font);
+		}
+		else if (PlayerOwner->ProjectWorldLocationToScreen(Eye - Along, Screen, false))
+		{
+			const FLinearColor Red(1.0f, 0.45f, 0.35f);
+			DrawLine(Screen.X - 9.0f, Screen.Y - 9.0f, Screen.X + 9.0f, Screen.Y + 9.0f, Red, 2.0f);
+			DrawLine(Screen.X - 9.0f, Screen.Y + 9.0f, Screen.X + 9.0f, Screen.Y - 9.0f, Red, 2.0f);
+			DrawText(Speed, Red, Screen.X + 14.0f, Screen.Y - 8.0f, Font);
+		}
+	}
 
 	const FMKInteractionOffer& Offer = Pawn->Interaction->CurrentOffer;
 	if (Offer.IsOffered())

@@ -1,7 +1,9 @@
 #include "JamZeroGPawn.h"
 
 #include "Camera/CameraComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SphereComponent.h"
+#include "Engine/StaticMesh.h"
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 #include "EnhancedInputComponent.h"
@@ -60,6 +62,20 @@ AJamZeroGPawn::AJamZeroGPawn()
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(Body);
 	Camera->bUsePawnControlRotation = true;
+	Camera->SetFieldOfView(CameraFOV);
+
+	// World space, not attached: the specks stay put while the camera flies
+	// through them (UpdateDust wraps the ones left behind).
+	Dust = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("Dust"));
+	Dust->SetupAttachment(Body);
+	Dust->SetUsingAbsoluteLocation(true);
+	Dust->SetUsingAbsoluteRotation(true);
+	Dust->SetUsingAbsoluteScale(true);
+	Dust->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Dust->SetCastShadow(false);
+	Dust->SetCanEverAffectNavigation(false);
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> DustShape(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	Dust->SetStaticMesh(DustShape.Object);
 
 	Interaction = CreateDefaultSubobject<UMKInteractionComponent>(TEXT("Interaction"));
 	Keyring = CreateDefaultSubobject<UMKKeyringComponent>(TEXT("Keyring"));
@@ -79,6 +95,7 @@ AJamZeroGPawn::AJamZeroGPawn()
 	Pistol.RecoilImpulse = 1500.0f;
 	Pistol.HitImpulse = 3000.0f;
 	Pistol.SoundPitch = 1.3f;
+	Pistol.bAutomatic = true;
 	FJamWeapon Shotgun;
 	Shotgun.Name = NSLOCTEXT("JamZeroG", "Shotgun", "Дробовик");
 	Shotgun.Damage = 12.0f;
@@ -142,6 +159,23 @@ void AJamZeroGPawn::BeginPlay()
 {
 	Super::BeginPlay();
 	Body->SetMassOverrideInKg(NAME_None, BodyMassKg, true);
+	Camera->SetFieldOfView(CameraFOV);
+	if (UMaterialInterface* Speck = DustMaterial.LoadSynchronous())
+	{
+		Dust->SetMaterial(0, Speck);
+	}
+	{
+		FRandomStream Random(DustCount);
+		const FVector Origin = Camera->GetComponentLocation();
+		const FVector Scale(DustSpeckCm / 100.0f);
+		TArray<FTransform> Specks;
+		for (int32 Index = 0; Index < DustCount; ++Index)
+		{
+			const FVector Offset(Random.FRandRange(-0.5f, 0.5f), Random.FRandRange(-0.5f, 0.5f), Random.FRandRange(-0.5f, 0.5f));
+			Specks.Emplace(FQuat::Identity, Origin + Offset * DustCubeCm, Scale);
+		}
+		Dust->AddInstances(Specks, /*bShouldReturnIndices=*/false, /*bWorldSpace=*/true);
+	}
 	BodyMaterial = NewObject<UPhysicalMaterial>(this, TEXT("ZeroGBodyMaterial"));
 	BodyMaterial->Friction = BodyFriction;
 	BodyMaterial->Restitution = BodyRestitution;
@@ -157,8 +191,8 @@ void AJamZeroGPawn::BeginPlay()
 		BulletTimeMID = UMaterialInstanceDynamic::Create(BulletTimeMaterial, this);
 		Camera->PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(0.0f, BulletTimeMID));
 	}
-	UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: %.0f kg, world gravity Z %.1f"), *GetName(), Body->GetMass(),
-		GetWorld()->GetGravityZ());
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: %.0f kg, world gravity Z %.1f, FOV %.0f, %d dust specks"), *GetName(),
+		Body->GetMass(), GetWorld()->GetGravityZ(), Camera->FieldOfView, Dust->GetInstanceCount());
 }
 
 // --- input -------------------------------------------------------------------
@@ -212,6 +246,7 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	UInputAction* TetherAction = MakeAction(TEXT("IA_ZG_Tether"), EInputActionValueType::Boolean);
 	UInputAction* ReloadAction = MakeAction(TEXT("IA_ZG_Reload"), EInputActionValueType::Boolean);
 	UInputAction* WheelAction = MakeAction(TEXT("IA_ZG_Wheel"), EInputActionValueType::Axis1D);
+	UInputAction* AimAction = MakeAction(TEXT("IA_ZG_Aim"), EInputActionValueType::Boolean);
 	UInputAction* WeaponActions[3] = {
 		MakeAction(TEXT("IA_ZG_Weapon1"), EInputActionValueType::Boolean),
 		MakeAction(TEXT("IA_ZG_Weapon2"), EInputActionValueType::Boolean),
@@ -235,6 +270,7 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Map(TetherAction, EKeys::T, false, false);
 	Map(ReloadAction, EKeys::R, false, false);
 	Map(WheelAction, EKeys::MouseWheelAxis, false, false);
+	Map(AimAction, EKeys::LeftShift, false, false);
 	Map(WeaponActions[0], EKeys::One, false, false);
 	Map(WeaponActions[1], EKeys::Two, false, false);
 	Map(WeaponActions[2], EKeys::Three, false, false);
@@ -245,25 +281,21 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindActionValueLambda(StabiliseAction, ETriggerEvent::Started, [this](const FInputActionValue&) { bStabilising = true; });
 	Input->BindActionValueLambda(StabiliseAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { bStabilising = false; });
 	Input->BindAction(UseAction, ETriggerEvent::Started, this, &AJamZeroGPawn::Use);
-	// Press aims (the path is drawn), release acts.
-	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Started, [this](const FInputActionValue&) { Aim = EAim::Primary; });
-	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Completed, [this](const FInputActionValue&)
+	// Act on press. An automatic gun keeps firing while LMB is held; Fire's
+	// interval gate makes the press frame (Started and Triggered) one shot.
+	Input->BindAction(PrimaryAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PrimaryPressed);
+	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Triggered, [this](const FInputActionValue&)
 	{
-		if (Aim == EAim::Primary)
+		const FJamWeapon* Weapon = GetWeapon();
+		if (!GrabbedBody.IsValid() && Weapon && Weapon->bAutomatic)
 		{
-			PrimaryPressed();
+			Fire();
 		}
-		Aim = EAim::None;
 	});
-	Input->BindActionValueLambda(PushAction, ETriggerEvent::Started, [this](const FInputActionValue&) { Aim = EAim::Push; });
-	Input->BindActionValueLambda(PushAction, ETriggerEvent::Completed, [this](const FInputActionValue&)
-	{
-		if (Aim == EAim::Push)
-		{
-			PushPressed();
-		}
-		Aim = EAim::None;
-	});
+	Input->BindAction(PushAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PushPressed);
+	// Left Shift held: the predicted paths are drawn.
+	Input->BindActionValueLambda(AimAction, ETriggerEvent::Started, [this](const FInputActionValue&) { bAiming = true; });
+	Input->BindActionValueLambda(AimAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { bAiming = false; });
 	Input->BindAction(PutAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PutDown);
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Started, this, &AJamZeroGPawn::BulletTimePressed);
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &AJamZeroGPawn::BulletTimeReleased);
@@ -495,13 +527,78 @@ bool AJamZeroGPawn::Grab(UPrimitiveComponent* Target, FVector Point)
 	GrabConstraint->SetAngularTwistLimit(ACM_Free, 0.0f);
 	GrabConstraint->SetLinearPositionDrive(true, true, true);
 	GrabConstraint->SetLinearVelocityDrive(true, true, true);
+	// Force mode, not the default acceleration mode: a force acts equally and
+	// oppositely on both bodies whatever their masses.
+	GrabConstraint->SetLinearDriveAccelerationMode(false);
 	GrabConstraint->SetLinearDriveParams(GrabStiffness, GrabDamping, /*ForceLimit=*/0.0f);
-	GrabConstraint->SetConstrainedComponents(Body, NAME_None, Target, NAME_None);
+	// The prop is component 1 (the child), the pawn component 2 (the parent):
+	// the drive's position target is the child frame's position in the parent
+	// frame. Frame 2 moves to the pawn's centre (its rotation is locked, so the
+	// frame never turns); frame 1 stays at the grab point on the prop. The
+	// target is then where the grab point should sit from the pawn's centre, in
+	// body space (UpdateHoldTarget, every tick). The other way round the target
+	// lives in the prop's spinning frame - seen in the probe as the part shoved
+	// to the opposite side.
+	// Mass conditioning rescales the two masses for stability: momentum is then
+	// not conserved (the probe saw 45000 kg cm/s after a 30000 push with an
+	// 800 kg part). Off, the pair moves as 100 + 800 kg.
+	GrabConstraint->ConstraintInstance.DisableMassConditioning();
+	GrabConstraint->SetConstrainedComponents(Target, NAME_None, Body, NAME_None);
+	GrabOffsetLocal = Body->GetComponentTransform().InverseTransformVectorNoScale(Point - Body->GetComponentLocation());
+	GrabConstraint->SetConstraintReferencePosition(EConstraintFrame::Frame2, FVector::ZeroVector);
 	GrabbedBody = Target;
+	UpdateHoldTarget();
 	GrabCandidate = nullptr;
 	Target->WakeAllRigidBodies();
 	UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: %s, %.0f kg"), *GetNameSafe(Target->GetOwner()), Target->GetMass());
 	return true;
+}
+
+void AJamZeroGPawn::UpdateHoldTarget()
+{
+	if (!GrabConstraint)
+	{
+		return;
+	}
+	const FVector Target = bHoldInFront
+		? Body->GetComponentTransform().InverseTransformVectorNoScale(
+			ViewLocation() - Body->GetComponentLocation() + ViewDirection() * HoldDistanceCm)
+		: GrabOffsetLocal;
+	GrabConstraint->SetLinearPositionTarget(Target);
+}
+
+void AJamZeroGPawn::UpdateDust()
+{
+	// A speck left more than half a cube behind re-enters on the far side: the
+	// cube follows the camera, each speck stays still in the world until then.
+	const FVector Centre = Camera->GetComponentLocation();
+	const double Half = DustCubeCm * 0.5;
+	bool bAnyWrapped = false;
+	for (int32 Index = 0; Index < Dust->GetInstanceCount(); ++Index)
+	{
+		FTransform Speck;
+		Dust->GetInstanceTransform(Index, Speck, /*bWorldSpace=*/true);
+		FVector Offset = Speck.GetLocation() - Centre;
+		bool bWrapped = false;
+		for (int32 Axis = 0; Axis < 3; ++Axis)
+		{
+			if (Offset[Axis] > Half || Offset[Axis] < -Half)
+			{
+				Offset[Axis] = FMath::Wrap(Offset[Axis], -Half, Half);
+				bWrapped = true;
+			}
+		}
+		if (bWrapped)
+		{
+			Speck.SetLocation(Centre + Offset);
+			Dust->UpdateInstanceTransform(Index, Speck, /*bWorldSpace=*/true, /*bMarkRenderStateDirty=*/false);
+			bAnyWrapped = true;
+		}
+	}
+	if (bAnyWrapped)
+	{
+		Dust->MarkRenderStateDirty();
+	}
 }
 
 void AJamZeroGPawn::Release()
@@ -562,6 +659,7 @@ bool AJamZeroGPawn::AttachTether(UPrimitiveComponent* Target)
 	Limit.bSoftConstraint = TetherStiffness > 0.0f;
 	Limit.Stiffness = TetherStiffness;
 	Limit.Damping = TetherDamping;
+	TetherConstraint->ConstraintInstance.DisableMassConditioning();
 	TetherConstraint->SetConstrainedComponents(Body, NAME_None, Target, NAME_None);
 	// Frame 2 from the pawn's position in the part's space to the part's origin.
 	TetherConstraint->SetConstraintReferencePosition(EConstraintFrame::Frame2, FVector::ZeroVector);
@@ -629,46 +727,40 @@ void AJamZeroGPawn::HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* Oth
 	}
 }
 
-void AJamZeroGPawn::ProbeAim(bool bAim, bool bPush)
+void AJamZeroGPawn::ProbeAim(bool bAim)
 {
-	Aim = !bAim ? EAim::None : bPush ? EAim::Push : EAim::Primary;
+	bAiming = bAim;
 	bLogNextPrediction = bAim;
 }
 
 void AJamZeroGPawn::DrawPrediction() const
 {
-	if (Aim == EAim::None)
+	if (!bAiming)
 	{
 		return;
 	}
 	const FVector Direction = ViewDirection();
-	UPrimitiveComponent* Held = GrabbedBody.Get();
-	if (Held && Aim == EAim::Primary)
+	if (UPrimitiveComponent* Held = GrabbedBody.Get())
 	{
-		// The throw: where the prop goes.
+		// LMB would throw: where the prop goes.
 		const float MassKg = FMath::Max(Held->GetMass(), 0.01f);
 		const float Impulse = FMath::Min(ThrowImpulse, MassKg * MaxThrowSpeedCm);
 		DrawPath(Held->GetComponentLocation(), Held->GetPhysicsLinearVelocity() + Direction * Impulse / MassKg,
 			Held->Bounds.SphereRadius, Held->GetOwner(), FColor(120, 220, 255));
 		return;
 	}
-	if (Held)
+	// RMB would push (orange, only with something in reach); LMB would recoil (yellow).
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamPushAim), /*bTraceComplex=*/false, this);
+	FHitResult Hit;
+	if (GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation(), ViewLocation() + Direction * PushReachCm, ECC_Visibility, Params))
 	{
-		return; // RMB while holding lets go: nothing to predict.
+		DrawPath(Body->GetComponentLocation(), GetBodyVelocity() - Direction * PushImpulse / Body->GetMass(),
+			Body->GetScaledSphereRadius(), nullptr, FColor(255, 140, 40));
 	}
-	const FJamWeapon* Weapon = GetWeapon();
-	float Impulse = Weapon ? Weapon->RecoilImpulse : 0.0f;
-	if (Aim == EAim::Push)
+	if (const FJamWeapon* Weapon = GetWeapon(); Weapon && Weapon->RecoilImpulse > 0.0f)
 	{
-		FCollisionQueryParams Params(SCENE_QUERY_STAT(JamPushAim), /*bTraceComplex=*/false, this);
-		FHitResult Hit;
-		Impulse = GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation(), ViewLocation() + Direction * PushReachCm, ECC_Visibility, Params)
-			? PushImpulse : 0.0f;
-	}
-	if (Impulse > 0.0f)
-	{
-		DrawPath(Body->GetComponentLocation(), GetBodyVelocity() - Direction * Impulse / Body->GetMass(),
-			Body->GetScaledSphereRadius(), nullptr, FColor(255, 200, 80));
+		DrawPath(Body->GetComponentLocation(), GetBodyVelocity() - Direction * Weapon->RecoilImpulse / Body->GetMass(),
+			Body->GetScaledSphereRadius(), nullptr, FColor(255, 230, 90));
 	}
 }
 
@@ -750,24 +842,39 @@ void AJamZeroGPawn::ApplyThrusters(float DeltaSeconds)
 {
 	const FVector Input = ThrustInput.GetClampedToMaxSize(1.0f);
 	ThrustInput = FVector::ZeroVector;
-	if (!bThrustersEnabled || Oxygen->IsEmpty() || DeltaSeconds <= 0.0f)
+	if (!bThrustersEnabled || DeltaSeconds <= 0.0f)
 	{
 		return;
 	}
-	if (!Input.IsNearlyZero())
-	{
-		const FRotationMatrix View(GetControlRotation());
-		const FVector Direction = View.GetUnitAxis(EAxis::X) * Input.X + View.GetUnitAxis(EAxis::Y) * Input.Y
-			+ View.GetUnitAxis(EAxis::Z) * Input.Z;
-		Body->AddImpulse(Direction * ThrustAccelCm * DeltaSeconds, NAME_None, /*bVelChange=*/true);
-		Oxygen->Spend(Oxygen->ThrusterPerSecond * DeltaSeconds);
-	}
 	if (bStabilising)
 	{
+		// X: deceleration proportional to speed up to a cap - firm when fast,
+		// easing out near standstill, never overshooting it.
 		const FVector Velocity = GetBodyVelocity();
-		const FVector Change = -Velocity.GetClampedToMaxSize(StabiliserAccelCm * DeltaSeconds);
-		Body->AddImpulse(Change, NAME_None, /*bVelChange=*/true);
+		const float Speed = Velocity.Size();
+		const float Change = FMath::Min(FMath::Min(StabiliserAccelCm, Speed * StabiliserRate) * DeltaSeconds, Speed);
+		if (Speed > KINDA_SMALL_NUMBER)
+		{
+			Body->AddImpulse(-Velocity / Speed * Change, NAME_None, /*bVelChange=*/true);
+		}
 		Oxygen->Spend(Oxygen->StabiliserPerSecond * DeltaSeconds);
+	}
+	if (Input.IsNearlyZero())
+	{
+		return;
+	}
+	// Along the input direction only, up to ThrustMaxSpeedCm along it: the
+	// other components of the velocity (a push, a recoil) are left alone, and
+	// a faster burst along the same direction is not braked either.
+	const FRotationMatrix View(GetControlRotation());
+	const FVector Direction = (View.GetUnitAxis(EAxis::X) * Input.X + View.GetUnitAxis(EAxis::Y) * Input.Y
+		+ View.GetUnitAxis(EAxis::Z) * Input.Z).GetSafeNormal();
+	const float Along = FVector::DotProduct(GetBodyVelocity(), Direction);
+	const float Add = FMath::Min(ThrustAccelCm * DeltaSeconds, ThrustMaxSpeedCm - Along);
+	if (Add > 0.0f)
+	{
+		Body->AddImpulse(Direction * Add, NAME_None, /*bVelChange=*/true);
+		Oxygen->Spend(Oxygen->ThrusterPerSecond * DeltaSeconds);
 	}
 }
 
@@ -790,6 +897,8 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 		? FMath::VRand() * ShakeAmplitude * (ShakeRemaining / FMath::Max(ShakeSeconds, 0.01f))
 		: FVector::ZeroVector);
 	RefreshGrabCandidate();
+	UpdateHoldTarget();
+	UpdateDust();
 	ApplyThrusters(DeltaSeconds);
 	if (ReloadEndSeconds > 0.0 && GetWorld()->GetTimeSeconds() >= ReloadEndSeconds && Weapons.IsValidIndex(CurrentWeapon))
 	{
@@ -1013,8 +1122,47 @@ namespace
 	void LogProbe(const TCHAR* Stage, const AJamZeroGPawn* Pawn)
 	{
 		const FVector Velocity = Pawn->GetBodyVelocity();
-		UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [%s]: gravity Z %.1f, pawn velocity (%.0f, %.0f, %.0f) = %.0f cm/s, O2 %.1f s"),
-			Stage, Pawn->GetWorld()->GetGravityZ(), Velocity.X, Velocity.Y, Velocity.Z, Velocity.Size(), Pawn->Oxygen->Seconds);
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [%s]: gravity Z %.1f, pawn velocity (%.0f, %.0f, %.0f) = %.0f cm/s, O2 %.1f s, body rotation %s, view %s"),
+			Stage, Pawn->GetWorld()->GetGravityZ(), Velocity.X, Velocity.Y, Velocity.Z, Velocity.Size(), Pawn->Oxygen->Seconds,
+			*Pawn->Body->GetComponentRotation().ToCompactString(), *Pawn->GetControlRotation().ToCompactString());
+	}
+
+	/**
+	 * Thrusters: at rest, then sideways 300 cm/s, then forward thrust held for
+	 * 1.5 s (along X only, up to ThrustMaxSpeedCm; Y untouched), then the
+	 * stabiliser held for 3 s, sampled every half second.
+	 */
+	void ProbeThrusters(AJamZeroGPawn* Pawn)
+	{
+		UWorld* World = Pawn->GetWorld();
+		Pawn->Body->SetWorldLocation(FVector(-1500.0f, 0.0f, 0.0f), false, nullptr, ETeleportType::TeleportPhysics);
+		Pawn->Body->SetPhysicsLinearVelocity(FVector(0.0f, 300.0f, 0.0f));
+		const double Start = World->GetTimeSeconds();
+		const TSharedRef<FTimerHandle> Steer = MakeShared<FTimerHandle>();
+		World->GetTimerManager().SetTimer(*Steer, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Start, Steer]()
+		{
+			const double Elapsed = Pawn->GetWorld()->GetTimeSeconds() - Start;
+			if (Elapsed >= 4.5)
+			{
+				// Stop steering, or the probe would overwrite the player's thrust input forever.
+				Pawn->ProbeThrust(FVector::ZeroVector, false);
+				Pawn->GetWorldTimerManager().ClearTimer(*Steer);
+				return;
+			}
+			// The view faces +X: forward thrust for 1.5 s, then the stabiliser to 4.5 s.
+			Pawn->ProbeThrust(Elapsed < 1.5 ? FVector(1.0f, 0.0f, 0.0f) : FVector::ZeroVector, Elapsed >= 1.5);
+		}), 0.0005f, true);
+		for (int32 Step = 1; Step <= 10; ++Step)
+		{
+			FTimerHandle Sample;
+			World->GetTimerManager().SetTimer(Sample, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Step]()
+			{
+				const FVector Velocity = Pawn->GetBodyVelocity();
+				UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [thrusters +%.1f s, %s]: velocity (%.0f, %.0f, %.0f) = %.0f cm/s, O2 %.1f s"),
+					Step * 0.5f, Step <= 3 ? TEXT("forward") : Step <= 9 ? TEXT("stabiliser") : TEXT("free"),
+					Velocity.X, Velocity.Y, Velocity.Z, Velocity.Size(), Pawn->Oxygen->Seconds);
+			}), Step * 0.5f, false);
+		}
 	}
 
 	/** The dock: one Ship.Part put inside the zone at rest; the count is logged before and after. */
@@ -1109,6 +1257,7 @@ namespace
 					LogProbe(TEXT("after crash"), Pawn);
 					UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [crash]: health %.0f"), Pawn->Vitals->Health);
 					ProbeDock(Pawn);
+					ProbeThrusters(Pawn);
 				}), 1.0f, false);
 			}), 2.0f, false);
 		}), 2.5f, false);
@@ -1134,6 +1283,7 @@ namespace
 					Pawn->GetBodyVelocity().Size(), Part->GetMass(), Part->GetPhysicsLinearVelocity().Size());
 				if (Seconds >= 5.0f)
 				{
+					LogProbe(TEXT("tether end"), Pawn);
 					Pawn->DetachTether();
 					ProbeCollisions(Pawn);
 				}
@@ -1181,8 +1331,8 @@ namespace
 				const FVector PawnVelocity = Pawn->GetBodyVelocity();
 				const FVector PropVelocity = Heaviest->GetPhysicsLinearVelocity();
 				const float Momentum = (PawnVelocity * Pawn->Body->GetMass() + PropVelocity * Heaviest->GetMass()).Size();
-				UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [coupled push +%.1f s]: pawn %.0f cm/s, held %s %.0f kg %.0f cm/s (expected both near %.0f), momentum %.0f kg cm/s, joint stretch %.0f cm"),
-					Seconds, PawnVelocity.Size(), *GetNameSafe(Heaviest->GetOwner()), Heaviest->GetMass(), PropVelocity.Size(), Expected,
+				UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [coupled push +%.1f s]: pawn %s cm/s, held %s %.0f kg %s cm/s (expected both near %.0f), momentum %.0f kg cm/s, joint stretch %.0f cm"),
+					Seconds, *PawnVelocity.ToCompactString(), *GetNameSafe(Heaviest->GetOwner()), Heaviest->GetMass(), *PropVelocity.ToCompactString(), Expected,
 					Momentum, FVector::Dist(Pawn->Body->GetComponentLocation(), Heaviest->GetComponentLocation()) - RestDistance);
 				if (Seconds >= 3.0f)
 				{
@@ -1207,11 +1357,13 @@ namespace
 			UE_LOG(LogMindKore, Warning, TEXT("ZeroG probe: no AJamZeroGPawn in %s"), *World->GetMapName());
 			return;
 		}
+		// The coupled-push measurement keeps the held thing where it was grabbed.
+		Pawn->bHoldInFront = false;
 		LogProbe(TEXT("before"), Pawn);
 		// One frame of aiming the push: the predicted path logs its first contact.
-		Pawn->ProbeAim(true, true);
+		Pawn->ProbeAim(true);
 		Pawn->Tick(0.0f);
-		Pawn->ProbeAim(false, true);
+		Pawn->ProbeAim(false);
 		Pawn->Push();
 		FTimerHandle AfterPush;
 		World->GetTimerManager().SetTimer(AfterPush, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn]()

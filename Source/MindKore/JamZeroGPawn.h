@@ -7,6 +7,7 @@
 #include "JamZeroGPawn.generated.h"
 
 class UCameraComponent;
+class UInstancedStaticMeshComponent;
 class UInputAction;
 class UInputMappingContext;
 class UJamOxygenComponent;
@@ -40,15 +41,23 @@ struct FInputActionValue;
  * to the loose body under the view within TetherReachCm; the part follows on
  * the rope wherever you push or thrust. T again cuts it.
  *
- * LMB and RMB act on release: while one is held the pawn draws where the
- * action will send it (push off, recoil) or where the throw sends the held
- * prop - a dotted line, the first contact marked, one bounce after it.
+ * LMB and RMB act on press (the pistol fires while LMB is held). Holding
+ * Left Shift aims: the pawn draws where a push and the current gun's recoil
+ * would send it, or where a throw sends the held prop - a dotted line, the
+ * first contact marked, one bounce after it.
+ *
+ * Only the mouse turns the view; the body's rotation is locked, so hits, the
+ * grab and the rope move it but never turn it.
  *
  * Crashes count: a hit above FeedbackMinSpeedCm thumps (sound, camera shake),
  * the blow is delivered to what was hit (CrashImpact, the same path as a
  * round), and above CrashDamageMinSpeedCm the pawn hurts itself.
- * Weak thrusters (WASD, Space/Ctrl, view-relative) and the stabiliser (X) are
- * a safety net that costs oxygen.
+ * Thrusters (WASD, Space/Ctrl, view-relative) are the precise movement: they
+ * accelerate along the input direction until the velocity along it reaches
+ * ThrustMaxSpeedCm and never brake anything else, so a push or a recoil on
+ * top is not cancelled. X stabilises: a smooth brake to standstill.
+ *
+ * Space dust (a cube of tiny specks wrapped around the camera) shows motion.
  *
  * All velocity changes go into the body as impulses in kg cm/s, so they read
  * the body's mass (default 100 kg): the sniper's recoil 40000 is 4 m/s.
@@ -101,6 +110,10 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "100.0"))
 	float RangeCm = 8000.0f;
 
+	/** Keeps firing while LMB is held, at FireInterval. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon")
+	bool bAutomatic = false;
+
 	/** Pitch of the blast sound: a small gun cracks, a big one booms. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.1"))
 	float SoundPitch = 1.0f;
@@ -127,6 +140,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UMKInteractionComponent> Interaction = nullptr;
 
+	/** Tiny specks kept in a cube around the camera (world space), streaming past as you move. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
+	TObjectPtr<UInstancedStaticMeshComponent> Dust = nullptr;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UMKKeyringComponent> Keyring = nullptr;
 
@@ -135,6 +152,27 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UJamOxygenComponent> Oxygen = nullptr;
+
+	// --- view ---------------------------------------------------------------
+
+	/** Horizontal field of view, degrees. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "60.0", ClampMax = "150.0"))
+	float CameraFOV = 105.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "0"))
+	int32 DustCount = 300;
+
+	/** Edge of the dust cube around the camera, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "100.0"))
+	float DustCubeCm = 2000.0f;
+
+	/** Size of one speck, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "0.1"))
+	float DustSpeckCm = 2.0f;
+
+	/** Unlit speck material (made by Scripts/build_zerog.py); loaded at BeginPlay. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View")
+	TSoftObjectPtr<UMaterialInterface> DustMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Jam/Materials/M_Jam_Dust.M_Jam_Dust")));
 
 	// --- body ---------------------------------------------------------------
 
@@ -149,7 +187,7 @@ public:
 
 	/** 0 = no cap. Clamped every tick. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Body", meta = (ClampMin = "0.0"))
-	float MaxSpeedCm = 1500.0f;
+	float MaxSpeedCm = 1200.0f;
 
 	// --- push-off (RMB) --------------------------------------------------------
 
@@ -172,13 +210,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "1.0"))
 	float MaxGrabMassKg = 5000.0f;
 
-	/** Spring of the grab joint (Chaos linear drive, acceleration mode). */
+	/** Spring of the grab joint, force mode (kg/s^2): with 100 kg + 800 kg about 15 rad/s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "0.0"))
-	float GrabStiffness = 3000.0f;
+	float GrabStiffness = 20000.0f;
 
-	/** Damping of the grab joint (Chaos linear drive, acceleration mode). */
+	/** Damping of the grab joint, force mode (kg/s): about critical for a heavy part, overdamped for a light one - no wobble. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "0.0"))
-	float GrabDamping = 300.0f;
+	float GrabDamping = 3000.0f;
+
+	/** The held thing's grab point is pulled to this far in front of the camera, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "0.0"))
+	float HoldDistanceCm = 150.0f;
+
+	/** Off: the held thing stays where it was grabbed, relative to the pawn. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab")
+	bool bHoldInFront = true;
 
 	/** kg cm/s given to the prop and taken by the pawn on a throw. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "0.0"))
@@ -203,7 +249,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Tether", meta = (ClampMin = "0.0"))
 	float TetherDamping = 50.0f;
 
-	// --- prediction (while LMB/RMB is held) ---------------------------------------
+	// --- prediction (while Left Shift is held) --------------------------------------
 
 	/** How far ahead the path is drawn, seconds of flight. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Prediction", meta = (ClampMin = "0.1"))
@@ -264,13 +310,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters")
 	bool bThrustersEnabled = true;
 
-	/** cm/s^2 while a thrust key is held. */
+	/** Acceleration along the input direction while a thrust key is held, cm/s^2. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters", meta = (ClampMin = "0.0"))
-	float ThrustAccelCm = 150.0f;
+	float ThrustAccelCm = 600.0f;
 
-	/** cm/s^2 toward standstill while X is held. */
+	/** Thrust stops adding once the velocity along the input direction reaches this, cm/s (it never brakes). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters", meta = (ClampMin = "0.0"))
-	float StabiliserAccelCm = 200.0f;
+	float ThrustMaxSpeedCm = 500.0f;
+
+	/** X: the stabiliser's deceleration cap, cm/s^2. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters", meta = (ClampMin = "0.0"))
+	float StabiliserAccelCm = 300.0f;
+
+	/** X: deceleration = speed x this (1/s), up to the cap - an ease-out near standstill. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters", meta = (ClampMin = "0.0"))
+	float StabiliserRate = 2.0f;
 
 	// --- bullet time presentation (as AJamCharacter) --------------------------
 
@@ -346,8 +400,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG")
 	float GetPushCooldownRemaining() const;
 
-	/** Console probe: aim (true = push, false = primary) or stop aiming; the next drawn path logs its first contact. */
-	void ProbeAim(bool bAim, bool bPush);
+	/** Console probe: aim (as Left Shift) or stop; the next drawn path logs its first contact. */
+	void ProbeAim(bool bAim);
+
+	/** Console probe: thrust input for the next tick (view frame: X forward, Y right, Z up) and the stabiliser. */
+	void ProbeThrust(const FVector& Input, bool bStabilise) { ThrustInput = Input; bStabilising = bStabilise; }
 
 	virtual void ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& ResolvedImpact) override;
 
@@ -369,6 +426,10 @@ protected:
 	TObjectPtr<UPhysicsConstraintComponent> GrabConstraint = nullptr;
 
 	TWeakObjectPtr<UPrimitiveComponent> GrabbedBody;
+	/** Where the grab point sat from the body's centre at the grab, body space: the target when not holding in front. */
+	FVector GrabOffsetLocal = FVector::ZeroVector;
+	void UpdateHoldTarget();
+	void UpdateDust();
 
 	UPROPERTY(Transient)
 	TObjectPtr<UPhysicsConstraintComponent> TetherConstraint = nullptr;
@@ -402,8 +463,7 @@ private:
 	void DrawPrediction() const;
 	void DrawPath(const FVector& Start, const FVector& Velocity, float RadiusCm, const AActor* Ignored, const FColor& Color) const;
 
-	enum class EAim : uint8 { None, Primary, Push };
-	EAim Aim = EAim::None;
+	bool bAiming = false;
 	mutable bool bLogNextPrediction = false;
 	void ToggleTether();
 	void DrawTether() const;
