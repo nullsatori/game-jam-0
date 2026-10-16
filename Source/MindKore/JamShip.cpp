@@ -7,6 +7,8 @@
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
+#include "Components/LightComponent.h"
+#include "Engine/DirectionalLight.h"
 #include "EngineUtils.h"
 #include "EnhancedInputSubsystems.h"
 #include "HAL/IConsoleManager.h"
@@ -637,6 +639,60 @@ namespace
 		TEXT("jam.Ship.Where"),
 		TEXT("Logs location and speed of every actor with the given tag (default Junk.Foreign)."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunShipWhere));
+
+	/**
+	 * jam.Ship.Shots: rendered stills for a look check (needs a real RHI, not
+	 * -nullrhi). Teleports the player (BugItGo) to each viewpoint, waits for the
+	 * frame to settle, takes a HighResShot; the last one looks at the strongest
+	 * directional light's star. Files land in Saved/Screenshots in this order.
+	 */
+	void RunShipShots(UWorld* World)
+	{
+		AJamShipGameMode* Mode = World->GetAuthGameMode<AJamShipGameMode>();
+		APlayerController* PlayerController = World->GetFirstPlayerController();
+		if (!Mode || !PlayerController)
+		{
+			return;
+		}
+		FRotator ToStar(-20.0f, 0.0f, 0.0f);
+		float Brightest = -1.0f;
+		for (TActorIterator<ADirectionalLight> Light(World); Light; ++Light)
+		{
+			const float Intensity = Light->GetLightComponent() ? Light->GetLightComponent()->Intensity : 0.0f;
+			if (Intensity > Brightest)
+			{
+				Brightest = Intensity;
+				ToStar = (-Light->GetActorForwardVector()).Rotation();
+			}
+		}
+		struct FView { const TCHAR* Name; FVector Where; FRotator Look; };
+		const TArray<FView> Views = {
+			{ TEXT("cabin_panel"), FVector(1700.0f, 0.0f, -40.0f), FRotator(-8.0f, 0.0f, 0.0f) },
+			{ TEXT("cabin_back"), FVector(1900.0f, 100.0f, -40.0f), FRotator(-5.0f, 190.0f, 0.0f) },
+			{ TEXT("ship_outside"), FVector(600.0f, 1800.0f, 400.0f), FRotator(-10.0f, -100.0f, 0.0f) },
+			{ TEXT("to_planetoid"), FVector(0.0f, 3500.0f, 300.0f), FRotator(-5.0f, 90.0f, 0.0f) },
+			{ TEXT("to_star"), FVector(-1500.0f, -1500.0f, 1500.0f), ToStar },
+		};
+		for (int32 Index = 0; Index < Views.Num(); ++Index)
+		{
+			const FView View = Views[Index];
+			After(Mode, 1.0f + Index * 4.0f, [PlayerController, View]()
+			{
+				PlayerController->ConsoleCommand(FString::Printf(TEXT("BugItGo %f %f %f %f %f 0"), View.Where.X, View.Where.Y, View.Where.Z,
+					View.Look.Pitch, View.Look.Yaw));
+			});
+			After(Mode, 3.5f + Index * 4.0f, [PlayerController, View, Index]()
+			{
+				UE_LOG(LogMindKore, Log, TEXT("Ship shots: %d %s at %s looking %s"), Index, View.Name, *View.Where.ToCompactString(), *View.Look.ToCompactString());
+				PlayerController->ConsoleCommand(TEXT("HighResShot 1"));
+			});
+		}
+	}
+
+	FAutoConsoleCommandWithWorld GShipShots(
+		TEXT("jam.Ship.Shots"),
+		TEXT("Rendered stills of Lvl_Jam_Ship from five viewpoints (HighResShot; needs a real RHI)."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunShipShots));
 
 	FAutoConsoleCommandWithWorld GShipProbe(
 		TEXT("jam.Ship.Probe"),

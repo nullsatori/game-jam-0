@@ -28,6 +28,7 @@ les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
 eas = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 ues = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
 MATS = "/Game/Jam/Materials"
+EXPOSURE_BIAS = 0.0  # tuned on rendered frames (jam.Ship.Shots)
 rng = random.Random(11)
 
 
@@ -82,6 +83,56 @@ def tint(name, rgb):
     eal.save_asset(path, False)
     log("made " + path)
     return mi
+
+
+def emissive_base(name, two_sided):
+    """An unlit material: emissive = Color x Intensity (vector and scalar parameters), made once."""
+    path = MATS + "/" + name
+    if eal.does_asset_exist(path):
+        return unreal.load_asset(path)
+    m = tools.create_asset(name, MATS, unreal.Material, unreal.MaterialFactoryNew())
+    m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    m.set_editor_property("two_sided", two_sided)
+    colour = mel.create_material_expression(m, unreal.MaterialExpressionVectorParameter, -500, 0)
+    colour.set_editor_property("parameter_name", "Color")
+    colour.set_editor_property("default_value", unreal.LinearColor(1.0, 1.0, 1.0, 1.0))
+    strength = mel.create_material_expression(m, unreal.MaterialExpressionScalarParameter, -500, 200)
+    strength.set_editor_property("parameter_name", "Intensity")
+    strength.set_editor_property("default_value", 1.0)
+    times = mel.create_material_expression(m, unreal.MaterialExpressionMultiply, -250, 100)
+    mel.connect_material_expressions(colour, "", times, "A")
+    mel.connect_material_expressions(strength, "", times, "B")
+    mel.connect_material_property(times, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    mel.recompile_material(m)
+    eal.save_asset(path, False)
+    log("made " + path)
+    return m
+
+
+def glow(name, base, rgb, intensity):
+    """An emissive instance; made once, its colour and intensity rewritten every build."""
+    path = MATS + "/" + name
+    if eal.does_asset_exist(path):
+        mi = unreal.load_asset(path)
+    else:
+        mi = tools.create_asset(name, MATS, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
+        mel.set_material_instance_parent(mi, base)
+    mel.set_material_instance_vector_parameter_value(mi, "Color", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
+    mel.set_material_instance_scalar_parameter_value(mi, "Intensity", intensity)
+    eal.save_asset(path, False)
+    log("made " + path)
+    return mi
+
+
+def point_light(label, loc, rgb, candela, radius, shadows=True):
+    light = spawn(unreal.PointLight, loc, None, label)
+    comp = light.get_editor_property("point_light_component")
+    comp.set_editor_property("intensity_units", unreal.LightUnits.CANDELAS)
+    comp.set_editor_property("intensity", candela)
+    comp.set_editor_property("attenuation_radius", radius)
+    comp.set_editor_property("light_color", unreal.Color(r=int(rgb[0] * 255), g=int(rgb[1] * 255), b=int(rgb[2] * 255), a=255))
+    comp.set_editor_property("cast_shadows", shadows)
+    return light
 
 
 def label_text(text, loc, yaw, size=60.0):
@@ -150,21 +201,54 @@ OXYGEN = tint("MI_Jam_O2", (0.1, 0.35, 0.95))
 DOCK = tint("MI_Jam_Dock", (0.2, 0.9, 0.3))
 ROCK = tint("MI_Jam_Rock", (0.33, 0.31, 0.28))
 FLESH = tint("MI_Jam_Flesh", (0.62, 0.3, 0.32))
-EYE = tint("MI_Jam_Eye", (0.03, 0.02, 0.02))
+EMISSIVE = emissive_base("M_Jam_Emissive", False)
+EMISSIVE_2S = emissive_base("M_Jam_Emissive2S", True)
+STAR = glow("MI_Jam_Star", EMISSIVE, (0.55, 0.92, 1.0), 60.0)
+STARS = glow("MI_Jam_Stars", EMISSIVE, (0.85, 0.9, 1.0), 25.0)
+DOME = glow("MI_Jam_SkyDome", EMISSIVE_2S, (0.035, 0.02, 0.07), 1.0)
+EYE = glow("MI_Jam_EyeGlow", EMISSIVE, (0.7, 0.03, 0.02), 6.0)
+LAMP = glow("MI_Jam_PanelLamp", EMISSIVE, (1.0, 0.08, 0.05), 3.0)
 CARGO = tint("MI_Jam_Cargo", (0.9, 0.75, 0.3))
 CABIN = tint("MI_Jam_Cabin", (0.55, 0.53, 0.5))
 
-# --- light: the zero-G map's recipe -------------------------------------------------------
-sun = spawn(unreal.DirectionalLight, V(0, 0, 3000), R(yaw=35.0, pitch=-40.0), "Sun")
-sun.root_component.set_mobility(unreal.ComponentMobility.MOVABLE)
-sun.get_editor_property("light_component").set_editor_property("intensity", 3.0)
-sky = spawn(unreal.SkyLight, V(0, 0, 0), None, "SkyLight_Low")
+# --- light: an alien star, a rim from the other side, a dim violet sky -----------------------------
+# Key: a teal-cyan star - cold and clearly not our Sun, it reads well against the
+# warm cabin, the orange parts and the fleshy planetoid. Rim: a weak magenta
+# from the opposite side for silhouettes. Sky: a far two-sided dark-violet dome
+# and a few hundred tiny emissive stars that the SkyLight captures as a faint
+# coloured ambient. Exposure: manual (no physical camera), bias tuned on frames.
+KEY_ROT = R(yaw=140.0, pitch=-30.0)
+key = spawn(unreal.DirectionalLight, V(0, 0, 3000), KEY_ROT, "Star_Key")
+key.root_component.set_mobility(unreal.ComponentMobility.MOVABLE)
+key_light = key.get_editor_property("light_component")
+key_light.set_editor_property("intensity", 5.0)
+key_light.set_editor_property("forward_shading_priority", 1)  # the one used for forward shading/translucency
+key_light.set_editor_property("light_color", unreal.Color(r=95, g=215, b=255, a=255))
+rim = spawn(unreal.DirectionalLight, V(0, 0, 3000), R(yaw=-40.0, pitch=20.0), "Rim")
+rim.root_component.set_mobility(unreal.ComponentMobility.MOVABLE)
+rim_light = rim.get_editor_property("light_component")
+rim_light.set_editor_property("intensity", 1.2)
+rim_light.set_editor_property("light_color", unreal.Color(r=255, g=110, b=190, a=255))
+rim_light.set_editor_property("cast_shadows", False)
+rim_light.set_editor_property("forward_shading_priority", 0)
+# The star's disc: 2 km away against the light's direction, ~3 degrees across.
+toward = key.get_actor_forward_vector()
+block("Star_Disc", V(-toward.x * 200000.0, -toward.y * 200000.0, -toward.z * 200000.0), (10000, 10000, 10000), None, SPHERE, STAR,
+      shadow=False, collide=False)
+block("Sky_Dome", V(0, 0, 0), (600000, 600000, 600000), None, SPHERE, DOME, shadow=False, collide=False)
+for j in range(300):
+    u, w = rng.uniform(-1.0, 1.0), rng.uniform(0, 2 * math.pi)
+    d = (math.sqrt(1 - u * u) * math.cos(w), math.sqrt(1 - u * u) * math.sin(w), u)
+    size = rng.uniform(400, 900)
+    block("Star_%03d" % j, V(d[0] * 250000, d[1] * 250000, d[2] * 250000), (size, size, size), None, SPHERE, STARS,
+          shadow=False, collide=False)
+sky = spawn(unreal.SkyLight, V(0, 0, 0), None, "SkyLight")
 sky.root_component.set_mobility(unreal.ComponentMobility.MOVABLE)
 sky_light = sky.get_editor_property("light_component")
-sky_light.set_editor_property("intensity", 0.6)
+sky_light.set_editor_property("intensity", 1.0)
 sky_light.set_editor_property("lower_hemisphere_is_black", False)
-sky_light.set_editor_property("lower_hemisphere_color", unreal.LinearColor(0.05, 0.06, 0.08, 1.0))
-ppv = spawn(unreal.PostProcessVolume, V(0, 0, 0), None, "PostProcess_Exposure")
+sky_light.set_editor_property("sky_distance_threshold", 100000.0)
+ppv = spawn(unreal.PostProcessVolume, V(0, 0, 0), None, "PostProcess_Look")
 ppv.set_editor_property("unbound", True)
 pp = ppv.get_editor_property("settings")
 pp.set_editor_property("override_auto_exposure_method", True)
@@ -172,7 +256,11 @@ pp.set_editor_property("auto_exposure_method", unreal.AutoExposureMethod.AEM_MAN
 pp.set_editor_property("override_auto_exposure_apply_physical_camera_exposure", True)
 pp.set_editor_property("auto_exposure_apply_physical_camera_exposure", False)
 pp.set_editor_property("override_auto_exposure_bias", True)
-pp.set_editor_property("auto_exposure_bias", 0.0)
+pp.set_editor_property("auto_exposure_bias", EXPOSURE_BIAS)
+pp.set_editor_property("override_bloom_intensity", True)
+pp.set_editor_property("bloom_intensity", 0.8)
+pp.set_editor_property("override_vignette_intensity", True)
+pp.set_editor_property("vignette_intensity", 0.5)
 ppv.set_editor_property("settings", pp)
 
 # --- the hull: an octagonal prism of 250 cm segments ---------------------------------------
@@ -274,10 +362,11 @@ block("Airlock_Ceiling", V(1300, 0, 110), (200, 240, 20), material=CABIN)
 wall_with_door("Airlock_Outer", 1200, 120, 100)
 door("Door_Inner", 1400)
 door("Door_Outer", 1200, "Jam.Suit", "Нужен скафандр")
-for name, loc in (("Cabin", V(1700, 0, 120)), ("Airlock", V(1300, 0, 80))):
-    lamp = spawn(unreal.PointLight, loc, None, "Light_" + name)
-    lamp.get_editor_property("point_light_component").set_editor_property("intensity", 8.0)
-    lamp.get_editor_property("point_light_component").set_editor_property("attenuation_radius", 700.0)
+AMBER = (1.0, 0.62, 0.28)
+point_light("Light_Cabin_Front", V(1850, 0, 120), AMBER, 8.0, 900.0)
+point_light("Light_Cabin_Back", V(1550, 0, 120), AMBER, 5.0, 900.0)
+point_light("Light_Airlock", V(1300, 0, 80), AMBER, 4.0, 500.0)
+point_light("Light_Emergency", V(1450, -230, 120), (1.0, 0.08, 0.05), 6.0, 600.0, shadows=False)
 
 cabin_zone = spawn(unreal.JamGravityZone, V(1700, 0, 0), None, "Gravity_Cabin")
 set_extent(cabin_zone, "zone", (300, 250, 150))
@@ -315,6 +404,8 @@ panel = spawn(unreal.JamShipPanel, V(1950, 0, FLOOR + 50), R(yaw=180.0), "Panel"
 panel.set_editor_property("hull_sockets", sockets)
 panel.set_editor_property("fuel_dock", fuel_dock)
 panel.set_editor_property("nav_dock", nav_dock)
+for lamp_mesh in panel.get_editor_property("lamps"):
+    lamp_mesh.set_material(0, LAMP)  # emissive; the panel's MIDs swap its Color red/green
 label_text("HULL  FUEL  NAV", V(1920, 0, FLOOR + 115), 180, 12)
 
 for j in range(12):
@@ -416,7 +507,12 @@ for j, direction in enumerate([(0.5, -0.6, -0.5), (-0.6, -0.5, 0.4), (0.7, 0.2, 
     tangent = norm((up[1], -up[0], 0.0)) if abs(up[2]) < 0.9 else (1.0, 0.0, 0.0)
     block("Tentacle_%d" % j, at, (80, 80, 1200), unreal.MathLibrary.make_rot_from_z(V(*tangent)), CYL, ANCHOR)
 eye_at, eye_up = on_surface((-0.3, -0.9, -0.2), 100.0)
-block("Eye", eye_at, (400, 400, 400), None, SPHERE, EYE)
+block("Eye", eye_at, (400, 400, 400), None, SPHERE, EYE, shadow=False)
+# Bioluminescence: warm pink and orange glows close to the surface.
+for j, (direction, rgb) in enumerate([((0.0, -1.0, 0.25), (1.0, 0.45, 0.6)), ((0.5, -0.8, -0.3), (1.0, 0.55, 0.25)),
+                                      ((-0.6, -0.6, 0.5), (1.0, 0.4, 0.55)), ((-0.2, -0.95, -0.4), (1.0, 0.5, 0.3)),
+                                      ((0.6, -0.7, 0.4), (1.0, 0.45, 0.5))]):
+    point_light("Planetoid_Glow_%d" % j, on_surface(direction, 300.0)[0], rgb, 120.0, 2500.0, shadows=False)
 
 # --- valuable cargo ----------------------------------------------------------------------------------------
 cargo_spots = [V(500, 200, -200), V(rx - 150, ry + 100, rz - 100), rear.transform_location(V(0, 0, 0)),
