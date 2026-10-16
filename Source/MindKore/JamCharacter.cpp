@@ -14,6 +14,7 @@
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "JamGravity.h"
+#include "JamWeapons.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "MKCarryComponent.h"
@@ -52,26 +53,10 @@ AJamCharacter::AJamCharacter(const FObjectInitializer& ObjectInitializer)
 	Carry = CreateDefaultSubobject<UMKCarryComponent>(TEXT("Carry"));
 	Keyring = CreateDefaultSubobject<UMKKeyringComponent>(TEXT("Keyring"));
 	Vitals = CreateDefaultSubobject<UMKVitalsComponent>(TEXT("Vitals"));
+	Guns = CreateDefaultSubobject<UJamWeaponsComponent>(TEXT("Guns"));
 
 	// Every path below is MindKore's own content, copied with its reference
 	// closure (CREDITS.md lists the sounds' donors).
-	static ConstructorHelpers::FObjectFinder<UMKImpactDataAsset> DefaultImpactData(
-		TEXT("/Game/MindKore/Impacts/DA_Impact_Default.DA_Impact_Default"));
-	ImpactData = DefaultImpactData.Object;
-	static ConstructorHelpers::FObjectFinder<USoundBase> BlastTransient(
-		TEXT("/Game/MindKore/Audio/SW_MK_Blast_Transient.SW_MK_Blast_Transient"));
-	static ConstructorHelpers::FObjectFinder<USoundBase> BlastTail(
-		TEXT("/Game/MindKore/Audio/SW_MK_Blast_Tail.SW_MK_Blast_Tail"));
-	for (USoundBase* Sound : { BlastTransient.Object, BlastTail.Object })
-	{
-		if (Sound)
-		{
-			ShotSounds.Add(Sound);
-		}
-	}
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Decal(
-		TEXT("/Game/MindKore/Impacts/Decals/M_Decal_Default.M_Decal_Default"));
-	DefaultImpactDecal = Decal.Object;
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BulletTime(
 		TEXT("/Game/MindKore/PostProcess/M_MK_BulletTime.M_MK_BulletTime"));
 	BulletTimeMaterial = BulletTime.Object;
@@ -164,10 +149,20 @@ void AJamCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindActionValueLambda(CrouchAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { UnCrouch(); });
 	Input->BindAction(UseAction, ETriggerEvent::Started, this, &AJamCharacter::Use);
 	Input->BindAction(PrimaryAction, ETriggerEvent::Started, this, &AJamCharacter::PrimaryPressed);
+	// An automatic gun keeps firing while LMB is held; Fire's interval gate makes the press frame one shot.
+	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Triggered, [this](const FInputActionValue&)
+	{
+		const FJamWeapon* Weapon = Guns->GetWeapon();
+		if (!Carry->IsHolding() && Weapon && Weapon->bAutomatic)
+		{
+			Fire();
+		}
+	});
 	Input->BindAction(PutAction, ETriggerEvent::Started, this, &AJamCharacter::PutDown);
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Started, this, &AJamCharacter::BulletTimePressed);
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &AJamCharacter::BulletTimeReleased);
 	Input->BindAction(CrowbarAction, ETriggerEvent::Started, this, &AJamCharacter::ToggleCrowbar);
+	Guns->BindInput(*Input, *Mapping);
 }
 
 void AJamCharacter::PawnClientRestart()
@@ -248,89 +243,24 @@ bool AJamCharacter::HasCrowbar() const
 	return ActorHasTag(MKFastenerCrowbarTag());
 }
 
-void AJamCharacter::Fire()
+bool AJamCharacter::Fire()
 {
-	UWorld* World = GetWorld();
-	if (!World || !Controller)
-	{
-		return;
-	}
 	// From the pawn's own camera, not the camera manager's cached view: the
 	// same point in play, and right on the frame of a teleport (console smoke).
-	const FVector Start = Camera->GetComponentLocation();
-	const FVector Direction = GetControlRotation().Vector();
-
-	for (USoundBase* Sound : ShotSounds)
+	FVector Recoil;
+	if (!Guns->Fire(Camera->GetComponentLocation(), GetControlRotation().Vector(), Recoil))
 	{
-		UGameplayStatics::PlaySound2D(this, Sound);
+		return false;
 	}
-
-	// As UMKFirearmComponent traces: the Shot channel (ECC_GameTraceChannel2),
-	// complex collision (the glass pane's shard triangles), physical material.
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamShot), /*bTraceComplex=*/true, this);
-	Params.bReturnPhysicalMaterial = true;
-	// Multi-trace and MKSelectResolvedHit, as UMKFirearmComponent::PerformImpactTrace:
-	// hit-zone boxes only overlap Shot, so they arrive as touches in front of
-	// the blocking hit and win on zone priority within the same actor.
-	TArray<FHitResult> Hits;
-	World->LineTraceMultiByChannel(Hits, Start, Start + Direction * ShotRangeCm, ECC_GameTraceChannel2, Params);
-	TArray<FMKHitCandidate, TInlineAllocator<8>> Candidates;
-	int32 NearestZone = INDEX_NONE;
-	for (const FHitResult& Each : Hits)
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	FVector Kick = Recoil / FMath::Max(Movement->Mass, 1.0f) * RecoilFraction;
+	if (Movement->IsMovingOnGround())
 	{
-		FMKHitCandidate& Candidate = Candidates.AddDefaulted_GetRef();
-		Candidate.Distance = Each.Distance;
-		Candidate.bBlocking = Each.bBlockingHit;
-		Candidate.ActorKey = Each.GetActor();
-		Candidate.HitZone = MKResolveHitZoneFromComponent(Each.GetComponent());
-		if (!Candidate.bBlocking && Candidate.HitZone != EMKHitZone::Default
-			&& (NearestZone == INDEX_NONE || Candidate.Distance < Candidates[NearestZone].Distance))
-		{
-			NearestZone = Candidates.Num() - 1;
-		}
+		// Along the ground only: the kick slides you back, it never lifts you off.
+		Kick = FVector::VectorPlaneProject(Kick, Movement->GetGravityDirection());
 	}
-	// Not in MindKore: a body made only of hit-zone boxes (AMKImpactDummy) has
-	// nothing that blocks Shot, so its nearest zone stands in for the blocking
-	// hit; without this the rule above always picks the wall behind the dummy.
-	if (NearestZone != INDEX_NONE)
-	{
-		Candidates[NearestZone].bBlocking = true;
-	}
-	const int32 Selected = MKSelectResolvedHit(Candidates, /*SameActorToleranceCm=*/2.5f);
-	if (Selected == INDEX_NONE)
-	{
-		UE_LOG(LogMindKore, Log, TEXT("Jam shot: no hit"));
-		return;
-	}
-	const FHitResult& Hit = Hits[Selected];
-
-	FMKImpactResolveParams ResolveParams;
-	ResolveParams.ImpactData = ImpactData;
-	FMKImpactFeedback Feedback;
-	FMKResolvedImpact Resolved = MKResolveImpactFromHit(Hit, Direction, ResolveParams, Feedback);
-	// Identity, damage and impulse are the caller's (UMKFirearmComponent::ResolveApplyAndFeedback).
-	Resolved.ShotId = FGuid::NewGuid();
-	Resolved.Kind = EMKImpactKind::Round;
-	Resolved.SourceActor = this;
-	Resolved.ImpactTimeSeconds = World->GetTimeSeconds();
-	Resolved.RangeCm = FVector::Dist(GetActorLocation(), Hit.ImpactPoint);
-	Resolved.DamageAmount = ShotDamage * Resolved.DamageMultiplier;
-	Resolved.ImpulseNewtonSeconds = Resolved.ShotDirection * ShotImpulseNewtonSeconds;
-	Resolved.bHasPhysicsImpulse = true;
-	const bool bDelivered = MKDeliverResolvedImpact(this, this, Resolved);
-	UE_LOG(LogMindKore, Log, TEXT("Jam shot: %s / %s, surface %d, zone %d, damage %.1f, %s"),
-		*GetNameSafe(Hit.GetActor()), *GetNameSafe(Hit.GetComponent()), int32(Resolved.SurfaceKind),
-		int32(Resolved.HitZone), Resolved.DamageAmount, bDelivered ? TEXT("delivered") : TEXT("no receiver"));
-
-	if (Feedback.ImpactSound)
-	{
-		UGameplayStatics::PlaySoundAtLocation(this, Feedback.ImpactSound, Hit.ImpactPoint);
-	}
-	if (UMaterialInterface* DecalMaterial = Feedback.DecalMaterial ? Feedback.DecalMaterial.Get() : DefaultImpactDecal.Get())
-	{
-		UGameplayStatics::SpawnDecalAttached(DecalMaterial, FVector(4.0f, 6.0f, 6.0f), Hit.GetComponent(), NAME_None,
-			Hit.ImpactPoint, (-Hit.ImpactNormal).Rotation(), EAttachLocation::KeepWorldPosition, 30.0f);
-	}
+	Movement->Velocity += Kick;
+	return true;
 }
 
 void AJamCharacter::ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& ResolvedImpact)

@@ -81,43 +81,62 @@ UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/S
 
 ## Как это работает
 
-- **Ходьба и невесомость — подмена пешки.** `AJamShipGameMode` каждый тик
-  смотрит, где пешка. Если ходок (`AJamShipWalker`) вышел из всех зон с
-  `bWalk` больше чем на `SwapMarginCm` (20) — на его месте появляется
-  `AJamZeroGPawn` с той же скоростью и тем же взглядом. Если невесомая пешка
-  зашла внутрь зоны на 20 см — обратно ходок. Переносятся (`FJamProgress` в
-  режиме игры, сбрасывается рестартом уровня): здоровье, броня, ключи (в т. ч.
-  скафандр), теги (`MK.Crowbar`), открытые стволы, кислород, груз, инструменты.
-- **Гравитация ходока.** В мире гравитация 0; `UJamWalkerMovement` даёт свою
-  (`GravityCm` зоны, 980 в каюте) по направлению зоны
-  (`SetGravityDirection`). В радиальной зоне (`bRadial`, планетоид)
-  направление — к центру, пересчитывается каждый тик.
-- **Ходьба по планетоиду.** `AJamShipController` держит «гравитационную
+- **Одна пешка.** Весь уровень — одна физическая `AJamZeroGPawn` (шар 100 кг
+  с запертым вращением). Подмены пешки больше нет: раньше на границе зон
+  ходок (`ACharacter`) и невесомая пешка менялись местами, и всё состояние
+  (здоровье, ключи, стволы с патронами, кислород) приходилось переносить
+  через `FJamProgress` — от этого стволы на ногах были чужие (бесконечный
+  тестовый хитскан), а после подмены магазины наполнялись. Теперь переносить
+  нечего; `FJamProgress`, `AJamShipWalker`, `UJamWalkerMovement` удалены,
+  груз и инструменты — поля `AJamShipGameMode` (`Cargo`, `Tools`).
+- **Гравитация.** `AJamShipGameMode` каждый тик даёт пешке гравитацию зоны с
+  `bWalk`, в которой она стоит (`SetGravity`: каюта и шлюз — вниз 980,
+  планетоид — 980 к центру, пересчёт каждый тик), или никакой. В мире
+  гравитация 0; в зоне на тело действует сила (`AddForce`, ускорение).
+- **Ходьба.** Земля — короткий свип шара (радиус −2 см) вдоль гравитации на
+  `GroundProbeCm` 12; годится, если нормаль не круче `MaxGroundAngleDeg` 50°.
+  На земле WASD ведёт касательную скорость к цели `WalkSpeedCm` 450 с
+  ускорением `WalkAccelCm` 3000, без ввода — тормоз `WalkBrakingCm` 4000
+  (не скользит); нормальная скорость вверх обнуляется (не отскакивает от
+  пола и от кривизны планетоида). В воздухе — `AirAccelCm` 400 к вводу, не
+  тормозит. Space на земле — прыжок `JumpSpeedCm` 420. Маневровые и X в зоне
+  выключены; Space/Ctrl как маневровые — только в невесомости.
+- **Камера.** В зоне поднимается на `EyeHeightCm` 110 над центром шара
+  (глаза ~1.5 м над полом), в невесомости возвращается в центр; обе стороны
+  плавно (`EyeRiseRate` 4/с). `AJamShipController` держит «гравитационную
   рамку»: сглаженный вектор гравитации (`GravityAlignRate` 4/с, ~0.5–1 с на
   разворот) и рамку, которую каждый тик доворачивают на кратчайший поворот
   от старого «низа» к новому (параллельный перенос, кватернионы — без
   карданного замка у «экватора»). Мышь крутит взгляд внутри рамки, крен
-  всегда 0. Капсула ходока выравнивается по гравитации.
-- **Уход с планетоида.** Прыжок с земли — обычный; второе нажатие в воздухе
-  в радиальной зоне — реактивный толчок «вверх» `JetExitSpeedCm` (1600):
-  ходок вылетает из `Gravity_Planetoid` и подменяется невесомой пешкой с той
-  же скоростью и взглядом. Внутри `Air_Planetoid` O2 ещё восполняется.
-  Невесомая пешка, долетевшая до оболочки 8 м, снова становится ходоком.
+  всегда 0. Вне зон рамка остаётся, как была (не прыгает к мировому верху).
+- **Уход с планетоида.** Прыжок с земли, второе нажатие Space в воздухе в
+  радиальной зоне — реактивный толчок «вверх» `JetExitSpeedCm` 1600: пешка
+  вылетает из `Gravity_Planetoid` (лимит скорости невесомости 1200 в зонах не
+  действует, иначе не вылететь). Внутри `Air_Planetoid` O2 ещё восполняется.
+  Прилёт в оболочку 8 м — падение на поверхность.
+- **Удары в зоне.** Глухой удар и тряска — только от `GroundFeedbackMinSpeedCm`
+  700 (ходьба в стену и приземление прыжка тихие). Приземление на годную
+  землю не ранит, даже с высоты (так прилетают на планетоид); удар о стену
+  быстрее 600 см/с ранит, как в невесомости.
+- **Отдача, толчок, бросок** идут в тело целиком и на земле: снапа, выстрел
+  под ноги или себе за спину подкидывает/отбрасывает (так задумано).
 - **Воздух.** Внутри зоны с `bBreathable` дыхание восполняет O2
   (`RefillPerSecond`) вместо расхода. HUD показывает `HudText` зоны.
 - **Скафандр.** `AJamSuitLocker` кладёт ключ `Jam.Suit` на кейринг; внешняя
   дверь шлюза — `AMKDoor` с этим ключом (первое E «Отпереть», второе —
   открыть; без скафандра — «Нужен скафандр»).
-- **Стволы.** На корабле невесомая пешка стартует без оружия;
-  `AJamWeaponPickup` открывает ствол (и ходоку — в прогресс, применится при
-  выходе в невесомость). Тост «Получено: …».
+- **Стволы** — `UJamWeaponsComponent` (`Guns`, см.
+  [RecoilWeapons](RecoilWeapons.md)). На корабле пешка стартует без оружия
+  (`AJamShipGameMode::StartPlay` запирает все); `AJamWeaponPickup` открывает
+  ствол любой пешке с этим компонентом. Тост «Получено: …».
 - **Корпус.** `AJamPlateSocket` ловит в свою коробку тело с тегом `Hull.Plate`:
   если `Clean_Hull` считает 0 мусора — лист встаёт в пробоину и становится
   статичным (кто его держал — отпускает), иначе тост «В корпусе мусор: n»
   (не чаще раза в 2 с). Лампа «Корпус» зелёная, когда заполнены все 3.
 - **Топливо и навигация.** `AJamDockZone`: деталь с нужным тегом в коробке
   мягко захватывается; лампа зелёная, когда док набрал `RequiredCount`
-  (засчитывается один раз).
+  (засчитывается один раз). Модуль навигации (80 кг) на планетоиде берётся
+  E, как любое тело (пружинный захват, масса тянет обоих).
 - **Камни.** `AJamBreakableRock` статичен; урон — только толчок пули
   (`HitImpulse`/100, Н·с) сверх `ImpulseThreshold` 25: пистолет 30 → 5,
   дробинка 40 → 15 (×8 = 120 за выстрел), снапа 600 → 575. Здоровье 600:
@@ -129,54 +148,60 @@ UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/S
 
 ## HUD
 
-Слева сверху: «Корпус n/3», «Топливо n/2», «Навигация n/1» (красным/зелёным),
-«Груз n/6», текст зоны («Можно дышать»). По центру сверху — тосты
-(«Получено: …», «В корпусе мусор: n», «Лист закреплён n/3», финал крупно).
-Ходоку — точка прицела, действие под ней, HP, O2, «скафандр»; невесомой
-пешке — её обычный HUD.
+Всегда HUD невесомой пешки (прицел, действие, O2, HP, скорость, ствол
+«[n] Имя патроны/запас» или «без оружия»), плюс слева сверху: «Корпус n/3»,
+«Топливо n/2», «Навигация n/1» (красным/зелёным), «Груз n/6», текст зоны
+(«Можно дышать»). По центру сверху — тосты («Получено: …», «В корпусе
+мусор: n», «Лист закреплён n/3», финал крупно).
 
 ## Проверка
 
-`jam.Ship.Probe` (смоук `-game -nullrhi` на `Lvl_Jam_Ship`):
+`jam.Ship.Probe` (смоук `-game -nullrhi` на `Lvl_Jam_Ship`): стоит в каюте,
+идёт 0.8 с к пульту, отпускает, прыгает; скафандр, обе двери шлюза; наружу;
+пистолет и выстрел; падение на планетоид; лист с мусором и без; все детали и
+рычаг. Каюта короче 2 с ходьбы (6 м), поэтому шаг — 0.8 с:
 
 ```
-Ship probe [start]: hull 0/3 red, fuel 0/2 red, navigation 0/1 red
-Ship probe [walker before]: pawn JamShipWalker_0, health 77, suit yes, crowbar yes, pistol (walker), O2 180, view R(0)
-Ship: swapped JamShipWalker -> JamZeroGPawn_0 at V(X=1000.00, Y=-74.00), velocity 0 cm/s, view R(0)
-Ship probe [out: zero-G]: pawn JamZeroGPawn_0, health 77, suit yes, crowbar yes, pistol locked, O2 180
-Toast: Получено: Пистолет
-Ship: swapped JamZeroGPawn -> JamShipWalker_1 at V(X=1700.00, Y=74.00), velocity 0 cm/s
-Ship probe [in: walker]: pawn JamShipWalker_1, health 77, suit yes, crowbar yes
-Ship probe [out again: zero-G]: pawn JamZeroGPawn_1, health 77, suit yes, crowbar yes, pistol unlocked
-Socket JamPlateSocket_0: refuses MKPhysicsProp_12, junk in the hull 12
-Toast: В корпусе мусор: 12
-Ship probe [plate]: 12 junk props moved out of the hull
-Socket JamPlateSocket_0: MKPhysicsProp_12 fitted (1/3)
+Ship probe [standing, 2 s]: JamZeroGPawn_0 at V(X=1460.00, Z=-110.00), walking, on the ground, speed 0 cm/s, eye 110 cm over the body (. up 1.000), view gravity . gravity 1.000, view pitch 0.0 roll 0.0 in gravity space, suit no, guns без оружия, O2 180, HP 100
+Ship probe [walking +0.4 s]: ... on the ground, speed 450 cm/s ...
+Ship probe [released +0.6 s]: JamZeroGPawn_0 at V(X=1802.68, Z=-110.00), walking, on the ground, speed 0 cm/s ...
+ZeroG pawn JamZeroGPawn_0: jump at 420 cm/s
+Ship probe [jump +0.15 s]: ... Z=-57.99), walking, in the air, speed 273 cm/s ...
+Ship probe [jump +1.5 s]: ... Z=-110.00), walking, on the ground, speed 0 cm/s ...
+Ship probe [airlock]: MKDoor_0 at x 1400 passable yes, key lock turned
+Ship probe [airlock]: MKDoor_1 at x 1200 passable yes, key lock turned
+ZeroG pawn JamZeroGPawn_0: gravity off (zero-G) at V(X=1000.00), 0 cm/s
+Weapon JamZeroGPawn_0: Пистолет fired, 1 pellet(s), recoil 1500 kg cm/s, 11/60 left
+ZeroG pawn JamZeroGPawn_0: gravity on (walking) at V(Y=10000.00, Z=2500.00), 0 cm/s
+Ship probe [on the planetoid]: JamZeroGPawn_0 at V(X=-13.72, Y=10000.00, Z=2039.97), walking, on the ground, speed 0 cm/s, eye 110 cm over the body (. up 1.000), view gravity . gravity 1.000, view pitch -0.0 roll 0.0 in gravity space, suit yes, guns [1] Пистолет 11/60, O2 180, HP 100
+Ship probe [plate]: with junk - fitted no
+Ship probe [plate]: clean hull (0) - fitted yes
 Ship probe [all parts in]: hull 3/3 green, fuel 2/2 green, navigation 1/1 green
 Ship: launch - Улетел, cargo 0/6; restarting in 6 s
-LoadMap: /Game/Jam/Maps/Lvl_Jam_Ship?Name=Player   (рестарт)
 ```
 
-`jam.Ship.Lap` (смоук `-game -nullrhi`) — ходок ставится на макушку
-планетоида и 35 с идёт вперёд; каждые 3 с лог: угол от старта, высота над
-поверхностью, совпадение «верха» капсулы с местной вертикалью, крен и наклон
-взгляда в гравитационной рамке. Полный круг:
+`jam.Ship.Lap` (смоук `-game -nullrhi`) — пешка ставится на макушку
+планетоида и 35 с идёт вперёд; каждые 3 с лог: угол от старта, высота,
+совпадение направления камеры над телом с местной вертикалью, крен и наклон
+взгляда в гравитационной рамке. За 35 с при 450 см/с — ~300° большого круга
+(весь круг 191 м):
 
 ```
-Ship lap +15 s: ... 165 deg from the start ... capsule up . local up 1.000, view roll in gravity space -0.0, pitch -7.2
-Ship lap +33 s: ... 5 deg from the start ...
+Ship lap + 3 s: 25 deg from the start, height 3040 cm, on the ground, speed 450 cm/s, eye offset . local up 0.999, view roll in gravity space 0.0, pitch -7.9, view gravity . gravity 0.999
+Ship lap +21 s: 177 deg from the start, height 3040 cm, on the ground, speed 450 cm/s, eye offset . local up 0.999, view roll in gravity space 0.0, pitch -7.9, view gravity . gravity 0.999
+Ship lap +33 s: 81 deg from the start (279° пройдено), ... roll 0.0 ...
 ```
 
-`jam.Ship.JetExit` — прыжок, второе нажатие через 2.4 с:
+`jam.Ship.JetExit` — прыжок, второе нажатие через 0.4 с:
 
 ```
-Walker JamShipWalker_0: jet exit at 1600 cm/s
-Ship: swapped JamShipWalker -> JamZeroGPawn_0 ... velocity 1180 cm/s
+ZeroG pawn JamZeroGPawn_0: jet exit at 1600 cm/s
+ZeroG pawn JamZeroGPawn_0: gravity off (zero-G) at V(Y=10000.00, Z=2800.63), 1155 cm/s
 ```
 
 `jam.Ship.Shots` / `jam.Ship.PlanetShots` (окно `-game -windowed`, не
 NullRHI) — `HighResShot` с 5 точек корабля / сверху и сбоку планетоида, в
-`Saved/Screenshots`.
+`Saved/Screenshots`; перед каждым кадром — строка состояния пешки.
 
 `jam.Ship.Where [Tag] [Seconds]` — где каждый актор с тегом и с какой
 скоростью (и ещё раз через Seconds). Им найдено, что мусор в углу восьмигранника
@@ -187,9 +212,12 @@ NullRHI) — `HighResShot` с 5 точек корабля / сверху и сб
 - **Метеориты** — не сделаны.
 - **Босс-планетоид**: проснётся по `OnLaunchAttempt`, щупальца схватят корабль
   — сейчас только статичные заглушки и событие.
-- **Ходьба по планетоиду** проверена логами круга и двумя стоп-кадрами;
-  ощущение в руках (скорость доворота, прыжки у «экватора») не проверено.
-- **Крюк-кошка** — только флаг в прогрессе.
+- **Ходьба** проверена логами (каюта, круг по планетоиду, прыжок, выход) и
+  стоп-кадрами; ощущение в руках (разгон, тормоз, доворот, прыжок) не
+  проверено. Приседа нет. Коллизия — только шар 40 см: голова (камера на
+  1.1 м выше) проходит под низкими препятствиями. Ступенек нет.
+- Перенос модуля навигации по планетоиду в смоуке не проверялся.
+- **Крюк-кошка** — только флаг (`Tools`).
 - Пояс камней — стена 40 × 20 м, его можно облететь; если нужно заставить
   взять дробовик — замкнуть камнями баки со всех сторон.
 - Внешняя дверь шлюза требует «Отпереть» перед «Открыть» (ключевой замок

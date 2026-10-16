@@ -10,8 +10,8 @@ class UInputAction;
 class UInputMappingContext;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
+class UJamWeaponsComponent;
 class UMKCarryComponent;
-class UMKImpactDataAsset;
 class UMKInteractionComponent;
 class UMKKeyringComponent;
 class UMKVitalsComponent;
@@ -26,12 +26,13 @@ struct FInputActionValue;
  * no input assets): WASD move, mouse look, Space jump, C / LeftCtrl crouch
  * (held; a crouch pressed in the air tucks the legs - the crouch-jump),
  * E use, LMB fire or throw while carrying, RMB / F put down, Q held bullet
- * time, G toggles the MK.Crowbar tag that AMKFastener reads.
+ * time, G toggles the MK.Crowbar tag that AMKFastener reads; R, 1/2/3 and the
+ * wheel belong to the guns.
  *
- * Fire is a test hitscan on the Shot channel through the lifted impact path
- * (MKResolveImpactFromHit + MKDeliverResolvedImpact), the way
- * UMKFirearmComponent fills FMKResolvedImpact. Rounds that hit this pawn are
- * paid into UMKVitalsComponent.
+ * The guns are the zero-G pawn's (UJamWeaponsComponent, Guns): the same
+ * pistol, shotgun and sniper with their ammo. On foot a shot's recoil moves
+ * the pawn by only RecoilFraction of what it would in zero-G. Rounds that hit
+ * this pawn are paid into UMKVitalsComponent.
  */
 UCLASS()
 class MINDKORE_API AJamCharacter : public ACharacter, public IMKImpactReceiver
@@ -64,27 +65,17 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UMKVitalsComponent> Vitals = nullptr;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Fire", meta = (ClampMin = "100.0"))
-	float ShotRangeCm = 5000.0f;
+	/** The guns (shared with the zero-G pawn). The test room starts with all three; the ship walker with none. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
+	TObjectPtr<UJamWeaponsComponent> Guns = nullptr;
 
-	/** Same as UMKFirearmComponent::BaseDamage. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Fire", meta = (ClampMin = "0.0"))
-	float ShotDamage = 60.0f;
-
-	/** Same as UMKFirearmComponent::ImpactImpulseNewtonSeconds. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Fire", meta = (ClampMin = "0.0"))
-	float ShotImpulseNewtonSeconds = 12.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Fire")
-	TObjectPtr<UMKImpactDataAsset> ImpactData = nullptr;
-
-	/** Played together, 2D, on every shot (the split blast of MindKore's revolver). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Fire")
-	TArray<TObjectPtr<USoundBase>> ShotSounds;
-
-	/** Used when the resolved feedback has no decal of its own. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Fire")
-	TObjectPtr<UMaterialInterface> DefaultImpactDecal = nullptr;
+	/**
+	 * Part of a gun's recoil that moves the walker (velocity = RecoilImpulse / mass
+	 * x this). Small, so the sniper nudges you but you stay on your feet; on the
+	 * ground the kick is kept along the ground.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Fire", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float RecoilFraction = 0.1f;
 
 	/** M_MK_BulletTime: scalar parameters Amount, EntryAge, ArcVisible, Aspect. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|BulletTime")
@@ -96,8 +87,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|BulletTime")
 	TObjectPtr<USoundBase> BulletTimeExitSound = nullptr;
 
+	/** Fire the current gun from the camera along the view; a fraction of its recoil moves the pawn. False when it cannot fire now. */
 	UFUNCTION(BlueprintCallable, Category = "Jam")
-	void Fire();
+	bool Fire();
 
 	UFUNCTION(BlueprintCallable, Category = "Jam")
 	void ToggleCrowbar();

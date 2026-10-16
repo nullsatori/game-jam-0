@@ -45,7 +45,7 @@ protected:
 	virtual bool Give(AActor* Hand) { return false; }
 };
 
-/** Unlocks a gun of AJamZeroGPawn (0 pistol, 1 shotgun, 2 sniper): on the floating pawn, or, for a walker in the ship mode, in its progress. */
+/** Unlocks a gun (0 pistol, 1 shotgun, 2 sniper) in the UJamWeaponsComponent of whoever takes it: the zero-G pawn or a walker. */
 UCLASS()
 class MINDKORE_API AJamWeaponPickup : public AJamPickupBase
 {

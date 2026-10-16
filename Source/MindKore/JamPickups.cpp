@@ -65,35 +65,19 @@ AJamWeaponPickup::AJamWeaponPickup()
 
 FText AJamWeaponPickup::RefusalFor(const AActor* Hand) const
 {
-	// A walker (on the planetoid) can take it too when the ship mode keeps the unlock for the next zero-G pawn.
-	return Hand->IsA<AJamZeroGPawn>() || GetWorld()->GetAuthGameMode<AJamShipGameMode>()
-		? FText::GetEmpty() : LOCTEXT("NeedSuitHands", "только в скафандре");
+	// Any pawn with guns: the zero-G pawn and the walkers.
+	return Hand->FindComponentByClass<UJamWeaponsComponent>() ? FText::GetEmpty() : LOCTEXT("NeedSuitHands", "только в скафандре");
 }
 
 bool AJamWeaponPickup::Give(AActor* Hand)
 {
-	const AJamZeroGPawn* Defaults = GetDefault<AJamZeroGPawn>();
-	if (!Defaults->Weapons.IsValidIndex(WeaponIndex))
+	UJamWeaponsComponent* Guns = Hand->FindComponentByClass<UJamWeaponsComponent>();
+	if (!Guns || !Guns->Weapons.IsValidIndex(WeaponIndex))
 	{
 		return false;
 	}
-	if (AJamZeroGPawn* Pawn = Cast<AJamZeroGPawn>(Hand))
-	{
-		Pawn->UnlockWeapon(WeaponIndex);
-	}
-	else if (AJamShipGameMode* Mode = GetWorld()->GetAuthGameMode<AJamShipGameMode>())
-	{
-		if (Mode->Progress.Weapons.Num() < Defaults->Weapons.Num())
-		{
-			Mode->Progress.Weapons.SetNumZeroed(Defaults->Weapons.Num());
-		}
-		Mode->Progress.Weapons[WeaponIndex] = true;
-	}
-	else
-	{
-		return false;
-	}
-	JamToast(this, FText::Format(LOCTEXT("GunUnlocked", "Получено: {0}"), Defaults->Weapons[WeaponIndex].Name));
+	Guns->UnlockWeapon(WeaponIndex);
+	JamToast(this, FText::Format(LOCTEXT("GunUnlocked", "Получено: {0}"), Guns->Weapons[WeaponIndex].Name));
 	return true;
 }
 
@@ -107,7 +91,7 @@ bool AJamToolPickup::Give(AActor* Hand)
 {
 	if (AJamShipGameMode* Mode = GetWorld()->GetAuthGameMode<AJamShipGameMode>())
 	{
-		Mode->Progress.Tools.AddUnique(ToolId);
+		Mode->Tools.AddUnique(ToolId);
 	}
 	JamToast(this, FText::Format(LOCTEXT("ToolUnlocked", "Получено: {0} (пока без механики)"), ToolName));
 	return true;
@@ -159,7 +143,7 @@ void AJamCargo::CompleteInteraction(AActor* Hand)
 	int32 Total = 0;
 	if (AJamShipGameMode* Mode = GetWorld()->GetAuthGameMode<AJamShipGameMode>())
 	{
-		Count = ++Mode->Progress.Cargo;
+		Count = ++Mode->Cargo;
 		Total = Mode->CargoTotal;
 	}
 	JamToast(this, FText::Format(LOCTEXT("CargoTaken", "Груз {0}/{1}"), Count, Total));

@@ -1,91 +1,48 @@
 #include "JamShip.h"
 
+#include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/BoxComponent.h"
 #include "Components/SphereComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
-#include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "Components/LightComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "EngineUtils.h"
-#include "EnhancedInputSubsystems.h"
 #include "HAL/IConsoleManager.h"
 #include "JamDockZone.h"
 #include "JamGravity.h"
 #include "JamOxygen.h"
 #include "JamPickups.h"
 #include "JamShipParts.h"
+#include "JamWeapons.h"
 #include "JamZeroGPawn.h"
-#include "MKCarryComponent.h"
-#include "MKInteractionComponent.h"
+#include "MKDoor.h"
 #include "MKKeyring.h"
-#include "MKPhysicsProp.h"
 #include "MKVitals.h"
 #include "MindKore.h"
 #include "TimerManager.h"
 
 #define LOCTEXT_NAMESPACE "JamShip"
 
-// --- walker ------------------------------------------------------------------------
-
-AJamShipWalker::AJamShipWalker(const FObjectInitializer& ObjectInitializer)
-	: Super(ObjectInitializer.SetDefaultSubobjectClass<UJamWalkerMovement>(ACharacter::CharacterMovementComponentName))
-{
-	// The capsule is turned by Tick (up against gravity), not by the controller's yaw.
-	bUseControllerRotationYaw = false;
-	Oxygen = CreateDefaultSubobject<UJamOxygenComponent>(TEXT("Oxygen"));
-	// A suit's strength: the navigation module (80 kg) can be carried on the planetoid.
-	Carry->Hands.MaxMassKg = 120.0f;
-}
-
-void AJamShipWalker::Jump()
-{
-	const FVector Gravity = GetCharacterMovement()->GetGravityDirection();
-	if (!GetCharacterMovement()->IsMovingOnGround() && bInRadialGravity)
-	{
-		// In the air over a planetoid: the jet leap that leaves its gravity.
-		LaunchCharacter(-Gravity * JetExitSpeedCm, /*bXYOverride=*/false, /*bZOverride=*/false);
-		UE_LOG(LogMindKore, Log, TEXT("Walker %s: jet exit at %.0f cm/s"), *GetName(), JetExitSpeedCm);
-		return;
-	}
-	Super::Jump();
-}
-
-void AJamShipWalker::Tick(float DeltaSeconds)
-{
-	Super::Tick(DeltaSeconds);
-	const FVector Up = -GetCharacterMovement()->GetGravityDirection();
-	FVector Forward = FVector::VectorPlaneProject(GetControlRotation().Vector(), Up);
-	if (Forward.IsNearlyZero())
-	{
-		Forward = FVector::VectorPlaneProject(GetActorForwardVector(), Up);
-	}
-	SetActorRotation(FRotationMatrix::MakeFromZX(Up, Forward).Rotator());
-}
-
 // --- controller ----------------------------------------------------------------------
 
 void AJamShipController::UpdateRotation(float DeltaTime)
 {
-	FVector TargetGravity = FVector::DownVector;
-	if (const ACharacter* Walker = Cast<ACharacter>(GetPawn()))
-	{
-		if (const UCharacterMovementComponent* Movement = Walker->GetCharacterMovement())
-		{
-			TargetGravity = Movement->GetGravityDirection();
-		}
-	}
-	// The view's "down" eases toward the pawn's gravity instead of snapping:
-	// landing on the planetoid turns the world under you over ~0.75 s.
+	// The pawn's gravity; outside every zone the frame keeps the last one.
+	const AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(GetPawn());
+	const bool bInGravity = Floater && Floater->IsInGravity();
 	if (SmoothedGravity.IsNearlyZero())
 	{
-		SmoothedGravity = TargetGravity;
+		SmoothedGravity = bInGravity ? Floater->GetGravityDirection() : FVector::DownVector;
 		GravityFrame = FQuat::FindBetweenNormals(FVector::DownVector, SmoothedGravity);
 	}
-	else
+	else if (bInGravity)
 	{
+		// The view's "down" eases toward the pawn's gravity instead of snapping:
+		// landing on the planetoid turns the world under you over ~0.75 s.
+		const FVector TargetGravity = Floater->GetGravityDirection();
 		const float Alpha = 1.0f - FMath::Exp(-GravityAlignRate * DeltaTime);
 		const FQuat Turn = FQuat::Slerp(FQuat::Identity, FQuat::FindBetweenNormals(SmoothedGravity, TargetGravity), Alpha);
 		const FVector Next = Turn.RotateVector(SmoothedGravity).GetSafeNormal(UE_SMALL_NUMBER, TargetGravity);
@@ -153,11 +110,26 @@ FVector AJamGravityZone::GravityAt(const FVector& Location) const
 AJamShipGameMode::AJamShipGameMode()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	WalkerClass = AJamShipWalker::StaticClass();
-	FloaterClass = AJamZeroGPawn::StaticClass();
-	DefaultPawnClass = WalkerClass;
+	// The pawn is the zero-G mode's (AJamZeroGPawn): it walks in the zones.
 	HUDClass = AJamShipHUD::StaticClass();
 	PlayerControllerClass = AJamShipController::StaticClass();
+}
+
+void AJamShipGameMode::StartPlay()
+{
+	Super::StartPlay();
+	// After every actor's BeginPlay (which unlocks the guns by default): the ship starts unarmed.
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		const APawn* Pawn = It->Get() ? It->Get()->GetPawn() : nullptr;
+		if (UJamWeaponsComponent* Guns = Pawn ? Pawn->FindComponentByClass<UJamWeaponsComponent>() : nullptr)
+		{
+			for (FJamWeapon& Weapon : Guns->Weapons)
+			{
+				Weapon.bUnlocked = false;
+			}
+		}
+	}
 }
 
 void AJamShipGameMode::Toast(const FText& Text)
@@ -198,149 +170,18 @@ void AJamShipGameMode::Tick(float DeltaSeconds)
 		return;
 	}
 	const FVector Location = Pawn->GetActorLocation();
-	// Air: any breathable zone (the planetoid's warm shell is wider than its walking shell).
+	// Air: any breathable zone (the planetoid's air shell is wider than its walking shell).
 	const AJamGravityZone* Air = ZoneAt(Location, 0.0f, /*bWalkOnly=*/false);
 	if (UJamOxygenComponent* Oxygen = Pawn->FindComponentByClass<UJamOxygenComponent>())
 	{
 		Oxygen->SetBreathable(Air && Air->bBreathable, Air ? Air->RefillPerSecond : 0.0f);
 	}
-	if (AJamShipWalker* Walker = Cast<AJamShipWalker>(Pawn))
-	{
-		// Out of every zone (past the margin): float.
-		const AJamGravityZone* Zone = ZoneAt(Location, -SwapMarginCm);
-		if (!Zone)
-		{
-			SwapPawn(PlayerController, FloaterClass);
-			return;
-		}
-		Walker->GetCharacterMovement()->SetGravityDirection(Zone->GravityAt(Location));
-		Walker->bInRadialGravity = Zone->bRadial;
-		if (UJamWalkerMovement* Movement = Cast<UJamWalkerMovement>(Walker->GetCharacterMovement()))
-		{
-			Movement->WalkerGravityZ = -Zone->GravityCm;
-		}
-	}
-	else if (Cast<AJamZeroGPawn>(Pawn) && ZoneAt(Location, SwapMarginCm))
-	{
-		// Well inside a zone: walk.
-		SwapPawn(PlayerController, WalkerClass);
-	}
-}
-
-void AJamShipGameMode::StoreProgress(APawn* Pawn)
-{
-	if (const UMKVitalsComponent* Vitals = Pawn->FindComponentByClass<UMKVitalsComponent>())
-	{
-		Progress.Health = Vitals->Health;
-		Progress.Armor = Vitals->Armor;
-	}
-	if (const UMKKeyringComponent* Keyring = MKFindKeyring(Pawn))
-	{
-		Progress.Keys = Keyring->GetKeyIds();
-	}
-	Progress.Flags = Pawn->Tags;
-	if (const AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(Pawn))
-	{
-		Progress.Weapons.Reset();
-		for (int32 Index = 0; Index < Floater->Weapons.Num(); ++Index)
-		{
-			Progress.Weapons.Add(Floater->IsWeaponUnlocked(Index));
-		}
-	}
-	if (const UJamOxygenComponent* Oxygen = Pawn->FindComponentByClass<UJamOxygenComponent>())
-	{
-		Progress.Oxygen = Oxygen->Seconds;
-	}
-}
-
-void AJamShipGameMode::ApplyProgress(APawn* Pawn) const
-{
-	if (UMKVitalsComponent* Vitals = Pawn->FindComponentByClass<UMKVitalsComponent>(); Vitals && Progress.Health >= 0.0f)
-	{
-		Vitals->Health = Progress.Health;
-		Vitals->Armor = Progress.Armor;
-	}
-	if (UMKKeyringComponent* Keyring = MKFindKeyring(Pawn))
-	{
-		for (const FName& Key : Progress.Keys)
-		{
-			Keyring->AddKey(Key);
-		}
-	}
-	for (const FName& Flag : Progress.Flags)
-	{
-		Pawn->Tags.AddUnique(Flag);
-	}
+	// Gravity: the walking zone's, or none (zero-G).
 	if (AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(Pawn))
 	{
-		// The ship starts with no guns: only what pickups unlocked comes along.
-		int32 FirstUnlocked = INDEX_NONE;
-		for (int32 Index = 0; Index < Floater->Weapons.Num(); ++Index)
-		{
-			const bool bUnlocked = Progress.Weapons.IsValidIndex(Index) && Progress.Weapons[Index];
-			Floater->SetWeaponUnlocked(Index, bUnlocked);
-			FirstUnlocked = FirstUnlocked == INDEX_NONE && bUnlocked ? Index : FirstUnlocked;
-		}
-		if (FirstUnlocked != INDEX_NONE && !Floater->IsWeaponUnlocked(Floater->CurrentWeapon))
-		{
-			Floater->SelectWeapon(FirstUnlocked);
-		}
+		const AJamGravityZone* Zone = ZoneAt(Location, 0.0f);
+		Floater->SetGravity(Zone ? Zone->GravityAt(Location) : FVector::ZeroVector, Zone ? Zone->GravityCm : 0.0f, Zone && Zone->bRadial);
 	}
-	if (UJamOxygenComponent* Oxygen = Pawn->FindComponentByClass<UJamOxygenComponent>(); Oxygen && Progress.Oxygen >= 0.0f)
-	{
-		Oxygen->Seconds = Progress.Oxygen;
-	}
-}
-
-APawn* AJamShipGameMode::SwapPawn(APlayerController* PlayerController, TSubclassOf<APawn> Class)
-{
-	APawn* Old = PlayerController ? PlayerController->GetPawn() : nullptr;
-	if (!Old || !Class)
-	{
-		return nullptr;
-	}
-	const FRotator View = PlayerController->GetControlRotation();
-	const FVector Velocity = Old->GetVelocity();
-	StoreProgress(Old);
-
-	FActorSpawnParameters Params;
-	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-	APawn* New = GetWorld()->SpawnActor<APawn>(Class, Old->GetActorLocation(), FRotator(0.0f, View.Yaw, 0.0f), Params);
-	if (!New)
-	{
-		UE_LOG(LogMindKore, Error, TEXT("Ship: could not spawn %s at %s"), *GetNameSafe(Class.Get()), *Old->GetActorLocation().ToString());
-		return nullptr;
-	}
-	if (AJamZeroGPawn* OldFloater = Cast<AJamZeroGPawn>(Old))
-	{
-		OldFloater->Release();
-		OldFloater->DetachTether();
-	}
-	// The old pawn's mapping context goes with it; the new pawn adds its own on possession.
-	if (const ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer())
-	{
-		if (UEnhancedInputLocalPlayerSubsystem* Input = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
-		{
-			Input->ClearAllMappings();
-		}
-	}
-	PlayerController->Possess(New);
-	// Possession resets the control rotation to the pawn's: the view is put back.
-	PlayerController->SetControlRotation(View);
-	ApplyProgress(New);
-	if (AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(New))
-	{
-		Floater->Body->SetPhysicsLinearVelocity(Velocity);
-	}
-	else if (ACharacter* Walker = Cast<ACharacter>(New))
-	{
-		Walker->GetCharacterMovement()->Velocity = Velocity;
-		Walker->GetCharacterMovement()->SetMovementMode(MOVE_Falling);
-	}
-	Old->Destroy();
-	UE_LOG(LogMindKore, Log, TEXT("Ship: swapped %s -> %s at %s, velocity %.0f cm/s, view %s"), *GetNameSafe(Old->GetClass()),
-		*New->GetName(), *New->GetActorLocation().ToCompactString(), Velocity.Size(), *View.ToCompactString());
-	return New;
 }
 
 void AJamShipGameMode::EndGame()
@@ -352,8 +193,8 @@ void AJamShipGameMode::EndGame()
 	bEnded = true;
 	// TODO (boss): the planetoid wakes here and grabs the ship; for now the run simply ends.
 	OnLaunchAttempt.Broadcast();
-	UE_LOG(LogMindKore, Log, TEXT("Ship: launch - Улетел, cargo %d/%d; restarting in %.0f s"), Progress.Cargo, CargoTotal, EndRestartSeconds);
-	Toast(FText::Format(LOCTEXT("Flew", "Улетел! Груз {0}/{1}"), Progress.Cargo, CargoTotal));
+	UE_LOG(LogMindKore, Log, TEXT("Ship: launch - Улетел, cargo %d/%d; restarting in %.0f s"), Cargo, CargoTotal, EndRestartSeconds);
+	Toast(FText::Format(LOCTEXT("Flew", "Улетел! Груз {0}/{1}"), Cargo, CargoTotal));
 	ToastUntil = GetWorld()->GetTimeSeconds() + EndRestartSeconds + 1.0;
 	if (APlayerController* PlayerController = GetWorld()->GetFirstPlayerController())
 	{
@@ -369,7 +210,7 @@ void AJamShipGameMode::EndGame()
 
 void AJamShipHUD::DrawHUD()
 {
-	Super::DrawHUD(); // the zero-G HUD draws itself only for a zero-G pawn
+	Super::DrawHUD(); // the zero-G HUD: reticle, action, O2, HP, speed, the gun
 	if (!Canvas)
 	{
 		return;
@@ -377,29 +218,6 @@ void AJamShipHUD::DrawHUD()
 	UFont* Font = GEngine->GetMediumFont();
 	const APawn* Pawn = GetOwningPawn();
 	const AJamShipGameMode* Mode = GetWorld()->GetAuthGameMode<AJamShipGameMode>();
-
-	if (const AJamShipWalker* Walker = Cast<AJamShipWalker>(Pawn))
-	{
-		const float CenterX = Canvas->ClipX * 0.5f;
-		const float CenterY = Canvas->ClipY * 0.5f;
-		DrawRect(FLinearColor(1.0f, 1.0f, 1.0f, 0.8f), CenterX - 2.0f, CenterY - 2.0f, 4.0f, 4.0f);
-		const FMKInteractionOffer& Offer = Walker->Interaction->CurrentOffer;
-		if (Offer.IsOffered())
-		{
-			FString Line = TEXT("[E] ") + Offer.Action.ToString();
-			if (!Offer.bAvailable)
-			{
-				Line += TEXT(" - ") + Offer.Reason.ToString();
-			}
-			float Width = 0.0f;
-			float Height = 0.0f;
-			GetTextSize(Line, Width, Height, Font);
-			DrawText(Line, Offer.bAvailable ? FLinearColor::White : FLinearColor(1.0f, 0.45f, 0.35f), CenterX - Width * 0.5f, CenterY + 24.0f, Font);
-		}
-		DrawText(FString::Printf(TEXT("HP %.0f   O2 %.0f s%s"), Walker->Vitals->Health, Walker->Oxygen->Seconds,
-			MKHolderHasKey(Walker, MKJamSuitKey()) ? TEXT("   скафандр") : TEXT("")),
-			FLinearColor(0.8f, 0.8f, 0.8f), 24.0f, Canvas->ClipY - 48.0f, Font);
-	}
 
 	// The three lamps, mirrored; cargo; the air here.
 	float Y = 24.0f;
@@ -415,7 +233,7 @@ void AJamShipHUD::DrawHUD()
 	}
 	if (Mode)
 	{
-		DrawText(FString::Printf(TEXT("Груз %d/%d"), Mode->Progress.Cargo, Mode->CargoTotal), FLinearColor(1.0f, 0.85f, 0.4f), 24.0f, Y, Font);
+		DrawText(FString::Printf(TEXT("Груз %d/%d"), Mode->Cargo, Mode->CargoTotal), FLinearColor(1.0f, 0.85f, 0.4f), 24.0f, Y, Font);
 		if (const AJamGravityZone* Zone = Mode->ZoneOf(Pawn); Zone && !Zone->HudText.IsEmpty())
 		{
 			DrawText(Zone->HudText.ToString(), FLinearColor(1.0f, 0.75f, 0.55f), 24.0f, Y + 20.0f, Font);
@@ -432,7 +250,7 @@ void AJamShipHUD::DrawHUD()
 	}
 }
 
-// --- console probe ----------------------------------------------------------------------------
+// --- console probes ----------------------------------------------------------------------------
 
 namespace
 {
@@ -443,22 +261,37 @@ namespace
 		Mode->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(Mode, MoveTemp(Step)), Seconds, false);
 	}
 
-	APawn* PlayerPawn(const UWorld* World)
+	AJamZeroGPawn* PlayerPawn(const UWorld* World)
 	{
 		const APlayerController* PlayerController = World->GetFirstPlayerController();
-		return PlayerController ? PlayerController->GetPawn() : nullptr;
+		return PlayerController ? Cast<AJamZeroGPawn>(PlayerController->GetPawn()) : nullptr;
 	}
 
-	void LogCarry(const TCHAR* Stage, const APawn* Pawn)
+	/** The pawn's view in its gravity space (world down in zero-G): roll should stay 0. */
+	FRotator GravityView(const AJamZeroGPawn* Pawn)
 	{
-		const UMKVitalsComponent* Vitals = Pawn ? Pawn->FindComponentByClass<UMKVitalsComponent>() : nullptr;
-		const UJamOxygenComponent* Oxygen = Pawn ? Pawn->FindComponentByClass<UJamOxygenComponent>() : nullptr;
-		const AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(Pawn);
-		UE_LOG(LogMindKore, Log, TEXT("Ship probe [%s]: pawn %s, health %.0f, suit %s, crowbar %s, pistol %s, O2 %.0f, view %s"), Stage,
-			*GetNameSafe(Pawn), Vitals ? Vitals->Health : -1.0f, MKHolderHasKey(Pawn, MKJamSuitKey()) ? TEXT("yes") : TEXT("no"),
-			Pawn && Pawn->ActorHasTag(TEXT("MK.Crowbar")) ? TEXT("yes") : TEXT("no"),
-			Floater ? (Floater->IsWeaponUnlocked(0) ? TEXT("unlocked") : TEXT("locked")) : TEXT("(walker)"),
-			Oxygen ? Oxygen->Seconds : -1.0f, Pawn && Pawn->GetController() ? *Pawn->GetController()->GetControlRotation().ToCompactString() : TEXT("-"));
+		const FVector Gravity = Pawn->IsInGravity() ? Pawn->GetGravityDirection() : FVector::DownVector;
+		return JamGravityRelativeRotation(Pawn->GetControlRotation(), Gravity);
+	}
+
+	void LogState(const TCHAR* Stage, const AJamZeroGPawn* Pawn)
+	{
+		if (!Pawn)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Ship probe [%s]: no AJamZeroGPawn"), Stage);
+			return;
+		}
+		const FVector Eye = Pawn->Camera->GetComponentLocation() - Pawn->Body->GetComponentLocation();
+		const FVector Up = Pawn->IsInGravity() ? -Pawn->GetGravityDirection() : FVector::UpVector;
+		const AJamShipController* Controller = Cast<AJamShipController>(Pawn->GetController());
+		const FRotator View = GravityView(Pawn);
+		UE_LOG(LogMindKore, Log, TEXT("Ship probe [%s]: %s at %s, %s, speed %.0f cm/s, eye %.0f cm over the body (. up %.3f), view gravity . gravity %.3f, view pitch %.1f roll %.1f in gravity space, suit %s, guns %s, O2 %.0f, HP %.0f"),
+			Stage, *Pawn->GetName(), *Pawn->GetActorLocation().ToCompactString(),
+			Pawn->IsInGravity() ? (Pawn->IsGrounded() ? TEXT("walking, on the ground") : TEXT("walking, in the air")) : TEXT("zero-G"),
+			Pawn->GetBodyVelocity().Size(), Eye.Size(), FVector::DotProduct(Eye.GetSafeNormal(), Up),
+			Controller && Pawn->IsInGravity() ? FVector::DotProduct(Controller->GetViewGravity(), Pawn->GetGravityDirection()) : -2.0f,
+			View.Pitch, View.Roll, MKHolderHasKey(Pawn, MKJamSuitKey()) ? TEXT("yes") : TEXT("no"), *Pawn->Guns->Describe(),
+			Pawn->Oxygen->Seconds, Pawn->Vitals->Health);
 	}
 
 	void Teleport(AActor* Actor, const FVector& Location)
@@ -486,6 +319,25 @@ namespace
 		return Found;
 	}
 
+	/** Hold scripted walking/thrust input (view frame: X forward) every frame for Seconds. */
+	void HoldInput(AJamShipGameMode* Mode, const FVector& Input, float Seconds)
+	{
+		const double End = Mode->GetWorld()->GetTimeSeconds() + Seconds;
+		const TSharedRef<FTimerHandle> Hold = MakeShared<FTimerHandle>();
+		Mode->GetWorldTimerManager().SetTimer(*Hold, FTimerDelegate::CreateWeakLambda(Mode, [Mode, Hold, End, Input]()
+		{
+			if (Mode->GetWorld()->GetTimeSeconds() > End)
+			{
+				Mode->GetWorldTimerManager().ClearTimer(*Hold);
+				return;
+			}
+			if (AJamZeroGPawn* Pawn = PlayerPawn(Mode->GetWorld()))
+			{
+				Pawn->ProbeThrust(Input, false);
+			}
+		}), 0.0005f, true);
+	}
+
 	void LogPanel(UWorld* World, const TCHAR* Stage)
 	{
 		for (TActorIterator<AJamShipPanel> Panel(World); Panel; ++Panel)
@@ -495,6 +347,19 @@ namespace
 				Panel->FuelDone(), Panel->FuelNeeded(), Panel->IsFuelDone() ? TEXT("green") : TEXT("red"),
 				Panel->NavDone(), Panel->NavNeeded(), Panel->IsNavDone() ? TEXT("green") : TEXT("red"));
 		}
+	}
+
+	/** The walking shell of the planetoid (the radial walking zone), or null. */
+	const AJamGravityZone* PlanetShell(UWorld* World)
+	{
+		for (TActorIterator<AJamGravityZone> It(World); It; ++It)
+		{
+			if (It->bRadial && It->bWalk && It->SphereRadiusCm > 0.0f)
+			{
+				return *It;
+			}
+		}
+		return nullptr;
 	}
 
 	/** (c) Every part into place, then the lever. */
@@ -583,13 +448,51 @@ namespace
 		});
 	}
 
-	/** (a) Walker -> zero-G -> walker -> zero-G through the cabin zone's edge. */
+	/** (a3) Out of the airlock into zero-G, the pistol, then down onto the planetoid. */
+	void ProbeOutAndPlanet(AJamShipGameMode* Mode, const FVector& Outside)
+	{
+		Teleport(PlayerPawn(Mode->GetWorld()), Outside);
+		After(Mode, 0.5f, [Mode]()
+		{
+			AJamZeroGPawn* Pawn = PlayerPawn(Mode->GetWorld());
+			LogState(TEXT("out of the airlock"), Pawn);
+			for (TActorIterator<AJamWeaponPickup> Pickup(Mode->GetWorld()); Pickup; ++Pickup)
+			{
+				if (Pickup->WeaponIndex == 0)
+				{
+					Pickup->CompleteInteraction(Pawn);
+				}
+			}
+			Pawn->Fire();
+			LogState(TEXT("pistol taken, one shot"), Pawn);
+			const AJamGravityZone* Shell = PlanetShell(Mode->GetWorld());
+			if (!Shell)
+			{
+				UE_LOG(LogMindKore, Warning, TEXT("Ship probe: no planetoid shell"));
+				ProbePlate(Mode);
+				return;
+			}
+			// 5 m over the top of the surface: falls, lands, the view turns to the local up.
+			Teleport(Pawn, Shell->GetActorLocation() + FVector::UpVector * (Shell->SphereRadiusCm - 300.0f));
+			After(Mode, 3.0f, [Mode]()
+			{
+				LogState(TEXT("on the planetoid"), PlayerPawn(Mode->GetWorld()));
+				ProbePlate(Mode);
+			});
+		});
+	}
+
+	/**
+	 * jam.Ship.Probe: (a) standing in the cabin, walking, stopping and a jump,
+	 * the suit, both airlock doors, out into zero-G, the pistol, landing on the
+	 * planetoid; (b) a plate refused and fitted; (c) every part in and the lever.
+	 */
 	void RunShipProbe(UWorld* World)
 	{
 		AJamShipGameMode* Mode = World->GetAuthGameMode<AJamShipGameMode>();
-		APawn* Walker = PlayerPawn(World);
-		// The box zones (cabin, airlock): inside = the biggest one's centre,
-		// outside = 2 m past the lowest X of them all (into the hull, toward the break).
+		AJamZeroGPawn* Pawn = PlayerPawn(World);
+		// The box zones (cabin, airlock): the cabin is the biggest; outside = 2 m
+		// past the lowest X of them all (beyond the outer door).
 		const AJamGravityZone* Cabin = nullptr;
 		double MinX = TNumericLimits<double>::Max();
 		for (TActorIterator<AJamGravityZone> It(World); It; ++It)
@@ -605,47 +508,63 @@ namespace
 				Cabin = *It;
 			}
 		}
-		if (!Mode || !Walker || !Cabin)
+		if (!Mode || !Pawn || !Cabin)
 		{
-			UE_LOG(LogMindKore, Warning, TEXT("Ship probe: needs AJamShipGameMode, a pawn and a box gravity zone"));
+			UE_LOG(LogMindKore, Warning, TEXT("Ship probe: needs AJamShipGameMode, an AJamZeroGPawn and a box gravity zone"));
 			return;
 		}
 		LogPanel(World, TEXT("start"));
-		if (UMKVitalsComponent* Vitals = Walker->FindComponentByClass<UMKVitalsComponent>())
+		const FVector Outside(MinX - 200.0, Cabin->GetActorLocation().Y, Cabin->GetActorLocation().Z);
+		// The back of the cabin, facing the panel (+X): room for a short walk.
+		Teleport(Pawn, FVector(Cabin->GetActorLocation().X - Cabin->Zone->GetScaledBoxExtent().X + 60.0, 0.0, Cabin->GetActorLocation().Z));
+		World->GetFirstPlayerController()->SetControlRotation(FRotator::ZeroRotator);
+		After(Mode, 2.0f, [Mode, Outside]()
 		{
-			Vitals->Health = 77.0f;
-		}
-		if (UMKKeyringComponent* Keyring = MKFindKeyring(Walker))
-		{
-			Keyring->AddKey(MKJamSuitKey());
-		}
-		Walker->Tags.AddUnique(TEXT("MK.Crowbar"));
-		LogCarry(TEXT("walker before"), Walker);
-		const FVector Inside = Cabin->GetActorLocation();
-		const FVector Outside(MinX - 200.0, Inside.Y, Inside.Z);
-		Teleport(Walker, Outside);
-		After(Mode, 0.3f, [Mode, Inside, Outside]()
-		{
-			APawn* Floater = PlayerPawn(Mode->GetWorld());
-			LogCarry(TEXT("out: zero-G"), Floater);
-			for (TActorIterator<AJamWeaponPickup> Pickup(Mode->GetWorld()); Pickup; ++Pickup)
+			LogState(TEXT("standing, 2 s"), PlayerPawn(Mode->GetWorld()));
+			HoldInput(Mode, FVector(1.0f, 0.0f, 0.0f), 0.8f);
+			After(Mode, 0.4f, [Mode]() { LogState(TEXT("walking +0.4 s"), PlayerPawn(Mode->GetWorld())); });
+			After(Mode, 0.8f, [Mode]() { LogState(TEXT("walking +0.8 s"), PlayerPawn(Mode->GetWorld())); });
+			After(Mode, 1.4f, [Mode, Outside]()
 			{
-				if (Pickup->WeaponIndex == 0)
+				AJamZeroGPawn* Pawn = PlayerPawn(Mode->GetWorld());
+				LogState(TEXT("released +0.6 s"), Pawn);
+				Pawn->JumpPressed();
+				After(Mode, 0.15f, [Mode]() { LogState(TEXT("jump +0.15 s"), PlayerPawn(Mode->GetWorld())); });
+				After(Mode, 1.5f, [Mode, Outside]()
 				{
-					Pickup->CompleteInteraction(Floater);
-				}
-			}
-			LogCarry(TEXT("pistol picked up"), Floater);
-			Teleport(Floater, Inside);
-			After(Mode, 0.3f, [Mode, Outside]()
-			{
-				APawn* Back = PlayerPawn(Mode->GetWorld());
-				LogCarry(TEXT("in: walker"), Back);
-				Teleport(Back, Outside);
-				After(Mode, 0.3f, [Mode]()
-				{
-					LogCarry(TEXT("out again: zero-G"), PlayerPawn(Mode->GetWorld()));
-					ProbePlate(Mode);
+					AJamZeroGPawn* Pawn = PlayerPawn(Mode->GetWorld());
+					LogState(TEXT("jump +1.5 s"), Pawn);
+					for (TActorIterator<AJamSuitLocker> Locker(Mode->GetWorld()); Locker; ++Locker)
+					{
+						Locker->CompleteInteraction(Pawn);
+					}
+					// The doors by X: the inner one (cabin side) has the larger X.
+					TArray<AMKDoor*> Doors;
+					for (TActorIterator<AMKDoor> Door(Mode->GetWorld()); Door; ++Door)
+					{
+						Doors.Add(*Door);
+					}
+					Doors.Sort([](const AMKDoor& A, const AMKDoor& B) { return A.GetActorLocation().X > B.GetActorLocation().X; });
+					for (AMKDoor* Door : Doors)
+					{
+						// A key lock takes one E to turn the key and another to open.
+						const bool bKeyLock = Door->IsKeyLockEngaged();
+						Door->CompleteInteraction(Pawn);
+						if (bKeyLock)
+						{
+							Door->CompleteInteraction(Pawn);
+						}
+					}
+					LogState(TEXT("suit taken"), Pawn);
+					After(Mode, 1.5f, [Mode, Doors, Outside]()
+					{
+						for (const AMKDoor* Door : Doors)
+						{
+							UE_LOG(LogMindKore, Log, TEXT("Ship probe [airlock]: %s at x %.0f passable %s, key lock %s"), *Door->GetName(),
+								Door->GetActorLocation().X, Door->IsPassable() ? TEXT("yes") : TEXT("no"), Door->IsKeyLockEngaged() ? TEXT("engaged") : TEXT("turned"));
+						}
+						ProbeOutAndPlanet(Mode, Outside);
+					});
 				});
 			});
 		});
@@ -721,6 +640,7 @@ namespace
 			After(Mode, 3.5f + Index * 4.0f, [PlayerController, View, Index]()
 			{
 				UE_LOG(LogMindKore, Log, TEXT("Ship shots: %d %s at %s looking %s"), Index, View.Name, *View.Where.ToCompactString(), *View.Look.ToCompactString());
+				LogState(View.Name, Cast<AJamZeroGPawn>(PlayerController->GetPawn()));
 				PlayerController->ConsoleCommand(TEXT("HighResShot 1"));
 			});
 		}
@@ -731,93 +651,60 @@ namespace
 		TEXT("Rendered stills of Lvl_Jam_Ship from five viewpoints (HighResShot; needs a real RHI)."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunShipShots));
 
-	/** The walking shell of the planetoid (the radial walking zone), or null. */
-	const AJamGravityZone* PlanetShell(UWorld* World)
-	{
-		for (TActorIterator<AJamGravityZone> It(World); It; ++It)
-		{
-			if (It->bRadial && It->bWalk && It->SphereRadiusCm > 0.0f)
-			{
-				return *It;
-			}
-		}
-		return nullptr;
-	}
-
 	/**
 	 * jam.Ship.Lap: put the player on top of the planetoid and walk straight
 	 * ahead for 35 s (scripted forward input every frame); every 3 s log the
-	 * angle travelled around the centre, the capsule's up against the local up,
-	 * and the view's roll in gravity space (should stay ~0).
+	 * angle travelled around the centre, the camera's offset against the local
+	 * up, and the view's roll in gravity space (should stay ~0).
 	 */
 	void RunShipLap(UWorld* World)
 	{
 		AJamShipGameMode* Mode = World->GetAuthGameMode<AJamShipGameMode>();
 		const AJamGravityZone* Shell = PlanetShell(World);
-		APawn* Pawn = PlayerPawn(World);
+		AJamZeroGPawn* Pawn = PlayerPawn(World);
 		if (!Mode || !Shell || !Pawn)
 		{
-			UE_LOG(LogMindKore, Warning, TEXT("Ship lap: needs the ship mode, a planetoid walking shell and a pawn"));
+			UE_LOG(LogMindKore, Warning, TEXT("Ship lap: needs the ship mode, a planetoid walking shell and the pawn"));
 			return;
 		}
 		const FVector Centre = Shell->GetActorLocation();
-		const float Radius = Shell->SphereRadiusCm;
-		const FVector Start = Centre + FVector::UpVector * (Radius - 600.0f);
+		const FVector Start = Centre + FVector::UpVector * (Shell->SphereRadiusCm - 600.0f);
 		Teleport(Pawn, Start);
-		if (APlayerController* PlayerController = World->GetFirstPlayerController())
-		{
-			PlayerController->SetControlRotation(FRotator(-10.0f, 0.0f, 0.0f));
-		}
-		const double Began = World->GetTimeSeconds() + 2.0;
-		const TSharedRef<FTimerHandle> Walk = MakeShared<FTimerHandle>();
-		Mode->GetWorldTimerManager().SetTimer(*Walk, FTimerDelegate::CreateWeakLambda(Mode, [Mode, Walk, Began]()
-		{
-			UWorld* LapWorld = Mode->GetWorld();
-			const double Now = LapWorld->GetTimeSeconds();
-			ACharacter* Walker = Cast<ACharacter>(PlayerPawn(LapWorld));
-			if (Now > Began + 35.0)
-			{
-				Mode->GetWorldTimerManager().ClearTimer(*Walk);
-				return;
-			}
-			if (Walker && Now >= Began)
-			{
-				const FVector Gravity = Walker->GetCharacterMovement()->GetGravityDirection();
-				const FRotator Yaw(0.0f, JamGravityRelativeRotation(Walker->GetControlRotation(), Gravity).Yaw, 0.0f);
-				Walker->AddMovementInput(FRotationMatrix(JamGravityWorldRotation(Yaw, Gravity)).GetUnitAxis(EAxis::X), 1.0f);
-			}
-		}), 0.0005f, true);
+		World->GetFirstPlayerController()->SetControlRotation(FRotator(-10.0f, 0.0f, 0.0f));
+		After(Mode, 2.0f, [Mode]() { HoldInput(Mode, FVector(1.0f, 0.0f, 0.0f), 35.0f); });
 		for (int32 Step = 0; Step <= 12; ++Step)
 		{
 			After(Mode, 2.0f + Step * 3.0f, [Mode, Centre, Start, Step]()
 			{
-				UWorld* LapWorld = Mode->GetWorld();
-				const APawn* Now = PlayerPawn(LapWorld);
-				const ACharacter* Walker = Cast<ACharacter>(Now);
+				const AJamZeroGPawn* Now = PlayerPawn(Mode->GetWorld());
 				if (!Now)
 				{
 					return;
 				}
 				const FVector Up = (Now->GetActorLocation() - Centre).GetSafeNormal();
 				const float Angle = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(Up, (Start - Centre).GetSafeNormal())));
-				const FVector Gravity = Walker ? Walker->GetCharacterMovement()->GetGravityDirection() : FVector::DownVector;
-				const FRotator View = Now->GetController() ? Now->GetController()->GetControlRotation() : FRotator::ZeroRotator;
-				const FRotator Relative = JamGravityRelativeRotation(View, Gravity);
+				const FVector Eye = (Now->Camera->GetComponentLocation() - Now->Body->GetComponentLocation()).GetSafeNormal();
+				const FRotator Relative = GravityView(Now);
 				const AJamShipController* Controller = Cast<AJamShipController>(Now->GetController());
-				UE_LOG(LogMindKore, Log, TEXT("Ship lap +%2d s: %s, %.0f deg from the start, height %.0f cm, capsule up . local up %.3f, view roll in gravity space %.1f, pitch %.1f, view gravity . gravity %.3f (%s)"),
-					Step * 3, *GetNameSafe(Now), Angle, FVector::Dist(Now->GetActorLocation(), Centre),
-					FVector::DotProduct(Now->GetActorUpVector(), Up), Relative.Roll, Relative.Pitch,
-					Controller ? FVector::DotProduct(Controller->GetViewGravity(), Gravity) : -2.0f, *GetNameSafe(Now->GetController()));
+				UE_LOG(LogMindKore, Log, TEXT("Ship lap +%2d s: %.0f deg from the start, height %.0f cm, %s, speed %.0f cm/s, eye offset . local up %.3f, view roll in gravity space %.1f, pitch %.1f, view gravity . gravity %.3f"),
+					Step * 3, Angle, FVector::Dist(Now->GetActorLocation(), Centre), Now->IsGrounded() ? TEXT("on the ground") : TEXT("in the air"),
+					Now->GetBodyVelocity().Size(), FVector::DotProduct(Eye, Up), Relative.Roll, Relative.Pitch,
+					Controller ? FVector::DotProduct(Controller->GetViewGravity(), Now->GetGravityDirection()) : -2.0f);
 			});
 		}
 	}
 
-	/** jam.Ship.JetExit: on the planetoid, jump and Space again in the air; logs the swap to zero-G. */
+	FAutoConsoleCommandWithWorld GShipLap(
+		TEXT("jam.Ship.Lap"),
+		TEXT("Walk the player straight ahead around the planetoid for 35 s, logging angle, up vectors and view roll."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunShipLap));
+
+	/** jam.Ship.JetExit: on the planetoid, jump and Space again in the air; logs leaving its gravity. */
 	void RunJetExit(UWorld* World)
 	{
 		AJamShipGameMode* Mode = World->GetAuthGameMode<AJamShipGameMode>();
 		const AJamGravityZone* Shell = PlanetShell(World);
-		APawn* Pawn = PlayerPawn(World);
+		AJamZeroGPawn* Pawn = PlayerPawn(World);
 		if (!Mode || !Shell || !Pawn)
 		{
 			return;
@@ -825,41 +712,23 @@ namespace
 		Teleport(Pawn, Shell->GetActorLocation() + FVector::UpVector * (Shell->SphereRadiusCm - 650.0f));
 		After(Mode, 2.0f, [Mode]()
 		{
-			if (ACharacter* Walker = Cast<ACharacter>(PlayerPawn(Mode->GetWorld())))
-			{
-				Walker->Jump();
-				UE_LOG(LogMindKore, Log, TEXT("Ship jet: %s jumps (on ground %s)"), *Walker->GetName(),
-					Walker->GetCharacterMovement()->IsMovingOnGround() ? TEXT("yes") : TEXT("no"));
-			}
+			AJamZeroGPawn* Pawn = PlayerPawn(Mode->GetWorld());
+			LogState(TEXT("jet: before the jump"), Pawn);
+			Pawn->JumpPressed();
 		});
 		After(Mode, 2.4f, [Mode]()
 		{
-			if (ACharacter* Walker = Cast<ACharacter>(PlayerPawn(Mode->GetWorld())))
-			{
-				UE_LOG(LogMindKore, Log, TEXT("Ship jet: before the second press: on ground %s, velocity %.0f cm/s, mode %d"),
-					Walker->GetCharacterMovement()->IsMovingOnGround() ? TEXT("yes") : TEXT("no"), Walker->GetVelocity().Size(),
-					int32(Walker->GetCharacterMovement()->MovementMode));
-				Walker->StopJumping();
-				Walker->Jump();
-			}
+			AJamZeroGPawn* Pawn = PlayerPawn(Mode->GetWorld());
+			LogState(TEXT("jet: before the second press"), Pawn);
+			Pawn->JumpPressed();
 		});
-		After(Mode, 4.0f, [Mode]()
-		{
-			const APawn* Now = PlayerPawn(Mode->GetWorld());
-			LogCarry(TEXT("after jet exit"), Now);
-			UE_LOG(LogMindKore, Log, TEXT("Ship jet: now %s, %.0f cm/s"), *GetNameSafe(Now), Now ? Now->GetVelocity().Size() : 0.0f);
-		});
+		After(Mode, 4.0f, [Mode]() { LogState(TEXT("jet: +1.6 s after"), PlayerPawn(Mode->GetWorld())); });
 	}
 
 	FAutoConsoleCommandWithWorld GJetExit(
 		TEXT("jam.Ship.JetExit"),
-		TEXT("On the planetoid: jump, then Space in the air - the jet leap that leaves its gravity; logs the swap."),
+		TEXT("On the planetoid: jump, then Space in the air - the jet leap that leaves its gravity; logs the state."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunJetExit));
-
-	FAutoConsoleCommandWithWorld GShipLap(
-		TEXT("jam.Ship.Lap"),
-		TEXT("Walk the player straight ahead around the planetoid for 35 s, logging angle, up vectors and view roll."),
-		FConsoleCommandWithWorldDelegate::CreateStatic(&RunShipLap));
 
 	/** jam.Ship.PlanetShots: two stills standing on the planetoid (top and side). */
 	void RunPlanetShots(UWorld* World)
@@ -884,14 +753,7 @@ namespace
 			});
 			After(Mode, 5.5f + Index * 6.0f, [PlayerController, Index]()
 			{
-				const APawn* Pawn = PlayerController->GetPawn();
-				const ACharacter* Walker = Cast<ACharacter>(Pawn);
-				const FVector Gravity = Walker ? Walker->GetCharacterMovement()->GetGravityDirection() : FVector::DownVector;
-				const FRotator Relative = JamGravityRelativeRotation(PlayerController->GetControlRotation(), Gravity);
-				UE_LOG(LogMindKore, Log, TEXT("Planet shots: %d (%s): %s at %s, gravity %s, view %s, view in gravity space pitch %.1f roll %.1f, on ground %s"),
-					Index, Index == 0 ? TEXT("top") : TEXT("side"), *GetNameSafe(Pawn), Pawn ? *Pawn->GetActorLocation().ToCompactString() : TEXT("-"),
-					*Gravity.ToCompactString(), *PlayerController->GetControlRotation().ToCompactString(), Relative.Pitch, Relative.Roll,
-					Walker && Walker->GetCharacterMovement()->IsMovingOnGround() ? TEXT("yes") : TEXT("no"));
+				LogState(Index == 0 ? TEXT("planet shot top") : TEXT("planet shot side"), Cast<AJamZeroGPawn>(PlayerController->GetPawn()));
 				PlayerController->ConsoleCommand(TEXT("HighResShot 1"));
 			});
 		}
@@ -904,7 +766,7 @@ namespace
 
 	FAutoConsoleCommandWithWorld GShipProbe(
 		TEXT("jam.Ship.Probe"),
-		TEXT("Ship blockout: pawn swaps with carried progress, a plate refused and fitted, every part in, the lever."),
+		TEXT("Ship: standing, walking and jumping in the cabin, the suit and the airlock, zero-G outside, the planetoid; a plate; every part in, the lever."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunShipProbe));
 }
 

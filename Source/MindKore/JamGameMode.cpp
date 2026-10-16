@@ -10,6 +10,7 @@
 #include "JamCollisionImpact.h"
 #include "JamDockZone.h"
 #include "JamOxygen.h"
+#include "JamWeapons.h"
 #include "JamZeroGPawn.h"
 #include "MKPhysicsProp.h"
 #include "MindKore.h"
@@ -57,7 +58,7 @@ void AJamHUD::DrawHUD()
 			CenterX - Width * 0.5f, CenterY + 24.0f, Font);
 	}
 
-	FString State = FString::Printf(TEXT("HP %.0f  AR %.0f"), Pawn->Vitals->Health, Pawn->Vitals->Armor);
+	FString State = FString::Printf(TEXT("HP %.0f  AR %.0f   %s"), Pawn->Vitals->Health, Pawn->Vitals->Armor, *Pawn->Guns->Describe());
 	if (Pawn->Carry->IsHolding())
 	{
 		State += TEXT("   carrying (LMB throw, RMB/F put)");
@@ -174,19 +175,7 @@ void AJamZeroGHUD::DrawHUD()
 	DrawText(FString::Printf(TEXT("O2 %.0f%% (%.0f s)"), Fraction * 100.0f, Pawn->Oxygen->Seconds), FLinearColor::White, BarX + 250.0f, BarY - 2.0f, Font);
 
 	FString State = FString::Printf(TEXT("HP %.0f   speed %.1f m/s"), Pawn->Vitals->Health, Pawn->GetBodyVelocity().Size() / 100.0f);
-	const FJamWeapon* Weapon = Pawn->GetWeapon();
-	if (!Weapon || !Weapon->bUnlocked)
-	{
-		State += TEXT("   без оружия");
-	}
-	else
-	{
-		State += FString::Printf(TEXT("   [%d] %s %d/%d"), Pawn->CurrentWeapon + 1, *Weapon->Name.ToString(), Weapon->Ammo, Weapon->Reserve);
-		if (const float Reload = Pawn->GetReloadRemaining(); Reload > 0.0f)
-		{
-			State += FString::Printf(TEXT(" (перезарядка %.1f)"), Reload);
-		}
-	}
+	State += TEXT("   ") + Pawn->Guns->Describe();
 	if (const float Held = Pawn->GetHeldMassKg(); Held > 0.0f)
 	{
 		State += FString::Printf(TEXT("   holding %.0f kg"), Held);

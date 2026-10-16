@@ -19,9 +19,17 @@
 
 ## Классы и файлы
 
-`Source/MindKore/JamZeroGPawn.h/.cpp`: `FJamWeapon` (USTRUCT),
-`AJamZeroGPawn::Weapons`, `Fire`, `SelectWeapon`, `Reload`; HUD — строка
-`[n] Имя патроны/запас` в `AJamZeroGHUD`.
+`Source/MindKore/JamWeapons.h/.cpp`: `FJamWeapon` (USTRUCT) и
+`UJamWeaponsComponent` — одно место для стволов: массив `Weapons`,
+`CurrentWeapon`, `bStartWithAllWeapons`, `Fire(Start, Direction, OutRecoil)`,
+`SelectWeapon`, `Reload`, `UnlockWeapon`, ввод R / 1 / 2 / 3 / колесо
+(`BindInput`), строка HUD `Describe()` — «[n] Имя патроны/запас» или «без
+оружия». ЛКМ привязывает пешка (ею же бросают). Компонент сам отдачу не
+применяет — возвращает её пешке: `AJamZeroGPawn` (`Guns`) кладёт её в тело
+целиком (в невесомости и на ногах на корабле), `AJamCharacter` тестовой
+комнаты — долю `RecoilFraction` 0.1 в скорость (на земле — только вдоль
+земли). В тестовой комнате открыты все три ствола, на корабле — ни одного
+до подбора.
 
 ## Числа (`FJamWeapon`, всё UPROPERTY; импульсы в кг·см/с)
 
@@ -62,5 +70,6 @@ ZeroG probe [after sniper]: ... pawn velocity (-715, 0, 0) = 715 cm/s
   MindKore с разной высотой.
 - Дробовик и перезарядка в смоуке не проверялись; ощущение отдачи — не
   проверялось (NullRHI).
-- Код трассы скопирован из `AJamCharacter::Fire` (`ponytail:` в коде): при
-  долгой жизни обеих пешек — слить в одну функцию.
+- В тестовой комнате вместо старого отладочного хитскана (60 урона,
+  12 Н·с, без патронов) — те же три ствола с патронами; урон и толчок у
+  целей там теперь другие (пистолет 25 / 30 Н·с).

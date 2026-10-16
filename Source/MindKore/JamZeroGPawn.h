@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
 #include "JamCollisionImpact.h"
+#include "JamWeapons.h"
 #include "MKImpactReceiver.h"
 #include "JamZeroGPawn.generated.h"
 
@@ -11,10 +12,10 @@ class UInstancedStaticMeshComponent;
 class UInputAction;
 class UInputMappingContext;
 class UJamOxygenComponent;
+class UJamWeaponsComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UPhysicsConstraintComponent;
-class UMKImpactDataAsset;
 class UMKInteractionComponent;
 class UMKKeyringComponent;
 class UMKVitalsComponent;
@@ -62,71 +63,19 @@ struct FInputActionValue;
  * All velocity changes go into the body as impulses in kg cm/s, so they read
  * the body's mass (default 100 kg): the sniper's recoil 40000 is 4 m/s.
  *
- * Guns are movement: three weapons (1/2/3, mouse wheel), each an FJamWeapon
- * of tunables. Every shot kicks the pawn back along the view and pushes what
- * it hits; R reloads. Guns cost no oxygen.
+ * Guns are movement: the shared UJamWeaponsComponent (Guns; 1/2/3, mouse
+ * wheel, R). Every shot kicks the pawn back along the view by the gun's full
+ * RecoilImpulse and pushes what it hits. Guns cost no oxygen.
+ *
+ * The same body walks: on the ship map AJamShipGameMode gives it the gravity
+ * of the zone it is in (cabin and airlock straight down, the planetoid toward
+ * its centre). There a force pulls the body down, a short sphere sweep along
+ * gravity finds the ground, WASD steers the velocity along the ground (fast
+ * acceleration and braking), Space jumps - and Space in the air over the
+ * planetoid is the jet exit. The camera rises to eye height. Recoil, pushes
+ * and throws still go into the body whole: a big gun fired at the floor lifts
+ * you. The view's frame (AJamShipController) follows gravity.
  */
-/** One gun of the zero-G pawn. Impulses are kg cm/s (velocity change = impulse / mass). */
-USTRUCT(BlueprintType)
-struct FJamWeapon
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon")
-	FText Name;
-
-	/** Per pellet, before the hit zone's multiplier. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
-	float Damage = 25.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.01"))
-	float FireInterval = 0.15f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "1"))
-	int32 MagazineSize = 12;
-
-	/** Rounds outside the magazine at the start. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0"))
-	int32 Reserve = 60;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
-	float ReloadSeconds = 1.2f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "1"))
-	int32 Pellets = 1;
-
-	/** Half-angle of the pellet cone, degrees. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
-	float SpreadDeg = 0.0f;
-
-	/** Kick on the pawn per shot, along -view. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
-	float RecoilImpulse = 1500.0f;
-
-	/** Push on a hit body per pellet, at the hit point. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
-	float HitImpulse = 3000.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "100.0"))
-	float RangeCm = 8000.0f;
-
-	/** Keeps firing while LMB is held, at FireInterval. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon")
-	bool bAutomatic = false;
-
-	/** Pitch of the blast sound: a small gun cracks, a big one booms. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.1"))
-	float SoundPitch = 1.0f;
-
-	/** Usable now. Set from AJamZeroGPawn::bStartWithAllWeapons on BeginPlay; pickups unlock (UnlockWeapon). */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapon")
-	bool bUnlocked = true;
-
-	/** Rounds in the magazine now. Set to MagazineSize on BeginPlay. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapon")
-	int32 Ammo = 0;
-};
-
 UCLASS()
 class MINDKORE_API AJamZeroGPawn : public APawn, public IMKImpactReceiver
 {
@@ -156,6 +105,10 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UJamOxygenComponent> Oxygen = nullptr;
+
+	/** The guns (shared with the walkers); the recoil of a shot goes into Body whole. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
+	TObjectPtr<UJamWeaponsComponent> Guns = nullptr;
 
 	// --- view ---------------------------------------------------------------
 
@@ -295,28 +248,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Crash", meta = (ClampMin = "0.0"))
 	float ShakeSeconds = 0.25f;
 
-	// --- guns (LMB, empty hands) ------------------------------------------------
-
-	/** 1 pistol, 2 shotgun, 3 sniper by default. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot")
-	TArray<FJamWeapon> Weapons;
-
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|ZeroG|Shot")
-	int32 CurrentWeapon = 0;
-
-	/** Off (the ship map): every gun starts locked until a pickup unlocks it. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot")
-	bool bStartWithAllWeapons = true;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot")
-	TObjectPtr<UMKImpactDataAsset> ImpactData = nullptr;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot")
-	TArray<TObjectPtr<USoundBase>> ShotSounds;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot")
-	TObjectPtr<UMaterialInterface> DefaultImpactDecal = nullptr;
-
 	// --- thrusters and stabiliser ------------------------------------------------
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters")
@@ -338,6 +269,55 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters", meta = (ClampMin = "0.0"))
 	float StabiliserRate = 2.0f;
 
+	// --- walking in a gravity zone (the ship map: cabin, airlock, planetoid) ------
+	// AJamShipGameMode sets the zone's gravity every tick (SetGravity). Inside,
+	// the body falls toward it (a force; world gravity stays 0), WASD walks on
+	// the ground, Space jumps; thrusters and the stabiliser are off.
+
+	/** Target speed along the ground, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
+	float WalkSpeedCm = 450.0f;
+
+	/** On the ground with input: how fast the ground velocity turns toward the target, cm/s^2. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
+	float WalkAccelCm = 3000.0f;
+
+	/** On the ground without input: the brake (friction feel, no sliding), cm/s^2. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
+	float WalkBrakingCm = 4000.0f;
+
+	/** In the air inside a zone: input adds along its direction up to WalkSpeedCm, never brakes, cm/s^2. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
+	float AirAccelCm = 400.0f;
+
+	/** Space on the ground: speed along -gravity, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
+	float JumpSpeedCm = 420.0f;
+
+	/** Space again in the air in a radial zone (the planetoid): a jet push up that leaves its gravity, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
+	float JetExitSpeedCm = 1600.0f;
+
+	/** Ground: a blocking hit of the body's sphere swept this far along gravity, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
+	float GroundProbeCm = 12.0f;
+
+	/** Ground steeper than this (from -gravity) is a wall, degrees. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0", ClampMax = "89.0"))
+	float MaxGroundAngleDeg = 50.0f;
+
+	/** The camera rises this far above the body's centre along -gravity (eyes ~1.5 m over the floor), cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
+	float EyeHeightCm = 110.0f;
+
+	/** How fast the camera moves to and from that height, 1/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.1"))
+	float EyeRiseRate = 4.0f;
+
+	/** Inside a zone a hit thumps (and hurts) only above this, so walking into a wall or landing a jump stays quiet, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
+	float GroundFeedbackMinSpeedCm = 700.0f;
+
 	// --- bullet time presentation (as AJamCharacter) --------------------------
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|BulletTime")
@@ -355,29 +335,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
 	bool Push();
 
-	/** Fire the current weapon: hitscan pellets, recoil, a push on what is hit. False when it cannot fire yet. */
+	/** Fire the current gun (Guns) from the view; its recoil goes into the body. False when it cannot fire now. */
 	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
 	bool Fire();
-
-	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
-	void SelectWeapon(int32 Index);
-
-	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
-	void Reload();
-
-	/** Unlock a gun and take it in hand. */
-	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
-	void UnlockWeapon(int32 Index);
-
-	void SetWeaponUnlocked(int32 Index, bool bUnlocked);
-
-	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG")
-	bool IsWeaponUnlocked(int32 Index) const { return Weapons.IsValidIndex(Index) && Weapons[Index].bUnlocked; }
-
-	const FJamWeapon* GetWeapon() const { return Weapons.IsValidIndex(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr; }
-
-	/** Seconds left of a reload; 0 when not reloading. */
-	float GetReloadRemaining() const;
 
 	/** Join Target to the body at Point (world). False when something is held, Target does not simulate or is absurdly heavy. */
 	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
@@ -427,6 +387,22 @@ public:
 	/** Console probe: thrust input for the next tick (view frame: X forward, Y right, Z up) and the stabiliser. */
 	void ProbeThrust(const FVector& Input, bool bStabilise) { ThrustInput = Input; bStabilising = bStabilise; }
 
+	/** Gravity here (unit direction, cm/s^2), set every tick by AJamShipGameMode; zero strength = zero-G. */
+	void SetGravity(const FVector& Direction, float StrengthCm, bool bRadial);
+
+	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG|Walk")
+	bool IsInGravity() const { return GravityStrengthCm > 0.0f; }
+
+	/** Unit; zero outside every gravity zone. */
+	FVector GetGravityDirection() const { return GravityDirection; }
+
+	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG|Walk")
+	bool IsGrounded() const { return bGrounded; }
+
+	/** Space pressed: a jump on the ground, the jet exit in the air over a planetoid; nothing in zero-G (Space thrusts there). */
+	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG|Walk")
+	void JumpPressed();
+
 	virtual void ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& ResolvedImpact) override;
 
 	virtual void Tick(float DeltaSeconds) override;
@@ -472,9 +448,6 @@ private:
 	void PrimaryPressed();
 	void PushPressed();
 	void PutDown();
-	void FireRay(const FJamWeapon& Weapon, const FVector& Direction);
-	double NextShotSeconds = 0.0;
-	double ReloadEndSeconds = 0.0;
 	UFUNCTION()
 	void HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp,
 		FVector NormalImpulse, const FHitResult& Hit);
@@ -492,6 +465,16 @@ private:
 	void BulletTimePressed();
 	void BulletTimeReleased();
 	void ApplyThrusters(float DeltaSeconds);
+	void Walk(float DeltaSeconds);
+	bool ProbeGround() const;
+
+	FVector GravityDirection = FVector::ZeroVector;
+	float GravityStrengthCm = 0.0f;
+	bool bRadialGravity = false;
+	bool bGrounded = false;
+	double LastJumpSeconds = -100.0;
+	/** The camera's offset from the body's centre (world space), eased toward the eye height. */
+	FVector EyeOffset = FVector::ZeroVector;
 	void UpdateBulletTimePresentation();
 
 	UPROPERTY(Transient)

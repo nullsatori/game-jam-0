@@ -19,6 +19,7 @@
 #include "InputModifiers.h"
 #include "JamDockZone.h"
 #include "JamOxygen.h"
+#include "JamWeapons.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "MKFastener.h"
@@ -83,69 +84,12 @@ AJamZeroGPawn::AJamZeroGPawn()
 	Keyring = CreateDefaultSubobject<UMKKeyringComponent>(TEXT("Keyring"));
 	Vitals = CreateDefaultSubobject<UMKVitalsComponent>(TEXT("Vitals"));
 	Oxygen = CreateDefaultSubobject<UJamOxygenComponent>(TEXT("Oxygen"));
+	Guns = CreateDefaultSubobject<UJamWeaponsComponent>(TEXT("Guns"));
 
-	// Guns as movement. Pistol: quick nudges (15 cm/s); shotgun: a shove and a
-	// spray that scatters junk; sniper: one slow shot that throws you back 4 m/s.
-	FJamWeapon Pistol;
-	Pistol.Name = NSLOCTEXT("JamZeroG", "Pistol", "Пистолет");
-	Pistol.Damage = 25.0f;
-	Pistol.FireInterval = 0.15f;
-	Pistol.MagazineSize = 12;
-	Pistol.Reserve = 60;
-	Pistol.ReloadSeconds = 1.2f;
-	Pistol.SpreadDeg = 0.5f;
-	Pistol.RecoilImpulse = 1500.0f;
-	Pistol.HitImpulse = 3000.0f;
-	Pistol.SoundPitch = 1.3f;
-	Pistol.bAutomatic = true;
-	FJamWeapon Shotgun;
-	Shotgun.Name = NSLOCTEXT("JamZeroG", "Shotgun", "Дробовик");
-	Shotgun.Damage = 12.0f;
-	Shotgun.FireInterval = 0.8f;
-	Shotgun.MagazineSize = 6;
-	Shotgun.Reserve = 24;
-	Shotgun.ReloadSeconds = 2.0f;
-	Shotgun.Pellets = 8;
-	Shotgun.SpreadDeg = 6.0f;
-	Shotgun.RecoilImpulse = 12000.0f;
-	Shotgun.HitImpulse = 4000.0f;
-	Shotgun.RangeCm = 3000.0f;
-	Shotgun.SoundPitch = 0.9f;
-	FJamWeapon Sniper;
-	Sniper.Name = NSLOCTEXT("JamZeroG", "Sniper", "Снапа");
-	Sniper.Damage = 150.0f;
-	Sniper.FireInterval = 1.2f;
-	Sniper.MagazineSize = 4;
-	Sniper.Reserve = 16;
-	Sniper.ReloadSeconds = 2.5f;
-	Sniper.RecoilImpulse = 40000.0f;
-	Sniper.HitImpulse = 60000.0f;
-	Sniper.RangeCm = 15000.0f;
-	Sniper.SoundPitch = 0.7f;
-	Weapons = { Pistol, Shotgun, Sniper };
-
-	// Same MindKore content as AJamCharacter (CREDITS.md lists the sound donors).
-	static ConstructorHelpers::FObjectFinder<UMKImpactDataAsset> DefaultImpactData(
-		TEXT("/Game/MindKore/Impacts/DA_Impact_Default.DA_Impact_Default"));
-	ImpactData = DefaultImpactData.Object;
-	static ConstructorHelpers::FObjectFinder<USoundBase> BlastTransient(
-		TEXT("/Game/MindKore/Audio/SW_MK_Blast_Transient.SW_MK_Blast_Transient"));
-	static ConstructorHelpers::FObjectFinder<USoundBase> BlastTail(
-		TEXT("/Game/MindKore/Audio/SW_MK_Blast_Tail.SW_MK_Blast_Tail"));
-	for (USoundBase* Sound : { BlastTransient.Object, BlastTail.Object })
-	{
-		if (Sound)
-		{
-			ShotSounds.Add(Sound);
-		}
-	}
 	// A plate struck: the armour hit cue (CC0 donors, see CREDITS.md).
 	static ConstructorHelpers::FObjectFinder<USoundBase> Crash(
 		TEXT("/Game/MindKore/Audio/Impact/SC_MK_Hit_Armor.SC_MK_Hit_Armor"));
 	CrashSound = Crash.Object;
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Decal(
-		TEXT("/Game/MindKore/Impacts/Decals/M_Decal_Default.M_Decal_Default"));
-	DefaultImpactDecal = Decal.Object;
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BulletTime(
 		TEXT("/Game/MindKore/PostProcess/M_MK_BulletTime.M_MK_BulletTime"));
 	BulletTimeMaterial = BulletTime.Object;
@@ -182,11 +126,6 @@ void AJamZeroGPawn::BeginPlay()
 	BodyMaterial->Friction = BodyFriction;
 	BodyMaterial->Restitution = BodyRestitution;
 	Body->SetPhysMaterialOverride(BodyMaterial);
-	for (FJamWeapon& Weapon : Weapons)
-	{
-		Weapon.Ammo = Weapon.MagazineSize;
-		Weapon.bUnlocked = bStartWithAllWeapons;
-	}
 	Body->SetNotifyRigidBodyCollision(true);
 	Body->OnComponentHit.AddDynamic(this, &AJamZeroGPawn::HandleBodyHit);
 	if (BulletTimeMaterial)
@@ -247,13 +186,8 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	UInputAction* BulletTimeAction = MakeAction(TEXT("IA_ZG_BulletTime"), EInputActionValueType::Boolean);
 	UInputAction* CrowbarAction = MakeAction(TEXT("IA_ZG_Crowbar"), EInputActionValueType::Boolean);
 	UInputAction* TetherAction = MakeAction(TEXT("IA_ZG_Tether"), EInputActionValueType::Boolean);
-	UInputAction* ReloadAction = MakeAction(TEXT("IA_ZG_Reload"), EInputActionValueType::Boolean);
-	UInputAction* WheelAction = MakeAction(TEXT("IA_ZG_Wheel"), EInputActionValueType::Axis1D);
 	UInputAction* AimAction = MakeAction(TEXT("IA_ZG_Aim"), EInputActionValueType::Boolean);
-	UInputAction* WeaponActions[3] = {
-		MakeAction(TEXT("IA_ZG_Weapon1"), EInputActionValueType::Boolean),
-		MakeAction(TEXT("IA_ZG_Weapon2"), EInputActionValueType::Boolean),
-		MakeAction(TEXT("IA_ZG_Weapon3"), EInputActionValueType::Boolean) };
+	UInputAction* JumpAction = MakeAction(TEXT("IA_ZG_Jump"), EInputActionValueType::Boolean);
 
 	Map(LookAction, EKeys::Mouse2D, false, false);
 	// WASD onto one 2D axis: D is +X, W is +Y (swizzled), A and S negated.
@@ -271,12 +205,9 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Map(BulletTimeAction, EKeys::Q, false, false);
 	Map(CrowbarAction, EKeys::G, false, false);
 	Map(TetherAction, EKeys::T, false, false);
-	Map(ReloadAction, EKeys::R, false, false);
-	Map(WheelAction, EKeys::MouseWheelAxis, false, false);
 	Map(AimAction, EKeys::LeftShift, false, false);
-	Map(WeaponActions[0], EKeys::One, false, false);
-	Map(WeaponActions[1], EKeys::Two, false, false);
-	Map(WeaponActions[2], EKeys::Three, false, false);
+	// Space is also Lift: thrust up in zero-G, a jump (press) in a gravity zone.
+	Map(JumpAction, EKeys::SpaceBar, false, false);
 
 	Input->BindAction(LookAction, ETriggerEvent::Triggered, this, &AJamZeroGPawn::Look);
 	Input->BindAction(ThrustAction, ETriggerEvent::Triggered, this, &AJamZeroGPawn::Thrust);
@@ -289,7 +220,7 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindAction(PrimaryAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PrimaryPressed);
 	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Triggered, [this](const FInputActionValue&)
 	{
-		const FJamWeapon* Weapon = GetWeapon();
+		const FJamWeapon* Weapon = Guns->GetWeapon();
 		if (!GrabbedBody.IsValid() && Weapon && Weapon->bAutomatic)
 		{
 			Fire();
@@ -304,25 +235,8 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &AJamZeroGPawn::BulletTimeReleased);
 	Input->BindAction(CrowbarAction, ETriggerEvent::Started, this, &AJamZeroGPawn::ToggleCrowbar);
 	Input->BindAction(TetherAction, ETriggerEvent::Started, this, &AJamZeroGPawn::ToggleTether);
-	Input->BindAction(ReloadAction, ETriggerEvent::Started, this, &AJamZeroGPawn::Reload);
-	Input->BindActionValueLambda(WheelAction, ETriggerEvent::Started, [this](const FInputActionValue& Value)
-	{
-		// The next unlocked gun in the wheel's direction.
-		const int32 Step = Value.Get<float>() > 0.0f ? 1 : Weapons.Num() - 1;
-		for (int32 Index = (CurrentWeapon + Step) % FMath::Max(Weapons.Num(), 1), Tries = 0; Tries < Weapons.Num();
-			Index = (Index + Step) % Weapons.Num(), ++Tries)
-		{
-			if (Weapons[Index].bUnlocked)
-			{
-				SelectWeapon(Index);
-				break;
-			}
-		}
-	});
-	for (int32 Index = 0; Index < 3; ++Index)
-	{
-		Input->BindActionValueLambda(WeaponActions[Index], ETriggerEvent::Started, [this, Index](const FInputActionValue&) { SelectWeapon(Index); });
-	}
+	Input->BindAction(JumpAction, ETriggerEvent::Started, this, &AJamZeroGPawn::JumpPressed);
+	Guns->BindInput(*Input, *Mapping);
 }
 
 void AJamZeroGPawn::PawnClientRestart()
@@ -719,7 +633,8 @@ void AJamZeroGPawn::HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* Oth
 	}
 	float SpeedCm = 0.0f;
 	JamDeliverCollisionImpact(this, Body, Hit, NormalImpulse, CrashImpact, LastCrashSeconds, SpeedCm);
-	if (SpeedCm < FeedbackMinSpeedCm || ShakeRemaining > ShakeSeconds * 0.5f)
+	const float MinSpeedCm = IsInGravity() ? FMath::Max(FeedbackMinSpeedCm, GroundFeedbackMinSpeedCm) : FeedbackMinSpeedCm;
+	if (SpeedCm < MinSpeedCm || ShakeRemaining > ShakeSeconds * 0.5f)
 	{
 		return; // A touch, or the same crash still shaking.
 	}
@@ -729,7 +644,10 @@ void AJamZeroGPawn::HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* Oth
 	}
 	ShakeRemaining = ShakeSeconds;
 	ShakeAmplitude = ShakeCmPer1000 * SpeedCm / 1000.0f;
-	if (SpeedCm >= CrashDamageMinSpeedCm)
+	// Landing on walkable ground in a gravity zone thumps but never hurts: a fall is how you arrive on the planetoid.
+	const bool bLanding = IsInGravity()
+		&& FVector::DotProduct(Hit.ImpactNormal, -GravityDirection) >= FMath::Cos(FMath::DegreesToRadians(MaxGroundAngleDeg));
+	if (SpeedCm >= CrashDamageMinSpeedCm && !bLanding)
 	{
 		const float Damage = (SpeedCm - CrashDamageMinSpeedCm) * CrashDamagePerCmS;
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG crash: %s at %.0f cm/s, self damage %.1f"), *GetNameSafe(OtherActor), SpeedCm, Damage);
@@ -767,7 +685,7 @@ void AJamZeroGPawn::DrawPrediction() const
 		DrawPath(Body->GetComponentLocation(), GetBodyVelocity() - Direction * PushImpulse / Body->GetMass(),
 			Body->GetScaledSphereRadius(), nullptr, FColor(255, 140, 40));
 	}
-	if (const FJamWeapon* Weapon = GetWeapon(); Weapon && Weapon->bUnlocked && Weapon->RecoilImpulse > 0.0f)
+	if (const FJamWeapon* Weapon = Guns->GetWeapon(); Weapon && Weapon->RecoilImpulse > 0.0f)
 	{
 		DrawPath(Body->GetComponentLocation(), GetBodyVelocity() - Direction * Weapon->RecoilImpulse / Body->GetMass(),
 			Body->GetScaledSphereRadius(), nullptr, FColor(255, 230, 90));
@@ -888,6 +806,104 @@ void AJamZeroGPawn::ApplyThrusters(float DeltaSeconds)
 	}
 }
 
+// --- walking ------------------------------------------------------------------------
+
+void AJamZeroGPawn::SetGravity(const FVector& Direction, float StrengthCm, bool bRadial)
+{
+	const bool bWas = IsInGravity();
+	GravityDirection = StrengthCm > 0.0f ? Direction.GetSafeNormal() : FVector::ZeroVector;
+	GravityStrengthCm = GravityDirection.IsZero() ? 0.0f : StrengthCm;
+	bRadialGravity = bRadial;
+	if (bWas != IsInGravity())
+	{
+		bGrounded = false;
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: %s at %s, %.0f cm/s"), *GetName(), IsInGravity() ? TEXT("gravity on (walking)") : TEXT("gravity off (zero-G)"),
+			*GetActorLocation().ToCompactString(), GetBodyVelocity().Size());
+	}
+}
+
+bool AJamZeroGPawn::ProbeGround() const
+{
+	// The body's sphere, a little thinner, swept a short way along gravity: a
+	// blocking hit there that faces up enough is ground.
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamGround), /*bTraceComplex=*/false, this);
+	FCollisionResponseParams Response;
+	Body->InitSweepCollisionParams(Params, Response);
+	if (const UPrimitiveComponent* Held = GrabbedBody.Get())
+	{
+		Params.AddIgnoredActor(Held->GetOwner());
+	}
+	const FVector Start = Body->GetComponentLocation();
+	FHitResult Hit;
+	const bool bHit = GetWorld()->SweepSingleByChannel(Hit, Start, Start + GravityDirection * GroundProbeCm, FQuat::Identity,
+		Body->GetCollisionObjectType(), FCollisionShape::MakeSphere(Body->GetScaledSphereRadius() - 2.0f), Params, Response);
+	return bHit && FVector::DotProduct(Hit.ImpactNormal, -GravityDirection) >= FMath::Cos(FMath::DegreesToRadians(MaxGroundAngleDeg));
+}
+
+void AJamZeroGPawn::Walk(float DeltaSeconds)
+{
+	const FVector Input = FVector(ThrustInput.X, ThrustInput.Y, 0.0f).GetClampedToMaxSize(1.0f); // Space and Ctrl (Z) do not walk
+	ThrustInput = FVector::ZeroVector;
+	if (DeltaSeconds <= 0.0f)
+	{
+		return;
+	}
+	// Gravity as an acceleration on this body only; the world's stays 0.
+	Body->AddForce(GravityDirection * GravityStrengthCm, NAME_None, /*bAccelChange=*/true);
+	const FVector Up = -GravityDirection;
+	const bool bJustJumped = GetWorld()->GetTimeSeconds() - LastJumpSeconds < 0.25;
+	bGrounded = !bJustJumped && ProbeGround();
+
+	// The view's right lies in the ground plane (the view frame never rolls);
+	// forward is right x up, so looking straight down still walks forward.
+	const FVector Right = FVector::VectorPlaneProject(FRotationMatrix(GetControlRotation()).GetUnitAxis(EAxis::Y), Up).GetSafeNormal();
+	const FVector Forward = FVector::CrossProduct(Right, Up);
+	const FVector Wish = (Forward * Input.X + Right * Input.Y).GetClampedToMaxSize(1.0f) * WalkSpeedCm;
+
+	const FVector Velocity = GetBodyVelocity();
+	float Normal = FVector::DotProduct(Velocity, Up);
+	FVector Tangent = Velocity - Up * Normal;
+	if (bGrounded)
+	{
+		const float Accel = Wish.IsNearlyZero() ? WalkBrakingCm : WalkAccelCm;
+		Tangent += (Wish - Tangent).GetClampedToMaxSize(Accel * DeltaSeconds);
+		// Stuck to the ground: no bounce off the floor or off the curve of the planetoid.
+		Normal = FMath::Min(Normal, 0.0f);
+	}
+	else if (!Wish.IsNearlyZero())
+	{
+		// Air control: adds toward the input up to the walking speed, never brakes.
+		const FVector Direction = Wish.GetSafeNormal();
+		const float Add = FMath::Min(AirAccelCm * DeltaSeconds, WalkSpeedCm - FVector::DotProduct(Tangent, Direction));
+		Tangent += Direction * FMath::Max(Add, 0.0f);
+	}
+	Body->SetPhysicsLinearVelocity(Tangent + Up * Normal);
+}
+
+void AJamZeroGPawn::JumpPressed()
+{
+	if (!IsInGravity())
+	{
+		return; // Zero-G: Space is the up thruster (Lift).
+	}
+	const FVector Up = -GravityDirection;
+	const FVector Velocity = GetBodyVelocity();
+	if (bGrounded)
+	{
+		Body->SetPhysicsLinearVelocity(Velocity - Up * FVector::DotProduct(Velocity, Up) + Up * JumpSpeedCm);
+		LastJumpSeconds = GetWorld()->GetTimeSeconds();
+		bGrounded = false;
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: jump at %.0f cm/s"), *GetName(), JumpSpeedCm);
+	}
+	else if (bRadialGravity)
+	{
+		// In the air over a planetoid: the jet leap that leaves its gravity.
+		Body->SetPhysicsLinearVelocity(Velocity + Up * JetExitSpeedCm);
+		LastJumpSeconds = GetWorld()->GetTimeSeconds();
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: jet exit at %.0f cm/s"), *GetName(), JetExitSpeedCm);
+	}
+}
+
 void AJamZeroGPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -901,25 +917,27 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 	}
 	DrawTether();
 	DrawPrediction();
-	// Camera shake: a fading random offset of the lens; the body never turns.
+	// The camera: at eye height over the body in gravity, at its centre in zero-G
+	// (eased both ways), plus the shake - a fading random offset; the body never turns.
+	EyeOffset = FMath::VInterpTo(EyeOffset, -GravityDirection * EyeHeightCm, DeltaSeconds, EyeRiseRate);
 	ShakeRemaining = FMath::Max(0.0f, ShakeRemaining - DeltaSeconds);
-	Camera->SetRelativeLocation(ShakeRemaining > 0.0f
+	const FVector Shake = ShakeRemaining > 0.0f
 		? FMath::VRand() * ShakeAmplitude * (ShakeRemaining / FMath::Max(ShakeSeconds, 0.01f))
-		: FVector::ZeroVector);
+		: FVector::ZeroVector;
+	Camera->SetRelativeLocation(Body->GetComponentTransform().InverseTransformVectorNoScale(EyeOffset + Shake));
 	RefreshGrabCandidate();
 	UpdateHoldTarget();
 	UpdateDust();
-	ApplyThrusters(DeltaSeconds);
-	if (ReloadEndSeconds > 0.0 && GetWorld()->GetTimeSeconds() >= ReloadEndSeconds && Weapons.IsValidIndex(CurrentWeapon))
+	if (IsInGravity())
 	{
-		FJamWeapon& Weapon = Weapons[CurrentWeapon];
-		const int32 Moved = FMath::Min(Weapon.MagazineSize - Weapon.Ammo, Weapon.Reserve);
-		Weapon.Ammo += Moved;
-		Weapon.Reserve -= Moved;
-		ReloadEndSeconds = 0.0;
-		UE_LOG(LogMindKore, Log, TEXT("ZeroG weapon: %s reloaded, %d/%d"), *Weapon.Name.ToString(), Weapon.Ammo, Weapon.Reserve);
+		Walk(DeltaSeconds);
 	}
-	if (MaxSpeedCm > 0.0f)
+	else
+	{
+		ApplyThrusters(DeltaSeconds);
+	}
+	// The cap is for zero-G: in a zone gravity bounds the speed, and the jet exit must beat it.
+	if (MaxSpeedCm > 0.0f && !IsInGravity())
 	{
 		const FVector Velocity = GetBodyVelocity();
 		if (Velocity.SizeSquared() > FMath::Square(MaxSpeedCm))
@@ -943,155 +961,15 @@ float AJamZeroGPawn::GetPushCooldownRemaining() const
 
 // --- shot ----------------------------------------------------------------------
 
-void AJamZeroGPawn::SetWeaponUnlocked(int32 Index, bool bUnlocked)
-{
-	if (Weapons.IsValidIndex(Index))
-	{
-		Weapons[Index].bUnlocked = bUnlocked;
-	}
-}
-
-void AJamZeroGPawn::UnlockWeapon(int32 Index)
-{
-	if (!Weapons.IsValidIndex(Index))
-	{
-		return;
-	}
-	Weapons[Index].bUnlocked = true;
-	CurrentWeapon = INDEX_NONE; // so SelectWeapon takes it even when it was the current slot
-	SelectWeapon(Index);
-	UE_LOG(LogMindKore, Log, TEXT("ZeroG weapon: %s unlocked"), *Weapons[Index].Name.ToString());
-}
-
-void AJamZeroGPawn::SelectWeapon(int32 Index)
-{
-	if (!Weapons.IsValidIndex(Index) || Index == CurrentWeapon || !Weapons[Index].bUnlocked)
-	{
-		return;
-	}
-	CurrentWeapon = Index;
-	ReloadEndSeconds = 0.0; // A switch abandons a reload.
-	UE_LOG(LogMindKore, Log, TEXT("ZeroG weapon: %s (%d/%d)"), *Weapons[Index].Name.ToString(), Weapons[Index].Ammo, Weapons[Index].Reserve);
-}
-
-float AJamZeroGPawn::GetReloadRemaining() const
-{
-	return FMath::Max(0.0f, float(ReloadEndSeconds - GetWorld()->GetTimeSeconds()));
-}
-
-void AJamZeroGPawn::Reload()
-{
-	FJamWeapon* Weapon = Weapons.IsValidIndex(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
-	if (!Weapon || Weapon->Ammo >= Weapon->MagazineSize || Weapon->Reserve <= 0 || GetReloadRemaining() > 0.0f)
-	{
-		return;
-	}
-	ReloadEndSeconds = GetWorld()->GetTimeSeconds() + Weapon->ReloadSeconds;
-	UE_LOG(LogMindKore, Log, TEXT("ZeroG weapon: reloading %s, %.1f s"), *Weapon->Name.ToString(), Weapon->ReloadSeconds);
-}
-
 bool AJamZeroGPawn::Fire()
 {
-	FJamWeapon* Weapon = Weapons.IsValidIndex(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
-	const double Now = GetWorld()->GetTimeSeconds();
-	if (!Weapon || !Weapon->bUnlocked || Now < NextShotSeconds || GetReloadRemaining() > 0.0f)
+	FVector Recoil;
+	if (!Guns->Fire(ViewLocation(), ViewDirection(), Recoil))
 	{
 		return false;
 	}
-	if (Weapon->Ammo <= 0)
-	{
-		UE_LOG(LogMindKore, Log, TEXT("ZeroG weapon: %s is empty"), *Weapon->Name.ToString());
-		Reload();
-		return false;
-	}
-	--Weapon->Ammo;
-	NextShotSeconds = Now + Weapon->FireInterval;
-	const FVector Direction = ViewDirection();
-	// One kick per shot, whatever the pellets do. Guns cost no oxygen.
-	AddBodyImpulse(-Direction * Weapon->RecoilImpulse);
-	for (USoundBase* Sound : ShotSounds)
-	{
-		UGameplayStatics::PlaySound2D(this, Sound, 1.0f, Weapon->SoundPitch);
-	}
-	for (int32 Pellet = 0; Pellet < Weapon->Pellets; ++Pellet)
-	{
-		FireRay(*Weapon, Weapon->SpreadDeg > 0.0f
-			? FMath::VRandCone(Direction, FMath::DegreesToRadians(Weapon->SpreadDeg))
-			: Direction);
-	}
-	UE_LOG(LogMindKore, Log, TEXT("ZeroG weapon: %s fired, %d pellet(s), recoil %.0f kg cm/s, %d/%d left"),
-		*Weapon->Name.ToString(), Weapon->Pellets, Weapon->RecoilImpulse, Weapon->Ammo, Weapon->Reserve);
+	AddBodyImpulse(Recoil);
 	return true;
-}
-
-void AJamZeroGPawn::FireRay(const FJamWeapon& Weapon, const FVector& Direction)
-{
-	UWorld* World = GetWorld();
-	const FVector Start = ViewLocation();
-	// ponytail: the same trace, hit choice and impact fill as AJamCharacter::Fire,
-	// copied so the ground pawn stays untouched; merge into one free function if
-	// both pawns outlive the jam.
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamZeroGShot), /*bTraceComplex=*/true, this);
-	Params.bReturnPhysicalMaterial = true;
-	TArray<FHitResult> Hits;
-	World->LineTraceMultiByChannel(Hits, Start, Start + Direction * Weapon.RangeCm, ECC_GameTraceChannel2, Params);
-	TArray<FMKHitCandidate, TInlineAllocator<8>> Candidates;
-	int32 NearestZone = INDEX_NONE;
-	for (const FHitResult& Each : Hits)
-	{
-		FMKHitCandidate& Candidate = Candidates.AddDefaulted_GetRef();
-		Candidate.Distance = Each.Distance;
-		Candidate.bBlocking = Each.bBlockingHit;
-		Candidate.ActorKey = Each.GetActor();
-		Candidate.HitZone = MKResolveHitZoneFromComponent(Each.GetComponent());
-		if (!Candidate.bBlocking && Candidate.HitZone != EMKHitZone::Default
-			&& (NearestZone == INDEX_NONE || Candidate.Distance < Candidates[NearestZone].Distance))
-		{
-			NearestZone = Candidates.Num() - 1;
-		}
-	}
-	if (NearestZone != INDEX_NONE)
-	{
-		Candidates[NearestZone].bBlocking = true;
-	}
-	const int32 Selected = MKSelectResolvedHit(Candidates, /*SameActorToleranceCm=*/2.5f);
-	if (Selected == INDEX_NONE)
-	{
-		return;
-	}
-	const FHitResult& Hit = Hits[Selected];
-	FMKImpactResolveParams ResolveParams;
-	ResolveParams.ImpactData = ImpactData;
-	FMKImpactFeedback Feedback;
-	FMKResolvedImpact Resolved = MKResolveImpactFromHit(Hit, Direction, ResolveParams, Feedback);
-	Resolved.ShotId = FGuid::NewGuid();
-	Resolved.Kind = EMKImpactKind::Round;
-	Resolved.SourceActor = this;
-	Resolved.ImpactTimeSeconds = World->GetTimeSeconds();
-	Resolved.RangeCm = FVector::Dist(GetActorLocation(), Hit.ImpactPoint);
-	Resolved.DamageAmount = Weapon.Damage * Resolved.DamageMultiplier;
-	// N s for receivers that read it (another pawn); kg cm/s / 100.
-	Resolved.ImpulseNewtonSeconds = Resolved.ShotDirection * Weapon.HitImpulse / 100.0f;
-	Resolved.bHasPhysicsImpulse = true;
-	const bool bDelivered = MKDeliverResolvedImpact(this, this, Resolved);
-	// Every loose body takes the gun's push at the hit point (MindKore's props
-	// ignore rounds; in zero-G the push is the point).
-	UPrimitiveComponent* HitComponent = Hit.GetComponent();
-	if (HitComponent && HitComponent->IsSimulatingPhysics() && HitComponent->GetOwner() != this)
-	{
-		HitComponent->AddImpulseAtLocation(Direction * Weapon.HitImpulse, Hit.ImpactPoint);
-	}
-	UE_LOG(LogMindKore, Verbose, TEXT("ZeroG shot: %s / %s, zone %d, damage %.1f, %s"), *GetNameSafe(Hit.GetActor()),
-		*GetNameSafe(HitComponent), int32(Resolved.HitZone), Resolved.DamageAmount, bDelivered ? TEXT("delivered") : TEXT("no receiver"));
-	if (Feedback.ImpactSound)
-	{
-		UGameplayStatics::PlaySoundAtLocation(this, Feedback.ImpactSound, Hit.ImpactPoint);
-	}
-	if (UMaterialInterface* DecalMaterial = Feedback.DecalMaterial ? Feedback.DecalMaterial.Get() : DefaultImpactDecal.Get())
-	{
-		UGameplayStatics::SpawnDecalAttached(DecalMaterial, FVector(4.0f, 6.0f, 6.0f), HitComponent, NAME_None,
-			Hit.ImpactPoint, (-Hit.ImpactNormal).Rotation(), EAttachLocation::KeepWorldPosition, 30.0f);
-	}
 }
 
 void AJamZeroGPawn::ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& ResolvedImpact)
@@ -1404,13 +1282,13 @@ namespace
 			Pawn->GetWorld()->GetTimerManager().SetTimer(AfterShot, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn]()
 			{
 				LogProbe(TEXT("after pistol"), Pawn);
-				Pawn->SelectWeapon(2);
+				Pawn->Guns->SelectWeapon(2);
 				Pawn->Fire();
 				FTimerHandle AfterSniper;
 				Pawn->GetWorld()->GetTimerManager().SetTimer(AfterSniper, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn]()
 				{
 					LogProbe(TEXT("after sniper"), Pawn);
-					Pawn->SelectWeapon(0);
+					Pawn->Guns->SelectWeapon(0);
 					ProbeCoupledPush(Pawn);
 				}), 0.25f, false);
 			}), 0.25f, false);

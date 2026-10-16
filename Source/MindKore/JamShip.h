@@ -1,102 +1,19 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
-#include "JamCharacter.h"
 #include "JamGameMode.h"
 #include "JamShip.generated.h"
 
 class UBoxComponent;
-class UJamOxygenComponent;
 
 /**
- * What survives a pawn swap (not a restart): health, keys, flags (actor tags
- * such as MK.Crowbar), unlocked guns, oxygen, cargo, tools. Kept by
- * AJamShipGameMode - one game mode per level, so a restart clears it.
- */
-USTRUCT(BlueprintType)
-struct FJamProgress
-{
-	GENERATED_BODY()
-
-	/** Negative: not stored yet (the first pawn keeps its own). */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Jam|Progress")
-	float Health = -1.0f;
-
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Jam|Progress")
-	float Armor = 0.0f;
-
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Jam|Progress")
-	TArray<FName> Keys;
-
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Jam|Progress")
-	TArray<FName> Flags;
-
-	/** By weapon index of AJamZeroGPawn::Weapons. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Jam|Progress")
-	TArray<bool> Weapons;
-
-	/** Negative: not stored yet. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Jam|Progress")
-	float Oxygen = -1.0f;
-
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Jam|Progress")
-	int32 Cargo = 0;
-
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Jam|Progress")
-	TArray<FName> Tools;
-};
-
-/** Gravity for the walker in a level whose world gravity is 0; the direction comes from SetGravityDirection. */
-UCLASS()
-class MINDKORE_API UJamWalkerMovement : public UCharacterMovementComponent
-{
-	GENERATED_BODY()
-
-public:
-	/** cm/s^2 toward the gravity direction, negative as UE's GravityZ; GravityScale still multiplies it. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Walker")
-	float WalkerGravityZ = -980.0f;
-
-	virtual float GetGravityZ() const override { return WalkerGravityZ * GravityScale; }
-};
-
-/**
- * AJamCharacter that falls in a zero-gravity level: the walker inside an
- * AJamGravityZone. Its capsule is turned every tick so its up is against the
- * gravity direction (straight up in the cabin, away from the planetoid's
- * centre on it). It breathes (UJamOxygenComponent) so oxygen carries over.
- */
-UCLASS()
-class MINDKORE_API AJamShipWalker : public AJamCharacter
-{
-	GENERATED_BODY()
-
-public:
-	AJamShipWalker(const FObjectInitializer& ObjectInitializer);
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
-	TObjectPtr<UJamOxygenComponent> Oxygen = nullptr;
-
-	/** Space again in the air on a planetoid (radial gravity): a jet leap straight up from the surface, cm/s. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Walker", meta = (ClampMin = "0.0"))
-	float JetExitSpeedCm = 1600.0f;
-
-	/** Set every tick by AJamShipGameMode: the walker stands in a radial (planetoid) zone, where the jet leap works. */
-	bool bInRadialGravity = false;
-
-	virtual void Tick(float DeltaSeconds) override;
-	virtual void Jump() override;
-};
-
-/**
- * Turns the view relative to the walker's gravity: the view is kept as pitch
+ * Turns the view relative to the pawn's gravity: the view is kept as pitch
  * and yaw in a frame that is carried along (quaternions) as gravity turns,
  * and that gravity eases toward the pawn's - so on the planetoid the mouse
  * looks around the local up, landing turns the world under you smoothly,
- * and walking around the sphere keeps the view level. With gravity straight
- * down it behaves as the stock controller.
+ * and walking around the sphere keeps the view level. Outside every gravity
+ * zone the frame stays where it was (no snap back to world up).
  */
 UCLASS()
 class MINDKORE_API AJamShipController : public APlayerController
@@ -123,11 +40,11 @@ private:
 };
 
 /**
- * A place with gravity and/or air. With bWalk the player walks inside
- * (AJamShipWalker) and floats outside (AJamZeroGPawn); without it the zone
- * only gives air. A box (the cabin and airlock) or, with SphereRadiusCm > 0,
- * a sphere around the actor (the planetoid: a thin walking shell inside a
- * wider warm, breathable one). bRadial pulls toward the actor's centre.
+ * A place with gravity and/or air. With bWalk the player's pawn walks inside
+ * (AJamZeroGPawn::SetGravity) and floats outside; without it the zone only
+ * gives air. A box (the cabin and airlock) or, with SphereRadiusCm > 0, a
+ * sphere around the actor (the planetoid: a thin walking shell inside a
+ * wider breathable one). bRadial pulls toward the actor's centre.
  */
 UCLASS()
 class MINDKORE_API AJamGravityZone : public AActor
@@ -148,7 +65,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
 	bool bWalk = true;
 
-	/** Gravity strength while walking here, cm/s^2 (980 = Earth; a planetoid much less, so a jump leaves it). */
+	/** Gravity strength while walking here, cm/s^2 (980 = Earth). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship", meta = (ClampMin = "0.0"))
 	float GravityCm = 980.0f;
 
@@ -177,13 +94,13 @@ public:
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FJamLaunchAttempt);
 
 /**
- * The ship level's mode («Почини и улети»): starts the player walking in the
- * cabin, swaps the pawn at the edge of every AJamGravityZone (walker inside,
- * zero-G pawn outside, same place, velocity and view), carries FJamProgress
- * across the swap, sets gravity and air for the pawn each tick, shows toasts,
- * and ends the run when the launch lever is pulled (AJamShipPanel): it
- * broadcasts OnLaunchAttempt (the hook for the planetoid boss, not built
- * yet), then shows «Улетел» and restarts.
+ * The ship level's mode («Почини и улети»): one physics pawn (AJamZeroGPawn)
+ * for the whole run - every tick it gets the gravity of the AJamGravityZone it
+ * is in (walking) or none (zero-G), and the air of the zone. Shows toasts,
+ * counts cargo, and ends the run when the launch lever is pulled
+ * (AJamShipPanel): it broadcasts OnLaunchAttempt (the hook for the planetoid
+ * boss, not built yet), then shows «Улетел» and restarts. The guns start
+ * locked; pickups unlock them.
  */
 UCLASS()
 class MINDKORE_API AJamShipGameMode : public AJamZeroGGameMode
@@ -192,16 +109,6 @@ class MINDKORE_API AJamShipGameMode : public AJamZeroGGameMode
 
 public:
 	AJamShipGameMode();
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
-	TSubclassOf<APawn> WalkerClass;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
-	TSubclassOf<APawn> FloaterClass;
-
-	/** Hysteresis at a zone's edge: leave or enter only this far past it, cm. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship", meta = (ClampMin = "0.0"))
-	float SwapMarginCm = 20.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship", meta = (ClampMin = "0.0"))
 	float ToastSeconds = 3.0f;
@@ -213,8 +120,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship", meta = (ClampMin = "0"))
 	int32 CargoTotal = 6;
 
+	/** Cargo taken this run. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Ship")
-	FJamProgress Progress;
+	int32 Cargo = 0;
+
+	/** Tools taken this run (AJamToolPickup; no mechanic yet). */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Ship")
+	TArray<FName> Tools;
 
 	UPROPERTY(BlueprintReadOnly, Transient, Category = "Jam|Ship")
 	bool bEnded = false;
@@ -229,25 +141,24 @@ public:
 	/** The zone the pawn is in now, or null (for the HUD). */
 	const AJamGravityZone* ZoneOf(const APawn* Pawn) const;
 
+	/** The first walking (gravity) zone containing Location, or null. */
+	const AJamGravityZone* GravityZoneAt(const FVector& Location) const { return ZoneAt(Location, 0.0f); }
+
 	/** The launch lever: the run is won. */
 	void EndGame();
 
-	/** Swap the controller's pawn to Class at the same place, velocity and view, carrying Progress. */
-	APawn* SwapPawn(APlayerController* PlayerController, TSubclassOf<APawn> Class);
-
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void StartPlay() override;
 
 private:
 	/** The first zone containing Location: walking zones only, or any zone. */
 	const AJamGravityZone* ZoneAt(const FVector& Location, float InsetCm, bool bWalkOnly = true) const;
-	void StoreProgress(APawn* Pawn);
-	void ApplyProgress(APawn* Pawn) const;
 
 	FText ToastText;
 	double ToastUntil = 0.0;
 };
 
-/** HUD of the ship level: the zero-G HUD or a walker's basics, plus the three lamps, cargo, air, toasts and the ending. */
+/** HUD of the ship level: the zero-G HUD plus the three lamps, cargo, the zone's text, toasts and the ending. */
 UCLASS()
 class MINDKORE_API AJamShipHUD : public AJamZeroGHUD
 {
