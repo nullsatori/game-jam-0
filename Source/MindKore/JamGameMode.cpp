@@ -199,9 +199,15 @@ void AJamZeroGHUD::DrawHUD()
 	{
 		State += TEXT("   crowbar");
 	}
+	// The ship-part dock of the zero-G map only: the ship map's docks (fuel,
+	// navigation, the hull's junk counter) are shown by AJamShipHUD's lamps.
 	for (TActorIterator<AJamDockZone> Dock(GetWorld()); Dock; ++Dock)
 	{
-		State += FString::Printf(TEXT("   Детали: %d/%d%s"), Dock->GetCount(), Dock->RequiredCount, Dock->IsCompleted() ? TEXT(" - готово") : TEXT(""));
+		if (Dock->RequiredTag != TEXT("Ship.Part"))
+		{
+			continue;
+		}
+		State +=FString::Printf(TEXT("   Детали: %d/%d%s"), Dock->GetCount(), Dock->RequiredCount, Dock->IsCompleted() ? TEXT(" - готово") : TEXT(""));
 		break;
 	}
 	if (Pawn->Oxygen->IsDead())
