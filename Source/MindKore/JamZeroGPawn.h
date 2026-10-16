@@ -118,6 +118,10 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.1"))
 	float SoundPitch = 1.0f;
 
+	/** Usable now. Set from AJamZeroGPawn::bStartWithAllWeapons on BeginPlay; pickups unlock (UnlockWeapon). */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapon")
+	bool bUnlocked = true;
+
 	/** Rounds in the magazine now. Set to MagazineSize on BeginPlay. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapon")
 	int32 Ammo = 0;
@@ -296,6 +300,10 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|ZeroG|Shot")
 	int32 CurrentWeapon = 0;
 
+	/** Off (the ship map): every gun starts locked until a pickup unlocks it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot")
+	bool bStartWithAllWeapons = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Shot")
 	TObjectPtr<UMKImpactDataAsset> ImpactData = nullptr;
 
@@ -352,6 +360,15 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
 	void Reload();
+
+	/** Unlock a gun and take it in hand. */
+	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
+	void UnlockWeapon(int32 Index);
+
+	void SetWeaponUnlocked(int32 Index, bool bUnlocked);
+
+	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG")
+	bool IsWeaponUnlocked(int32 Index) const { return Weapons.IsValidIndex(Index) && Weapons[Index].bUnlocked; }
 
 	const FJamWeapon* GetWeapon() const { return Weapons.IsValidIndex(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr; }
 

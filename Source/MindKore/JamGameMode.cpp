@@ -87,7 +87,8 @@ void AJamZeroGGameMode::StartPlay()
 	for (TActorIterator<AMKPhysicsProp> It(GetWorld()); It; ++It)
 	{
 		UPrimitiveComponent* PropBody = It->Body;
-		if (!PropBody || !PropBody->IsSimulatingPhysics())
+		// Jam.NoDrift: placed parts (a module on the asteroid) stay where the level put them.
+		if (!PropBody || !PropBody->IsSimulatingPhysics() || It->ActorHasTag(TEXT("Jam.NoDrift")))
 		{
 			continue;
 		}
@@ -173,7 +174,12 @@ void AJamZeroGHUD::DrawHUD()
 	DrawText(FString::Printf(TEXT("O2 %.0f%% (%.0f s)"), Fraction * 100.0f, Pawn->Oxygen->Seconds), FLinearColor::White, BarX + 250.0f, BarY - 2.0f, Font);
 
 	FString State = FString::Printf(TEXT("HP %.0f   speed %.1f m/s"), Pawn->Vitals->Health, Pawn->GetBodyVelocity().Size() / 100.0f);
-	if (const FJamWeapon* Weapon = Pawn->GetWeapon())
+	const FJamWeapon* Weapon = Pawn->GetWeapon();
+	if (!Weapon || !Weapon->bUnlocked)
+	{
+		State += TEXT("   без оружия");
+	}
+	else
 	{
 		State += FString::Printf(TEXT("   [%d] %s %d/%d"), Pawn->CurrentWeapon + 1, *Weapon->Name.ToString(), Weapon->Ammo, Weapon->Reserve);
 		if (const float Reload = Pawn->GetReloadRemaining(); Reload > 0.0f)

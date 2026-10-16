@@ -50,6 +50,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Jam|Oxygen")
 	bool IsEmpty() const { return Seconds <= 0.0f; }
 
+	/** In air (the cabin, the planetoid's warm shell): breathing restores RefillPerSecond instead of draining. Set every tick by the zone owner. */
+	void SetBreathable(bool bInAir, float RefillPerSecond) { bBreathable = bInAir; BreathableRefillPerSecond = RefillPerSecond; }
+
+	UFUNCTION(BlueprintPure, Category = "Jam|Oxygen")
+	bool IsBreathable() const { return bBreathable; }
+
 	UFUNCTION(BlueprintPure, Category = "Jam|Oxygen")
 	bool IsDead() const { return bDead; }
 
@@ -63,6 +69,8 @@ protected:
 
 private:
 	float SuffocationAccumulator = 0.0f;
+	bool bBreathable = false;
+	float BreathableRefillPerSecond = 0.0f;
 	bool bDead = false;
 };
 

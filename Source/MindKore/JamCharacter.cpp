@@ -11,6 +11,7 @@
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "JamGravity.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "MKCarryComponent.h"
@@ -24,7 +25,8 @@
 #include "Sound/SoundBase.h"
 #include "UObject/ConstructorHelpers.h"
 
-AJamCharacter::AJamCharacter()
+AJamCharacter::AJamCharacter(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
 {
 	PrimaryActorTick.bCanEverTick = true;
 
@@ -183,9 +185,13 @@ void AJamCharacter::PawnClientRestart()
 void AJamCharacter::Move(const FInputActionValue& Value)
 {
 	const FVector2D Axis = Value.Get<FVector2D>();
-	const FRotator Yaw(0.0f, GetControlRotation().Yaw, 0.0f);
-	AddMovementInput(FRotationMatrix(Yaw).GetUnitAxis(EAxis::X), Axis.Y);
-	AddMovementInput(FRotationMatrix(Yaw).GetUnitAxis(EAxis::Y), Axis.X);
+	// The view's yaw in gravity space, back to the world: with gravity down this
+	// is the plain control yaw; on the planetoid it walks along the surface.
+	const FVector Gravity = GetCharacterMovement()->GetGravityDirection();
+	const FRotator Yaw(0.0f, JamGravityRelativeRotation(GetControlRotation(), Gravity).Yaw, 0.0f);
+	const FRotationMatrix Walk(JamGravityWorldRotation(Yaw, Gravity));
+	AddMovementInput(Walk.GetUnitAxis(EAxis::X), Axis.Y);
+	AddMovementInput(Walk.GetUnitAxis(EAxis::Y), Axis.X);
 }
 
 void AJamCharacter::Look(const FInputActionValue& Value)

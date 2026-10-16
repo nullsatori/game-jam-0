@@ -183,6 +183,7 @@ void AJamZeroGPawn::BeginPlay()
 	for (FJamWeapon& Weapon : Weapons)
 	{
 		Weapon.Ammo = Weapon.MagazineSize;
+		Weapon.bUnlocked = bStartWithAllWeapons;
 	}
 	Body->SetNotifyRigidBodyCollision(true);
 	Body->OnComponentHit.AddDynamic(this, &AJamZeroGPawn::HandleBodyHit);
@@ -304,9 +305,16 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindAction(ReloadAction, ETriggerEvent::Started, this, &AJamZeroGPawn::Reload);
 	Input->BindActionValueLambda(WheelAction, ETriggerEvent::Started, [this](const FInputActionValue& Value)
 	{
-		if (Weapons.Num() > 0)
+		// The next unlocked gun in the wheel's direction.
+		const int32 Step = Value.Get<float>() > 0.0f ? 1 : Weapons.Num() - 1;
+		for (int32 Index = (CurrentWeapon + Step) % FMath::Max(Weapons.Num(), 1), Tries = 0; Tries < Weapons.Num();
+			Index = (Index + Step) % Weapons.Num(), ++Tries)
 		{
-			SelectWeapon((CurrentWeapon + (Value.Get<float>() > 0.0f ? 1 : Weapons.Num() - 1)) % Weapons.Num());
+			if (Weapons[Index].bUnlocked)
+			{
+				SelectWeapon(Index);
+				break;
+			}
 		}
 	});
 	for (int32 Index = 0; Index < 3; ++Index)
@@ -757,7 +765,7 @@ void AJamZeroGPawn::DrawPrediction() const
 		DrawPath(Body->GetComponentLocation(), GetBodyVelocity() - Direction * PushImpulse / Body->GetMass(),
 			Body->GetScaledSphereRadius(), nullptr, FColor(255, 140, 40));
 	}
-	if (const FJamWeapon* Weapon = GetWeapon(); Weapon && Weapon->RecoilImpulse > 0.0f)
+	if (const FJamWeapon* Weapon = GetWeapon(); Weapon && Weapon->bUnlocked && Weapon->RecoilImpulse > 0.0f)
 	{
 		DrawPath(Body->GetComponentLocation(), GetBodyVelocity() - Direction * Weapon->RecoilImpulse / Body->GetMass(),
 			Body->GetScaledSphereRadius(), nullptr, FColor(255, 230, 90));
@@ -933,9 +941,29 @@ float AJamZeroGPawn::GetPushCooldownRemaining() const
 
 // --- shot ----------------------------------------------------------------------
 
+void AJamZeroGPawn::SetWeaponUnlocked(int32 Index, bool bUnlocked)
+{
+	if (Weapons.IsValidIndex(Index))
+	{
+		Weapons[Index].bUnlocked = bUnlocked;
+	}
+}
+
+void AJamZeroGPawn::UnlockWeapon(int32 Index)
+{
+	if (!Weapons.IsValidIndex(Index))
+	{
+		return;
+	}
+	Weapons[Index].bUnlocked = true;
+	CurrentWeapon = INDEX_NONE; // so SelectWeapon takes it even when it was the current slot
+	SelectWeapon(Index);
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG weapon: %s unlocked"), *Weapons[Index].Name.ToString());
+}
+
 void AJamZeroGPawn::SelectWeapon(int32 Index)
 {
-	if (!Weapons.IsValidIndex(Index) || Index == CurrentWeapon)
+	if (!Weapons.IsValidIndex(Index) || Index == CurrentWeapon || !Weapons[Index].bUnlocked)
 	{
 		return;
 	}
@@ -964,7 +992,7 @@ bool AJamZeroGPawn::Fire()
 {
 	FJamWeapon* Weapon = Weapons.IsValidIndex(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
 	const double Now = GetWorld()->GetTimeSeconds();
-	if (!Weapon || Now < NextShotSeconds || GetReloadRemaining() > 0.0f)
+	if (!Weapon || !Weapon->bUnlocked || Now < NextShotSeconds || GetReloadRemaining() > 0.0f)
 	{
 		return false;
 	}

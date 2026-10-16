@@ -39,7 +39,7 @@ class MINDKORE_API AJamCharacter : public ACharacter, public IMKImpactReceiver
 	GENERATED_BODY()
 
 public:
-	AJamCharacter();
+	AJamCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UCameraComponent> Camera = nullptr;

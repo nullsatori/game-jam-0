@@ -42,7 +42,14 @@ void UJamOxygenComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	{
 		return;
 	}
-	Spend(BreathingPerSecond * DeltaTime);
+	if (bBreathable)
+	{
+		Seconds = FMath::Min(CapacitySeconds, Seconds + BreathableRefillPerSecond * DeltaTime);
+	}
+	else
+	{
+		Spend(BreathingPerSecond * DeltaTime);
+	}
 
 	UMKVitalsComponent* Vitals = GetOwner()->FindComponentByClass<UMKVitalsComponent>();
 	if (!Vitals)
