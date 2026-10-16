@@ -1,0 +1,73 @@
+# Third-party sources
+
+Everything in `Content/MindKore` is MindKore's own content (meshes, materials,
+textures, data assets, Niagara, synthesised sounds). The sounds below are cut
+from third-party recordings; the entries are copied from MindKore's
+`Docs/CREDITS.md`. No content pack (Fab, Marketplace) is included.
+
+## Audio
+
+Nothing below is used as recorded: every in-game sound was cut from a donor,
+played down, layered and re-recorded into a wave of MindKore by a script.
+
+**The shot** (`SW_MK_Blast_Transient`, `SW_MK_Blast_Tail`) — cut from
+**Smith & Wesson 686 Plus 4 Inch Barrel .357 Mag** by **AugustSandberg**
+([Freesound 231248](https://freesound.org/people/AugustSandberg/sounds/231248/)).
+Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+
+**VisceralBulletImpacts.wav** — by **u1769092**, via
+[Freesound](https://freesound.org/people/u1769092/sounds/423301/).
+Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+Donor of the blow in every hit on a body and of the close-range layer
+(`SW_MK_Hit_*`).
+
+**Gushy Impacts (Blood)** — by **TILE_SFX**, via
+[Freesound](https://freesound.org/people/tile_sfx/sounds/866651/).
+Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+Donor of the wet layer (`SW_MK_Hit_Torso_*`, `SW_MK_Hit_Head_*`).
+
+**Impacts_Slushy_Orange_002.wav** — by **duckduckpony**, via
+[Freesound](https://freesound.org/people/duckduckpony/sounds/204041/).
+Licence: [CC Attribution 4.0](https://creativecommons.org/licenses/by/4.0/).
+Commercial use permitted; **attribution required**.
+Donor of the gristle crunch in `SW_MK_Hit_Limb_*`. Modified: cut to single
+events, played 10–14 semitones down, band-limited, shortened.
+
+**Clean Revolver Reload** — by **Dredile**, via
+[Freesound](https://freesound.org/people/Dredile/sounds/177863/).
+Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+Donor of the bone of `SW_MK_Hit_Head_*` and the plate of `SW_MK_Hit_Armor_*`.
+
+**Revolver Cocking.wav** — by **ajoyce86**, via
+[Freesound](https://freesound.org/people/ajoyce86/sounds/240698/);
+**22lr revolver handling clicking foley** and **9mm Handgun Being Dry Fired** —
+by **serøutōnin--deprivəd**, via Freesound
+([677159](https://freesound.org/s/677159/), [674568](https://freesound.org/s/674568/)).
+Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/), all three.
+The bone of `SW_MK_Hit_Head_*`.
+
+### Household things
+
+Freesound HQ previews, cut to single events, faded, levelled, two of them
+cross-faded into 4 s loops. All [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+Waves in `/Game/MindKore/Audio/Household`.
+
+- **Toilet Flush & Tank-Refill** — **Oneirophile**
+  ([Freesound 141365](https://freesound.org/people/Oneirophile/sounds/141365/)):
+  `SW_MK_Toilet_Flush`, `SW_MK_Toilet_Fill`, `SW_MK_Toilet_FillStop`.
+- **microwave cycle with ding 1.wav** — **greatsoundstube**
+  ([Freesound 628599](https://freesound.org/people/greatsoundstube/sounds/628599/)):
+  `SW_MK_Microwave_Hum`, `SW_MK_Microwave_Ding`.
+- **Microwave oven (Open / Close + Operating sounds)** — **Breviceps**
+  ([Freesound 457029](https://freesound.org/people/Breviceps/sounds/457029/)):
+  `SW_MK_Microwave_DoorOpen`, `SW_MK_Microwave_DoorClose`, the latch click of
+  `SW_MK_Microwave_Start`.
+
+### Synthesised, no donor
+
+`SW_MK_TimeEntry`, `SW_MK_TimeExit`.
+
+## Engine content
+
+`/Engine/BasicShapes` (the test room blockout, the dummy, the plank, crate and
+block) ships with Unreal Engine and is used under the Unreal Engine EULA.
