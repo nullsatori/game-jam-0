@@ -90,13 +90,39 @@ UnrealEditor-Cmd.exe <путь>\MKJamStarter.uproject -ExecutePythonScript="<п�
 [Tether-Prediction](Docs/Tether-Prediction.md) ·
 [CREDITS](CREDITS.md)
 
-## Тяжёлый арт
+## Тяжёлый арт и Git LFS
 
-`Content/JamArt/` — единственная папка в `.gitignore`. Тяжёлые меши,
-текстуры и звуки команды кладутся туда и передаются вне git (облако, архив);
-каждый копирует её к себе в `Content/JamArt/`. В git идут только код, конфиг,
-карта и лёгкие системные ассеты из `Content/MindKore` (ни одного файла больше
-50 МБ, без LFS).
+Арт команды (меши, текстуры, звуки) кладётся в `Content/JamArt/` — пути
+пакетов начинаются с `/Game/JamArt/`. Только эта папка идёт через Git LFS;
+код, конфиг, карты и системные ассеты в `Content/MindKore` и `Content/Jam`
+остаются в обычном git (они были там до LFS и не переносились).
+
+**Один раз на машине.** Установить [Git LFS](https://git-lfs.com) (идёт с
+Git for Windows) и выполнить `git lfs install`. После этого `git clone` и
+`git pull` сами скачивают файлы LFS.
+
+**Блокировки.** `.uasset` и `.umap` внутри `Content/JamArt/` помечены
+`lockable`: после checkout они только для чтения, пока их не заблокируешь.
+Двоичный ассет нельзя слить, поэтому правит его один человек:
+
+```
+git lfs lock "Content/JamArt/Ship/SM_Ship_Hull.uasset"
+# правка в редакторе, сохранение, commit, push
+git lfs unlock "Content/JamArt/Ship/SM_Ship_Hull.uasset"
+git lfs locks            # кто что держит
+```
+
+Если редактор пишет, что файл только для чтения, значит его не заблокировали.
+Можно поставить в UE плагин «Git LFS 2» (Project Settings → Source Control),
+он блокирует сам при checkout ассета.
+
+**Квота.** LFS на GitHub считается на аккаунт владельца репозитория: 10 ГиБ
+хранения и трафик, который тратит каждый clone и pull. Аккаунт уже занят
+другим проектом примерно на 8,7 ГиБ, поэтому:
+- текстуры не больше 2K (лучше 1K), без 4K и несжатых исходников;
+- исходники (`.blend`, `.psd`, `.spp`) в репозиторий не класть, только
+  импортированные `.uasset` и при необходимости `.fbx`;
+- перед push смотреть `git lfs ls-files -s`.
 
 ## Что не перенесено
 

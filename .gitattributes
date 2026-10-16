@@ -17,3 +17,11 @@
 *.blend binary
 *.ttf binary
 *.otf binary
+
+# Team art: the only folder stored in Git LFS (Content/JamArt/, see README.md).
+# Files committed before LFS stay in plain git. Binary assets cannot be merged,
+# so .uasset/.umap here are lockable: read-only until `git lfs lock`.
+Content/JamArt/** filter=lfs diff=lfs merge=lfs -text
+Content/JamArt/**/*.uasset filter=lfs diff=lfs merge=lfs -text lockable
+Content/JamArt/**/*.umap filter=lfs diff=lfs merge=lfs -text lockable
+Content/JamArt/README.md !filter !diff !merge text

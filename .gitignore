@@ -5,5 +5,3 @@ DerivedDataCache/
 .vs/
 *.sln
 
-# Heavy team art, shared outside git (see README.md).
-Content/JamArt/
