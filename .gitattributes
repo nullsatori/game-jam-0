@@ -1,0 +1,19 @@
+* text=auto
+
+# Unreal and other binary files: never diffed or merged as text. No LFS.
+*.uasset binary
+*.umap binary
+*.fbx binary
+*.obj binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.png binary
+*.jpg binary
+*.tga binary
+*.exr binary
+*.hdr binary
+*.psd binary
+*.blend binary
+*.ttf binary
+*.otf binary
