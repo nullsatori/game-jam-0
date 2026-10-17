@@ -40,7 +40,7 @@
 AJamZeroGPawn::AJamZeroGPawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	// The controller explicitly turns the body; APawn must not rotate it again.
+	// The body never turns; the camera follows the control rotation alone.
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationRoll = false;
@@ -457,8 +457,8 @@ bool AJamZeroGPawn::Grab(UPrimitiveComponent* Target, FVector Point)
 	GrabConstraint->SetLinearDriveParams(GrabStiffness, GrabDamping, /*ForceLimit=*/0.0f);
 	// The prop is component 1 (the child), the pawn component 2 (the parent):
 	// the drive's position target is the child frame's position in the parent
-	// frame. Frame 2 follows the pawn's centre and body orientation;
-	// frame 1 stays at the grab point on the prop. The
+	// frame. Frame 2 moves to the pawn's centre (its rotation is locked, so the
+	// frame never turns); frame 1 stays at the grab point on the prop. The
 	// target is then where the grab point should sit from the pawn's centre, in
 	// body space (UpdateHoldTarget, every tick). The other way round the target
 	// lives in the prop's spinning frame - seen in the probe as the part shoved

@@ -31,17 +31,13 @@
 void AJamShipController::UpdateRotation(float DeltaTime)
 {
 	// The pawn's gravity; outside every zone the frame keeps the last one.
-	AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(GetPawn());
+	const AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(GetPawn());
 	const bool bInGravity = Floater && Floater->IsInGravity();
-	const auto RotateBody = [Floater](const FQuat& Rotation)
-	{
-		if (!Floater) return;
-		// Eye height is a world-space offset, eased by the pawn. Rotating the
-		// parent must not swing that offset before the pawn's next tick.
-		const FVector EyeLocation = Floater->Camera->GetComponentLocation();
-		Floater->Body->SetWorldRotation(Rotation, false, nullptr, ETeleportType::TeleportPhysics);
-		Floater->Camera->SetWorldLocation(EyeLocation);
-	};
+	// Only the view turns, never the physics body. Teleporting the sphere's
+	// rotation every frame against its rotation lock left it spinning at
+	// 10^5..10^6 deg/s, and on touchdown friction turned that spin into a
+	// sideways kick (7.5 m/s in jam.Ship.Land); it also turned the grab's
+	// body-space hold target away from the view.
 	if (Floater && !bInGravity && Floater->bFreeBodyRotation)
 	{
 		// Compose in body space: after a flip, yaw still turns around the
@@ -49,22 +45,38 @@ void AJamShipController::UpdateRotation(float DeltaTime)
 		const FQuat View = (GetControlRotation().Quaternion() * RotationInput.Quaternion()).GetNormalized();
 		LastWrittenRotation = View.Rotator();
 		SetControlRotation(LastWrittenRotation);
-		// Teleport only orientation; preserve linear momentum. Physics rotation
-		// stays locked so collisions and the tether cannot spin the player.
-		RotateBody(View);
 		bWasFreeBodyRotation = true;
 		return;
 	}
 	if (bWasFreeBodyRotation)
 	{
-		// Rebase the walking frame on the actual exit orientation. Preserve
-		// the entire pose (including roll), then let gravity align the frame
-		// with the same easing used when walking around the planetoid.
+		// Leaving free rotation (landing, or entering the cabin): build the
+		// upright frame for the target gravity at once, keeping where the view
+		// looks, and fade the leftover roll out as a world-space offset. Easing
+		// the gravity itself from the free pose meant turning through up to 180
+		// degrees with FindBetweenNormals, whose axis is arbitrary near opposite
+		// vectors: an upside-down landing nodded the view 60 degrees in pitch on
+		// its way upright (jam.Ship.Land 0 180).
 		const FQuat ExitView = GetControlRotation().Quaternion();
-		const FRotator Local = (GravityFrame.Inverse() * ExitView).Rotator();
-		RelativeView = FRotator(FMath::Clamp(Local.Pitch, -89.0f, 89.0f), Local.Yaw, 0.0f);
-		GravityFrame = (ExitView * RelativeView.Quaternion().Inverse()).GetNormalized();
-		SmoothedGravity = -GravityFrame.GetUpVector();
+		const FVector Gravity = bInGravity ? Floater->GetGravityDirection()
+			: (SmoothedGravity.IsNearlyZero() ? FVector::DownVector : SmoothedGravity);
+		const FVector Up = -Gravity;
+		const FVector Forward = ExitView.GetForwardVector();
+		FVector Ahead = FVector::VectorPlaneProject(Forward, Up);
+		if (!Ahead.Normalize(0.05f))
+		{
+			// Looking straight along gravity: the view's own up (or down) gives the heading.
+			Ahead = FVector::VectorPlaneProject(FVector::DotProduct(Forward, Up) < 0.0f ? ExitView.GetUpVector() : -ExitView.GetUpVector(), Up).GetSafeNormal();
+		}
+		GravityFrame = FRotationMatrix::MakeFromXZ(Ahead, Up).ToQuat();
+		const float Pitch = FMath::RadiansToDegrees(FMath::Asin(FMath::Clamp(FVector::DotProduct(Forward, Up), -1.0f, 1.0f)));
+		RelativeView = FRotator(FMath::Clamp(Pitch, -89.0f, 89.0f), 0.0f, 0.0f);
+		SmoothedGravity = Gravity;
+		RecoveryOffset = (ExitView * (GravityFrame * RelativeView.Quaternion()).Inverse()).GetNormalized();
+		if (RecoveryOffset.W < 0.0f)
+		{
+			RecoveryOffset = -RecoveryOffset; // the short way round: GetAngle stays within 180 degrees
+		}
 		LastWrittenRotation = GetControlRotation();
 		bWasFreeBodyRotation = false;
 	}
@@ -111,13 +123,17 @@ void AJamShipController::UpdateRotation(float DeltaTime)
 	}
 	View.Roll = 0.0f;
 	RelativeView = View;
-	LastWrittenRotation = (GravityFrame * View.Quaternion()).Rotator();
-	SetControlRotation(LastWrittenRotation);
-	if (Floater)
+	// The roll left over from free rotation fades at the gravity easing rate,
+	// but never faster than RecoveryMaxDegPerSec: a 180-degree flip would
+	// otherwise start at 720 deg/s.
+	if (const float Angle = RecoveryOffset.GetAngle(); Angle > UE_KINDA_SMALL_NUMBER)
 	{
-		// Walking keeps the body upright in the gravity frame; only the head pitches.
-		RotateBody(GravityFrame * FRotator(0.0f, View.Yaw, 0.0f).Quaternion());
+		const float Step = FMath::Min(Angle * (1.0f - FMath::Exp(-GravityAlignRate * DeltaTime)),
+			FMath::DegreesToRadians(RecoveryMaxDegPerSec) * DeltaTime);
+		RecoveryOffset = FQuat::Slerp(RecoveryOffset, FQuat::Identity, Step / Angle).GetNormalized();
 	}
+	LastWrittenRotation = (RecoveryOffset * GravityFrame * View.Quaternion()).Rotator();
+	SetControlRotation(LastWrittenRotation);
 	if (APawn* const ViewPawn = GetPawnOrSpectator())
 	{
 		ViewPawn->FaceRotation(LastWrittenRotation, DeltaTime);
@@ -775,6 +791,69 @@ namespace
 		TEXT("jam.Ship.JetExit"),
 		TEXT("On the planetoid: jump, then Space in the air - the jet leap that leaves its gravity; logs the state."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunJetExit));
+
+	/**
+	 * jam.Ship.Land [Pitch] [Roll] [Speed]: start outside the planetoid's shell
+	 * with a free (rolled) view, fall onto the surface at Speed and log every
+	 * frame-ish for 4 s: grounded, radial and tangential speed, the body's
+	 * angular velocity and its up against the local up, the view's roll/pitch
+	 * in gravity space and how far the view turned since the last sample.
+	 */
+	void RunShipLand(const TArray<FString>& Args, UWorld* World)
+	{
+		AJamShipGameMode* Mode = World->GetAuthGameMode<AJamShipGameMode>();
+		const AJamGravityZone* Shell = PlanetShell(World);
+		AJamZeroGPawn* Pawn = PlayerPawn(World);
+		APlayerController* PlayerController = World->GetFirstPlayerController();
+		if (!Mode || !Shell || !Pawn || !PlayerController)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Ship land: needs the ship mode, the planetoid shell and the pawn"));
+			return;
+		}
+		const float Pitch = Args.Num() > 0 ? FCString::Atof(*Args[0]) : -60.0f;
+		const float Roll = Args.Num() > 1 ? FCString::Atof(*Args[1]) : 150.0f;
+		const float Speed = Args.Num() > 2 ? FCString::Atof(*Args[2]) : 600.0f;
+		const FVector Centre = Shell->GetActorLocation();
+		const FVector Start = Centre + FVector::UpVector * (Shell->SphereRadiusCm + 300.0f);
+		Teleport(Pawn, Start);
+		PlayerController->SetControlRotation(FRotator(Pitch, 30.0f, Roll));
+		After(Mode, 0.5f, [Mode, Centre, Speed]()
+		{
+			if (AJamZeroGPawn* Now = PlayerPawn(Mode->GetWorld()))
+			{
+				Now->Body->SetPhysicsLinearVelocity((Centre - Now->GetActorLocation()).GetSafeNormal() * Speed);
+			}
+		});
+		TSharedRef<FQuat> LastView = MakeShared<FQuat>(FQuat::Identity);
+		for (int32 Step = 0; Step <= 120; ++Step)
+		{
+			After(Mode, 0.5f + Step * 0.033f, [Mode, Centre, Step, LastView]()
+			{
+				const AJamZeroGPawn* Now = PlayerPawn(Mode->GetWorld());
+				if (!Now)
+				{
+					return;
+				}
+				const FVector Up = (Now->GetActorLocation() - Centre).GetSafeNormal();
+				const FVector Velocity = Now->GetBodyVelocity();
+				const float Radial = FVector::DotProduct(Velocity, Up);
+				const FQuat View = Now->GetControlRotation().Quaternion();
+				const float Turned = Step == 0 ? 0.0f : FMath::RadiansToDegrees(View.AngularDistance(*LastView));
+				*LastView = View;
+				const FRotator Relative = GravityView(Now);
+				UE_LOG(LogMindKore, Log, TEXT("Ship land %3d: %s %s, height %.0f, radial %.0f, tangential %.0f cm/s, body spin %.1f deg/s, body up . local up %.3f, view pitch %.1f roll %.1f, view turned %.2f deg"),
+					Step, Now->IsInGravity() ? TEXT("gravity") : TEXT("zero-G "), Now->IsGrounded() ? TEXT("ground") : TEXT("air   "),
+					FVector::Dist(Now->GetActorLocation(), Centre), Radial, (Velocity - Radial * Up).Size(),
+					Now->Body->GetPhysicsAngularVelocityInDegrees().Size(), FVector::DotProduct(Now->Body->GetUpVector(), Up),
+					Relative.Pitch, Relative.Roll, Turned);
+			});
+		}
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GShipLand(
+		TEXT("jam.Ship.Land"),
+		TEXT("jam.Ship.Land [Pitch] [Roll] [Speed]: fall onto the planetoid from a free, rolled view and log the landing every ~33 ms."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunShipLand));
 
 	/** jam.Ship.PlanetShots: two stills standing on the planetoid (top and side). */
 	void RunPlanetShots(UWorld* World)

@@ -27,7 +27,7 @@ struct FInputActionValue;
 /**
  * The zero-G player: a simulated sphere with its rotation locked, gravity
  * off and no damping, so momentum is kept until something changes it. The
- * camera follows the control rotation; optional free look turns the body in zero-G.
+ * camera follows the control rotation (free look in zero-G turns only the view).
  *
  * Ways to move, strongest first: push off what is in reach (RMB) - against a
  * wall you fly, against light junk the junk flies; throw what you hold (LMB),
@@ -47,7 +47,7 @@ struct FInputActionValue;
  * would send it, or where a throw sends the held prop - a dotted line, the
  * first contact marked, one bounce after it.
  *
- * Only the mouse turns the body; physics rotation is locked, so hits, the
+ * Only the mouse turns the view; the body's rotation is locked, so hits, the
  * grab and the rope move it but never turn it.
  *
  * Crashes count: a hit above FeedbackMinSpeedCm thumps (sound, camera shake),
@@ -112,7 +112,7 @@ public:
 
 	// --- view ---------------------------------------------------------------
 
-	/** In zero gravity, mouse look rotates the whole body around its local axes without pitch limits. */
+	/** In zero gravity, mouse look turns the view around its own axes (yaw about the view's up after a flip), without pitch limits. The physics body never turns. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View")
 	bool bFreeBodyRotation = true;
 
