@@ -10,9 +10,15 @@ Everything is in centimetres, the ship along +X with its centre at the origin.
 Layout, sizes and tags: Docs/Ship-Blockout.md. Seeded: the same map every run.
 """
 import math
+import os
 import random
+import sys
 
 import unreal
+
+# The shared living wall material (Scripts/jam_living_wall.py), found next to this script.
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_living_wall  # noqa: E402
 
 MAP = "/Game/Jam/Maps/Lvl_Jam_Ship"
 CUBE = unreal.load_asset("/Engine/BasicShapes/Cube.Cube")
@@ -503,6 +509,30 @@ block("Probe_Wing", on_surface((0.15, -1.0, 0.25), 40.0)[0], (300, 20, 80), prob
 nav_at, _ = on_surface((0.03, -1.0, 0.2), 150.0)
 prop("NavModule", nav_at, CUBE, (100, 100, 100), 80, PART, ["Ship.Nav", "Jam.NoDrift"])
 label_text("NAV MODULE", on_surface((0.03, -1.0, 0.2), 300.0)[0], 90, 30)
+# The cocoon (Docs/LivingWall.md): four living walls and a roof, 2.6 m, around the
+# module; their fronts (+Y) face out. Getting the module takes the shotgun and
+# pulling it out through a blast hole before the weave closes.
+_, nav_up = on_surface((0.03, -1.0, 0.2), 0.0)
+nav_frame = unreal.MathLibrary.make_rot_from_z(V(*nav_up))
+nav_x, nav_y = nav_frame.get_forward_vector(), nav_frame.get_right_vector()
+COCOON, COCOON_HALF = 260.0, 130.0
+cocoon_sides = [(nav_x, V(*nav_up)), (nav_x * -1.0, V(*nav_up)), (nav_y, V(*nav_up)), (nav_y * -1.0, V(*nav_up)), (V(*nav_up), nav_x)]
+probe_side = max(range(4), key=lambda k: cocoon_sides[k][0].x)  # the side facing +X, away from the old probe's wreck
+WALL_MAT = jam_living_wall.material(log)
+for j, (out, along) in enumerate(cocoon_sides):
+    w = spawn(unreal.JamLivingWall, nav_at + out * COCOON_HALF, unreal.MathLibrary.make_rot_from_yz(out, along), "Cocoon_%d" % j)
+    w.set_editor_property("width_cm", COCOON)
+    w.set_editor_property("height_cm", COCOON)
+    w.set_editor_property("wall_material", WALL_MAT)
+    # A 1 m module passes a hole only if its clear radius is over 71 cm: these
+    # walls tear wider and wait longer than the default (a pawn-sized hole).
+    w.set_editor_property("burst_margin_cm", 70.0)
+    w.set_editor_property("burst_max_radius_cm", 110.0)
+    w.set_editor_property("max_stun_seconds", 3.0)
+    w.set_editor_property("thin_spot_count", 1 if j < 4 else 0)
+    w.set_editor_property("thin_spot_seed", j + 1)
+    if j == probe_side:
+        w.set_editor_property("tags", ["Jam.WallProbe"])
 gun_at, gun_up = on_surface((0.6, -0.8, 0.3), 100.0)
 shotgun = spawn(unreal.JamWeaponPickup, gun_at, unreal.MathLibrary.make_rot_from_z(V(*gun_up)), "Pickup_Shotgun")
 shotgun.set_actor_scale3d(V(0.6, 0.4, 1.8))

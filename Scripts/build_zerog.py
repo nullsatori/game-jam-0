@@ -14,14 +14,21 @@ gravity 0 and the AJamZeroGGameMode override. Inside: floating junk
 (AMKPhysicsProp, 5-500 kg; AJamZeroGGameMode gives it drift and spin on
 StartPlay), static 4 m anchor blocks to push off, a rocket stand-in at the far
 +X end with the dock zone and four tagged ship parts (Ship.Part) 20-40 m away,
-oxygen canisters, a glass pane in a floating frame, an impact dummy
-and the PlayerStart at the origin facing +X, 1 m from the first anchor's face.
+oxygen canisters, a glass pane in a floating frame, an impact dummy,
+a living wall (AJamLivingWall) closing an alcove against the shell with a ship
+part inside, and the PlayerStart at the origin facing +X, 1 m from the first anchor's face.
 Everything is seeded: the same map every run.
 """
 import math
+import os
 import random
+import sys
 
 import unreal
+
+# The shared living wall material (Scripts/jam_living_wall.py), found next to this script.
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_living_wall  # noqa: E402
 
 MAP = "/Game/Jam/Maps/Lvl_Jam_ZeroG"
 CUBE = unreal.load_asset("/Engine/BasicShapes/Cube.Cube")
@@ -277,6 +284,54 @@ log("junk: %d props" % count)
 # --- someone to shoot: more floating dummies (after the junk, so its seed is unchanged) ---
 for i, (loc, yaw) in enumerate([(V(-1500, 0, 600), 0), (V(1500, 1200, -400), 200), (V(-800, -2600, -900), 60)]):
     spawn(unreal.MKImpactDummy, loc, yaw, "Dummy_Floating_%d" % i)
+
+# --- the living wall: an alcove against the shell, closed by AJamLivingWall (Docs/LivingWall.md) ---
+# After everything else so the seeded layout above is unchanged; the first
+# candidate mouth with nothing placed within 1.5 m of the alcove is taken.
+WALL_MAT = jam_living_wall.material(log)
+DEPTH, OPEN_W, SIDE_T = 300.0, 400.0, 40.0
+X_MOUTH = -HX + DEPTH
+taken = [a.get_actor_location() for a in eas.get_all_level_actors()
+         if not a.get_actor_label().startswith(("Shell_", "Sun", "SkyLight", "PostProcess", "DimLight"))]
+for y0, z0 in ((0.0, 0.0), (-2500.0, 0.0), (2500.0, 0.0), (0.0, -1500.0), (0.0, 1500.0)):
+    if all(not (-HX - 150 < p.x < X_MOUTH + 150 and abs(p.y - y0) < OPEN_W / 2 + 190 and abs(p.z - z0) < OPEN_W / 2 + 190) for p in taken):
+        break
+else:
+    raise RuntimeError("no clear spot for the living wall alcove")
+xc = (-HX + X_MOUTH) / 2
+half = OPEN_W / 2 + SIDE_T / 2
+block("Alcove_Top", V(xc, y0, z0 + half), (DEPTH, OPEN_W + 2 * SIDE_T, SIDE_T), material=ANCHOR)
+block("Alcove_Bottom", V(xc, y0, z0 - half), (DEPTH, OPEN_W + 2 * SIDE_T, SIDE_T), material=ANCHOR)
+block("Alcove_Left", V(xc, y0 - half, z0), (DEPTH, SIDE_T, OPEN_W), material=ANCHOR)
+block("Alcove_Right", V(xc, y0 + half, z0), (DEPTH, SIDE_T, OPEN_W), material=ANCHOR)
+wall = spawn(unreal.JamLivingWall, V(X_MOUTH - 10, y0, z0), -90, "LivingWall")  # yaw -90: its front (+Y) faces +X, the arena
+wall.set_editor_property("width_cm", OPEN_W)
+wall.set_editor_property("height_cm", OPEN_W)
+wall.set_editor_property("thin_spot_count", 1)
+wall.set_editor_property("wall_material", WALL_MAT)
+wall.set_editor_property("tags", ["Jam.WallProbe"])
+prize = spawn(unreal.MKPhysicsProp, V(xc, y0, z0), 0, "ShipPart_Alcove_40kg")
+prize_body = prize.get_editor_property("body")
+prize_body.modify()
+prize_body.set_static_mesh(CUBE)
+prize_body.set_material(0, PART)
+prize.set_actor_scale3d(V(0.6, 0.6, 0.6))
+prize.set_editor_property("mass_kg", 40.0)
+prize.set_editor_property("tags", ["Ship.Part", "Jam.NoDrift"])
+zero_damping(prize_body)
+inside = spawn(unreal.PointLight, V(xc - 60, y0, z0 + 120), 0, "Alcove_Light")
+inside_light = inside.get_editor_property("point_light_component")
+inside_light.set_editor_property("intensity", 15.0)
+inside_light.set_editor_property("attenuation_radius", 450.0)
+inside_light.set_editor_property("light_color", unreal.Color(r=255, g=190, b=140, a=255))
+# Its face looks away from the sun: a warm lamp in front so the weave reads.
+front = spawn(unreal.PointLight, V(X_MOUTH + 250, y0, z0 + 150), 0, "LivingWall_Light")
+front_light = front.get_editor_property("point_light_component")
+front_light.set_editor_property("intensity", 25.0)
+front_light.set_editor_property("attenuation_radius", 900.0)
+front_light.set_editor_property("light_color", unreal.Color(r=255, g=210, b=180, a=255))
+label_text("LIVING WALL", V(X_MOUTH + 10, y0, z0 + OPEN_W / 2 + 70), 0, 50)
+log("living wall at the alcove mouth x %.0f, y %.0f, z %.0f" % (X_MOUTH - 10, y0, z0))
 
 # --- save -------------------------------------------------------------------------------
 assert ues.get_editor_world().get_outer().get_path_name() == MAP
