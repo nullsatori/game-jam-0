@@ -1,0 +1,11 @@
+ue-mcp:
+  version: 1
+  contentRoots:
+    - /Game/
+  # In-process, not the 1.4 daemon: the daemon outlives the client and attaches
+  # to whichever editor of this project starts next, including a headless
+  # Automation run. In-process ends with the MCP client.
+  server:
+    mode: in-process
+tasks: {}
+flows: {}

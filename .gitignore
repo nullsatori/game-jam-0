@@ -5,7 +5,7 @@ DerivedDataCache/
 .vs/
 *.sln
 
-ue-mcp.local.
-ue-mcp.yml
+# ue-mcp.yml is shared; per-machine overrides stay local
+ue-mcp.local.*
 Plugins/
 .idea/

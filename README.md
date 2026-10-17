@@ -94,6 +94,47 @@ UnrealEditor-Cmd.exe <путь>\MKJamStarter.uproject -ExecutePythonScript="<п�
 Модуль называется `MindKore`: так перенесённый код работает без правок.
 Новый код — файлы `Jam*.h/.cpp` в `Source/MindKore`.
 
+## MCP-плагины
+
+Для работы ИИ-ассистента с редактором (Claude Code, Codex, Cursor) нужны два
+Editor-плагина. В git их нет (`Plugins/` в `.gitignore`), в `.uproject` они
+помечены `Optional`: без них проект открывается и собирается как обычно.
+Каждый ставит их сам, ровно этих версий:
+
+1. **UE_MCP_Bridge** из npm-пакета `ue-mcp`, версия `1.4.8-beta.2`. Нужен
+   Node.js. Из корня репозитория, при закрытом редакторе:
+
+   ```powershell
+   npx -y ue-mcp@1.4.8-beta.2 deploy MKJamStarter.uproject
+   ```
+
+2. **VibeUE**, снимок `dc051be7c49b08e613ca7a2196fe9f39c9b52119` из
+   [kevinpbuckley/VibeUE](https://github.com/kevinpbuckley/VibeUE):
+
+   ```powershell
+   git clone https://github.com/kevinpbuckley/VibeUE.git Plugins/VibeUE
+   git -C Plugins/VibeUE checkout dc051be7c49b08e613ca7a2196fe9f39c9b52119
+   ```
+
+3. Собрать проект (команда из раздела «Открыть и собрать») и открыть редактор.
+
+Настройка клиента уже в репозитории:
+
+- `.mcp.json` регистрирует `ue-mcp@1.4.8-beta.2` и `unreal-mcp` —
+  встроенный MCP-сервер редактора `http://127.0.0.1:8000/mcp`, на нём
+  работают инструменты VibeUE. Порт 8000 один на машину: два открытых
+  редактора с MCP его не поделят, ответит только один из них.
+- Путь к проекту в `.mcp.json` относительный, поэтому клиент запускать из
+  корня репозитория. Иначе — свой абсолютный путь к `.uproject` в локальной
+  настройке клиента (для Claude Code: `claude mcp add --scope local ue-mcp -- npx -y
+  ue-mcp@1.4.8-beta.2 <путь>/MKJamStarter.uproject`).
+- `ue-mcp.yml` — общая настройка сервера: `server.mode: in-process`, сервер
+  живёт вместе с клиентом и не подключается к чужому редактору. Личные
+  правки — в `ue-mcp.local.yml`, он не коммитится.
+
+Обновление: поменять версию в команде `deploy`, в `.mcp.json` и здесь, снова
+выполнить `deploy` и пересобрать.
+
 ## Git LFS
 
 - Все двоичные файлы (`.uasset`, `.umap`, `.fbx`, `.wav`, `.png` и т. д.)

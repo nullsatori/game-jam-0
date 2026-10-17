@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "unreal-mcp": {
+      "type": "http",
+      "url": "http://127.0.0.1:8000/mcp"
+    },
+    "ue-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "ue-mcp@1.4.8-beta.2",
+        "MKJamStarter.uproject"
+      ]
+    }
+  }
+}
