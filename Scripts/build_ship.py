@@ -1,6 +1,6 @@
 """Builds /Game/Jam/Maps/Lvl_Jam_Ship, the grey blockout of «Почини и улети» (editor Python, headless).
 
-Run (delete Content/Jam/Maps/Lvl_Jam_Ship.umap first; the editor stays open after
+Run (an existing map is rebuilt in place; the editor stays open after
 a plain -ExecutePythonScript, so wrap it in a script that ends with
 unreal.SystemLibrary.quit_editor()):
   UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
@@ -18,6 +18,7 @@ import unreal
 
 # The shared living wall material (Scripts/jam_living_wall.py), found next to this script.
 sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_flesh  # noqa: E402
 import jam_living_wall  # noqa: E402
 
 MAP = "/Game/Jam/Maps/Lvl_Jam_Ship"
@@ -184,8 +185,11 @@ def set_extent(actor, prop_name, extent):
 
 # --- fresh, non-partitioned level -----------------------------------------------
 if eal.does_asset_exist(MAP):
-    raise RuntimeError(MAP + " exists: delete the .umap first (a failed new_level would build into another map)")
-if not les.new_level(MAP, False):
+    # Rebuilt in place: the map is loaded and every actor cleared (its file is edited, never deleted).
+    if not les.load_level(MAP) or ues.get_editor_world().get_outer().get_path_name() != MAP:
+        raise RuntimeError("load_level failed for " + MAP)
+    eas.destroy_actors([a for a in eas.get_all_level_actors() if not isinstance(a, (unreal.WorldSettings, unreal.Brush))])
+elif not les.new_level(MAP, False):
     raise RuntimeError("new_level failed for " + MAP)
 world = ues.get_editor_world()
 if world.get_outer().get_path_name() != MAP:
@@ -482,8 +486,9 @@ label_text("FUEL TANKS", V(150, -6000, 350), 90, 50)
 # Within 8 m of the surface the player walks on it (radial gravity 980 toward the
 # centre; the view's up eases to the surface normal); within 10 m breathing
 # restores oxygen. A jump, then Space again in the air, is a jet leap off it.
+FLESH_SET = jam_flesh.materials(log)  # the gritty flesh (Docs/LivingWall.md, Materials)
 PLANET, PR = (0.0, 10000.0, -1000.0), 3000.0
-block("Planetoid", V(*PLANET), (2 * PR, 2 * PR, 2 * PR), None, SPHERE, FLESH)
+block("Planetoid", V(*PLANET), (2 * PR, 2 * PR, 2 * PR), None, SPHERE, FLESH_SET["PlanetSkin"])
 walk_shell = spawn(unreal.JamGravityZone, V(*PLANET), None, "Gravity_Planetoid")
 walk_shell.set_editor_property("sphere_radius_cm", PR + 800.0)
 walk_shell.set_editor_property("radial", True)
@@ -544,9 +549,9 @@ label_text("SHOTGUN", on_surface((0.6, -0.8, 0.3), 250.0)[0], 90, 30)
 for j, direction in enumerate([(0.5, -0.6, -0.5), (-0.6, -0.5, 0.4), (0.7, 0.2, 0.6), (-0.4, 0.3, -0.8)]):
     at, up = on_surface(direction, 40.0)
     tangent = norm((up[1], -up[0], 0.0)) if abs(up[2]) < 0.9 else (1.0, 0.0, 0.0)
-    block("Tentacle_%d" % j, at, (80, 80, 1200), unreal.MathLibrary.make_rot_from_z(V(*tangent)), CYL, ANCHOR)
+    block("Tentacle_%d" % j, at, (80, 80, 1200), unreal.MathLibrary.make_rot_from_z(V(*tangent)), CYL, FLESH_SET["Suckers"])
 eye_at, eye_up = on_surface((-0.3, -0.9, -0.2), 100.0)
-block("Eye", eye_at, (400, 400, 400), None, SPHERE, EYE, shadow=False)
+block("Eye", eye_at, (400, 400, 400), None, SPHERE, FLESH_SET["PlanetEye"], shadow=False)
 # Bioluminescence: warm pink and orange glows close to the surface.
 for j, (direction, rgb) in enumerate([((0.0, -1.0, 0.25), (1.0, 0.45, 0.6)), ((0.5, -0.8, -0.3), (1.0, 0.55, 0.25)),
                                       ((-0.6, -0.6, 0.5), (1.0, 0.4, 0.55)), ((-0.2, -0.95, -0.4), (1.0, 0.5, 0.3)),

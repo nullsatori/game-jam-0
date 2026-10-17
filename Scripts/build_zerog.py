@@ -128,8 +128,11 @@ def zero_damping(component):
 
 # --- fresh, non-partitioned level --------------------------------------------
 if eal.does_asset_exist(MAP):
-    raise RuntimeError(MAP + " exists: delete the .umap first (a failed new_level would build into another map)")
-if not les.new_level(MAP, False):
+    # Rebuilt in place: the map is loaded and every actor cleared (its file is edited, never deleted).
+    if not les.load_level(MAP) or ues.get_editor_world().get_outer().get_path_name() != MAP:
+        raise RuntimeError("load_level failed for " + MAP)
+    eas.destroy_actors([a for a in eas.get_all_level_actors() if not isinstance(a, (unreal.WorldSettings, unreal.Brush))])
+elif not les.new_level(MAP, False):
     raise RuntimeError("new_level failed for " + MAP)
 world = ues.get_editor_world()
 if world.get_outer().get_path_name() != MAP:

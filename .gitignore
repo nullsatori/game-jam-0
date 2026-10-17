@@ -9,3 +9,4 @@ DerivedDataCache/
 ue-mcp.local.*
 Plugins/
 .idea/
+__pycache__/

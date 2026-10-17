@@ -5,6 +5,16 @@ textures, data assets, Niagara, synthesised sounds). The sounds below are cut
 from third-party recordings; the entries are copied from MindKore's
 `Docs/CREDITS.md`. No content pack (Fab, Marketplace) is included.
 
+## Textures
+
+`Content/JamArt/Textures/Flesh/T_Jam_Gritty_*` (muscle, tendon, vessels, wetness,
+bundle end, membrane, planet skin, planet eye, suckers) are the owner's own
+AI generations (17.10.2026, a gritty retro palette after Half-Life 1, Postal 2
+and Buckshot Roulette; no texture from those games was used). Imported at
+256 px. The normal maps `T_Jam_Gritty_{Muscle,Tendon,PlanetSkin}_N` are derived
+from them by `Scripts/make_flesh_normals.py`. The frame of the mesh living wall
+uses MindKore's own `T_MK_Yard_Rust_BC/N`.
+
 ## Audio
 
 Nothing below is used as recorded: every in-game sound was cut from a donor,
