@@ -145,7 +145,8 @@ Alt цепляет то, что под прицелом, в пределах `Gr
   на тело.
 - Пешка (`CrashImpact` — те же настройки для её ударов): от
   `FeedbackMinSpeedCm` (250) — звук `SC_MK_Hit_Armor` (громкость по
-  скорости) и тряска камеры (`ShakeCmPer1000` 4 см, `ShakeSeconds` 0.25);
+  скорости; по плоти `MK_Flesh` — `FleshCrashSound`, хруст и мокрый удар
+  `SC_MK_Hit_Limb` ниже на 0.4–0.55) и тряска камеры (`ShakeCmPer1000` 4 см, `ShakeSeconds` 0.25);
   от `CrashDamageMinSpeedCm` (600) — урон себе
   `(скорость − 600) × CrashDamagePerCmS` (0.05).
 

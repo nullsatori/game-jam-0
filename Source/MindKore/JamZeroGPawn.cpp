@@ -100,6 +100,27 @@ AJamZeroGPawn::AJamZeroGPawn()
 	static ConstructorHelpers::FObjectFinder<USoundBase> TimeExit(
 		TEXT("/Game/MindKore/Audio/BulletTime/SW_MK_TimeExit.SW_MK_TimeExit"));
 	BulletTimeExitSound = TimeExit.Object;
+	// Flesh underfoot: MindKore's wet body hit and gristle crunch (recorded donors, CREDITS.md), pitched down when played.
+	static ConstructorHelpers::FObjectFinder<USoundBase> FleshStep(TEXT("/Game/MindKore/Audio/Impact/SC_MK_Hit_Torso.SC_MK_Hit_Torso"));
+	FleshStepSound = FleshStep.Object;
+	static ConstructorHelpers::FObjectFinder<USoundBase> FleshCrash(TEXT("/Game/MindKore/Audio/Impact/SC_MK_Hit_Limb.SC_MK_Hit_Limb"));
+	FleshCrashSound = FleshCrash.Object;
+}
+
+namespace
+{
+	/** MK_Flesh (SurfaceType3, DefaultEngine.ini) from the hit, else from the component's first material
+	 *  (the planetoid's complex collision and a physics contact may not report one). */
+	bool IsFlesh(const FHitResult& Hit)
+	{
+		const UPhysicalMaterial* Material = Hit.PhysMaterial.Get();
+		const UPrimitiveComponent* Component = Hit.GetComponent();
+		if (!Material && Component && Component->GetMaterial(0))
+		{
+			Material = Component->GetMaterial(0)->GetPhysicalMaterial();
+		}
+		return UPhysicalMaterial::DetermineSurfaceType(Material) == SurfaceType3;
+	}
 }
 
 void AJamZeroGPawn::BeginPlay()
@@ -719,9 +740,11 @@ void AJamZeroGPawn::HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* Oth
 	{
 		return; // A touch, or the same crash still shaking.
 	}
-	if (CrashSound)
+	const bool bFlesh = IsFlesh(Hit);
+	if (USoundBase* Sound = bFlesh && FleshCrashSound ? FleshCrashSound.Get() : CrashSound.Get())
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, CrashSound, Hit.ImpactPoint, FMath::Clamp(SpeedCm / 1000.0f, 0.2f, 1.0f));
+		UGameplayStatics::PlaySoundAtLocation(this, Sound, Hit.ImpactPoint, FMath::Clamp(SpeedCm / 1000.0f, 0.2f, 1.0f),
+			bFlesh ? FMath::FRandRange(FleshPitchRange.X, FleshPitchRange.Y) : 1.0f);
 	}
 	ShakeRemaining = ShakeSeconds;
 	ShakeAmplitude = ShakeCmPer1000 * SpeedCm / 1000.0f;
@@ -903,11 +926,12 @@ void AJamZeroGPawn::SetGravity(const FVector& Direction, float StrengthCm, bool 
 	}
 }
 
-bool AJamZeroGPawn::ProbeGround(FVector& OutNormal) const
+bool AJamZeroGPawn::ProbeGround(FHitResult& OutHit) const
 {
 	// The body's sphere, a little thinner, swept a short way along gravity: a
 	// blocking hit there that faces up enough is ground.
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamGround), /*bTraceComplex=*/false, this);
+	Params.bReturnPhysicalMaterial = true; // flesh underfoot squelches
 	FCollisionResponseParams Response;
 	Body->InitSweepCollisionParams(Params, Response);
 	if (const UPrimitiveComponent* Held = GrabbedBody.Get())
@@ -915,11 +939,24 @@ bool AJamZeroGPawn::ProbeGround(FVector& OutNormal) const
 		Params.AddIgnoredActor(Held->GetOwner());
 	}
 	const FVector Start = Body->GetComponentLocation();
-	FHitResult Hit;
-	const bool bHit = GetWorld()->SweepSingleByChannel(Hit, Start, Start + GravityDirection * GroundProbeCm, FQuat::Identity,
+	const bool bHit = GetWorld()->SweepSingleByChannel(OutHit, Start, Start + GravityDirection * GroundProbeCm, FQuat::Identity,
 		Body->GetCollisionObjectType(), FCollisionShape::MakeSphere(Body->GetScaledSphereRadius() - 2.0f), Params, Response);
-	OutNormal = bHit ? FVector(Hit.ImpactNormal) : -GravityDirection;
-	return bHit && FVector::DotProduct(Hit.ImpactNormal, -GravityDirection) >= FMath::Cos(FMath::DegreesToRadians(MaxGroundAngleDeg));
+	if (!bHit)
+	{
+		OutHit.ImpactNormal = -GravityDirection;
+	}
+	return bHit && FVector::DotProduct(OutHit.ImpactNormal, -GravityDirection) >= FMath::Cos(FMath::DegreesToRadians(MaxGroundAngleDeg));
+}
+
+void AJamZeroGPawn::PlayFleshStep(const FHitResult& Ground, float Volume)
+{
+	const bool bFlesh = IsFlesh(Ground);
+	UE_LOG(LogMindKore, Verbose, TEXT("ZeroG pawn %s: step on %s (%s), volume %.2f"), *GetName(), *GetNameSafe(Ground.GetComponent()),
+		bFlesh ? TEXT("flesh") : TEXT("not flesh"), Volume);
+	if (FleshStepSound && bFlesh)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, FleshStepSound, Ground.ImpactPoint, Volume, FMath::FRandRange(FleshPitchRange.X, FleshPitchRange.Y));
+	}
 }
 
 void AJamZeroGPawn::Walk(float DeltaSeconds)
@@ -934,8 +971,11 @@ void AJamZeroGPawn::Walk(float DeltaSeconds)
 	Body->AddForce(GravityDirection * GravityStrengthCm, NAME_None, /*bAccelChange=*/true);
 	const FVector Up = -GravityDirection;
 	const bool bJustJumped = GetWorld()->GetTimeSeconds() - LastJumpSeconds < 0.25;
-	FVector Ground = Up;
-	bGrounded = !bJustJumped && ProbeGround(Ground);
+	FHitResult GroundHit;
+	// A touchdown is ground after a real flight, not a bump of the relief losing the probe for a frame.
+	const bool bTouchdown = GetWorld()->GetTimeSeconds() - LastGroundedSeconds > 0.2;
+	bGrounded = !bJustJumped && ProbeGround(GroundHit);
+	const FVector Ground = bGrounded ? FVector(GroundHit.ImpactNormal) : Up;
 
 	// The view's right lies in the ground plane (the view frame never rolls);
 	// forward is right x up, so looking straight down still walks forward.
@@ -959,6 +999,14 @@ void AJamZeroGPawn::Walk(float DeltaSeconds)
 		Tangent += (Slope - Tangent).GetClampedToMaxSize(Accel * DeltaSeconds);
 		// Stuck to the ground: no bounce off the floor or off the curve of the planetoid.
 		Body->SetPhysicsLinearVelocity(Tangent + Ground * FMath::Min(Normal, 0.0f));
+		// Steps: one on touchdown (louder), then one every StepCm walked.
+		StepTravelCm += float(Tangent.Size()) * DeltaSeconds;
+		if (bTouchdown || StepTravelCm >= StepCm)
+		{
+			PlayFleshStep(GroundHit, bTouchdown ? StepVolume * 2.0f : StepVolume);
+			StepTravelCm = 0.0f;
+		}
+		LastGroundedSeconds = GetWorld()->GetTimeSeconds();
 		return;
 	}
 	if (!Wish.IsNearlyZero())

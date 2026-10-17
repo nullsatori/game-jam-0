@@ -350,6 +350,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
 	float GroundFeedbackMinSpeedCm = 700.0f;
 
+	/** On flesh (MK_Flesh: the planetoid, living walls): a wet step every StepCm walked, and on every touchdown. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk")
+	TObjectPtr<USoundBase> FleshStepSound = nullptr;
+
+	/** On flesh a crash or hard fall plays this instead of CrashSound (the plate). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk")
+	TObjectPtr<USoundBase> FleshCrashSound = nullptr;
+
+	/** About 3.5 steps a second at WalkSpeedCm 450. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "1.0"))
+	float StepCm = 130.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
+	float StepVolume = 0.35f;
+
+	/** The meat samples pitched down this far (random in the range): heavier and wetter. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk")
+	FVector2D FleshPitchRange = FVector2D(0.4f, 0.55f);
+
 	// --- bullet time presentation (as AJamCharacter) --------------------------
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|BulletTime")
@@ -510,13 +529,16 @@ private:
 	void BulletTimeReleased();
 	void ApplyThrusters(float DeltaSeconds);
 	void Walk(float DeltaSeconds);
-	/** Walkable ground under the body; its normal in OutNormal. */
-	bool ProbeGround(FVector& OutNormal) const;
+	/** Walkable ground under the body; the hit (normal, surface) in OutHit. */
+	bool ProbeGround(FHitResult& OutHit) const;
+	void PlayFleshStep(const FHitResult& Ground, float Volume);
 
 	FVector GravityDirection = FVector::ZeroVector;
 	float GravityStrengthCm = 0.0f;
 	bool bRadialGravity = false;
 	bool bGrounded = false;
+	float StepTravelCm = 0.0f;
+	double LastGroundedSeconds = -100.0;
 	double LastJumpSeconds = -100.0;
 	/** The camera's offset from the body's centre (world space), eased toward the eye height. */
 	FVector EyeOffset = FVector::ZeroVector;
