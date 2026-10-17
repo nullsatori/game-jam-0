@@ -22,6 +22,7 @@ SCRIPTS = os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.p
 sys.path.insert(0, SCRIPTS)
 import jam_flesh  # noqa: E402
 import jam_living_wall  # noqa: E402
+import jam_sky  # noqa: E402
 
 MAP = "/Game/Jam/Maps/Lvl_Jam_Ship"
 CUBE = unreal.load_asset("/Engine/BasicShapes/Cube.Cube")
@@ -250,6 +251,14 @@ toward = key.get_actor_forward_vector()
 block("Star_Disc", V(-toward.x * 200000.0, -toward.y * 200000.0, -toward.z * 200000.0), (10000, 10000, 10000), None, SPHERE, STAR,
       shadow=False, collide=False)
 block("Sky_Dome", V(0, 0, 0), (600000, 600000, 600000), None, SPHERE, DOME, shadow=False, collide=False)
+# The star map (Scripts/jam_sky.py) on a dome just inside the violet one, hidden from
+# reflection and sky-light captures: the camera sees the stars, the SkyLight keeps
+# capturing the violet dome, so the scene light is unchanged.
+stars_dome = block("Sky_Stars", V(0, 0, 0), (590000, 590000, 590000), None, SPHERE, jam_sky.material(log), shadow=False, collide=False)
+stars_comp = stars_dome.get_editor_property("static_mesh_component")
+stars_comp.set_editor_property("visible_in_reflection_captures", False)
+stars_comp.set_editor_property("visible_in_real_time_sky_captures", False)
+stars_comp.set_editor_property("visible_in_ray_tracing", False)
 for j in range(300):
     u, w = rng.uniform(-1.0, 1.0), rng.uniform(0, 2 * math.pi)
     d = (math.sqrt(1 - u * u) * math.cos(w), math.sqrt(1 - u * u) * math.sin(w), u)

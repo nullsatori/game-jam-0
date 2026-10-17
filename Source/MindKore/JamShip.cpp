@@ -691,6 +691,8 @@ namespace
 			{ TEXT("ship_outside"), FVector(600.0f, 1800.0f, 400.0f), FRotator(-10.0f, -100.0f, 0.0f) },
 			{ TEXT("to_planetoid"), FVector(0.0f, 3500.0f, 300.0f), FRotator(-5.0f, 90.0f, 0.0f) },
 			{ TEXT("to_star"), FVector(-1500.0f, -1500.0f, 1500.0f), ToStar },
+			// The star map puts the galactic centre toward +X on the horizon (Scripts/jam_sky.py).
+			{ TEXT("to_galactic_core"), FVector(2600.0f, -600.0f, 200.0f), FRotator(5.0f, 0.0f, 0.0f) },
 		};
 		for (int32 Index = 0; Index < Views.Num(); ++Index)
 		{
@@ -711,7 +713,7 @@ namespace
 
 	FAutoConsoleCommandWithWorld GShipShots(
 		TEXT("jam.Ship.Shots"),
-		TEXT("Rendered stills of Lvl_Jam_Ship from five viewpoints (HighResShot; needs a real RHI)."),
+		TEXT("Rendered stills of Lvl_Jam_Ship from six viewpoints (HighResShot; needs a real RHI)."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunShipShots));
 
 	/**
