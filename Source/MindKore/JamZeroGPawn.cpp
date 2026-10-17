@@ -903,7 +903,7 @@ void AJamZeroGPawn::SetGravity(const FVector& Direction, float StrengthCm, bool 
 	}
 }
 
-bool AJamZeroGPawn::ProbeGround() const
+bool AJamZeroGPawn::ProbeGround(FVector& OutNormal) const
 {
 	// The body's sphere, a little thinner, swept a short way along gravity: a
 	// blocking hit there that faces up enough is ground.
@@ -918,6 +918,7 @@ bool AJamZeroGPawn::ProbeGround() const
 	FHitResult Hit;
 	const bool bHit = GetWorld()->SweepSingleByChannel(Hit, Start, Start + GravityDirection * GroundProbeCm, FQuat::Identity,
 		Body->GetCollisionObjectType(), FCollisionShape::MakeSphere(Body->GetScaledSphereRadius() - 2.0f), Params, Response);
+	OutNormal = bHit ? FVector(Hit.ImpactNormal) : -GravityDirection;
 	return bHit && FVector::DotProduct(Hit.ImpactNormal, -GravityDirection) >= FMath::Cos(FMath::DegreesToRadians(MaxGroundAngleDeg));
 }
 
@@ -933,7 +934,8 @@ void AJamZeroGPawn::Walk(float DeltaSeconds)
 	Body->AddForce(GravityDirection * GravityStrengthCm, NAME_None, /*bAccelChange=*/true);
 	const FVector Up = -GravityDirection;
 	const bool bJustJumped = GetWorld()->GetTimeSeconds() - LastJumpSeconds < 0.25;
-	bGrounded = !bJustJumped && ProbeGround();
+	FVector Ground = Up;
+	bGrounded = !bJustJumped && ProbeGround(Ground);
 
 	// The view's right lies in the ground plane (the view frame never rolls);
 	// forward is right x up, so looking straight down still walks forward.
@@ -946,12 +948,20 @@ void AJamZeroGPawn::Walk(float DeltaSeconds)
 	FVector Tangent = Velocity - Up * Normal;
 	if (bGrounded)
 	{
+		// On the ground the walk runs in the ground's plane: up a slope the wish
+		// climbs along it (in the gravity plane the climb was cancelled every
+		// frame and a 25-degree slope took ~25 cm/s, jam.Ship.Caves); on level
+		// ground this is the gravity plane.
+		const FVector Slope = FVector::VectorPlaneProject(Wish, Ground).GetSafeNormal() * Wish.Size();
+		Normal = FVector::DotProduct(Velocity, Ground);
+		Tangent = Velocity - Ground * Normal;
 		const float Accel = Wish.IsNearlyZero() ? WalkBrakingCm : WalkAccelCm;
-		Tangent += (Wish - Tangent).GetClampedToMaxSize(Accel * DeltaSeconds);
+		Tangent += (Slope - Tangent).GetClampedToMaxSize(Accel * DeltaSeconds);
 		// Stuck to the ground: no bounce off the floor or off the curve of the planetoid.
-		Normal = FMath::Min(Normal, 0.0f);
+		Body->SetPhysicsLinearVelocity(Tangent + Ground * FMath::Min(Normal, 0.0f));
+		return;
 	}
-	else if (!Wish.IsNearlyZero())
+	if (!Wish.IsNearlyZero())
 	{
 		// Air control: adds toward the input up to the walking speed, never brakes.
 		const FVector Direction = Wish.GetSafeNormal();

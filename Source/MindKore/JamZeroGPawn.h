@@ -510,7 +510,8 @@ private:
 	void BulletTimeReleased();
 	void ApplyThrusters(float DeltaSeconds);
 	void Walk(float DeltaSeconds);
-	bool ProbeGround() const;
+	/** Walkable ground under the body; its normal in OutNormal. */
+	bool ProbeGround(FVector& OutNormal) const;
 
 	FVector GravityDirection = FVector::ZeroVector;
 	float GravityStrengthCm = 0.0f;

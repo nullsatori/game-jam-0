@@ -9,6 +9,7 @@ unreal.SystemLibrary.quit_editor()):
 Everything is in centimetres, the ship along +X with its centre at the origin.
 Layout, sizes and tags: Docs/Ship-Blockout.md. Seeded: the same map every run.
 """
+import json
 import math
 import os
 import random
@@ -17,7 +18,8 @@ import sys
 import unreal
 
 # The shared living wall material (Scripts/jam_living_wall.py), found next to this script.
-sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+SCRIPTS = os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts")
+sys.path.insert(0, SCRIPTS)
 import jam_flesh  # noqa: E402
 import jam_living_wall  # noqa: E402
 
@@ -483,12 +485,20 @@ for j, loc in enumerate([V(0, -6000, 0), V(300, -6200, 200)]):
 label_text("FUEL TANKS", V(150, -6000, 350), 90, 50)
 
 # --- the planetoid: living, breathable, walkable --------------------------------------------------
-# Within 8 m of the surface the player walks on it (radial gravity 980 toward the
-# centre; the view's up eases to the surface normal); within 10 m breathing
-# restores oxygen. A jump, then Space again in the air, is a jet leap off it.
+# The mesh, its relief, caves and craters come from Scripts/blender/jam_planet.py
+# (imported by Scripts/jam_import_meshes.py); every spot on it from
+# Scripts/planet_layout.json (planet-local cm). Within 8 m over its highest point
+# the player walks on it (radial gravity 980 toward the centre; the view's up eases
+# to the local up), within 10 m breathing restores oxygen; that reaches down into
+# the caves too. A jump, then Space again in the air, is a jet leap off it.
+with open(os.path.join(SCRIPTS, "planet_layout.json"), encoding="utf-8") as f:
+    LAYOUT = json.load(f)
 FLESH_SET = jam_flesh.materials(log)  # the gritty flesh (Docs/LivingWall.md, Materials)
-PLANET, PR = (0.0, 10000.0, -1000.0), 3000.0
-block("Planetoid", V(*PLANET), (2 * PR, 2 * PR, 2 * PR), None, SPHERE, FLESH_SET["PlanetSkin"])
+PLANET = (0.0, 16000.0, -1000.0)        # clear of the ship, the junk and the belt: the near surface ~73 m from the ship
+PR = LAYOUT["surface_max_cm"]           # its highest point over the centre
+planet = eas.spawn_actor_from_object(unreal.load_asset("/Game/JamArt/Meshes/Planet/SM_Jam_Planet"), V(*PLANET), R())
+planet.set_actor_label("Planetoid")
+planet.get_editor_property("static_mesh_component").set_material(0, FLESH_SET["PlanetSkin"])
 walk_shell = spawn(unreal.JamGravityZone, V(*PLANET), None, "Gravity_Planetoid")
 walk_shell.set_editor_property("sphere_radius_cm", PR + 800.0)
 walk_shell.set_editor_property("radial", True)
@@ -502,22 +512,31 @@ air_shell.set_editor_property("refill_per_second", 5.0)
 air_shell.set_editor_property("hud_text", unreal.Text("Можно дышать"))
 
 
-def on_surface(direction, height):
-    d = norm(direction)
-    return V(PLANET[0] + d[0] * (PR + height), PLANET[1] + d[1] * (PR + height), PLANET[2] + d[2] * (PR + height)), d
+def on_planet(local):
+    return V(PLANET[0] + local[0], PLANET[1] + local[1], PLANET[2] + local[2])
 
 
-probe_at, probe_up = on_surface((0.0, -1.0, 0.2), 60.0)
+def on_surface(name, height):
+    """A layout spot, height cm over the surface along its up; and that up."""
+    spot = LAYOUT["spots"][name]
+    up = spot["up"]
+    return on_planet([spot["pos"][k] + up[k] * height for k in range(3)]), up
+
+
+def tangent_of(up):
+    return norm((up[1], -up[0], 0.0)) if abs(up[2]) < 0.9 else (1.0, 0.0, 0.0)
+
+
+probe_at, probe_up = on_surface("probe_body", 60.0)
 probe_rot = unreal.MathLibrary.make_rot_from_z(V(*probe_up))
 block("Probe_Body", probe_at, (200, 120, 120), probe_rot, material=ANCHOR)
-block("Probe_Wing", on_surface((0.15, -1.0, 0.25), 40.0)[0], (300, 20, 80), probe_rot, material=ANCHOR)
-nav_at, _ = on_surface((0.03, -1.0, 0.2), 150.0)
+block("Probe_Wing", on_surface("probe_wing", 40.0)[0], (300, 20, 80), probe_rot, material=ANCHOR)
+nav_at, nav_up = on_surface("nav", 150.0)
 prop("NavModule", nav_at, CUBE, (100, 100, 100), 80, PART, ["Ship.Nav", "Jam.NoDrift"])
-label_text("NAV MODULE", on_surface((0.03, -1.0, 0.2), 300.0)[0], 90, 30)
+label_text("NAV MODULE", on_surface("nav", 300.0)[0], 90, 30)
 # The cocoon (Docs/LivingWall.md): four living walls and a roof, 2.6 m, around the
 # module; their fronts (+Y) face out. Getting the module takes the shotgun and
 # pulling it out through a blast hole before the weave closes.
-_, nav_up = on_surface((0.03, -1.0, 0.2), 0.0)
 nav_frame = unreal.MathLibrary.make_rot_from_z(V(*nav_up))
 nav_x, nav_y = nav_frame.get_forward_vector(), nav_frame.get_right_vector()
 COCOON, COCOON_HALF = 260.0, 130.0
@@ -538,29 +557,65 @@ for j, (out, along) in enumerate(cocoon_sides):
     w.set_editor_property("thin_spot_seed", j + 1)
     if j == probe_side:
         w.set_editor_property("tags", ["Jam.WallProbe"])
-gun_at, gun_up = on_surface((0.6, -0.8, 0.3), 100.0)
+gun_at, gun_up = on_surface("shotgun", 100.0)
 shotgun = spawn(unreal.JamWeaponPickup, gun_at, unreal.MathLibrary.make_rot_from_z(V(*gun_up)), "Pickup_Shotgun")
 shotgun.set_actor_scale3d(V(0.6, 0.4, 1.8))
 shotgun.set_editor_property("weapon_index", 1)
 shotgun.get_editor_property("mesh").set_material(0, PART)
-label_text("SHOTGUN", on_surface((0.6, -0.8, 0.3), 250.0)[0], 90, 30)
+label_text("SHOTGUN", on_surface("shotgun", 250.0)[0], 90, 30)
 
-# Finale placeholders: tentacles lying on the surface, a dark eye. No behaviour.
-for j, direction in enumerate([(0.5, -0.6, -0.5), (-0.6, -0.5, 0.4), (0.7, 0.2, 0.6), (-0.4, 0.3, -0.8)]):
-    at, up = on_surface(direction, 40.0)
-    tangent = norm((up[1], -up[0], 0.0)) if abs(up[2]) < 0.9 else (1.0, 0.0, 0.0)
-    block("Tentacle_%d" % j, at, (80, 80, 1200), unreal.MathLibrary.make_rot_from_z(V(*tangent)), CYL, FLESH_SET["Suckers"])
-eye_at, eye_up = on_surface((-0.3, -0.9, -0.2), 100.0)
-block("Eye", eye_at, (400, 400, 400), None, SPHERE, FLESH_SET["PlanetEye"], shadow=False)
-# Bioluminescence: warm pink and orange glows close to the surface.
-for j, (direction, rgb) in enumerate([((0.0, -1.0, 0.25), (1.0, 0.45, 0.6)), ((0.5, -0.8, -0.3), (1.0, 0.55, 0.25)),
-                                      ((-0.6, -0.6, 0.5), (1.0, 0.4, 0.55)), ((-0.2, -0.95, -0.4), (1.0, 0.5, 0.3)),
-                                      ((0.6, -0.7, 0.4), (1.0, 0.45, 0.5))]):
-    point_light("Planetoid_Glow_%d" % j, on_surface(direction, 300.0)[0], rgb, 120.0, 2500.0, shadows=False)
+
+def round_wall(label, at, front, up, tag, margin, widest):
+    """A round living wall 4 m across (Docs/LivingWall.md): a crater's membrane or a cave plug."""
+    w = spawn(unreal.JamLivingWall, at, unreal.MathLibrary.make_rot_from_yz(V(*front), V(*up)), label)
+    w.set_editor_property("width_cm", 400.0)
+    w.set_editor_property("height_cm", 400.0)
+    w.set_editor_property("round", True)
+    w.set_editor_property("wall_material", WALL_MAT)
+    w.set_editor_property("burst_margin_cm", margin)
+    w.set_editor_property("burst_max_radius_cm", widest)
+    w.set_editor_property("max_stun_seconds", 3.0)
+    w.set_editor_property("tags", [tag])
+    return w
+
+
+# Craters: a round membrane on each bowl's flat bottom (front = up), over a shaft into the caves.
+for crater in LAYOUT["craters"]:
+    up = crater["up"]
+    # A pawn-sized hole for a few seconds, like the cocoon's: the pawn drops through it.
+    round_wall("Crater_" + crater["name"], on_planet([crater["pos"][k] + up[k] * 5.0 for k in range(3)]), up, tangent_of(up),
+               "Jam.Crater", 70.0, 110.0)
+# Cave plugs: round walls across the tunnel throats (front along the tunnel).
+for plug in LAYOUT["plugs"]:
+    # Shot at eye level, the hole must reach the floor 1.5 m lower: a wider blast than a crater's.
+    round_wall("CavePlug_" + plug["name"], on_planet(plug["pos"]), plug["forward"], plug["up"], "Jam.CavePlug", 100.0, 150.0)
+# Behind both plugs of T1 and under crater C1's membrane: oxygen (the cargo is placed with the rest below).
+oxygen = LAYOUT["prizes"][1]
+canister = spawn(unreal.JamOxygenCanister, on_planet(oxygen["pos"]), None, "O2_Canister_Cave")
+canister.get_editor_property("body").set_material(0, OXYGEN)
+zero_damping(canister.get_editor_property("body"))
+canister.set_editor_property("tags", ["Jam.NoDrift"])
+
+# Finale placeholders: tentacles arching out of the ground, the eye. No behaviour.
+TENTACLE = unreal.load_asset("/Game/JamArt/Meshes/Planet/SM_Jam_Tentacle")
+for j in range(4):
+    at, up = on_surface("tentacle%d" % j, 0.0)
+    t = eas.spawn_actor_from_object(TENTACLE, at, unreal.MathLibrary.make_rot_from_zx(V(*up), V(*tangent_of(up))))
+    t.set_actor_label("Tentacle_%d" % j)
+    t.get_editor_property("static_mesh_component").set_material(0, FLESH_SET["Suckers"])
+eye_at, eye_up = on_surface("eye", 50.0)
+eye = eas.spawn_actor_from_object(unreal.load_asset("/Game/JamArt/Meshes/Planet/SM_Jam_PlanetEye"), eye_at,
+                                  unreal.MathLibrary.make_rot_from_x(V(*eye_up)))
+eye.set_actor_label("Eye")
+eye.get_editor_property("static_mesh_component").set_material(0, FLESH_SET["PlanetEye"])
+eye.get_editor_property("static_mesh_component").set_editor_property("cast_shadow", False)
+# Bioluminescence: the same warm pink and orange glows, 3 m over the new surface.
+for j, rgb in enumerate([(1.0, 0.45, 0.6), (1.0, 0.55, 0.25), (1.0, 0.4, 0.55), (1.0, 0.5, 0.3), (1.0, 0.45, 0.5)]):
+    point_light("Planetoid_Glow_%d" % j, on_surface("glow%d" % j, 300.0)[0], rgb, 120.0, 2500.0, shadows=False)
 
 # --- valuable cargo ----------------------------------------------------------------------------------------
 cargo_spots = [V(500, 200, -200), V(rx - 150, ry + 100, rz - 100), rear.transform_location(V(0, 0, 0)),
-               V(-500, -6100, -300), on_surface((-0.1, -1.0, 0.1), 120.0)[0], V(-1400, -300, 600)]
+               V(-500, -6100, -300), on_planet(LAYOUT["prizes"][0]["pos"]), V(-1400, -300, 600)]
 for j, loc in enumerate(cargo_spots):
     c = spawn(unreal.JamCargo, loc, None, "Cargo_%d" % j)
     c.get_editor_property("body").set_material(0, CARGO)

@@ -137,13 +137,21 @@ void AJamLivingWall::Build()
 	}
 	// Thin spots: patches well inside the edges.
 	const FVector2D Half(CellsX * CellSizeCm * 0.5f, CellsZ * CellSizeCm * 0.5f);
+	if (bRound)
+	{
+		for (int32 Index = 0; Index < Cells.Num(); ++Index)
+		{
+			const FVector2D At = CellCentre(Index) / Half;
+			Cells[Index].bExists = At.SizeSquared() <= 1.0;
+		}
+	}
 	const FVector2D Inner(FMath::Max(0.0f, float(Half.X - ThinSpotRadiusCm - CellSizeCm)), FMath::Max(0.0f, float(Half.Y - ThinSpotRadiusCm - CellSizeCm)));
 	for (int32 Spot = 0; Spot < ThinSpotCount; ++Spot)
 	{
 		const FVector2D At(Random.FRandRange(-Inner.X, Inner.X), Random.FRandRange(-Inner.Y, Inner.Y));
 		for (int32 Index = 0; Index < Cells.Num(); ++Index)
 		{
-			Cells[Index].bThin |= FVector2D::Distance(CellCentre(Index), At) <= ThinSpotRadiusCm;
+			Cells[Index].bThin |= Cells[Index].bExists && FVector2D::Distance(CellCentre(Index), At) <= ThinSpotRadiusCm;
 		}
 	}
 
@@ -230,6 +238,20 @@ void AJamLivingWall::StrandSegments(int32 Cell, double Now, float Twitch, FVecto
 
 void AJamLivingWall::WriteCell(int32 Cell, double Now, float Twitch)
 {
+	if (!Cells[Cell].bExists)
+	{
+		// Outside a round wall: zero-scale instances (no bodies).
+		const FTransform None(FQuat::Identity, FVector::ZeroVector, FVector::ZeroVector);
+		for (int32 Strand = 0; Strand < 2; ++Strand)
+		{
+			Strands->UpdateInstanceTransform(Cell * 2 + Strand, None, false, true, true);
+		}
+		for (int32 Thread = 0; Thread < 4; ++Thread)
+		{
+			Threads->UpdateInstanceTransform(Cell * 4 + Thread, None, false, true, true);
+		}
+		return;
+	}
 	FVector2D A[2], B[2];
 	float Depth[2];
 	float Radius = 0.0f;
@@ -275,7 +297,7 @@ void AJamLivingWall::UpdateRim(double Now)
 		const int32 Z = Index / CellsX;
 		for (const int32 Next : { CellAt(X + 1, Z), CellAt(X - 1, Z), CellAt(X, Z + 1), CellAt(X, Z - 1) })
 		{
-			if (IsWhole(Next))
+			if (IsWhole(Next) && Cells[Next].bExists)
 			{
 				Rim.Add(Next);
 			}
@@ -316,7 +338,7 @@ void AJamLivingWall::Tear(const TArray<FVector2D>& Points, float Radius, TSet<in
 	{
 		for (int32 Index = 0; Index < Cells.Num(); ++Index)
 		{
-			if (FVector2D::DistSquared(CellCentre(Index), Point) <= Radius * Radius)
+			if (Cells[Index].bExists && FVector2D::DistSquared(CellCentre(Index), Point) <= Radius * Radius)
 			{
 				OutCells.Add(Index);
 			}
@@ -699,7 +721,7 @@ float AJamLivingWall::ClearRadiusAt(const FVector& WorldPoint) const
 	float Clear = TNumericLimits<float>::Max();
 	for (int32 Index = 0; Index < Cells.Num(); ++Index)
 	{
-		if (Cells[Index].Growth <= 0.0f || FVector2D::Distance(CellCentre(Index), Point) > Clear + CellSizeCm + StrandOverlapCm)
+		if (!Cells[Index].bExists || Cells[Index].Growth <= 0.0f || FVector2D::Distance(CellCentre(Index), Point) > Clear + CellSizeCm + StrandOverlapCm)
 		{
 			continue;
 		}

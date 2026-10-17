@@ -13,6 +13,7 @@
 #include "HAL/IConsoleManager.h"
 #include "JamDockZone.h"
 #include "JamGravity.h"
+#include "JamLivingWall.h"
 #include "JamOxygen.h"
 #include "JamPickups.h"
 #include "JamShipParts.h"
@@ -888,6 +889,232 @@ namespace
 		TEXT("jam.Ship.PlanetShots"),
 		TEXT("Two HighResShot stills standing on the planetoid, top and side (needs a real RHI)."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunPlanetShots));
+
+	/** The first living wall with this tag (crater membranes: Jam.Crater, cave plugs: Jam.CavePlug), or the named one. */
+	AJamLivingWall* TaggedWall(UWorld* World, FName Tag, const FString& Name = FString())
+	{
+		for (TActorIterator<AJamLivingWall> It(World); It; ++It)
+		{
+			if (Name.IsEmpty() ? It->ActorHasTag(Tag) : It->GetName() == Name)
+			{
+				return *It;
+			}
+		}
+		return nullptr;
+	}
+
+	/** Take the shotgun, look at Target through the gravity-framed controller, fire. */
+	void ShotgunAt(AJamZeroGPawn* Pawn, const FVector& Target)
+	{
+		Pawn->Guns->UnlockWeapon(1);
+		Pawn->GetController()->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());
+		if (!Pawn->Fire())
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Caves probe: %s did not fire"), *Pawn->Guns->Describe());
+		}
+	}
+
+	/** Signed height of the pawn over a wall's plane along its front normal, cm. */
+	float OverPlane(const AJamLivingWall* Wall, const AJamZeroGPawn* Pawn)
+	{
+		return FVector::DotProduct(Pawn->GetActorLocation() - Wall->GetActorLocation(), Wall->GetFrontNormal());
+	}
+
+	/**
+	 * (b) A cave plug: the pawn 5 m in front on the tunnel floor walks at it -
+	 * the whole plug stops it; then a shotgun blast straight ahead at eye level
+	 * and the same walk: through the hole before it closes.
+	 */
+	void ProbePlug(AJamShipGameMode* Mode, AJamLivingWall* Plug)
+	{
+		const FVector Front = Plug->GetFrontNormal();
+		const FVector Up = Plug->GetActorUpVector();
+		const FVector Centre = Plug->GetActorLocation();
+		const FVector Start = Centre + Front * 500.0f - Up * 130.0f;
+		const auto Walk = [Mode, Plug, Start, Front, Centre](const TCHAR* Label, bool bShoot, TFunction<void()> Next)
+		{
+			Teleport(PlayerPawn(Mode->GetWorld()), Start);
+			const FString Name = Label;
+			After(Mode, 1.2f, [Mode, Plug, Front, Centre, Name, bShoot, Next]()
+			{
+				AJamZeroGPawn* Pawn = PlayerPawn(Mode->GetWorld());
+				// As a player would: straight ahead at eye level.
+				const FVector Eye = Pawn->Camera->GetComponentLocation();
+				const FVector Aim = Eye - Front * FVector::DotProduct(Eye - Centre, Front);
+				LogState(*FString::Printf(TEXT("plug %s: start"), *Name), Pawn);
+				if (bShoot)
+				{
+					ShotgunAt(Pawn, Aim);
+				}
+				Pawn->GetController()->SetControlRotation((Aim - Pawn->Camera->GetComponentLocation()).Rotation());
+				const float HP = Pawn->Vitals->Health;
+				After(Mode, 0.15f, [Mode, Plug, Name, HP, Next]()
+				{
+					UE_LOG(LogMindKore, Log, TEXT("Caves probe [plug %s]: open cells %d, clear radius at the hole %.0f cm; walking at it for 3 s"),
+						*Name, Plug->GetOpenCellCount(), Plug->ClearRadiusAt(Plug->GetLastWoundCentre()));
+					HoldInput(Mode, FVector(1.0f, 0.0f, 0.0f), 3.0f);
+					for (int32 Step = 1; Step <= 6; ++Step)
+					{
+						After(Mode, Step * 0.5f, [Mode, Plug, Name, Step]()
+						{
+							const AJamZeroGPawn* Pawn = PlayerPawn(Mode->GetWorld());
+							const FVector Local = Plug->GetActorTransform().InverseTransformPosition(Pawn->GetActorLocation());
+							UE_LOG(LogMindKore, Log, TEXT("Caves probe [plug %s +%.1f s]: %.0f cm in front, %.0f cm across, %.0f cm over the axis, %s, speed %.0f cm/s"), *Name, Step * 0.5f,
+								Local.Y, Local.X, Local.Z, Pawn->IsGrounded() ? TEXT("on the ground") : TEXT("in the air"), Pawn->GetBodyVelocity().Size());
+						});
+					}
+					After(Mode, 3.2f, [Mode, Plug, Name, HP, Next]()
+					{
+						const AJamZeroGPawn* Pawn = PlayerPawn(Mode->GetWorld());
+						const float Over = OverPlane(Plug, Pawn);
+						UE_LOG(LogMindKore, Log, TEXT("Caves probe [plug %s]: through %s - the pawn is %.0f cm %s the plug, %s, HP %.0f -> %.0f, open cells %d"),
+							*Name, Over < -(Plug->GetHalfDepthCm() + Pawn->Body->GetScaledSphereRadius()) ? TEXT("yes") : TEXT("no"),
+							FMath::Abs(Over), Over < 0.0f ? TEXT("behind") : TEXT("in front of"),
+							Pawn->IsGrounded() ? TEXT("on the ground") : TEXT("in the air"), HP, Pawn->Vitals->Health, Plug->GetOpenCellCount());
+						Next();
+					});
+				});
+			});
+		};
+		UE_LOG(LogMindKore, Log, TEXT("Caves probe [plug]: %s at %s, front %s, up %s"), *Plug->GetName(), *Centre.ToCompactString(),
+			*Front.ToCompactString(), *Up.ToCompactString());
+		Walk(TEXT("control, no shot"), false, [Mode, Walk]()
+		{
+			// The weave must be whole again before the real try (the bump may have torn a cell).
+			After(Mode, 3.0f, [Walk]() { Walk(TEXT("after a shotgun blast"), true, []() { UE_LOG(LogMindKore, Log, TEXT("Caves probe: done")); }); });
+		});
+	}
+
+	/**
+	 * (a) A crater: the pawn 2.5 m over the membrane in radial gravity, the
+	 * shotgun straight down; logs the height over the membrane's plane every
+	 * 0.25 s for 5 s: does it drop through the hole and land in the tunnel below?
+	 */
+	void ProbeCrater(AJamShipGameMode* Mode, AJamLivingWall* Crater, TFunction<void()> Next)
+	{
+		const FVector Up = Crater->GetFrontNormal();
+		const FVector Centre = Crater->GetActorLocation();
+		AJamZeroGPawn* Pawn = PlayerPawn(Mode->GetWorld());
+		UE_LOG(LogMindKore, Log, TEXT("Caves probe [crater]: %s at %s, up %s (radial up there %s)"), *Crater->GetName(), *Centre.ToCompactString(),
+			*Up.ToCompactString(), *(Centre - PlanetShell(Mode->GetWorld())->GetActorLocation()).GetSafeNormal().ToCompactString());
+		Teleport(Pawn, Centre + Up * 250.0f);
+		After(Mode, 0.25f, [Mode, Crater, Centre]()
+		{
+			AJamZeroGPawn* Pawn = PlayerPawn(Mode->GetWorld());
+			LogState(TEXT("crater: over the membrane"), Pawn);
+			ShotgunAt(Pawn, Centre);
+		});
+		const TSharedRef<float> Lowest = MakeShared<float>(TNumericLimits<float>::Max());
+		for (int32 Step = 1; Step <= 20; ++Step)
+		{
+			After(Mode, 0.25f + Step * 0.25f, [Mode, Crater, Step, Lowest, Next]()
+			{
+				const AJamZeroGPawn* Pawn = PlayerPawn(Mode->GetWorld());
+				const float Over = OverPlane(Crater, Pawn);
+				*Lowest = FMath::Min(*Lowest, Over);
+				UE_LOG(LogMindKore, Log, TEXT("Caves probe [crater +%.2f s]: %.0f cm %s the membrane, %s, speed %.0f cm/s, open cells %d"), Step * 0.25f,
+					FMath::Abs(Over), Over >= 0.0f ? TEXT("over") : TEXT("under"), Pawn->IsInGravity() ? (Pawn->IsGrounded() ? TEXT("on the ground") : TEXT("in the air")) : TEXT("zero-G"),
+					Pawn->GetBodyVelocity().Size(), Crater->GetOpenCellCount());
+				if (Step == 20)
+				{
+					const bool bThrough = *Lowest < -(Crater->GetHalfDepthCm() + Pawn->Body->GetScaledSphereRadius());
+					UE_LOG(LogMindKore, Log, TEXT("Caves probe [crater]: dropped through %s - lowest %.0f cm under the membrane, now %s, HP %.0f, membrane open cells %d"),
+						bThrough ? TEXT("yes") : TEXT("no"), -*Lowest, Pawn->IsGrounded() ? TEXT("on the ground") : TEXT("in the air"), Pawn->Vitals->Health,
+						Crater->GetOpenCellCount());
+					Next();
+				}
+			});
+		}
+	}
+
+	/** jam.Ship.Caves [Crater] [Plug]: a crater membrane opened by the shotgun and the drop through it; a cave plug walked into, then shot and walked through. */
+	void RunShipCaves(const TArray<FString>& Args, UWorld* World)
+	{
+		AJamShipGameMode* Mode = World->GetAuthGameMode<AJamShipGameMode>();
+		AJamLivingWall* Crater = TaggedWall(World, TEXT("Jam.Crater"), Args.Num() > 0 ? Args[0] : FString());
+		AJamLivingWall* Plug = TaggedWall(World, TEXT("Jam.CavePlug"), Args.Num() > 1 ? Args[1] : FString());
+		if (!Mode || !PlayerPawn(World) || !Crater || !Plug || !PlanetShell(World))
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Caves probe: needs the ship mode, the pawn, the planetoid shell, a Jam.Crater and a Jam.CavePlug wall"));
+			return;
+		}
+		ProbeCrater(Mode, Crater, [Mode, Plug]() { After(Mode, 1.0f, [Mode, Plug]() { ProbePlug(Mode, Plug); }); });
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GShipCaves(
+		TEXT("jam.Ship.Caves"),
+		TEXT("jam.Ship.Caves [Crater] [Plug]: shotgun a crater membrane and drop through; walk at a cave plug, then shoot it and walk through."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunShipCaves));
+
+	/**
+	 * jam.Ship.CaveShots: rendered stills (real RHI) - the planet from afar,
+	 * standing on the relief, a crater membrane before and 0.35 s after a blast
+	 * from its rim, a cave plug from 6 m down its tunnel.
+	 */
+	void RunCaveShots(UWorld* World)
+	{
+		AJamShipGameMode* Mode = World->GetAuthGameMode<AJamShipGameMode>();
+		const AJamGravityZone* Shell = PlanetShell(World);
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AJamLivingWall* Crater = TaggedWall(World, TEXT("Jam.Crater"));
+		AJamLivingWall* Plug = TaggedWall(World, TEXT("Jam.CavePlug"));
+		if (!Mode || !Shell || !Controller || !Crater || !Plug)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Cave shots: needs the ship mode, the planetoid, a crater and a plug"));
+			return;
+		}
+		const FVector Centre = Shell->GetActorLocation();
+		const auto Place = [Controller](const FVector& Where, const FVector& Target)
+		{
+			Teleport(Controller->GetPawn(), Where);
+			Controller->SetControlRotation((Target - Where).Rotation());
+		};
+		const auto Shot = [Controller](const TCHAR* Name)
+		{
+			LogState(Name, Cast<AJamZeroGPawn>(Controller->GetPawn()));
+			UE_LOG(LogMindKore, Log, TEXT("Cave shots: %s"), Name);
+			Controller->ConsoleCommand(TEXT("HighResShot 1"));
+		};
+		const auto Look = [Controller](const FVector& Target)
+		{
+			if (const APawn* Pawn = Controller->GetPawn())
+			{
+				Controller->SetControlRotation((Target - Cast<AJamZeroGPawn>(Pawn)->Camera->GetComponentLocation()).Rotation());
+			}
+		};
+		// 0: from afar (zero-G, 160 m out toward the ship side).
+		const FVector Far = Centre + FVector(-0.3f, -1.0f, 0.35f).GetSafeNormal() * 25000.0f;
+		After(Mode, 1.0f, [Place, Far, Centre]() { Place(Far, Centre); });
+		After(Mode, 9.0f, [Place, Far, Centre, Shot]() { Place(Far, Centre); Shot(TEXT("planet from afar")); });
+		// 1: standing on the relief at the top, looking along +X.
+		const FVector Top = Centre + FVector::UpVector * (Shell->SphereRadiusCm - 600.0f);
+		After(Mode, 10.0f, [Place, Top]() { Place(Top, Top + FVector(1000.0f, 0.0f, -300.0f)); });
+		After(Mode, 14.0f, [Shot]() { Shot(TEXT("on the relief")); });
+		// 2, 3: a crater from its rim (8.5 m out), before and after a blast.
+		const FVector Up = Crater->GetFrontNormal();
+		const FVector Side = FVector::CrossProduct(Up, FVector::RightVector).GetSafeNormal();
+		const FVector Rim = Crater->GetActorLocation() + Side * 850.0f + Up * 500.0f;
+		const FVector Membrane = Crater->GetActorLocation();
+		After(Mode, 15.0f, [Place, Rim, Membrane]() { Place(Rim, Membrane); });
+		After(Mode, 19.0f, [Look, Membrane]() { Look(Membrane); });
+		After(Mode, 19.3f, [Shot]() { Shot(TEXT("crater, whole")); });
+		After(Mode, 21.0f, [Controller, Membrane]() { ShotgunAt(Cast<AJamZeroGPawn>(Controller->GetPawn()), Membrane); });
+		After(Mode, 21.05f, [Look, Membrane]() { Look(Membrane); });
+		After(Mode, 21.35f, [Shot]() { Shot(TEXT("crater, +0.35 s after the blast")); });
+		// 4: a cave plug from 6 m down its tunnel.
+		const FVector PlugFront = Plug->GetFrontNormal();
+		const FVector PlugUp = Plug->GetActorUpVector();
+		const FVector Stand = Plug->GetActorLocation() + PlugFront * 600.0f - PlugUp * 130.0f;
+		const FVector PlugCentre = Plug->GetActorLocation();
+		After(Mode, 24.0f, [Place, Stand, PlugCentre]() { Place(Stand, PlugCentre); });
+		After(Mode, 27.5f, [Look, PlugCentre]() { Look(PlugCentre); });
+		After(Mode, 28.0f, [Shot]() { Shot(TEXT("cave plug")); });
+	}
+
+	FAutoConsoleCommandWithWorld GCaveShots(
+		TEXT("jam.Ship.CaveShots"),
+		TEXT("Rendered stills of the planetoid: from afar, on the relief, a crater membrane before/after the shotgun, a cave plug (HighResShot; real RHI)."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunCaveShots));
 
 	FAutoConsoleCommandWithWorld GShipProbe(
 		TEXT("jam.Ship.Probe"),

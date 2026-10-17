@@ -68,6 +68,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Shape", meta = (ClampMin = "5.0"))
 	float CellSizeCm = 20.0f;
 
+	/**
+	 * Round wall (a crater's membrane, a cave plug): only the cells whose centre
+	 * lies in the ellipse inscribed in the grid exist; the others are never drawn,
+	 * never collide and never tear, and the tissue regrows inward from them as
+	 * from a rim.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Shape")
+	bool bRound = false;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Shape", meta = (ClampMin = "1.0"))
 	float StrandThicknessCm = 12.0f;
 
@@ -266,6 +275,8 @@ private:
 		FIntPoint From = FIntPoint::ZeroValue;
 		float Phase = 0.0f;
 		bool bThin = false;
+		/** False outside a round wall's ellipse: no strands, never torn, counts as whole (a rim to regrow from). */
+		bool bExists = true;
 		/** Bundle thickness factor, lean of each bundle (radians), colour variation. */
 		float Thickness = 1.0f;
 		float Lean[2] = { 0.0f, 0.0f };
