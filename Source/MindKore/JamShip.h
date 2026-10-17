@@ -32,6 +32,7 @@ public:
 
 private:
 	FVector SmoothedGravity = FVector::ZeroVector;
+	bool bWasFreeBodyRotation = false;
 	/** World from the view's local frame, carried along as gravity turns. */
 	FQuat GravityFrame = FQuat::Identity;
 	/** The view in that frame: pitch and yaw, no roll. */

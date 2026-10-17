@@ -31,8 +31,21 @@
 void AJamShipController::UpdateRotation(float DeltaTime)
 {
 	// The pawn's gravity; outside every zone the frame keeps the last one.
-	const AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(GetPawn());
+	AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(GetPawn());
 	const bool bInGravity = Floater && Floater->IsInGravity();
+	if (Floater && !bInGravity && Floater->bFreeBodyRotation)
+	{
+		// Compose in body space: after a flip, yaw still turns around the
+		// player's own up axis. Euler pitch/yaw accumulation cannot do this.
+		const FQuat View = (GetControlRotation().Quaternion() * RotationInput.Quaternion()).GetNormalized();
+		LastWrittenRotation = View.Rotator();
+		SetControlRotation(LastWrittenRotation);
+		// Teleport only orientation; preserve linear momentum. Physics rotation
+		// stays locked so collisions and the tether cannot spin the player.
+		Floater->Body->SetWorldRotation(View, false, nullptr, ETeleportType::TeleportPhysics);
+		bWasFreeBodyRotation = true;
+		return;
+	}
 	if (SmoothedGravity.IsNearlyZero())
 	{
 		SmoothedGravity = bInGravity ? Floater->GetGravityDirection() : FVector::DownVector;
@@ -56,22 +69,34 @@ void AJamShipController::UpdateRotation(float DeltaTime)
 
 	// Someone else set the view (possession, a teleport, a probe): take it as the new one.
 	const FRotator Control = GetControlRotation();
-	if (!Control.Equals(LastWrittenRotation, 0.01f))
+	if (bWasFreeBodyRotation || !Control.Equals(LastWrittenRotation, 0.01f))
 	{
 		const FRotator Local = (GravityFrame.Inverse() * Control.Quaternion()).Rotator();
 		RelativeView = FRotator(Local.Pitch, Local.Yaw, 0.0f);
 	}
 
+	bWasFreeBodyRotation = false;
 	FRotator View = RelativeView;
 	FRotator DeltaRotation(RotationInput);
 	if (PlayerCameraManager)
 	{
 		PlayerCameraManager->ProcessViewRotation(DeltaTime, View, DeltaRotation);
 	}
+	else
+	{
+		View += DeltaRotation;
+		View.Pitch = FMath::Clamp(FRotator::NormalizeAxis(View.Pitch), -89.0f, 89.0f);
+	}
 	View.Roll = 0.0f;
 	RelativeView = View;
 	LastWrittenRotation = (GravityFrame * View.Quaternion()).Rotator();
 	SetControlRotation(LastWrittenRotation);
+	if (Floater)
+	{
+		// Walking keeps the body upright in the gravity frame; only the head pitches.
+		Floater->Body->SetWorldRotation(GravityFrame * FRotator(0.0f, View.Yaw, 0.0f).Quaternion(),
+			false, nullptr, ETeleportType::TeleportPhysics);
+	}
 	if (APawn* const ViewPawn = GetPawnOrSpectator())
 	{
 		ViewPawn->FaceRotation(LastWrittenRotation, DeltaTime);

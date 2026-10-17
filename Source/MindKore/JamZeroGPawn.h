@@ -112,6 +112,10 @@ public:
 
 	// --- view ---------------------------------------------------------------
 
+	/** In zero gravity, mouse look rotates the whole body around its local axes without pitch limits. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View")
+	bool bFreeBodyRotation = true;
+
 	/** Horizontal field of view, degrees: MindKore's bodycam (UMKCameraComponent::BodyCamFov). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "60.0", ClampMax = "150.0"))
 	float CameraFOV = 134.0f;
