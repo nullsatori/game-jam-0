@@ -33,6 +33,12 @@ Commercial use permitted; **attribution required**.
 Donor of the gristle crunch in `SW_MK_Hit_Limb_*`. Modified: cut to single
 events, played 10–14 semitones down, band-limited, shortened.
 
+**Male_Breath_Fast_Loop_Stereo.wav** — by **Nox_Sound**, via
+[Freesound](https://freesound.org/people/nox_sound/sounds/554907/).
+Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+Donor of `SW_MK_Enemy_Grunt_*` (the living wall's groan, `SC_MK_Enemy_Grunt`
+played pitched down).
+
 **Clean Revolver Reload** — by **Dredile**, via
 [Freesound](https://freesound.org/people/Dredile/sounds/177863/).
 Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
