@@ -969,6 +969,10 @@ bool AJamZeroGPawn::Fire()
 		return false;
 	}
 	AddBodyImpulse(Recoil);
+	// The kick is felt in the camera too, not only in the speed readout.
+	const float Kick = RecoilShakeCmPer10000 * Recoil.Size() / 10000.0f;
+	ShakeAmplitude = ShakeRemaining > 0.0f ? FMath::Max(ShakeAmplitude, Kick) : Kick;
+	ShakeRemaining = ShakeSeconds;
 	return true;
 }
 

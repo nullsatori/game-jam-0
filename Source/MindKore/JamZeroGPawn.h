@@ -252,6 +252,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Crash", meta = (ClampMin = "0.0"))
 	float ShakeSeconds = 0.25f;
 
+	/** Camera kick of a shot per 10000 kg cm/s of recoil, cm (the same fading shake as a crash). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
+	float RecoilShakeCmPer10000 = 1.5f;
+
 	// --- thrusters and stabiliser ------------------------------------------------
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters")
@@ -259,7 +263,7 @@ public:
 
 	/** Acceleration along the input direction while a thrust key is held, cm/s^2. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters", meta = (ClampMin = "0.0"))
-	float ThrustAccelCm = 600.0f;
+	float ThrustAccelCm = 250.0f;
 
 	/** Thrust stops adding once the velocity along the input direction reaches this, cm/s (it never brakes). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters", meta = (ClampMin = "0.0"))

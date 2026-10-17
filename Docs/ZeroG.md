@@ -93,7 +93,7 @@
 | `PushImpulse` | 30000 | от статики: 300 см/с; телу массы m даётся +импульс, себе −импульс |
 | `PushCooldownSeconds` | 0.35 | |
 | `Weapons` | 3 ствола | см. [RecoilWeapons](RecoilWeapons.md) |
-| `ThrustAccelCm` | 600 | см/с² вдоль направления ввода |
+| `ThrustAccelCm` | 250 | см/с² вдоль направления ввода (было 600; владелец: «ускорение WASD ниже») |
 | `ThrustMaxSpeedCm` | 500 | выше этой скорости вдоль направления ввода двигатель не добавляет (и не тормозит) |
 | `StabiliserAccelCm` / `StabiliserRate` | 300 / 2 | торможение = min(300, скорость × 2) см/с² — мягкий конец у нуля |
 | `bThrustersEnabled` | true | выключить двигатели совсем |
