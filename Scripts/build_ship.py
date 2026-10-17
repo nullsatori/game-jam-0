@@ -598,8 +598,9 @@ for crater in LAYOUT["craters"]:
                "Jam.Crater", 70.0, 110.0)
 # Cave plugs: round walls across the tunnel throats (front along the tunnel).
 for plug in LAYOUT["plugs"]:
-    # Shot at eye level, the hole must reach the floor 1.5 m lower: a wider blast than a crater's.
-    round_wall("CavePlug_" + plug["name"], on_planet(plug["pos"]), plug["forward"], plug["up"], "Jam.CavePlug", 100.0, 150.0)
+    # Shot at eye level, the hole must reach the floor 1.5 m lower: a wider blast than a crater's
+    # (the ragged outline is 0.7-1.3 of it in places).
+    round_wall("CavePlug_" + plug["name"], on_planet(plug["pos"]), plug["forward"], plug["up"], "Jam.CavePlug", 110.0, 170.0)
 # Behind both plugs of T1 and under crater C1's membrane: oxygen (the cargo is placed with the rest below).
 oxygen = LAYOUT["prizes"][1]
 canister = spawn(unreal.JamOxygenCanister, on_planet(oxygen["pos"]), None, "O2_Canister_Cave")

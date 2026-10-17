@@ -5,14 +5,16 @@
 Writes SM_Jam_LivingWall_Square.fbx (4 x 4 m in a rusty frame) and
 SM_Jam_LivingWall_Round.fbx (4 m across in a ring: crater membranes, cave plugs)
 plus preview renders into out_dir (not the repository). Procedural, seeded,
-built like flayed anatomy in layers (owner, 17.10: muscle tissue, not a net):
-  - back: a sagging fascia membrane across the whole opening;
-  - fusiform muscle bellies (many thin, slightly twisted fibres over a core,
-    fibres along the belly) in two interleaving fans from opposite corners and
-    two straps across on top; round: a radial fan converging on a ring knot;
+built like flayed anatomy (owner, 17-18.10: solid muscle tissue, not a net, not a
+set of fibres):
+  - behind: one continuous muscular mass across the whole opening;
+  - fusiform bellies, each ONE solid fluted body (the fibres are the texture
+    along it), wide enough to touch and overlap and sinking into the mass: two
+    interleaving fans from opposite corners, short ones in the other corners, two
+    straps on top; round: a sphincter - a thick ring of circular muscle with
+    radial bellies from the rim running into it over a puckered middle;
   - pale flat aponeuroses where bellies meet the frame, widening onto it;
-  - stringy connective threads across the gaps, a few branching vessels and
-    nerves along the borders between muscles;
+  - a few stringy connective threads and branching vessels;
   - the frame with brackets and bolts.
 Wall space as AJamLivingWall's (UE axes, here in metres): width along X, height
 along Z, the front toward +Y, the centre at the origin.
@@ -202,8 +204,9 @@ def anchors_round():
 Y = np.array((0.0, 1.0, 0.0))
 
 
-def flat_tube(parts, path, r_w, r_d, sides, mat):
-    """A tube whose section is an ellipse: r_w across in the wall plane, r_d in depth (Y). UV0: u around, v along."""
+def flat_tube(parts, path, r_w, r_d, sides, mat, grooves=0, groove=0.0):
+    """A tube whose section is an ellipse: r_w across in the wall plane, r_d in depth (Y). UV0: u around, v along.
+    grooves > 0: the surface is fluted along the tube (that many ridges, relative depth groove), slightly twisting."""
     path = np.asarray(path, dtype=np.float64)
     r_w = np.broadcast_to(np.asarray(r_w, dtype=np.float64), (len(path),))
     r_d = np.broadcast_to(np.asarray(r_d, dtype=np.float64), (len(path),))
@@ -218,7 +221,8 @@ def flat_tube(parts, path, r_w, r_d, sides, mat):
     for k in range(len(path)):
         for j in range(sides + 1):
             a = 2 * math.pi * j / sides
-            verts.append(path[k] + r_w[k] * math.cos(a) * w[k] + r_d[k] * math.sin(a) * d[k])
+            flute = 1.0 + groove * math.sin(grooves * a + 0.8 * seg[k]) if grooves else 1.0
+            verts.append(path[k] + flute * (r_w[k] * math.cos(a) * w[k] + r_d[k] * math.sin(a) * d[k]))
             uvs.append((j / sides, seg[k] / circ))
     cols = sides + 1
     faces = [[k * cols + j, k * cols + j + 1, (k + 1) * cols + j + 1, (k + 1) * cols + j] for k in range(len(path) - 1) for j in range(sides)]
@@ -233,16 +237,17 @@ def flat_tube(parts, path, r_w, r_d, sides, mat):
     return w, d
 
 
-def belly(parts, rng, a, b, r_max, bend=0.0, depth=0.0, tendon_a=True, tendon_b=True, fibres=13, flat=0.45):
-    """A fusiform muscle from a to b: thick in the middle, tapering into tendons; many thin, slightly
-    twisted fibres over a core, fibres along it. A tendon end becomes a pale flat ribbon fanning out
-    onto its attachment. Returns the belly's path (for vessels and connective threads)."""
-    a, b = np.asarray(a, float), np.asarray(b, float)
-    ab = b - a
-    side = np.cross(ab, Y)
-    side /= np.linalg.norm(side)
-    ctrl = [a, a + ab * 0.33 + side * bend * 0.8 + Y * depth, a + ab * 0.66 + side * bend + Y * depth, b]
-    path = spline(ctrl, 0.04)
+def belly(parts, rng, a, b, r_max, bend=0.0, depth=0.0, tendon_a=True, tendon_b=True, flat=0.45, path=None):
+    """A fusiform muscle from a to b: ONE closed solid body, thick in the middle, tapering into
+    tendons, fluted along its length (the fibres are the texture along it and these grooves). A
+    tendon end becomes a pale flat ribbon fanning out onto its attachment. Returns its path."""
+    if path is None:
+        a, b = np.asarray(a, float), np.asarray(b, float)
+        ab = b - a
+        side = np.cross(ab, Y)
+        side /= np.linalg.norm(side)
+        ctrl = [a, a + ab * 0.33 + side * bend * 0.8 + Y * depth, a + ab * 0.66 + side * bend + Y * depth, b]
+        path = spline(ctrl, 0.04)
     seg = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(path, axis=0), axis=1))])
     s = seg / seg[-1]
     ta = rng.uniform(0.13, 0.2) if tendon_a else 0.0
@@ -250,20 +255,10 @@ def belly(parts, rng, a, b, r_max, bend=0.0, depth=0.0, tendon_a=True, tendon_b=
     u = np.clip((s - ta) / (tb - ta), 0.0, 1.0)
     # Fusiform: the belly swells off-centre a little, like a real one.
     peak = rng.uniform(0.4, 0.6)
-    shape = np.where(u < peak, np.sin(0.5 * math.pi * u / peak), np.sin(0.5 * math.pi * (1 - u) / (1 - peak))) ** 0.8
-    r = 0.012 + r_max * shape
-    inside = (s >= ta) & (s <= tb)
-    idx = np.nonzero(inside)[0]
-    core_path = path[idx]
-    w, d = flat_tube(parts, core_path, r[idx] * 0.8, r[idx] * 0.8 * flat, 10, MUSCLE)
-    twist = rng.uniform(0.3, 0.7) * math.pi
-    golden = math.pi * (3 - math.sqrt(5))
-    for k in range(fibres):
-        rad = math.sqrt((k + 0.5) / fibres)
-        ang = k * golden + twist * u[idx]
-        off = (r[idx] * 0.85 * rad)[:, None] * (np.cos(ang)[:, None] * w + flat * np.sin(ang)[:, None] * d)
-        fr = np.maximum(r[idx] * rng.uniform(0.26, 0.34), 0.006)
-        flat_tube(parts, core_path + off, fr, fr * 0.9, 5, MUSCLE)
+    shape = np.where(u < peak, np.sin(0.5 * math.pi * u / peak), np.sin(0.5 * math.pi * (1 - u) / (1 - peak))) ** 0.7
+    r = 0.015 + r_max * shape
+    idx = np.nonzero((s >= ta) & (s <= tb))[0]
+    flat_tube(parts, path[idx], r[idx], r[idx] * flat, 24, MUSCLE, grooves=int(rng.integers(11, 16)), groove=0.05)
     # Aponeuroses: pale flat ribbons from the belly to the attachment, widening onto it.
     for end, rng_idx in ((tendon_a, np.nonzero(s <= ta + 0.02)[0]), (tendon_b, np.nonzero(s >= tb - 0.02)[0])):
         if not end or len(rng_idx) < 2:
@@ -274,7 +269,6 @@ def belly(parts, rng, a, b, r_max, bend=0.0, depth=0.0, tendon_a=True, tendon_b=
         width = r[rng_idx].max() * 0.6 + (0.22 - r[rng_idx].max() * 0.6) * at_frame ** 2
         flat_tube(parts, p, width, 0.008 + 0.012 * (1 - at_frame), 8, TENDON)
     return path
-
 
 def threads(parts, rng, paths, count):
     """Stringy connective fibres stretched across the gaps between neighbouring bellies."""
@@ -323,82 +317,88 @@ def cords(parts, rng, paths, count):
 
 
 def fascia(parts, rng, round_):
-    """The back layer: a sagging translucent membrane across the opening (its thin places are the material's)."""
+    """The back layer: a continuous muscular mass across the whole opening (front and back
+    surfaces), bulging, its fibres diagonal (square) or radial (round) in UV0; a round one
+    puckers in toward the middle like a sphincter's floor. The bellies sink into it."""
     n = 72
-    lim = INNER + 0.02
-    verts, uvs = [], []
+    lim = INNER + 0.04
+    front, back, uvs = [], [], []
     for i in range(n + 1):
         for k in range(n + 1):
             x, z = -lim + 2 * lim * i / n, -lim + 2 * lim * k / n
-            rr = min(1.0, (x * x + z * z) / (lim * lim)) if round_ else max(abs(x), abs(z)) ** 2 / lim ** 2
-            y = -0.13 - 0.07 * (1 - rr) + 0.012 * math.sin(x * 7.3 + z * 2.1) * math.cos(z * 5.7)
-            verts.append((x, y, z))
-            uvs.append((x * 0.6, z * 0.6))
+            r = math.hypot(x, z)
+            bulge = 0.025 * math.sin(x * 3.3 + 0.4) * math.sin(z * 2.9 - 0.8) + 0.012 * math.sin(x * 8.1 - z * 6.7)
+            if round_:
+                th = math.atan2(z, x)
+                pucker = -0.06 * math.exp(-(r / 0.4) ** 2) * (1.0 + 0.25 * math.sin(10 * th))
+                y = -0.06 + bulge + pucker
+                uvs.append((th / (2 * math.pi) * 8.0, r * 1.6))
+            else:
+                y = -0.06 + bulge
+                uvs.append(((x - z) * 0.7071 * 0.8, (x + z) * 0.7071 * 1.6))
+            # Flutes along the fibres on the front surface.
+            along = r if round_ else (x - z) * 0.7071
+            y += 0.006 * math.sin(along * 55.0)
+            front.append((x, y, z))
+            back.append((x, -0.17 - 0.02 * (1 - min(1.0, r / lim)), z))
     faces = []
     for i in range(n):
         for k in range(n):
             x, z = -lim + 2 * lim * (i + 0.5) / n, -lim + 2 * lim * (k + 0.5) / n
             if round_ and x * x + z * z > lim * lim:
                 continue
-            a = i * (n + 1) + k
-            faces.append([a, a + n + 1, a + n + 2, a + 1])
-    parts.add(verts, uvs, faces, MEMBRANE)
-
+            q = i * (n + 1) + k
+            faces.append([q, q + n + 1, q + n + 2, q + 1])
+    parts.add(front, uvs, [f[::-1] for f in faces], MUSCLE)
+    parts.add(back, uvs, faces, MUSCLE)
 
 def tissue_square(parts, rng):
     fascia(parts, rng, False)
     c = INNER * 0.95
     paths = []
-    # Fan A from the lower-left corner and fan B from the upper-right: fingers that interleave
-    # across the middle (serratus against an oblique), uneven widths and lengths.
-    # The fingers end free in the middle, tapering, overlapping the other fan's.
-    for ang, length, r in ((14, 3.0, 0.27), (31, 2.7, 0.31), (48, 2.85, 0.26), (64, 3.05, 0.3), (80, 2.5, 0.22)):
+    # Fan A from the lower-left corner and fan B from the upper-right: wide bellies that touch and
+    # overlap each other and sink into the mass behind; their fingers interleave in the middle.
+    for ang, length, r in ((12, 3.0, 0.33), (27, 2.75, 0.36), (42, 2.9, 0.32), (57, 3.05, 0.35), (72, 2.75, 0.31), (85, 2.3, 0.27)):
         a = np.array((-c, 0.0, -c))
         dirn = np.array((math.cos(math.radians(ang)), 0.0, math.sin(math.radians(ang))))
-        paths.append(belly(parts, rng, a, a + dirn * length * rng.uniform(0.93, 1.05), r, bend=rng.uniform(-0.15, 0.15),
-                           depth=rng.uniform(-0.04, 0.0), tendon_b=False))
-    for ang, length, r in ((193, 2.8, 0.28), (210, 2.6, 0.32), (227, 2.95, 0.27), (246, 2.65, 0.25), (261, 2.2, 0.2)):
+        paths.append(belly(parts, rng, a, a + dirn * length * rng.uniform(0.95, 1.05), r, bend=rng.uniform(-0.1, 0.1),
+                           depth=rng.uniform(-0.02, 0.02), tendon_b=False))
+    for ang, length, r in ((191, 2.8, 0.34), (206, 2.65, 0.37), (221, 2.95, 0.33), (237, 2.7, 0.32), (252, 2.5, 0.3), (265, 2.1, 0.26)):
         a = np.array((c, 0.0, c))
         dirn = np.array((math.cos(math.radians(ang)), 0.0, math.sin(math.radians(ang))))
-        paths.append(belly(parts, rng, a, a + dirn * length * rng.uniform(0.93, 1.05), r, bend=rng.uniform(-0.15, 0.15),
-                           depth=rng.uniform(0.01, 0.06), tendon_b=False))
-    # The other two corners: short bellies from each, so the corners are muscle, not a window.
-    for corner, angles in (((-c, 0.0, c), (-20, -48)), ((c, 0.0, -c), (160, 128))):
+        paths.append(belly(parts, rng, a, a + dirn * length * rng.uniform(0.95, 1.05), r, bend=rng.uniform(-0.1, 0.1),
+                           depth=rng.uniform(0.0, 0.04), tendon_b=False))
+    # The other two corners: short fused bellies.
+    for corner, angles in (((-c, 0.0, c), (-18, -45, -72)), ((c, 0.0, -c), (162, 135, 108))):
         for ang in angles:
             dirn = np.array((math.cos(math.radians(ang)), 0.0, math.sin(math.radians(ang))))
-            paths.append(belly(parts, rng, corner, np.array(corner) + dirn * rng.uniform(1.1, 1.4), rng.uniform(0.2, 0.25),
-                               bend=rng.uniform(-0.1, 0.1), depth=rng.uniform(-0.05, -0.01), tendon_b=False, fibres=10))
-    # Two long straps on top, crossing diagonally (sartorius-like), and a short one off the left side.
-    paths.append(belly(parts, rng, (-c, 0.0, c), (c * 0.9, 0.0, -c), 0.12, bend=0.35, depth=0.16, fibres=9, flat=0.5))
-    paths.append(belly(parts, rng, (0.1, 0.0, INNER), (c, 0.0, -0.5), 0.1, bend=-0.2, depth=0.13, fibres=8, flat=0.5))
-    paths.append(belly(parts, rng, (-INNER, 0.0, 0.25), (-0.2, 0.0, -INNER), 0.16, bend=0.15, depth=0.08, fibres=10))
-    threads(parts, rng, paths, 70)
+            paths.append(belly(parts, rng, corner, np.array(corner) + dirn * rng.uniform(1.1, 1.5), rng.uniform(0.27, 0.32),
+                               bend=rng.uniform(-0.08, 0.08), depth=rng.uniform(-0.03, 0.0), tendon_b=False))
+    # Two long straps on top, crossing diagonally (sartorius-like).
+    paths.append(belly(parts, rng, (-c, 0.0, c), (c * 0.9, 0.0, -c), 0.16, bend=0.35, depth=0.17, flat=0.5))
+    paths.append(belly(parts, rng, (0.1, 0.0, INNER), (c, 0.0, -0.5), 0.13, bend=-0.2, depth=0.14, flat=0.5))
+    threads(parts, rng, paths, 30)
     cords(parts, rng, paths, 6)
-
 
 def tissue_round(parts, rng):
     fascia(parts, rng, True)
     paths = []
-    # A radial fan of bellies converging on a sphincter-like knot in the middle.
-    angles = np.radians(np.array([0, 47, 88, 140, 181, 222, 268, 311]) + rng.uniform(-8, 8, 8))
-    for k, ang in enumerate(angles):
-        if k == 5:
-            continue  # one gap: not too regular
+    # A sphincter: a thick ring of circular muscle around the middle (orbicularis-like) ...
+    ring = np.array([(0.45 * math.cos(t) + 0.03 * math.sin(3 * t), 0.02 + 0.02 * math.sin(2 * t), 0.45 * math.sin(t))
+                     for t in np.linspace(0, 2 * math.pi * 1.04, 140)])
+    flat_tube(parts, ring, 0.27, 0.2, 24, MUSCLE, grooves=13, groove=0.05)
+    paths.append(ring)
+    # ... and radial bellies from the rim that touch each other and run into the ring.
+    count = 12
+    for k in range(count):
+        ang = 2 * math.pi * k / count + rng.uniform(-0.12, 0.12)
         a = np.array((INNER * 0.97 * math.cos(ang), 0.0, INNER * 0.97 * math.sin(ang)))
-        b = a / np.linalg.norm(a) * rng.uniform(0.22, 0.32)
-        paths.append(belly(parts, rng, a, b, rng.uniform(0.2, 0.28), bend=rng.uniform(-0.15, 0.15),
-                           depth=rng.uniform(-0.02, 0.04), tendon_b=False, fibres=10))
-    # The knot: fibres running round the middle, a thick twisted ring.
-    for k in range(7):
-        ring = [np.array((0.28 * math.cos(t) + 0.03 * math.sin(3 * t + k), 0.05 + 0.03 * math.sin(2 * t + k), 0.28 * math.sin(t)))
-                for t in np.linspace(0, 2 * math.pi, 64)]
-        tube(parts, ring, 0.07 + 0.02 * math.sin(k), 6, MUSCLE)
-    paths.append(belly(parts, rng, (-INNER * 0.9, 0.0, 0.6), (INNER * 0.8, 0.0, -0.8), 0.075, bend=0.3, depth=0.13, fibres=6, flat=0.6))
-    threads(parts, rng, paths, 50)
+        b = a / np.linalg.norm(a) * 0.4
+        paths.append(belly(parts, rng, a, b, rng.uniform(0.27, 0.33), bend=rng.uniform(-0.1, 0.1),
+                           depth=rng.uniform(-0.02, 0.03), tendon_b=False))
+    threads(parts, rng, paths, 24)
     cords(parts, rng, paths, 4)
 
-
-# --- mesh -----------------------------------------------------------------------------------------
 def to_bmesh(parts):
     """Into a bmesh, Y mirrored (the FBX round trip turns Blender +Y into UE -Y) and the winding reversed."""
     bm = bmesh.new()

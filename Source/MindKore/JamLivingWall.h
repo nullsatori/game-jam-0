@@ -35,11 +35,17 @@ class USoundBase;
  * BurstMarginCm, at most BurstMaxRadiusCm - otherwise eight pellets would
  * leave eight 20 cm holes and never one a body fits through.
  *
- * Regrowth. A torn cell waits RegrowDelaySeconds plus the blast's stun
- * (StunSecondsPerCell for every cell of its wound beyond StunFreeCells, at
- * most MaxStunSeconds) and then until a 4-neighbour is whole; then its strands
- * grow out of that neighbour's side over StrandGrowSeconds. So a hole closes
- * ring by ring from its rim, and a big wound starts later than a small one.
+ * Holes. Every wound is a ragged outline around its centre (WoundGap): a
+ * random wobble (harmonics 2..5 from a per-wound seed), stretched along a fibre
+ * direction (muscle tears along its fibres), plus a few pellet blobs for a
+ * blast. It closes at a different time in every direction: after
+ * RegrowDelaySeconds plus the stun (StunSecondsPerCell per cell beyond
+ * StunFreeCells, at most MaxStunSeconds) give or take a quarter by angle, the
+ * outline at that angle shrinks to the centre over about StrandGrowSeconds per
+ * cell of radius, along the fibres last. The cells follow the same outline: a
+ * torn cell stays open while its centre is inside it and grows back (its rods,
+ * the collision) once the outline has passed it. The skin material draws the
+ * same outline (M_Jam_Gritty, LivingHoles), so what is seen is what collides.
  * Whatever overlaps a regrowing cell is pushed out along the wall normal toward
  * the side its centre is on; a pawn with vitals takes SqueezeDamage.
  */
@@ -146,6 +152,13 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Tear", meta = (ClampMin = "0.0"))
 	float BurstMaxRadiusCm = 80.0f;
+
+	/** A tear opens over this (a single hit / a blast), fast at first, along the fibres first; a cell opens when the outline reaches it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Tear", meta = (ClampMin = "0.0"))
+	float TearSeconds = 0.1f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Tear", meta = (ClampMin = "0.0"))
+	float BlastTearSeconds = 0.25f;
 
 	// --- regrowth ---------------------------------------------------------
 
@@ -320,8 +333,19 @@ private:
 		float Side = 1.0f;
 		double TornAt = 0.0;
 		double NextPulse = 0.0;
-		/** The hole the skin shows, cm (wall space). */
+		/** The outline (WoundGap): typical radius cm, seed 0..1, fibre angle rad, stretch along it, pellet blobs. */
 		float Radius = 0.0f;
+		float Seed = 0.0f;
+		float Fibre = 0.0f;
+		float Stretch = 0.0f;
+		int32 Blobs = 0;
+		/** Seconds before the outline starts closing (on average) and how long one direction takes. */
+		float Stun = 0.0f;
+		float Close = 0.0f;
+		/** Seconds the outline takes to open (it closes after Tear + Stun, about). */
+		float Tear = 0.1f;
+		/** Cells inside the full outline that the opening outline has not reached yet. */
+		TArray<int32> Unopened;
 	};
 
 	struct FPendingHit
@@ -335,14 +359,19 @@ private:
 
 	void Build();
 	void ProcessHits(double Now);
-	void Tear(const TArray<FVector2D>& Points, float Radius, TSet<int32>& OutCells) const;
 	void UpdateCells(float DeltaSeconds, double Now);
 	void UpdateWounds(double Now);
 	void UpdateRim(double Now);
 	void PushOutBodies(double Now);
 	void WriteCell(int32 Cell, double Now, float Twitch);
-	/** The skin's holes: each wound's radius from its open cells, the widest MaxHoles into the materials. */
-	void UpdateHoles(float DeltaSeconds);
+	/** The skin's holes: every wound's outline into the materials (the widest MaxHoles). */
+	void UpdateHoles(double Now);
+	/** Signed distance (cm, about) from Point to the wound's outline at Age seconds: < 0 inside the hole. */
+	static float WoundGap(const FWound& Wound, const FVector2D& Point, float Age, bool bFullShape = false);
+	/** Open the cells the opening outlines have reached. */
+	void UpdateTearing(double Now);
+	/** When the wound's outline has closed in every direction, seconds after the tear. */
+	static float WoundEnd(const FWound& Wound);
 	void Spurt(const FWound& Wound, int32 Cell) const;
 
 	FVector2D CellCentre(int32 Cell) const;
@@ -362,7 +391,7 @@ private:
 	TArray<FPendingHit> Pending;
 	TMap<TWeakObjectPtr<AActor>, double> LastSqueeze;
 	/** Hole slots of the skin material (M_Jam_Gritty HOLES). */
-	static constexpr int32 MaxHoles = 8;
+	static constexpr int32 MaxHoles = 6;
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> SkinMaterials;
 	/** Holes shown last frame (to clear the slots once they are gone). */

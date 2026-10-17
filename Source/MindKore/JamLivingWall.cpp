@@ -320,46 +320,99 @@ void AJamLivingWall::WriteCell(int32 Cell, double Now, float Twitch)
 	}
 }
 
-void AJamLivingWall::UpdateHoles(float DeltaSeconds)
+namespace
+{
+	float Frac(float X)
+	{
+		return X - FMath::FloorToFloat(X);
+	}
+
+	/**
+	 * How open the outline at angle Theta is, 0..1: it opens over Tear (cubic ease-out, along
+	 * the fibres first, across them up to 1.6 x slower), waits, then closes over Close after a
+	 * delay that differs by angle (Stun +- a quarter, along the fibres a little later).
+	 * Mirrored in M_Jam_Gritty (Scripts/jam_flesh.py HOLE_HLSL).
+	 */
+	float OutlineOpen(float Seed, float Fibre, float Stun, float Close, float Tear, float Theta, float Age)
+	{
+		const float Across = 0.5f - 0.5f * FMath::Cos(2.0f * (Theta - Fibre));
+		const float Opening = 1.0f - FMath::Pow(1.0f - FMath::Clamp(Age / FMath::Max(Tear * (1.0f + 0.6f * Across), 0.001f), 0.0f, 1.0f), 3.0f);
+		const float Uneven = 0.6f * FMath::Sin(Theta + UE_TWO_PI * Frac(Seed * 1.3f)) + 0.4f * FMath::Sin(2.0f * Theta + UE_TWO_PI * Frac(Seed * 2.7f));
+		const float Delay = Tear + Stun * (1.0f + 0.25f * Uneven) + 0.25f * Close * (1.0f - Across);
+		return Opening * (1.0f - FMath::SmoothStep(Delay, Delay + Close, Age));
+	}
+}
+
+float AJamLivingWall::WoundGap(const FWound& Wound, const FVector2D& Point, float Age, bool bFullShape)
+{
+	// Keep in step with HOLE_HLSL in Scripts/jam_flesh.py: the skin draws this outline.
+	const FVector2D Offset = Point - Wound.Centre;
+	const float Theta = FMath::Atan2(float(Offset.Y), float(Offset.X));
+	float Wobble = 1.0f;
+	for (int32 K = 2; K <= 5; ++K)
+	{
+		const float Amp = 0.05f + 0.12f * Frac(Wound.Seed * 0.6180339f * K + 0.11f * K);
+		const float Phase = UE_TWO_PI * Frac(Wound.Seed * 0.7548776f * K + 0.37f);
+		Wobble += Amp * FMath::Sin(K * Theta + Phase);
+	}
+	// Lobes out, never a notch narrower than 3/4 of the radius (a blast must stay passable);
+	// longer along the fibres, not narrower across them.
+	const float Shape = Wound.Radius * FMath::Clamp(Wobble, 0.75f, 1.3f) * (1.0f + Wound.Stretch * (0.5f + 0.5f * FMath::Cos(2.0f * (Theta - Wound.Fibre))));
+	const auto Open = [&Wound, Age, bFullShape](float Angle)
+	{
+		return bFullShape ? 1.0f : OutlineOpen(Wound.Seed, Wound.Fibre, Wound.Stun, Wound.Close, Wound.Tear, Angle, Age);
+	};
+	float Gap = float(Offset.Size()) - Shape * Open(Theta);
+	for (int32 Blob = 0; Blob < Wound.Blobs; ++Blob)
+	{
+		const float Beta = UE_TWO_PI * Frac(Wound.Seed * (Blob + 1) * 0.4142136f + 0.17f * Blob);
+		const FVector2D At = Wound.Centre + FVector2D(FMath::Cos(Beta), FMath::Sin(Beta)) * Wound.Radius * 0.8f;
+		const float Size = Wound.Radius * (0.3f + 0.15f * Frac(Wound.Seed * (Blob + 3) * 0.381966f))
+			* Open(Beta);
+		Gap = FMath::Min(Gap, float(FVector2D::Distance(Point, At)) - Size);
+	}
+	return Gap;
+}
+
+float AJamLivingWall::WoundEnd(const FWound& Wound)
+{
+	return Wound.Tear + Wound.Stun * 1.25f + Wound.Close * 1.25f + 0.05f;
+}
+
+void AJamLivingWall::UpdateHoles(double Now)
 {
 	if (SkinMaterials.IsEmpty() || (Wounds.IsEmpty() && ShownHoles == 0))
 	{
 		return;
 	}
-	// A wound's hole reaches its farthest open cell: a torn one by its whole
-	// half-width, a regrowing one less as it grows. Opening is immediate, closing
-	// eased, so the rim does not jump a ring at a time.
-	for (FWound& Wound : Wounds)
-	{
-		float Target = 0.0f;
-		for (const int32 Index : Wound.Cells)
-		{
-			const float Growth = Cells[Index].Growth;
-			if (Growth < 1.0f)
-			{
-				Target = FMath::Max(Target, float(FVector2D::Distance(CellCentre(Index), Wound.Centre)) + CellSizeCm * 0.7f * (1.0f - Smooth(Growth)));
-			}
-		}
-		Wound.Radius = Target > Wound.Radius ? Target : FMath::FInterpTo(Wound.Radius, Target, DeltaSeconds, 8.0f);
-	}
+	// Every wound's outline, the widest MaxHoles of them, in the skin's own space
+	// (the wall scaled by WidthCm / SkinSizeCm): A = (centre, radius, age),
+	// B = (seed, fibre angle, stretch, blobs), C = (stun, close).
 	TArray<const FWound*> Widest;
 	for (const FWound& Wound : Wounds)
 	{
 		Widest.Add(&Wound);
 	}
 	Widest.Sort([](const FWound& A, const FWound& B) { return A.Radius > B.Radius; });
-	// Mesh space: the skin is the wall scaled by WidthCm / SkinSizeCm.
 	const float ToMesh = SkinSizeCm / FMath::Max(WidthCm, 1.0f);
 	const int32 Shown = FMath::Min(Widest.Num(), MaxHoles);
 	for (int32 Slot = 0; Slot < FMath::Max(Shown, ShownHoles); ++Slot)
 	{
-		const FLinearColor Hole = Slot < Shown
-			? FLinearColor(Widest[Slot]->Centre.X * ToMesh, Widest[Slot]->Centre.Y * ToMesh, Widest[Slot]->Radius * ToMesh, 0.0f)
-			: FLinearColor(1.0e5f, 1.0e5f, 0.0f, 0.0f);
-		const FName Name(*FString::Printf(TEXT("Hole%d"), Slot));
+		FLinearColor A(1.0e5f, 1.0e5f, 0.0f, 0.0f);
+		FLinearColor B(0.0f, 0.0f, 0.0f, 0.0f);
+		FLinearColor C(1.0f, 1.0f, 0.0f, 0.0f);
+		if (Slot < Shown)
+		{
+			const FWound& Wound = *Widest[Slot];
+			A = FLinearColor(Wound.Centre.X * ToMesh, Wound.Centre.Y * ToMesh, Wound.Radius * ToMesh, float(Now - Wound.TornAt));
+			B = FLinearColor(Wound.Seed, Wound.Fibre, Wound.Stretch, float(Wound.Blobs));
+			C = FLinearColor(Wound.Stun, Wound.Close, Wound.Tear, 0.0f);
+		}
 		for (UMaterialInstanceDynamic* Material : SkinMaterials)
 		{
-			Material->SetVectorParameterValue(Name, Hole);
+			Material->SetVectorParameterValue(FName(*FString::Printf(TEXT("Hole%dA"), Slot)), A);
+			Material->SetVectorParameterValue(FName(*FString::Printf(TEXT("Hole%dB"), Slot)), B);
+			Material->SetVectorParameterValue(FName(*FString::Printf(TEXT("Hole%dC"), Slot)), C);
 		}
 	}
 	ShownHoles = Shown;
@@ -410,19 +463,7 @@ void AJamLivingWall::ReceiveResolvedImpact_Implementation(const FMKResolvedImpac
 	}
 }
 
-void AJamLivingWall::Tear(const TArray<FVector2D>& Points, float Radius, TSet<int32>& OutCells) const
-{
-	for (const FVector2D& Point : Points)
-	{
-		for (int32 Index = 0; Index < Cells.Num(); ++Index)
-		{
-			if (Cells[Index].bExists && FVector2D::DistSquared(CellCentre(Index), Point) <= Radius * Radius)
-			{
-				OutCells.Add(Index);
-			}
-		}
-	}
-}
+
 
 void AJamLivingWall::ProcessHits(double Now)
 {
@@ -445,43 +486,68 @@ void AJamLivingWall::ProcessHits(double Now)
 			Centroid += Pending[Index].Point / Group.Value.Num();
 			Side += Pending[Index].Side;
 		}
-		TSet<int32> Torn;
-		Tear(Points, TearRadiusCm, Torn);
 		const bool bBlast = Group.Value.Num() >= BurstMinHits;
 		float Spread = 0.0f;
-		if (bBlast)
+		for (const FVector2D& Point : Points)
 		{
-			for (const FVector2D& Point : Points)
+			Spread = FMath::Max(Spread, float(FVector2D::Distance(Point, Centroid)));
+		}
+		// The outline: a blast's disc (its hits plus the margin), a single hit's
+		// TearRadiusCm; ragged, stretched along the fibres (diagonal on a square
+		// wall, radial on a round one), a blast with pellet blobs around it.
+		FWound Shape;
+		Shape.Centre = Centroid;
+		Shape.Radius = bBlast ? FMath::Min(Spread + BurstMarginCm, BurstMaxRadiusCm) : TearRadiusCm * 1.2f;
+		Shape.Seed = Random.FRand();
+		Shape.Fibre = bRound && Centroid.Size() > 40.0f ? float(FMath::Atan2(Centroid.Y, Centroid.X))
+			: FMath::DegreesToRadians((Random.FRand() < 0.5f ? 45.0f : 135.0f) + Random.FRandRange(-25.0f, 25.0f));
+		Shape.Stretch = Random.FRandRange(0.3f, 0.6f);
+		Shape.Blobs = bBlast ? 3 : 0;
+		TSet<int32> Torn;
+		int32 Nearest = INDEX_NONE;
+		float NearestDistance = TNumericLimits<float>::Max();
+		for (int32 Index = 0; Index < Cells.Num(); ++Index)
+		{
+			if (!Cells[Index].bExists)
 			{
-				Spread = FMath::Max(Spread, float(FVector2D::Distance(Point, Centroid)));
+				continue;
 			}
-			Tear({ Centroid }, FMath::Min(Spread + BurstMarginCm, BurstMaxRadiusCm), Torn);
+			if (WoundGap(Shape, CellCentre(Index), 0.0f, /*bFullShape=*/true) < 0.0f)
+			{
+				Torn.Add(Index);
+			}
+			const float Distance = float(FVector2D::Distance(CellCentre(Index), Centroid));
+			if (Distance < NearestDistance && Distance <= TearRadiusCm + CellSizeCm * 0.5f)
+			{
+				NearestDistance = Distance;
+				Nearest = Index;
+			}
+		}
+		if (Torn.IsEmpty() && Nearest != INDEX_NONE)
+		{
+			Torn.Add(Nearest); // a hit between cell centres still tears the one it is in
 		}
 		if (Torn.IsEmpty())
 		{
 			continue;
 		}
 		const int32 Count = Torn.Num();
-		const float Delay = RegrowDelaySeconds + FMath::Min(FMath::Max(0, Count - StunFreeCells) * StunSecondsPerCell, MaxStunSeconds);
-		FWound& Wound = Wounds.AddDefaulted_GetRef();
-		Wound.TornAt = Now;
-		Wound.NextPulse = Now;
-		Wound.Side = Side >= 0.0f ? 1.0f : -1.0f;
-		for (const int32 Index : Torn)
-		{
-			FCell& Cell = Cells[Index];
-			if (Cell.Growth >= 1.0f)
-			{
-				Open.Add(Index);
-			}
-			const double Wait = Now + Delay * (Cell.bThin ? ThinSpotSlowdown : 1.0f);
-			Cell.RegrowAt = Cell.Growth <= 0.0f ? FMath::Max(Cell.RegrowAt, Wait) : Wait;
-			Cell.Growth = 0.0f;
-			Cell.From = FIntPoint::ZeroValue;
-			WriteCell(Index, Now, 0.0f);
-			Wound.Cells.Add(Index);
-			Wound.Centre += CellCentre(Index) / Count;
-		}
+		const int32 CentreCell = CellAt(FMath::FloorToInt32(float(Centroid.X) / CellSizeCm + CellsX * 0.5f),
+			FMath::FloorToInt32(float(Centroid.Y) / CellSizeCm + CellsZ * 0.5f));
+		const bool bThinCentre = CentreCell != INDEX_NONE && Cells[CentreCell].bThin;
+		const float Delay = (RegrowDelaySeconds + FMath::Min(FMath::Max(0, Count - StunFreeCells) * StunSecondsPerCell, MaxStunSeconds))
+			* (bThinCentre ? ThinSpotSlowdown : 1.0f);
+		Shape.Stun = Delay;
+		// About StrandGrowSeconds per cell of radius, as the old ring-by-ring closing.
+		Shape.Close = FMath::Max(StrandGrowSeconds * 0.5f, Shape.Radius / CellSizeCm * StrandGrowSeconds) * (bThinCentre ? ThinSpotSlowdown : 1.0f);
+		Shape.Tear = bBlast ? BlastTearSeconds : TearSeconds;
+		Shape.TornAt = Now;
+		Shape.NextPulse = Now + Shape.Tear;
+		Shape.Side = Side >= 0.0f ? 1.0f : -1.0f;
+		FWound& Wound = Wounds.Add_GetRef(Shape);
+		// The cells open as the outline reaches them (UpdateTearing), over Tear.
+		Wound.Cells = Torn.Array();
+		Wound.Unopened = Wound.Cells;
 		LastWoundCentre = Wound.Centre;
 		const FVector WorldCentre = Wall.TransformPosition(FVector(Wound.Centre.X, 0.0f, Wound.Centre.Y));
 
@@ -498,7 +564,8 @@ void AJamLivingWall::ProcessHits(double Now)
 			{
 				const int32 X = Index % CellsX;
 				const int32 Z = Index / CellsX;
-				if (IsWhole(CellAt(X + 1, Z)) || IsWhole(CellAt(X - 1, Z)) || IsWhole(CellAt(X, Z + 1)) || IsWhole(CellAt(X, Z - 1)))
+				const auto Outside = [this, &Torn](int32 Next) { return Next != INDEX_NONE && Cells[Next].bExists && !Torn.Contains(Next); };
+				if (Outside(CellAt(X + 1, Z)) || Outside(CellAt(X - 1, Z)) || Outside(CellAt(X, Z + 1)) || Outside(CellAt(X, Z - 1)))
 				{
 					Rim.Add(Index);
 				}
@@ -516,17 +583,32 @@ void AJamLivingWall::ProcessHits(double Now)
 			}
 		}
 
-		// Feedback: chunks out of each hit (a few), a crunch (throttled), a groan for a big one.
+		// Feedback: chunks out of a few hits spread over the tear, a crunch (throttled), a groan for a big one.
 		const FPendingHit& First = Pending[Group.Value[0]];
-		for (int32 Shown = 0; Shown < FMath::Min(Group.Value.Num(), 4); ++Shown)
+		const int32 Chunks = FMath::Min(Group.Value.Num(), 4);
+		for (int32 Shown = 0; Shown < Chunks; ++Shown)
 		{
 			const FPendingHit& Hit = Pending[Group.Value[Shown]];
-			if (UNiagaraComponent* Effect = TearVfx ? UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, TearVfx, Hit.WorldPoint,
-				(-Hit.Direction).Rotation(), FVector(0.3f), /*bAutoDestroy=*/true, /*bAutoActivate=*/false) : nullptr)
+			const FVector At = Hit.WorldPoint;
+			const FRotator Facing = (-Hit.Direction).Rotation();
+			const int32 Droplets = FMath::Min(Count * 2, 24);
+			const auto Burst = [this, At, Facing, Droplets]()
 			{
-				Effect->SetVariableInt(TEXT("User.BloodDropletCount"), FMath::Min(Count * 2, 24));
-				Effect->Activate();
+				if (UNiagaraComponent* Effect = TearVfx ? UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, TearVfx, At, Facing, FVector(0.3f),
+					/*bAutoDestroy=*/true, /*bAutoActivate=*/false) : nullptr)
+				{
+					Effect->SetVariableInt(TEXT("User.BloodDropletCount"), Droplets);
+					Effect->Activate();
+				}
+			};
+			const float Later = Wound.Tear * Shown / Chunks;
+			if (Later <= 0.0f)
+			{
+				Burst();
+				continue;
 			}
+			FTimerHandle Handle;
+			GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, Burst), Later, false);
 		}
 		if (TearSound && Now - LastTearSound >= TearSoundIntervalSeconds)
 		{
@@ -540,6 +622,8 @@ void AJamLivingWall::ProcessHits(double Now)
 		UE_LOG(LogMindKore, Log, TEXT("Living wall %s: tore %d cells (%d hit(s)%s) around (%.0f, %.0f), regrowth after %.2f s, %d rim jet(s)"),
 			*GetName(), Count, Group.Value.Num(), bBlast ? *FString::Printf(TEXT(", one blast, hits within %.0f cm of their centre"), Spread) : TEXT(""),
 			Wound.Centre.X, Wound.Centre.Y, Delay, Wound.SpurtCells.Num());
+		UE_LOG(LogMindKore, Verbose, TEXT("Living wall %s: outline radius %.0f, seed %.3f, fibre %.0f deg, stretch %.2f, %d blob(s), closes in %.2f s"),
+			*GetName(), Wound.Radius, Wound.Seed, FMath::RadiansToDegrees(Wound.Fibre), Wound.Stretch, Wound.Blobs, WoundEnd(Wound));
 	}
 	Pending.Reset();
 }
@@ -548,38 +632,55 @@ void AJamLivingWall::ProcessHits(double Now)
 
 void AJamLivingWall::UpdateCells(float DeltaSeconds, double Now)
 {
-	static const FIntPoint Steps[4] = { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) };
+	// A torn cell stays open while its centre is inside a wound's outline; once
+	// the outline has passed it, its rods (the collision) grow back in place.
 	for (int32 Slot = Open.Num() - 1; Slot >= 0; --Slot)
 	{
 		const int32 Index = Open[Slot];
 		FCell& Cell = Cells[Index];
-		if (Cell.Growth <= 0.0f)
+		const FVector2D Centre = CellCentre(Index);
+		const bool bInside = Wounds.ContainsByPredicate([&Centre, Now](const FWound& Wound)
 		{
-			if (Now < Cell.RegrowAt)
-			{
-				continue;
-			}
-			// Only out of a whole neighbour: a hole closes from its rim inward.
-			FIntPoint Whole[4];
-			int32 Found = 0;
-			for (const FIntPoint& Step : Steps)
-			{
-				if (IsWhole(CellAt(Index % CellsX + Step.X, Index / CellsX + Step.Y)))
-				{
-					Whole[Found++] = Step;
-				}
-			}
-			if (Found == 0)
-			{
-				continue;
-			}
-			Cell.From = Whole[Random.RandHelper(Found)];
+			return WoundGap(Wound, Centre, float(Now - Wound.TornAt)) < 0.0f;
+		});
+		if (bInside)
+		{
+			continue;
 		}
-		Cell.Growth = FMath::Min(1.0f, Cell.Growth + DeltaSeconds / (StrandGrowSeconds * (Cell.bThin ? ThinSpotSlowdown : 1.0f)));
+		Cell.Growth = FMath::Min(1.0f, Cell.Growth + DeltaSeconds / (0.5f * StrandGrowSeconds * (Cell.bThin ? ThinSpotSlowdown : 1.0f)));
 		WriteCell(Index, Now, 0.0f);
 		if (Cell.Growth >= 1.0f)
 		{
 			Open.RemoveAtSwap(Slot);
+		}
+	}
+}
+
+void AJamLivingWall::UpdateTearing(double Now)
+{
+	for (FWound& Wound : Wounds)
+	{
+		const float Age = float(Now - Wound.TornAt);
+		for (int32 Slot = Wound.Unopened.Num() - 1; Slot >= 0; --Slot)
+		{
+			const int32 Index = Wound.Unopened[Slot];
+			if (WoundGap(Wound, CellCentre(Index), Age) >= 0.0f && Age < Wound.Tear * 1.6f + 0.05f)
+			{
+				continue; // not reached yet (a cell the outline never reaches is dropped after the tear)
+			}
+			Wound.Unopened.RemoveAtSwap(Slot);
+			FCell& Cell = Cells[Index];
+			if (WoundGap(Wound, CellCentre(Index), Age) >= 0.0f)
+			{
+				continue;
+			}
+			if (Cell.Growth >= 1.0f)
+			{
+				Open.Add(Index);
+			}
+			Cell.Growth = 0.0f;
+			Cell.From = FIntPoint::ZeroValue;
+			WriteCell(Index, Now, 0.0f);
 		}
 	}
 }
@@ -591,7 +692,7 @@ void AJamLivingWall::UpdateWounds(double Now)
 	{
 		FWound& Wound = Wounds[Slot];
 		// A jet stops once its rim cell has started to regrow.
-		Wound.SpurtCells.RemoveAll([this](int32 Index) { return Cells[Index].Growth > 0.0f; });
+		Wound.SpurtCells.RemoveAll([this, &Wound](int32 Index) { return Cells[Index].Growth > 0.0f && Wound.Unopened.IsEmpty(); });
 		if (Now >= Wound.NextPulse && !Wound.SpurtCells.IsEmpty())
 		{
 			Wound.NextPulse = Now + SpurtPulseSeconds;
@@ -600,7 +701,7 @@ void AJamLivingWall::UpdateWounds(double Now)
 				Spurt(Wound, Index);
 			}
 		}
-		if (!Wound.Cells.ContainsByPredicate([this](int32 Index) { return Cells[Index].Growth < 1.0f; }))
+		if (Now - Wound.TornAt >= WoundEnd(Wound) && Wound.Unopened.IsEmpty() && !Wound.Cells.ContainsByPredicate([this](int32 Index) { return Cells[Index].Growth < 1.0f; }))
 		{
 			UE_LOG(LogMindKore, Log, TEXT("Living wall %s: a hole of %d cells closed after %.2f s"), *GetName(), Wound.Cells.Num(), Now - Wound.TornAt);
 			if (CloseSound)
@@ -736,6 +837,10 @@ void AJamLivingWall::Tick(float DeltaSeconds)
 	{
 		ProcessHits(Now);
 	}
+	if (!Wounds.IsEmpty())
+	{
+		UpdateTearing(Now);
+	}
 	if (!Open.IsEmpty())
 	{
 		UpdateCells(DeltaSeconds, Now);
@@ -749,7 +854,7 @@ void AJamLivingWall::Tick(float DeltaSeconds)
 	{
 		UpdateWounds(Now);
 	}
-	UpdateHoles(DeltaSeconds);
+	UpdateHoles(Now);
 }
 
 // --- queries ----------------------------------------------------------------------------
@@ -998,7 +1103,7 @@ namespace
 	}
 
 	/**
-	 * The ship's cocoon: a Ship.Nav prop within 2.5 m behind the wall is pushed
+	 * The ship's cocoon: a Ship.Nav prop within 4 m of the wall (the probe's shots and the parked pawn may have nudged it) is pushed
 	 * out through a shotgun hole at 250 cm/s (as a pull would), and the probe
 	 * logs whether all of it got past the weave before it closed.
 	 */
@@ -1009,7 +1114,7 @@ namespace
 		{
 			UPrimitiveComponent* Root = Cast<UPrimitiveComponent>(It->GetRootComponent());
 			if (It->ActorHasTag(TEXT("Ship.Nav")) && Root && Root->IsSimulatingPhysics()
-				&& FVector::Dist(It->GetActorLocation(), Wall->GetActorLocation()) < 250.0f)
+				&& FVector::Dist(It->GetActorLocation(), Wall->GetActorLocation()) < 400.0f)
 			{
 				Module = Root;
 			}
@@ -1054,6 +1159,7 @@ namespace
 		double LastPassable = -1.0;
 		double LastSweepClear = -1.0;
 		double NextLog = 0.0;
+		double NextEarly = 0.0;
 		FVector Hole = FVector::ZeroVector;
 		bool bSawOpen = false;
 	};
@@ -1079,6 +1185,13 @@ namespace
 					*Label, Since, Open, FVector::Dist(Watch->Hole, Wall->GetActorLocation()), Wall->ClearRadiusAt(Watch->Hole), Bodies, BodyScale);
 			}
 			Watch->MostOpen = FMath::Max(Watch->MostOpen, Open);
+			// The tear opening: the open cells and the clear radius at the hole centre over the first 0.4 s.
+			if (Since <= 0.41 && Now >= Watch->NextEarly)
+			{
+				Watch->NextEarly = Now + 0.05;
+				UE_LOG(LogMindKore, Log, TEXT("Wall probe [%s]: tearing +%.2f s, open %d cells, clear radius at the hole centre %.0f cm"),
+					*Label, Since, Open, Wall->ClearRadiusAt(Wall->GetLastWoundCentre()));
+			}
 			if (bWindow && Watch->bSawOpen)
 			{
 				FVector Widest;
@@ -1172,7 +1285,7 @@ namespace
 								{
 									// Parked in the hole: the closing weave must push it out, not trap it.
 									AimAndFire(Pawn, 1, Centre);
-									WallAfter(Wall, 0.1f, [Wall, Pawn]()
+									WallAfter(Wall, 0.35f, [Wall, Pawn]() // once the tear has opened (BlastTearSeconds)
 									{
 										// Only into a hole the sphere fits: teleported into strands, the
 										// solver throws it out at tens of m/s (seen: 71 m/s, 325 damage).
@@ -1212,12 +1325,19 @@ namespace
 	 * pawn 3.5 m in front of it - the whole weave, right after a shotgun blast,
 	 * and mid-regrowth (a quarter of the hole grown back). Saved/Screenshots, in order.
 	 */
-	void RunWallShots(UWorld* World)
+	void RunWallShots(const TArray<FString>& Args, UWorld* World)
 	{
+		// The wall named, or the first with the tag given (Jam.Crater, Jam.CavePlug), else the probe wall.
+		const FName Tag(Args.Num() > 0 ? *Args[0] : TEXT("Jam.WallProbe"));
 		AJamLivingWall* Wall = nullptr;
 		for (TActorIterator<AJamLivingWall> It(World); It; ++It)
 		{
-			if (!Wall || It->ActorHasTag(TEXT("Jam.WallProbe")))
+			if (Args.Num() > 0 && It->GetName() == Args[0])
+			{
+				Wall = *It;
+				break;
+			}
+			if (!Wall || (It->ActorHasTag(Tag) && !Wall->ActorHasTag(Tag)))
 			{
 				Wall = *It;
 			}
@@ -1249,10 +1369,10 @@ namespace
 		// Mid-regrowth: once a quarter of the hole has grown back (threads across, bundles thickening).
 		const TSharedRef<int32> Most = MakeShared<int32>(0);
 		const TSharedRef<FTimerHandle> Handle = MakeShared<FTimerHandle>();
-		WallAfter(Wall, 13.4f, [Controller, Wall, Most, Handle]()
+		WallAfter(Wall, 13.4f, [Controller, Wall, Most, Handle, Hold]()
 		{
 			const double Blast = Wall->GetWorld()->GetTimeSeconds() - 0.4;
-			Wall->GetWorldTimerManager().SetTimer(*Handle, FTimerDelegate::CreateWeakLambda(Wall, [Controller, Wall, Most, Handle, Blast]()
+			Wall->GetWorldTimerManager().SetTimer(*Handle, FTimerDelegate::CreateWeakLambda(Wall, [Controller, Wall, Most, Handle, Blast, Hold]()
 			{
 				const int32 Open = Wall->GetOpenCellCount();
 				*Most = FMath::Max(*Most, Open);
@@ -1260,17 +1380,26 @@ namespace
 				{
 					return;
 				}
+				Hold(); // in gravity the pawn may have fallen through the hole meanwhile
 				UE_LOG(LogMindKore, Log, TEXT("Wall shots: 2 regrowing, blast +%.2f s, open %d of %d"), Wall->GetWorld()->GetTimeSeconds() - Blast, Open, *Most);
 				Controller->ConsoleCommand(TEXT("HighResShot 1"));
 				Wall->GetWorldTimerManager().ClearTimer(*Handle);
 			}), 0.02f, true);
 		});
+		// A second blast once the first has closed: every tear has its own shape.
+		WallAfter(Wall, 21.0f, [Hold, Pawn, Centre]() { Hold(); AimAndFire(Pawn, 1, Centre); });
+		WallAfter(Wall, 21.05f, [Hold]() { Hold(); });
+		WallAfter(Wall, 21.35f, [Controller, Wall]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Wall shots: 3 second blast +0.35 s, open %d"), Wall->GetOpenCellCount());
+			Controller->ConsoleCommand(TEXT("HighResShot 1"));
+		});
 	}
 
-	FAutoConsoleCommandWithWorld GWallShots(
+	FAutoConsoleCommandWithWorldAndArgs GWallShots(
 		TEXT("jam.Wall.Shots"),
-		TEXT("Rendered stills of the probe living wall: whole, right after a shotgun blast, closing (HighResShot; needs a real RHI)."),
-		FConsoleCommandWithWorldDelegate::CreateStatic(&RunWallShots));
+		TEXT("jam.Wall.Shots [Name|Tag]: rendered stills of a living wall: whole, right after a shotgun blast, closing, a second blast (HighResShot; needs a real RHI)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunWallShots));
 
 	/** jam.Wall.Seal: the seal check (CheckSealed) on every living wall of the map. */
 	void RunWallSeal(UWorld* World)

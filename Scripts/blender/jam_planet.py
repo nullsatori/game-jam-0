@@ -371,7 +371,7 @@ def export(obj, path):
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
-    bpy.ops.export_scene.fbx(filepath=path, use_selection=True, mesh_smooth_type="FACE", use_triangles=True,
+    bpy.ops.export_scene.fbx(filepath=path, use_selection=True, mesh_smooth_type="FACE", use_triangles=True, colors_type="LINEAR",
                              add_leaf_bones=False, bake_anim=False, axis_forward="-Z", axis_up="Y")
     print("JAMPLANET: wrote %s" % path)
 
@@ -411,6 +411,29 @@ def tube(path, radii, sides, name, v_scale=1.0):
 
 
 # --- the planet ------------------------------------------------------------------------------------
+def add_flesh_colours(obj, verts, d):
+    """Vertex colours for the skin material (M_Jam_Gritty, PlanetLook): R = cavity (folds lower
+    than their 3 m surroundings, and anything under the surface: crater shafts, caves), G = a
+    slow blotch noise for bruise-like colour patches. Linear, exported as such."""
+    h = height(d)
+    tangent = np.cross(d, np.where(np.abs(d[:, 2:3]) < 0.9, [[0.0, 0.0, 1.0]], [[1.0, 0.0, 0.0]]))
+    tangent /= np.linalg.norm(tangent, axis=1, keepdims=True)
+    bitangent = np.cross(d, tangent)
+    blur = np.zeros_like(h)
+    reach = 3.0 / RADIUS
+    for k in range(6):
+        a = 2 * math.pi * k / 6
+        off = d + (tangent * math.cos(a) + bitangent * math.sin(a)) * reach
+        blur += height(off / np.linalg.norm(off, axis=1, keepdims=True)) / 6
+    below = np.clip((RADIUS + h - np.linalg.norm(verts, axis=1)) / 3.0, 0.0, 1.0)
+    cavity = np.clip(np.maximum((blur - h) / 1.2, 0.0) + below, 0.0, 1.0)
+    blotch = np.clip(0.5 + 0.9 * fbm(d * 4.0 + 5.3, 3), 0.0, 1.0)
+    colours = np.stack([cavity, blotch, np.zeros_like(h), np.ones_like(h)], axis=1).astype(np.float32)
+    attr = obj.data.color_attributes.new(name="Flesh", type="FLOAT_COLOR", domain="POINT")
+    attr.data.foreach_set("color", colours.ravel())
+    print("JAMPLANET: vertex colours: cavity mean %.2f (%.0f%% over 0.3), blotch mean %.2f" % (cavity.mean(), 100 * (cavity > 0.3).mean(), blotch.mean()))
+
+
 def build_planet():
     F, origin, paths = build_field()
     verts, quads = surface_nets(F, origin)
@@ -418,6 +441,7 @@ def build_planet():
     d = verts / np.linalg.norm(verts, axis=1, keepdims=True)
     uv = np.stack([np.arctan2(d[:, 1], d[:, 0]) / (2 * math.pi) + 0.5, np.arccos(np.clip(d[:, 2], -1, 1)) / math.pi], axis=1)
     obj = make_mesh("SM_Jam_Planet", verts, quads, uv)
+    add_flesh_colours(obj, verts, d)
     tris = len(quads) * 2
     if tris > TARGET_TRIS:
         apply_decimate(obj, TARGET_TRIS / tris)
