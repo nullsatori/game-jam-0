@@ -2,6 +2,8 @@
 
 #include "Camera/CameraComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Components/SphereComponent.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/StaticMesh.h"
@@ -46,6 +48,12 @@ AJamLivingWall::AJamLivingWall()
 	Threads->SetGenerateOverlapEvents(false);
 	Threads->SetCanEverAffectNavigation(false);
 	Threads->SetNumCustomDataFloats(3);
+	Skin = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Skin"));
+	Skin->SetupAttachment(Strands);
+	Skin->SetMobility(EComponentMobility::Movable);
+	Skin->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Skin->SetGenerateOverlapEvents(false);
+	Skin->SetCanEverAffectNavigation(false);
 
 	// MindKore's own content (CREDITS.md lists the sound donors).
 	static ConstructorHelpers::FObjectFinder<UPhysicalMaterial> Flesh(TEXT("/Game/MindKore/Materials/Physical/PM_MK_Flesh.PM_MK_Flesh"));
@@ -72,6 +80,14 @@ void AJamLivingWall::BeginPlay()
 {
 	Super::BeginPlay();
 	Build();
+	SkinMaterials.Reset();
+	for (int32 Slot = 0; SkinMesh && Slot < Skin->GetNumMaterials(); ++Slot)
+	{
+		if (UMaterialInstanceDynamic* Material = Skin->CreateDynamicMaterialInstance(Slot, Skin->GetMaterial(Slot)))
+		{
+			SkinMaterials.Add(Material);
+		}
+	}
 }
 
 // --- layout -----------------------------------------------------------------------------
@@ -101,6 +117,15 @@ namespace
 
 void AJamLivingWall::Build()
 {
+	if (SkinMesh)
+	{
+		HeightCm = WidthCm; // the mesh is square (a round wall is the ellipse inscribed in it)
+	}
+	Skin->SetStaticMesh(SkinMesh);
+	Skin->SetVisibility(SkinMesh != nullptr);
+	Skin->SetRelativeScale3D(FVector(WidthCm / SkinSizeCm));
+	Strands->SetVisibility(SkinMesh == nullptr);
+	Threads->SetVisibility(SkinMesh == nullptr);
 	CellsX = FMath::Max(1, FMath::RoundToInt32(WidthCm / CellSizeCm));
 	CellsZ = FMath::Max(1, FMath::RoundToInt32(HeightCm / CellSizeCm));
 	Cells.Reset();
@@ -167,8 +192,12 @@ void AJamLivingWall::Build()
 	TArray<FTransform> Transforms;
 	Transforms.SetNum(Cells.Num() * 2);
 	Strands->AddInstances(Transforms, /*bShouldReturnIndices=*/false);
-	Transforms.SetNum(Cells.Num() * 4);
-	Threads->AddInstances(Transforms, /*bShouldReturnIndices=*/false);
+	if (!SkinMesh)
+	{
+		Transforms.SetNum(Cells.Num() * 4);
+		Threads->AddInstances(Transforms, /*bShouldReturnIndices=*/false);
+	}
+
 	for (int32 Index = 0; Index < Cells.Num(); ++Index)
 	{
 		WriteCell(Index, 0.0, 0.0f);
@@ -177,7 +206,7 @@ void AJamLivingWall::Build()
 		{
 			Strands->SetCustomData(Instance, { Thin, 0.0f, Cells[Index].Variation });
 		}
-		for (int32 Instance = Index * 4; Instance < Index * 4 + 4; ++Instance)
+		for (int32 Instance = Index * 4; !SkinMesh && Instance < Index * 4 + 4; ++Instance)
 		{
 			Threads->SetCustomData(Instance, { Thin, 1.0f, Cells[Index].Variation });
 		}
@@ -246,7 +275,7 @@ void AJamLivingWall::WriteCell(int32 Cell, double Now, float Twitch)
 		{
 			Strands->UpdateInstanceTransform(Cell * 2 + Strand, None, false, true, true);
 		}
-		for (int32 Thread = 0; Thread < 4; ++Thread)
+		for (int32 Thread = 0; !SkinMesh && Thread < 4; ++Thread)
 		{
 			Threads->UpdateInstanceTransform(Cell * 4 + Thread, None, false, true, true);
 		}
@@ -260,6 +289,10 @@ void AJamLivingWall::WriteCell(int32 Cell, double Now, float Twitch)
 	{
 		Strands->UpdateInstanceTransform(Cell * 2 + Strand, Segment(FVector(A[Strand].X, Depth[Strand], A[Strand].Y),
 			FVector(B[Strand].X, Depth[Strand], B[Strand].Y), Radius), /*bWorldSpace=*/false, /*bMarkRenderStateDirty=*/true, /*bTeleport=*/true);
+	}
+	if (SkinMesh)
+	{
+		return; // the skin draws it (its holes: UpdateHoles); the rods above are only the collision
 	}
 
 	// The vessels: grown in the thread stage, from the end nearer the neighbour
@@ -285,6 +318,51 @@ void AJamLivingWall::WriteCell(int32 Cell, double Now, float Twitch)
 		Threads->UpdateInstanceTransform(Cell * 4 + Thread * 2, Segment(P[0], Tip1, ThreadRadius), false, true, true);
 		Threads->UpdateInstanceTransform(Cell * 4 + Thread * 2 + 1, Segment(P[1], Tip2, ThreadRadius * 0.7f), false, true, true);
 	}
+}
+
+void AJamLivingWall::UpdateHoles(float DeltaSeconds)
+{
+	if (SkinMaterials.IsEmpty() || (Wounds.IsEmpty() && ShownHoles == 0))
+	{
+		return;
+	}
+	// A wound's hole reaches its farthest open cell: a torn one by its whole
+	// half-width, a regrowing one less as it grows. Opening is immediate, closing
+	// eased, so the rim does not jump a ring at a time.
+	for (FWound& Wound : Wounds)
+	{
+		float Target = 0.0f;
+		for (const int32 Index : Wound.Cells)
+		{
+			const float Growth = Cells[Index].Growth;
+			if (Growth < 1.0f)
+			{
+				Target = FMath::Max(Target, float(FVector2D::Distance(CellCentre(Index), Wound.Centre)) + CellSizeCm * 0.7f * (1.0f - Smooth(Growth)));
+			}
+		}
+		Wound.Radius = Target > Wound.Radius ? Target : FMath::FInterpTo(Wound.Radius, Target, DeltaSeconds, 8.0f);
+	}
+	TArray<const FWound*> Widest;
+	for (const FWound& Wound : Wounds)
+	{
+		Widest.Add(&Wound);
+	}
+	Widest.Sort([](const FWound& A, const FWound& B) { return A.Radius > B.Radius; });
+	// Mesh space: the skin is the wall scaled by WidthCm / SkinSizeCm.
+	const float ToMesh = SkinSizeCm / FMath::Max(WidthCm, 1.0f);
+	const int32 Shown = FMath::Min(Widest.Num(), MaxHoles);
+	for (int32 Slot = 0; Slot < FMath::Max(Shown, ShownHoles); ++Slot)
+	{
+		const FLinearColor Hole = Slot < Shown
+			? FLinearColor(Widest[Slot]->Centre.X * ToMesh, Widest[Slot]->Centre.Y * ToMesh, Widest[Slot]->Radius * ToMesh, 0.0f)
+			: FLinearColor(1.0e5f, 1.0e5f, 0.0f, 0.0f);
+		const FName Name(*FString::Printf(TEXT("Hole%d"), Slot));
+		for (UMaterialInstanceDynamic* Material : SkinMaterials)
+		{
+			Material->SetVectorParameterValue(Name, Hole);
+		}
+	}
+	ShownHoles = Shown;
 }
 
 void AJamLivingWall::UpdateRim(double Now)
@@ -671,6 +749,7 @@ void AJamLivingWall::Tick(float DeltaSeconds)
 	{
 		UpdateWounds(Now);
 	}
+	UpdateHoles(DeltaSeconds);
 }
 
 // --- queries ----------------------------------------------------------------------------
@@ -808,6 +887,75 @@ namespace
 		TArray<FHitResult> Hits;
 		Wall->GetWorld()->SweepMultiByObjectType(Hits, Point + Reach, Point - Reach, FQuat::Identity, Objects, FCollisionShape::MakeSphere(Radius), Params);
 		return Hits.ContainsByPredicate([Wall](const FHitResult& Hit) { return Hit.GetActor() == Wall; });
+	}
+
+	/** Would a sphere of Radius swept along the wall normal through Point hit anything at all (the wall, its frame, rock)? */
+	bool SweepAnyBlocked(const AJamLivingWall* Wall, const AActor* Ignored, const FVector& Point, float Radius)
+	{
+		const FVector Reach = Wall->GetFrontNormal() * (Wall->GetHalfDepthCm() + Radius + 20.0f);
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(JamWallSeal), false, Ignored);
+		return Wall->GetWorld()->SweepTestByObjectType(Point + Reach, Point - Reach, FQuat::Identity,
+			FCollisionObjectQueryParams(FCollisionObjectQueryParams::AllObjects), FCollisionShape::MakeSphere(Radius), Params);
+	}
+
+	/**
+	 * A whole wall must be sealed: the pawn sphere (r 40) and a 15 cm one swept
+	 * through a 25 cm grid over the opening, corners included (a round wall:
+	 * inside its circle), must all be stopped. A round wall also gets rings of
+	 * 15 cm sweeps 15 cm inside its edge, on it and 15 cm outside: they must hit
+	 * the wall or whatever holds it (a crater floor, a tunnel throat) - no gap
+	 * around it. (Farther out a sweep can start and end inside the rock, which
+	 * is a surface, and pass without meaning a gap.)
+	 */
+	void CheckSealed(const AJamLivingWall* Wall, const AActor* Ignored)
+	{
+		const FTransform Frame = Wall->GetActorTransform();
+		const float HalfW = Wall->WidthCm * 0.5f;
+		const float HalfH = Wall->HeightCm * 0.5f;
+		int32 Points = 0;
+		int32 PawnPasses = 0;
+		int32 SmallPasses = 0;
+		FString First;
+		for (float X = -HalfW + 5.0f; X <= HalfW - 4.9f; X += 25.0f)
+		{
+			for (float Z = -HalfH + 5.0f; Z <= HalfH - 4.9f; Z += 25.0f)
+			{
+				if (Wall->bRound && FMath::Square(X / (HalfW - 8.0f)) + FMath::Square(Z / (HalfH - 8.0f)) > 1.0f)
+				{
+					continue;
+				}
+				const FVector At = Frame.TransformPosition(FVector(X, 0.0f, Z));
+				++Points;
+				const bool bPawn = !SweepAnyBlocked(Wall, Ignored, At, 40.0f);
+				const bool bSmall = !SweepAnyBlocked(Wall, Ignored, At, 15.0f);
+				PawnPasses += bPawn;
+				SmallPasses += bSmall;
+				if ((bPawn || bSmall) && First.IsEmpty())
+				{
+					First = FString::Printf(TEXT(", first at (%.0f, %.0f)"), X, Z);
+				}
+			}
+		}
+		FString Ring;
+		int32 RingPasses = 0;
+		if (Wall->bRound)
+		{
+			for (const float Out : { -15.0f, 0.0f, 15.0f })
+			{
+				int32 Passes = 0;
+				for (int32 Step = 0; Step < 36; ++Step)
+				{
+					const float Angle = Step * 2.0f * PI / 36.0f;
+					const FVector At = Frame.TransformPosition(FVector((HalfW + Out) * FMath::Cos(Angle), 0.0f, (HalfH + Out) * FMath::Sin(Angle)));
+					Passes += !SweepAnyBlocked(Wall, Ignored, At, 15.0f);
+				}
+				RingPasses += Passes;
+				Ring += FString::Printf(TEXT("%s%+.0f cm: %d/36"), Ring.IsEmpty() ? TEXT(", rings of 15 cm sweeps around the edge ") : TEXT(", "), Out, Passes);
+			}
+		}
+		UE_LOG(LogMindKore, Log, TEXT("Wall seal %s (%s, %.0f x %.0f cm): %d grid points, the pawn sphere passes at %d, a 15 cm sphere at %d%s%s - %s"),
+			*Wall->GetName(), Wall->bRound ? TEXT("round") : TEXT("rectangular"), Wall->WidthCm, Wall->HeightCm, Points, PawnPasses, SmallPasses,
+			*First, *Ring, PawnPasses + SmallPasses + RingPasses == 0 ? TEXT("sealed") : TEXT("NOT sealed"));
 	}
 
 	/** Launch the pawn through Point along -front so its centre reaches Point at half of FlightSeconds. */
@@ -990,6 +1138,7 @@ namespace
 			UE_LOG(LogMindKore, Warning, TEXT("Wall probe: needs an AJamLivingWall and the AJamZeroGPawn"));
 			return;
 		}
+		CheckSealed(Wall, Pawn);
 		// Aim where a cell's strands cross: the weave has 8 cm gaps at the cell
 		// corners (the wall centre is one when the cell count is even).
 		const FVector Centre = Wall->NearestCellCentre(Wall->GetActorLocation());
@@ -1122,6 +1271,21 @@ namespace
 		TEXT("jam.Wall.Shots"),
 		TEXT("Rendered stills of the probe living wall: whole, right after a shotgun blast, closing (HighResShot; needs a real RHI)."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunWallShots));
+
+	/** jam.Wall.Seal: the seal check (CheckSealed) on every living wall of the map. */
+	void RunWallSeal(UWorld* World)
+	{
+		const AActor* Ignored = WallProbePawn(World);
+		for (TActorIterator<AJamLivingWall> It(World); It; ++It)
+		{
+			CheckSealed(*It, Ignored);
+		}
+	}
+
+	FAutoConsoleCommandWithWorld GWallSeal(
+		TEXT("jam.Wall.Seal"),
+		TEXT("Sweep the pawn sphere and a 15 cm sphere through a grid over every whole living wall (round ones: and around their edge); logs any pass."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunWallSeal));
 
 	FAutoConsoleCommandWithWorldAndArgs GWallProbe(
 		TEXT("jam.Wall.Probe"),

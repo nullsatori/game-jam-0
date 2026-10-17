@@ -28,6 +28,7 @@ import unreal
 
 # The shared living wall material (Scripts/jam_living_wall.py), found next to this script.
 sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_flesh  # noqa: E402
 import jam_living_wall  # noqa: E402
 
 MAP = "/Game/Jam/Maps/Lvl_Jam_ZeroG"
@@ -312,6 +313,7 @@ wall.set_editor_property("width_cm", OPEN_W)
 wall.set_editor_property("height_cm", OPEN_W)
 wall.set_editor_property("thin_spot_count", 1)
 wall.set_editor_property("wall_material", WALL_MAT)
+jam_flesh.skin_wall(wall, jam_flesh.materials(log))  # the mesh look (Docs/LivingWall.md)
 wall.set_editor_property("tags", ["Jam.WallProbe"])
 prize = spawn(unreal.MKPhysicsProp, V(xc, y0, z0), 0, "ShipPart_Alcove_40kg")
 prize_body = prize.get_editor_property("body")

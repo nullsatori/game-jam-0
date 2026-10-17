@@ -16,12 +16,12 @@ the Vessels mask), normal map x NormalStrength, roughness from the Wetness
 mask (wet = glossy), emissive = colour x SelfLight. Static switches:
   Triplanar - world-aligned projection (TriplanarCm per tile): the planetoid,
       which has no UVs;
-  LivingPieces - the mesh living wall's pieces: UV1 is the piece's cell in a
-      CellsX x CellsZ grid, PieceData (a transient texture AJamLivingWall
-      writes) holds growth (R), the side it regrows from (G, B as -1..1) and
-      twitch (A); a piece at growth g is scaled by g toward the middle of that
-      side. UV1 outside 0..1 (the frame) is never touched.
-The membrane instance overrides the blend mode to translucent, two-sided.
+  LivingHoles - the mesh living wall: AJamLivingWall writes its holes (centre and
+      radius from its cell model, up to 8) into HoleN; the material cuts them out
+      with a fibrous edge (the vessel mask, panning while the hole closes), a dark
+      wet rim band and a twitch of the rim along the wall normal. The wall
+      instances are masked; their membrane is translucent.
+The membrane instances override the blend mode to translucent, two-sided.
 """
 import os
 
@@ -92,13 +92,17 @@ def import_textures(src_dir, normals_dir, log):
 
 
 # --- the master -------------------------------------------------------------------------
-
 DEFAULT_SCALARS = {
     "UTile": 1.0, "VTile": 1.0, "WetTiling": 1.0, "VesselTiling": 1.0, "VesselAmount": 0.0,
     "RoughDry": 0.75, "RoughWet": 0.22, "Specular": 0.6, "Metallic": 0.0, "NormalStrength": 1.0,
     "SelfLight": 0.15, "Opacity": 0.55, "TriplanarCm": 400.0, "VesselTriplanarScale": 4.0,
-    "WallSizeCm": 400.0, "Cells": 10.0, "TwitchCm": 1.5, "PulseCm": 0.0, "PulseSpeed": 1.7,
+    "TwitchCm": 1.5, "PulseCm": 0.0, "PulseSpeed": 1.7,
+    # Living wall holes (LivingHoles): edge noise tile, jaggedness (share of the radius), pan per second,
+    # the cut ramp, the dark wet rim band and its darkness.
+    "HoleNoiseCm": 90.0, "HoleJag": 0.55, "HolePanX": 0.035, "HolePanZ": 0.05, "HoleSoftCm": 1.5,
+    "HoleRimCm": 14.0, "HoleRimDark": 0.35,
 }
+HOLES = 8  # hole slots of the living wall material; AJamLivingWall::MaxHoles
 DEFAULT_VECTORS = {"Tint": (1.0, 1.0, 1.0), "VesselColor": (0.35, 0.08, 0.12)}
 WAT = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/WorldAlignedTexture"
 WAN = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/WorldAlignedNormal"
@@ -155,10 +159,10 @@ def _master(log):
         link(b, n, "B")
         return n
 
-    def mask(src, **channels):
+    def mask(src, out="", **channels):
         n = node(unreal.MaterialExpressionComponentMask, r=channels.get("r", False), g=channels.get("g", False),
                  b=channels.get("b", False), a=channels.get("a", False))
-        link(src, n)
+        link(src, n, "", out)
         return n
 
     def switch(name, on, off, on_out=""):
@@ -202,18 +206,9 @@ def _master(log):
     colour = op(mul, mask(bc, r=True, g=True, b=True), vector("Tint"))
     vessel = op(mul, mask(ves, r=True), scalar("VesselAmount"))
     colour = lerp(colour, op(mul, colour, vector("VesselColor")), vessel)
-    mel.connect_material_property(colour, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    mel.connect_material_property(lerp(scalar("RoughDry"), scalar("RoughWet"), mask(wet, r=True)), "", unreal.MaterialProperty.MP_ROUGHNESS)
-    mel.connect_material_property(scalar("Specular"), "", unreal.MaterialProperty.MP_SPECULAR)
-    mel.connect_material_property(scalar("Metallic"), "", unreal.MaterialProperty.MP_METALLIC)
-    flat = node(unreal.MaterialExpressionConstant3Vector, constant=unreal.LinearColor(0, 0, 1, 0))
-    normal = node(unreal.MaterialExpressionNormalize)
-    link(lerp(flat, mask(nrm, r=True, g=True, b=True), scalar("NormalStrength")), normal)
-    mel.connect_material_property(normal, "", unreal.MaterialProperty.MP_NORMAL)
-    mel.connect_material_property(op(mul, colour, scalar("SelfLight")), "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    mel.connect_material_property(scalar("Opacity"), "", unreal.MaterialProperty.MP_OPACITY)
+    rough = lerp(scalar("RoughDry"), scalar("RoughWet"), mask(wet, r=True))
 
-    # World position offset: breathing (all), plus the living wall's pieces (switch).
+    # Breathing: a swell along the normal (all of them; PulseCm 0 is none).
     phase = node(unreal.MaterialExpressionDotProduct)
     link(node(unreal.MaterialExpressionWorldPosition), phase, "A")
     link(node(unreal.MaterialExpressionConstant3Vector, constant=unreal.LinearColor(0.004, 0.006, 0.005, 0)), phase, "B")
@@ -221,47 +216,76 @@ def _master(log):
     link(op(add, op(mul, node(unreal.MaterialExpressionTime), scalar("PulseSpeed")), phase), breath)
     swell = op(mul, op(mul, node(unreal.MaterialExpressionVertexNormalWS), breath), scalar("PulseCm"))
 
-    uv1 = node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=1)
-    data_obj = tex_object("PieceData", "/Engine/EngineResources/WhiteSquareTexture", ST.SAMPLERTYPE_LINEAR_COLOR)
-    data = sample(data_obj, uv1, ST.SAMPLERTYPE_LINEAR_COLOR)
-    # The frame (UV1 = -1) is always whole.
-    frame = node(unreal.MaterialExpressionSaturate)
-    link(op(mul, mask(uv1, r=True), const_b=-1000.0), frame)
-    growth = node(unreal.MaterialExpressionMax)
-    link(mask(data, r=True), growth, "A")
-    link(frame, growth, "B")
-    size = scalar("WallSizeCm")
-    pivot = op(mul, op(add, uv1, const_b=-0.5), size)                       # (x, z) in wall space, cm
-    side = op(add, op(mul, mask(data, g=True, b=True), const_b=2.0), const_b=-1.0)
-    half_cell = op(mul, op(unreal.MaterialExpressionDivide, size, scalar("Cells")), const_b=0.5)
-    anchor = op(add, pivot, op(mul, side, half_cell))
-    zero = node(unreal.MaterialExpressionConstant, r=0.0)
-    anchor3 = append(append(mask(anchor, r=True), zero), mask(anchor, g=True))
+    # The living wall's holes (switch LivingHoles): AJamLivingWall writes up to HOLES
+    # holes as HoleN = (x, z, radius) in the mesh's own space (cm). h = distance to the
+    # nearest hole's edge, the edge pushed in and out by the vessel mask (panning: strands
+    # weave across while the hole closes). h < 0 is cut away (opacity mask), a dark wet band
+    # rims the hole, and the rim twitches along the wall normal.
     local = node(unreal.MaterialExpressionTransformPosition,
                  transform_source_type=unreal.MaterialPositionTransformSource.TRANSFORMPOSSOURCE_WORLD,
                  transform_type=unreal.MaterialPositionTransformSource.TRANSFORMPOSSOURCE_LOCAL)
     link(node(unreal.MaterialExpressionWorldPosition), local)
-    shrink = op(mul, op(sub, anchor3, local), op(sub, node(unreal.MaterialExpressionConstant, r=1.0), growth))
-    # Twitch of a torn rim: along the wall normal (local Y), each piece out of phase.
+    lxz = append(mask(local, r=True), mask(local, b=True))
+    pan = op(mul, node(unreal.MaterialExpressionTime), append(scalar("HolePanX"), scalar("HolePanZ")))
+    jag_uv = op(add, op(unreal.MaterialExpressionDivide, lxz, scalar("HoleNoiseCm")), pan)
+    jag = op(add, mask(sample(ves_obj, jag_uv, ST.SAMPLERTYPE_LINEAR_GRAYSCALE), r=True), const_b=-0.5)
+    edge_scale = op(add, op(mul, jag, scalar("HoleJag")), const_b=1.0)
+    nearest = None
+    for k in range(HOLES):
+        hole = node(unreal.MaterialExpressionVectorParameter, parameter_name="Hole%d" % k,
+                    default_value=unreal.LinearColor(1.0e5, 1.0e5, 0.0, 0.0))
+        dist = node(unreal.MaterialExpressionDistance)
+        link(lxz, dist, "A")
+        link(mask(hole, r=True, g=True), dist, "B")
+        gap = op(sub, dist, op(mul, mask(hole, b=True), edge_scale))
+        if nearest is None:
+            nearest = gap
+        else:
+            low = node(unreal.MaterialExpressionMin)
+            link(nearest, low, "A")
+            link(gap, low, "B")
+            nearest = low
+    cut = node(unreal.MaterialExpressionSaturate)
+    link(op(unreal.MaterialExpressionDivide, nearest, scalar("HoleSoftCm")), cut)
+    rim = node(unreal.MaterialExpressionSaturate)
+    link(op(unreal.MaterialExpressionDivide, nearest, scalar("HoleRimCm")), rim)
+    holed_colour = op(mul, colour, lerp(scalar("HoleRimDark"), node(unreal.MaterialExpressionConstant, r=1.0), rim))
+    holed_rough = lerp(scalar("RoughWet"), rough, rim)
+    one = node(unreal.MaterialExpressionConstant, r=1.0)
+    opacity = switch("LivingHoles", cut, one)
+    colour = switch("LivingHoles", holed_colour, colour)
+    rough = switch("LivingHoles", holed_rough, rough)
     jerk_phase = node(unreal.MaterialExpressionDotProduct)
-    link(pivot, jerk_phase, "A")
-    link(node(unreal.MaterialExpressionConstant2Vector, r=0.13, g=0.07), jerk_phase, "B")
+    link(lxz, jerk_phase, "A")
+    link(node(unreal.MaterialExpressionConstant2Vector, r=0.21, g=0.17), jerk_phase, "B")
     jerk = node(unreal.MaterialExpressionSine)
-    link(op(add, op(mul, node(unreal.MaterialExpressionTime), const_b=37.0), jerk_phase), jerk)
-    jerk_y = op(mul, op(mul, jerk, mask(data, a=True)), scalar("TwitchCm"))
-    twitch = append(append(zero, jerk_y), zero)
+    link(op(add, op(mul, node(unreal.MaterialExpressionTime), const_b=29.0), jerk_phase), jerk)
+    jerk_y = op(mul, op(mul, jerk, op(sub, one, rim)), scalar("TwitchCm"))
+    zero = node(unreal.MaterialExpressionConstant, r=0.0)
     to_world = node(unreal.MaterialExpressionTransform,
                     transform_source_type=unreal.MaterialVectorCoordTransformSource.TRANSFORMSOURCE_LOCAL,
                     transform_type=unreal.MaterialVectorCoordTransform.TRANSFORM_WORLD)
-    link(op(add, shrink, twitch), to_world)
-    pieces = op(add, to_world, swell)
-    mel.connect_material_property(switch("LivingPieces", pieces, swell), "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
+    link(append(append(zero, jerk_y), zero), to_world)
+    offset = switch("LivingHoles", op(add, to_world, swell), swell)
+
+    mel.connect_material_property(colour, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    mel.connect_material_property(rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    mel.connect_material_property(scalar("Specular"), "", unreal.MaterialProperty.MP_SPECULAR)
+    mel.connect_material_property(scalar("Metallic"), "", unreal.MaterialProperty.MP_METALLIC)
+    flat = node(unreal.MaterialExpressionConstant3Vector, constant=unreal.LinearColor(0, 0, 1, 0))
+    normal = node(unreal.MaterialExpressionNormalize)
+    link(lerp(flat, mask(nrm, r=True, g=True, b=True), scalar("NormalStrength")), normal)
+    mel.connect_material_property(normal, "", unreal.MaterialProperty.MP_NORMAL)
+    mel.connect_material_property(op(mul, colour, scalar("SelfLight")), "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    mel.connect_material_property(op(mul, scalar("Opacity"), opacity), "", unreal.MaterialProperty.MP_OPACITY)
+    mel.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+    mel.connect_material_property(offset, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
     mel.recompile_material(m)
     eal.save_asset(BASE, False)
     log("built " + BASE)
 
 
-def _instance(name, parent, scalars=None, vectors=None, textures=None, switches=None, translucent=False):
+def _instance(name, parent, scalars=None, vectors=None, textures=None, switches=None, translucent=False, masked=False):
     path = MATS + "/" + name
     if eal.does_asset_exist(path):
         mi = unreal.load_asset(path)
@@ -277,6 +301,11 @@ def _instance(name, parent, scalars=None, vectors=None, textures=None, switches=
         mel.set_material_instance_texture_parameter_value(mi, k, unreal.load_asset(v))
     for k, v in (switches or {}).items():
         mel.set_material_instance_static_switch_parameter_value(mi, k, v)
+    if masked:
+        o = mi.get_editor_property("base_property_overrides")
+        o.set_editor_property("override_blend_mode", True)
+        o.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+        mi.set_editor_property("base_property_overrides", o)
     if translucent:
         o = mi.get_editor_property("base_property_overrides")
         o.set_editor_property("override_blend_mode", True)
@@ -315,8 +344,8 @@ LOOKS = {
     "Suckers": ({"NormalStrength": 0.6, "SelfLight": 0.15, "VTile": 3.0}, {"Tint": (1.1, 0.95, 0.95)},
                 {"BaseColor": _t("Suckers_BC"), "Normal": _t("PlanetSkin_N")}),
 }
-# The mesh living wall's slots: the same looks with LivingPieces on.
-WALL_SLOTS = ["Muscle", "Tendon", "Vessel", "Membrane", "MuscleEnd"]
+# The mesh living wall's slots: the same looks with LivingHoles on.
+WALL_SLOTS = ["Muscle", "Tendon", "Vessel", "Membrane"]
 
 
 def materials(log):
@@ -329,7 +358,23 @@ def materials(log):
                               {"Triplanar": name == "PlanetSkin"}, translucent=name == "Membrane")
     for name in WALL_SLOTS:
         scalars, vectors, textures = LOOKS[name]
-        out["Wall_" + name] = _instance("MI_Jam_Wall_" + name, base, dict(scalars, PulseCm=0.5), vectors, textures,
-                                        {"LivingPieces": True}, translucent=name == "Membrane")
+        # The wall's back membrane is nearly opaque: a lit room behind must not read as a hole.
+        wall_scalars = dict(scalars, PulseCm=0.5, **({"Opacity": 0.88} if name == "Membrane" else {}))
+        out["Wall_" + name] = _instance("MI_Jam_Wall_" + name, base, wall_scalars, vectors, textures,
+                                        {"LivingHoles": True}, translucent=name == "Membrane", masked=name != "Membrane")
     log("flesh materials: %s" % ", ".join(sorted(out)))
     return out
+
+
+# --- the mesh living wall --------------------------------------------------------------------------
+SKIN = {False: "/Game/JamArt/Meshes/LivingWall/SM_Jam_LivingWall_Square", True: "/Game/JamArt/Meshes/LivingWall/SM_Jam_LivingWall_Round"}
+# The mesh slots (Scripts/blender/jam_living_wall_mesh.py): muscle, tendon, vessel, membrane, frame.
+SKIN_SLOTS = {"Muscle": "Wall_Muscle", "Tendon": "Wall_Tendon", "Vessel": "Wall_Vessel", "Membrane": "Wall_Membrane", "FrameMetal": "FrameMetal"}
+
+
+def skin_wall(wall, mats, round_=False):
+    """Give an AJamLivingWall the mesh look; its cells (rods, hidden) stay the collision."""
+    wall.set_editor_property("skin_mesh", unreal.load_asset(SKIN[round_]))
+    skin = wall.get_editor_property("skin")
+    for slot, name in SKIN_SLOTS.items():
+        skin.set_material_by_name(slot, mats[name])

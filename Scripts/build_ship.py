@@ -548,9 +548,10 @@ for j, (out, along) in enumerate(cocoon_sides):
     w.set_editor_property("width_cm", COCOON)
     w.set_editor_property("height_cm", COCOON)
     w.set_editor_property("wall_material", WALL_MAT)
+    jam_flesh.skin_wall(w, FLESH_SET)
     # A 1 m module passes a hole only if its clear radius is over 71 cm: these
     # walls tear wider and wait longer than the default (a pawn-sized hole).
-    w.set_editor_property("burst_margin_cm", 70.0)
+    w.set_editor_property("burst_margin_cm", 80.0)  # 70 left the module a 66-74 cm clear radius: too close to its 71
     w.set_editor_property("burst_max_radius_cm", 110.0)
     w.set_editor_property("max_stun_seconds", 3.0)
     w.set_editor_property("thin_spot_count", 1 if j < 4 else 0)
@@ -572,6 +573,7 @@ def round_wall(label, at, front, up, tag, margin, widest):
     w.set_editor_property("height_cm", 400.0)
     w.set_editor_property("round", True)
     w.set_editor_property("wall_material", WALL_MAT)
+    jam_flesh.skin_wall(w, FLESH_SET, round_=True)
     w.set_editor_property("burst_margin_cm", margin)
     w.set_editor_property("burst_max_radius_cm", widest)
     w.set_editor_property("max_stun_seconds", 3.0)

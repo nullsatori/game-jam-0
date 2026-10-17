@@ -7,6 +7,9 @@
 
 class UInstancedStaticMeshComponent;
 class UMaterialInterface;
+class UStaticMesh;
+class UStaticMeshComponent;
+class UMaterialInstanceDynamic;
 class UNiagaraSystem;
 class UPhysicalMaterial;
 class USoundBase;
@@ -56,6 +59,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam|LivingWall")
 	TObjectPtr<UInstancedStaticMeshComponent> Threads = nullptr;
 
+	/** The mesh look (SkinMesh): drawn instead of the rods, no collision. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam|LivingWall")
+	TObjectPtr<UStaticMeshComponent> Skin = nullptr;
+
 	// --- shape -------------------------------------------------------------
 
 	/** Rounded to whole cells. */
@@ -102,6 +109,22 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Shape")
 	TObjectPtr<UMaterialInterface> WallMaterial = nullptr;
+
+	/**
+	 * The mesh look (Scripts/blender/jam_living_wall_mesh.py): one whole wall
+	 * mesh, drawn instead of the rods (the cells stay as the invisible collision;
+	 * no threads are made) and scaled to WidthCm; the wall is square. Its holes
+	 * are cut in the material (M_Jam_Gritty, LivingHoles): every wound is a
+	 * hole whose radius follows its cells - the farthest still-open cell from
+	 * the wound centre, smoothed - so what is seen closes with what collides.
+	 * Unset: the rods, as before.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Shape")
+	TObjectPtr<UStaticMesh> SkinMesh = nullptr;
+
+	/** The mesh's own width, cm: the skin is scaled to WidthCm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Shape", meta = (ClampMin = "1.0"))
+	float SkinSizeCm = 400.0f;
 
 	/** Flesh: the resolver reports MK_Flesh, so hits sound and mark as a body. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Shape")
@@ -297,6 +320,8 @@ private:
 		float Side = 1.0f;
 		double TornAt = 0.0;
 		double NextPulse = 0.0;
+		/** The hole the skin shows, cm (wall space). */
+		float Radius = 0.0f;
 	};
 
 	struct FPendingHit
@@ -316,6 +341,8 @@ private:
 	void UpdateRim(double Now);
 	void PushOutBodies(double Now);
 	void WriteCell(int32 Cell, double Now, float Twitch);
+	/** The skin's holes: each wound's radius from its open cells, the widest MaxHoles into the materials. */
+	void UpdateHoles(float DeltaSeconds);
 	void Spurt(const FWound& Wound, int32 Cell) const;
 
 	FVector2D CellCentre(int32 Cell) const;
@@ -334,6 +361,12 @@ private:
 	TArray<FWound> Wounds;
 	TArray<FPendingHit> Pending;
 	TMap<TWeakObjectPtr<AActor>, double> LastSqueeze;
+	/** Hole slots of the skin material (M_Jam_Gritty HOLES). */
+	static constexpr int32 MaxHoles = 8;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> SkinMaterials;
+	/** Holes shown last frame (to clear the slots once they are gone). */
+	int32 ShownHoles = 0;
 	FVector2D LastWoundCentre = FVector2D::ZeroVector;
 	double LastTearSound = -1.0;
 	FRandomStream Random;
