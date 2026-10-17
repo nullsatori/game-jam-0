@@ -249,11 +249,10 @@ rim_light.set_editor_property("intensity", 1.2)
 rim_light.set_editor_property("light_color", unreal.Color(r=255, g=110, b=190, a=255))
 rim_light.set_editor_property("cast_shadows", False)
 rim_light.set_editor_property("forward_shading_priority", 0)
-# The star's disc: 2 km away against the light's direction, ~3 degrees across.
-toward = key.get_actor_forward_vector()
-block("Star_Disc", V(-toward.x * 200000.0, -toward.y * 200000.0, -toward.z * 200000.0), (10000, 10000, 10000), None, SPHERE, STAR,
-      shadow=False, collide=False)
-block("Sky_Dome", V(0, 0, 0), (600000, 600000, 600000), None, SPHERE, DOME, shadow=False, collide=False)
+# The star's disc, ~1.9 km out, 900 m across: placed and sized by the owner in the editor on
+# 2026-10-18 (was 100 m across, 2 km away against the key light's direction).
+block("Star_Disc", V(108852.8, -111334.1, 97070.0), (90000, 90000, 90000), None, SPHERE, STAR, shadow=False, collide=False)
+sky_dome = block("Sky_Dome", V(0, 0, 0), (600000, 600000, 600000), None, SPHERE, DOME, shadow=False, collide=False)
 # The star map (Scripts/jam_sky.py) on a dome just inside the violet one, hidden from
 # reflection and sky-light captures: the camera sees the stars, the SkyLight keeps
 # capturing the violet dome, so the scene light is unchanged.
@@ -268,6 +267,18 @@ for j in range(300):
     size = rng.uniform(400, 900)
     block("Star_%03d" % j, V(d[0] * 250000, d[1] * 250000, d[2] * 250000), (size, size, size), None, SPHERE, STARS,
           shadow=False, collide=False)
+# One sky to move (owner, 18.10: the stars could not be moved one by one): the star map and the
+# stars ride Sky_Dome - moving or scaling it carries them all; all of it in the outliner folder Sky.
+for actor in eas.get_all_level_actors():
+    label = actor.get_actor_label()
+    if label == "Sky_Stars" or (label.startswith("Star_") and label[5:].isdigit()):
+        actor.attach_to_actor(sky_dome, "", unreal.AttachmentRule.KEEP_WORLD, unreal.AttachmentRule.KEEP_WORLD,
+                              unreal.AttachmentRule.KEEP_WORLD, False)
+    if label.startswith(("Sky_", "Star_")):
+        actor.set_folder_path("Sky")
+# The owner widened the sky 1.5 times in the editor on 2026-10-18 (Sky_Dome 6 -> 9 km across); the star
+# map and the stars go out with it, the stars keeping their apparent size.
+sky_dome.set_actor_scale3d(V(9000.0, 9000.0, 9000.0))
 sky = spawn(unreal.SkyLight, V(0, 0, 0), None, "SkyLight")
 sky.root_component.set_mobility(unreal.ComponentMobility.MOVABLE)
 sky_light = sky.get_editor_property("light_component")
