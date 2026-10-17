@@ -200,10 +200,10 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Map(LiftAction, EKeys::SpaceBar, false, false);
 	Map(LiftAction, EKeys::LeftControl, false, true);
 	Map(StabiliseAction, EKeys::X, false, false);
-	// Owner 17.10: F uses/grabs/lets go, Q/E roll, V bullet time, Alt the grapple.
-	Map(UseAction, EKeys::F, false, false);
+	// Owner 17.10: RMB uses/grabs/lets go, F pushes, Q/E roll, V bullet time, Alt the grapple.
+	Map(UseAction, EKeys::RightMouseButton, false, false);
 	Map(PrimaryAction, EKeys::LeftMouseButton, false, false);
-	Map(PushAction, EKeys::RightMouseButton, false, false);
+	Map(PushAction, EKeys::F, false, false);
 	Map(RollAction, EKeys::E, false, false);
 	Map(RollAction, EKeys::Q, false, true);
 	Map(GrappleAction, EKeys::LeftAlt, false, false);
@@ -308,12 +308,23 @@ void AJamZeroGPawn::PrimaryPressed()
 
 void AJamZeroGPawn::PushPressed()
 {
-	if (GrabbedBody.IsValid())
+	// Holding something, F pushes off whatever else is in reach and the held
+	// body comes along (the grab couples the masses). With nothing else in
+	// reach the push goes into the held body itself: it is let go, and it and
+	// the pawn get equal and opposite impulses (Vision/CurrentState.md).
+	if (Push())
 	{
-		Release();
 		return;
 	}
-	Push();
+	if (UPrimitiveComponent* Held = GrabbedBody.Get())
+	{
+		const FVector Direction = ViewDirection();
+		Release();
+		Held->AddImpulse(Direction * PushImpulse);
+		AddBodyImpulse(-Direction * PushImpulse);
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG push: the held %s (%.0f kg) pushed away, impulse %.0f kg cm/s"),
+			*GetNameSafe(Held->GetOwner()), Held->GetMass(), PushImpulse);
+	}
 }
 
 void AJamZeroGPawn::Roll(const FInputActionValue& Value)
