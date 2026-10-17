@@ -27,7 +27,7 @@ struct FInputActionValue;
 /**
  * The zero-G player: a simulated sphere with its rotation locked, gravity
  * off and no damping, so momentum is kept until something changes it. The
- * camera follows the control rotation; the body never turns.
+ * camera follows the control rotation (free look in zero-G turns only the view).
  *
  * Ways to move, strongest first: push off what is in reach (RMB) - against a
  * wall you fly, against light junk the junk flies; throw what you hold (LMB),
@@ -111,6 +111,10 @@ public:
 	TObjectPtr<UJamWeaponsComponent> Guns = nullptr;
 
 	// --- view ---------------------------------------------------------------
+
+	/** In zero gravity, mouse look turns the view around its own axes (yaw about the view's up after a flip), without pitch limits. The physics body never turns. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View")
+	bool bFreeBodyRotation = true;
 
 	/** Horizontal field of view, degrees: MindKore's bodycam (UMKCameraComponent::BodyCamFov). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "60.0", ClampMax = "150.0"))
@@ -210,6 +214,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Tether", meta = (ClampMin = "0.0"))
 	float TetherDamping = 50.0f;
 
+	// --- grapple (Left Alt) ----------------------------------------------------------
+
+	/** Alt hooks what is under the view within this, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grapple", meta = (ClampMin = "100.0"))
+	float GrappleRangeCm = 3000.0f;
+
+	/**
+	 * Pull along the line while hooked, kg cm/s^2 (100 kg: 150000 = 1500 cm/s^2).
+	 * A hooked loose body gets the same pull back, so a light one comes to you
+	 * and a heavy one or a wall takes you to it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grapple", meta = (ClampMin = "0.0"))
+	float GrapplePull = 150000.0f;
+
+	/** The hook lets go by itself this close to its point, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grapple", meta = (ClampMin = "0.0"))
+	float GrappleArriveCm = 200.0f;
+
+	// --- roll (Q/E) --------------------------------------------------------------
+
+	/** Q/E roll the view in zero-G free rotation, deg/s. Ignored in a gravity zone. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "0.0"))
+	float RollRateDegPerSec = 90.0f;
+
 	// --- prediction (while Left Shift is held) --------------------------------------
 
 	/** How far ahead the path is drawn, seconds of flight. */
@@ -248,6 +276,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Crash", meta = (ClampMin = "0.0"))
 	float ShakeSeconds = 0.25f;
 
+	/** Camera kick of a shot per 10000 kg cm/s of recoil, cm (the same fading shake as a crash). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
+	float RecoilShakeCmPer10000 = 1.5f;
+
 	// --- thrusters and stabiliser ------------------------------------------------
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters")
@@ -255,7 +287,7 @@ public:
 
 	/** Acceleration along the input direction while a thrust key is held, cm/s^2. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters", meta = (ClampMin = "0.0"))
-	float ThrustAccelCm = 600.0f;
+	float ThrustAccelCm = 250.0f;
 
 	/** Thrust stops adding once the velocity along the input direction reaches this, cm/s (it never brakes). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters", meta = (ClampMin = "0.0"))
@@ -384,6 +416,11 @@ public:
 	/** Console probe: aim (as Left Shift) or stop; the next drawn path logs its first contact. */
 	void ProbeAim(bool bAim);
 
+	/** Left Alt: hook what is under the view, or let go. */
+	void ToggleGrapple();
+
+	UPrimitiveComponent* GetGrappled() const { return GrappleTarget.Get(); }
+
 	/** Console probe: thrust input for the next tick (view frame: X forward, Y right, Z up) and the stabiliser. */
 	void ProbeThrust(const FVector& Input, bool bStabilise) { ThrustInput = Input; bStabilising = bStabilise; }
 
@@ -432,6 +469,10 @@ protected:
 	TObjectPtr<UPhysicsConstraintComponent> TetherConstraint = nullptr;
 
 	TWeakObjectPtr<UPrimitiveComponent> TetheredBody;
+
+	/** The hooked component and the hook point in its local space. */
+	TWeakObjectPtr<UPrimitiveComponent> GrappleTarget;
+	FVector GrappleLocalPoint = FVector::ZeroVector;
 	TWeakObjectPtr<UPrimitiveComponent> GrabCandidate;
 	FVector GrabCandidatePoint = FVector::ZeroVector;
 
@@ -447,7 +488,10 @@ private:
 	void Lift(const FInputActionValue& Value);
 	void PrimaryPressed();
 	void PushPressed();
-	void PutDown();
+	void Roll(const FInputActionValue& Value);
+	void UpdateGrapple();
+	/** On the ship map only after AJamToolPickup "Grapple" was taken; elsewhere always. */
+	bool HasGrapple() const;
 	UFUNCTION()
 	void HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp,
 		FVector NormalImpulse, const FHitResult& Hit);

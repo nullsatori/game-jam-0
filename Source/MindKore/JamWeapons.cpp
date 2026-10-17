@@ -25,7 +25,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Pistol.Reserve = 60;
 	Pistol.ReloadSeconds = 1.2f;
 	Pistol.SpreadDeg = 0.5f;
-	Pistol.RecoilImpulse = 1500.0f;
+	Pistol.RecoilImpulse = 4000.0f;
 	Pistol.HitImpulse = 3000.0f;
 	Pistol.SoundPitch = 1.3f;
 	Pistol.bAutomatic = true;
@@ -38,7 +38,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Shotgun.ReloadSeconds = 2.0f;
 	Shotgun.Pellets = 8;
 	Shotgun.SpreadDeg = 6.0f;
-	Shotgun.RecoilImpulse = 12000.0f;
+	Shotgun.RecoilImpulse = 25000.0f;
 	Shotgun.HitImpulse = 4000.0f;
 	Shotgun.RangeCm = 3000.0f;
 	Shotgun.SoundPitch = 0.9f;
@@ -49,7 +49,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Sniper.MagazineSize = 4;
 	Sniper.Reserve = 16;
 	Sniper.ReloadSeconds = 2.5f;
-	Sniper.RecoilImpulse = 40000.0f;
+	Sniper.RecoilImpulse = 70000.0f;
 	Sniper.HitImpulse = 60000.0f;
 	Sniper.RangeCm = 15000.0f;
 	Sniper.SoundPitch = 0.7f;

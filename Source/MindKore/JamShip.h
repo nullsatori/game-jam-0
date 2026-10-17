@@ -13,7 +13,9 @@ class UBoxComponent;
  * and that gravity eases toward the pawn's - so on the planetoid the mouse
  * looks around the local up, landing turns the world under you smoothly,
  * and walking around the sphere keeps the view level. Outside every gravity
- * zone the frame stays where it was (no snap back to world up).
+ * zone optional free rotation turns the view around its own axes (the physics
+ * body never turns). On return the frame is built upright for the gravity
+ * at once, the view keeps its heading, and the leftover roll fades out.
  */
 UCLASS()
 class MINDKORE_API AJamShipController : public APlayerController
@@ -25,6 +27,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Walker", meta = (ClampMin = "0.1"))
 	float GravityAlignRate = 4.0f;
 
+	/** Speed cap of the turn upright after free rotation (landing upside down), deg/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Walker", meta = (ClampMin = "10.0"))
+	float RecoveryMaxDegPerSec = 240.0f;
+
 	virtual void UpdateRotation(float DeltaTime) override;
 
 	/** The gravity direction the view uses now (eased toward the pawn's). */
@@ -32,10 +38,13 @@ public:
 
 private:
 	FVector SmoothedGravity = FVector::ZeroVector;
+	bool bWasFreeBodyRotation = false;
 	/** World from the view's local frame, carried along as gravity turns. */
 	FQuat GravityFrame = FQuat::Identity;
 	/** The view in that frame: pitch and yaw, no roll. */
 	FRotator RelativeView = FRotator::ZeroRotator;
+	/** World-space turn from the upright view to the one shown: what is left of a free-rotation pose, fading to identity. */
+	FQuat RecoveryOffset = FQuat::Identity;
 	FRotator LastWrittenRotation = FRotator(1000.0f, 0.0f, 0.0f);
 };
 

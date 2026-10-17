@@ -123,7 +123,7 @@ UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/S
 - **Воздух.** Внутри зоны с `bBreathable` дыхание восполняет O2
   (`RefillPerSecond`) вместо расхода. HUD показывает `HudText` зоны.
 - **Скафандр.** `AJamSuitLocker` кладёт ключ `Jam.Suit` на кейринг; внешняя
-  дверь шлюза — `AMKDoor` с этим ключом (первое E «Отпереть», второе —
+  дверь шлюза — `AMKDoor` с этим ключом (первое ПКМ «Отпереть», второе —
   открыть; без скафандра — «Нужен скафандр»).
 - **Стволы** — `UJamWeaponsComponent` (`Guns`, см.
   [RecoilWeapons](RecoilWeapons.md)). На корабле пешка стартует без оружия
@@ -141,10 +141,10 @@ UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/S
   (`HitImpulse`/100, Н·с) сверх `ImpulseThreshold` 25: пистолет 30 → 5,
   дробинка 40 → 15 (×8 = 120 за выстрел), снапа 600 → 575. Здоровье 600:
   пистолет ~120 выстрелов, дробовик ~5, снапа 2. Разбитый — 3 куска по 30 кг.
-- **Рычаг.** `AJamShipPanel`: E — список недостающего («не готово: корпус,
+- **Рычаг.** `AJamShipPanel`: ПКМ — список недостающего («не готово: корпус,
   топливо, навигация»); когда всё готово — `OnLaunchAttempt` (крючок для
   босса), затем «Улетел! Груз n/6» и рестарт через `EndRestartSeconds` (6).
-- **Груз.** E на `AJamCargo` — +1 к «Груз n/6» и предмет исчезает.
+- **Груз.** ПКМ на `AJamCargo` — +1 к «Груз n/6» и предмет исчезает.
 
 ## HUD
 

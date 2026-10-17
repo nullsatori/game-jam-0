@@ -12,6 +12,7 @@
 #include "JamOxygen.h"
 #include "JamWeapons.h"
 #include "JamZeroGPawn.h"
+#include "JamShip.h"
 #include "MKPhysicsProp.h"
 #include "MindKore.h"
 #include "MKCarryComponent.h"
@@ -76,6 +77,7 @@ void AJamHUD::DrawHUD()
 
 AJamZeroGGameMode::AJamZeroGGameMode()
 {
+	PlayerControllerClass = AJamShipController::StaticClass();
 	DefaultPawnClass = AJamZeroGPawn::StaticClass();
 	HUDClass = AJamZeroGHUD::StaticClass();
 }
