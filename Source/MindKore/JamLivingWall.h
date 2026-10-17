@@ -16,9 +16,9 @@ class USoundBase;
 
 /**
  * A living wall of woven tissue - the Whomping Willow as a door. A pistol round
- * tears a strand or two and the weave closes again in about half a second; a
- * shotgun blast tears a hole that stays open for a few seconds and lets the
- * player (or a prop) through before it re-weaves, centre last.
+ * leaves a hand-sized wound that snaps shut in under half a second and never
+ * opens the collision; a shotgun blast tears a hole that stays open for a few
+ * seconds and lets the player (or a prop) through before it re-weaves.
  *
  * Wall space is the actor's own, like AMKGlassPane: width along local X, height
  * along local Z, the face toward local +Y (the "front"), origin at the centre,
@@ -29,9 +29,10 @@ class USoundBase;
  * shrink to a speck (no collision); instances are never removed.
  *
  * Tearing. Every impact (IMKImpactReceiver: rounds, and thrown props through
- * the collision-impact path) tears the cells within TearRadiusCm of its point.
- * BurstMinHits or more impacts from one source in one frame (the shotgun's
- * pellets) are one blast: it also tears the disc covering them all plus
+ * the collision-impact path) wounds the skin within TearRadiusCm of its point;
+ * a single hit's cells keep their collision (held-down pistol fire must never
+ * open a way through). BurstMinHits or more impacts from one source in one
+ * frame (the shotgun's pellets) are one blast: it tears its cells and the disc covering them all plus
  * BurstMarginCm, at most BurstMaxRadiusCm - otherwise eight pellets would
  * leave eight 20 cm holes and never one a body fits through.
  *

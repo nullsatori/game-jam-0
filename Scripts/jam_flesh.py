@@ -460,7 +460,8 @@ def materials(log):
         scalars, vectors, textures = LOOKS[name]
         # The wall's back membrane is nearly opaque: a lit room behind must not read as a hole.
         # Its self light is raised: the round walls sit in dark caves and the owner keeps the lighting as it is.
-        wall_scalars = dict(scalars, PulseCm=0.5, SelfLight=scalars.get("SelfLight", 0.15) * 2.0,
+        # No vessel web on the walls: raw meat (owner's reference, 18.10), not a ball of yarn.
+        wall_scalars = dict(scalars, PulseCm=0.5, SelfLight=scalars.get("SelfLight", 0.15) * 2.0, VesselAmount=0.0,
                             **({"Opacity": 0.88} if name == "Membrane" else {}))
         out["Wall_" + name] = _instance("MI_Jam_Wall_" + name, base, wall_scalars, vectors, textures,
                                         {"LivingHoles": True}, translucent=name == "Membrane", masked=name != "Membrane")
@@ -479,4 +480,5 @@ def skin_wall(wall, mats, round_=False):
     wall.set_editor_property("skin_mesh", unreal.load_asset(SKIN[round_]))
     skin = wall.get_editor_property("skin")
     for slot, name in SKIN_SLOTS.items():
-        skin.set_material_by_name(slot, mats[name])
+        # The round mesh's frame slot is its fleshy lip: the planet's own (world-aligned) skin, no seam.
+        skin.set_material_by_name(slot, mats["PlanetSkin" if round_ and slot == "FrameMetal" else name])

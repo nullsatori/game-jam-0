@@ -493,14 +493,13 @@ void AJamLivingWall::ProcessHits(double Now)
 			Spread = FMath::Max(Spread, float(FVector2D::Distance(Point, Centroid)));
 		}
 		// The outline: a blast's disc (its hits plus the margin), a single hit's
-		// TearRadiusCm; ragged, stretched along the fibres (diagonal on a square
-		// wall, radial on a round one), a blast with pellet blobs around it.
+		// TearRadiusCm; ragged, stretched along the fibres (diagonal, on the round
+		// walls too), a blast with pellet blobs around it.
 		FWound Shape;
 		Shape.Centre = Centroid;
 		Shape.Radius = bBlast ? FMath::Min(Spread + BurstMarginCm, BurstMaxRadiusCm) : TearRadiusCm * 1.2f;
 		Shape.Seed = Random.FRand();
-		Shape.Fibre = bRound && Centroid.Size() > 40.0f ? float(FMath::Atan2(Centroid.Y, Centroid.X))
-			: FMath::DegreesToRadians((Random.FRand() < 0.5f ? 45.0f : 135.0f) + Random.FRandRange(-25.0f, 25.0f));
+		Shape.Fibre = FMath::DegreesToRadians((Random.FRand() < 0.5f ? 45.0f : 135.0f) + Random.FRandRange(-25.0f, 25.0f));
 		Shape.Stretch = Random.FRandRange(0.3f, 0.6f);
 		Shape.Blobs = bBlast ? 3 : 0;
 		TSet<int32> Torn;
@@ -535,19 +534,27 @@ void AJamLivingWall::ProcessHits(double Now)
 		const int32 CentreCell = CellAt(FMath::FloorToInt32(float(Centroid.X) / CellSizeCm + CellsX * 0.5f),
 			FMath::FloorToInt32(float(Centroid.Y) / CellSizeCm + CellsZ * 0.5f));
 		const bool bThinCentre = CentreCell != INDEX_NONE && Cells[CentreCell].bThin;
-		const float Delay = (RegrowDelaySeconds + FMath::Min(FMath::Max(0, Count - StunFreeCells) * StunSecondsPerCell, MaxStunSeconds))
+		// A single hit (pistol, sniper, a thrown prop) is only a visible wound that snaps shut in under half
+		// a second; its cells keep their collision, so no spray of rounds ever opens a way through.
+		constexpr float HitStunSeconds = 0.05f;
+		constexpr float HitCloseSeconds = 0.2f;
+		const float Delay = (bBlast ? RegrowDelaySeconds + FMath::Min(FMath::Max(0, Count - StunFreeCells) * StunSecondsPerCell, MaxStunSeconds) : HitStunSeconds)
 			* (bThinCentre ? ThinSpotSlowdown : 1.0f);
 		Shape.Stun = Delay;
-		// About StrandGrowSeconds per cell of radius, as the old ring-by-ring closing.
-		Shape.Close = FMath::Max(StrandGrowSeconds * 0.5f, Shape.Radius / CellSizeCm * StrandGrowSeconds) * (bThinCentre ? ThinSpotSlowdown : 1.0f);
+		// A blast: about StrandGrowSeconds per cell of radius, as the old ring-by-ring closing.
+		Shape.Close = (bBlast ? FMath::Max(StrandGrowSeconds * 0.5f, Shape.Radius / CellSizeCm * StrandGrowSeconds) : HitCloseSeconds)
+			* (bThinCentre ? ThinSpotSlowdown : 1.0f);
 		Shape.Tear = bBlast ? BlastTearSeconds : TearSeconds;
 		Shape.TornAt = Now;
 		Shape.NextPulse = Now + Shape.Tear;
 		Shape.Side = Side >= 0.0f ? 1.0f : -1.0f;
 		FWound& Wound = Wounds.Add_GetRef(Shape);
 		// The cells open as the outline reaches them (UpdateTearing), over Tear.
-		Wound.Cells = Torn.Array();
-		Wound.Unopened = Wound.Cells;
+		if (bBlast)
+		{
+			Wound.Cells = Torn.Array();
+			Wound.Unopened = Wound.Cells;
+		}
 		LastWoundCentre = Wound.Centre;
 		const FVector WorldCentre = Wall.TransformPosition(FVector(Wound.Centre.X, 0.0f, Wound.Centre.Y));
 
@@ -619,8 +626,8 @@ void AJamLivingWall::ProcessHits(double Now)
 		{
 			UGameplayStatics::PlaySoundAtLocation(this, GroanSound, WorldCentre, 1.0f, GroanPitch);
 		}
-		UE_LOG(LogMindKore, Log, TEXT("Living wall %s: tore %d cells (%d hit(s)%s) around (%.0f, %.0f), regrowth after %.2f s, %d rim jet(s)"),
-			*GetName(), Count, Group.Value.Num(), bBlast ? *FString::Printf(TEXT(", one blast, hits within %.0f cm of their centre"), Spread) : TEXT(""),
+		UE_LOG(LogMindKore, Log, TEXT("Living wall %s: %s %d cells (%d hit(s)%s) around (%.0f, %.0f), regrowth after %.2f s, %d rim jet(s)"),
+			*GetName(), bBlast ? TEXT("tore") : TEXT("wounded (collision kept)"), Count, Group.Value.Num(), bBlast ? *FString::Printf(TEXT(", one blast, hits within %.0f cm of their centre"), Spread) : TEXT(""),
 			Wound.Centre.X, Wound.Centre.Y, Delay, Wound.SpurtCells.Num());
 		UE_LOG(LogMindKore, Verbose, TEXT("Living wall %s: outline radius %.0f, seed %.3f, fibre %.0f deg, stretch %.2f, %d blob(s), closes in %.2f s"),
 			*GetName(), Wound.Radius, Wound.Seed, FMath::RadiansToDegrees(Wound.Fibre), Wound.Stretch, Wound.Blobs, WoundEnd(Wound));
@@ -1229,8 +1236,40 @@ namespace
 	}
 
 	/**
+	 * The pistol held down from 3 m: PistolShots rounds at its fire rate, scattered over a 20 cm
+	 * circle; after each one the open cells and a sweep of the pawn's sphere through the aim point.
+	 * Single hits must never open the wall. Then Done once the last wound has had time to close.
+	 */
+	void PistolSpray(AJamLivingWall* Wall, AJamZeroGPawn* Pawn, const FVector& Centre, const FVector& Front, TFunction<void()> Done, int32 Shot = 0)
+	{
+		constexpr int32 PistolShots = 8;
+		if (Shot == PistolShots)
+		{
+			WallAfter(Wall, 0.6f, [Wall, Done]()
+			{
+				UE_LOG(LogMindKore, Log, TEXT("Wall probe [pistol 3 m]: +0.60 s after the last round, open %d cells"), Wall->GetOpenCellCount());
+				Done();
+			});
+			return;
+		}
+		const FVector Up = FVector::CrossProduct(Front, FVector::CrossProduct(FVector::UpVector, Front).GetSafeNormal());
+		const FVector Side = FVector::CrossProduct(Up, Front);
+		const float Angle = UE_TWO_PI * Shot / PistolShots;
+		const FVector Aim = Centre + (Side * FMath::Cos(Angle) + Up * FMath::Sin(Angle)) * (Shot % 2 ? 20.0f : 8.0f);
+		PlacePawn(Pawn, Centre + Front * 300.0f);
+		AimAndFire(Pawn, 0, Aim);
+		PlacePawn(Pawn, Centre + Front * 300.0f);
+		WallAfter(Wall, 0.17f, [Wall, Pawn, Centre, Front, Done, Shot]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Wall probe [pistol 3 m]: round %d, open %d cells, pawn sphere through the aim point %s"),
+				Shot + 1, Wall->GetOpenCellCount(), SweepBlocked(Wall, Pawn, Centre) ? TEXT("blocked") : TEXT("passes"));
+			PistolSpray(Wall, Pawn, Centre, Front, Done, Shot + 1);
+		});
+	}
+
+	/**
 	 * jam.Wall.Probe [Name]: on the wall named (or tagged Jam.WallProbe, or the
-	 * first): the pistol from 3 m at its centre until it is whole again; the
+	 * first): the pistol held down from 3 m (PistolSpray); the
 	 * shotgun from 5 m - torn cells, the clear radius and a sweep of the pawn's
 	 * sphere through the hole over time, time to close; another shotgun blast and
 	 * the pawn flown through the hole; then the same flight at the whole wall.
@@ -1262,9 +1301,7 @@ namespace
 		PlacePawn(Pawn, Centre + Front * 300.0f);
 		WallAfter(Wall, 0.3f, [Wall, Pawn, Centre, Front]()
 		{
-			AimAndFire(Pawn, 0, Centre);
-			PlacePawn(Pawn, Centre + Front * 300.0f);
-			WatchUntilClosed(Wall, Pawn, TEXT("pistol 3 m"), false, [Wall, Pawn, Centre, Front]()
+			PistolSpray(Wall, Pawn, Centre, Front, [Wall, Pawn, Centre, Front]()
 			{
 				PlacePawn(Pawn, Centre + Front * 500.0f);
 				WallAfter(Wall, 0.5f, [Wall, Pawn, Centre, Front]()

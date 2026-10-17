@@ -3,26 +3,29 @@
   blender.exe -b --python Scripts/blender/jam_living_wall_mesh.py -- <out_dir>
 
 Writes SM_Jam_LivingWall_Square.fbx (4 x 4 m in a rusty frame) and
-SM_Jam_LivingWall_Round.fbx (4 m across in a ring: crater membranes, cave plugs)
+SM_Jam_LivingWall_Round.fbx (4 m across in a fleshy lip: crater membranes, cave plugs)
 plus preview renders into out_dir (not the repository). Procedural, seeded,
 built like flayed anatomy (owner, 17-18.10: solid muscle tissue, not a net, not a
 set of fibres):
   - behind: one continuous muscular mass across the whole opening;
   - fusiform bellies, each ONE solid fluted body (the fibres are the texture
     along it), wide enough to touch and overlap and sinking into the mass: two
-    interleaving fans from opposite corners, short ones in the other corners, two
-    straps on top; round: a sphincter - a thick ring of circular muscle with
-    radial bellies from the rim running into it over a puckered middle;
-  - pale flat aponeuroses where bellies meet the frame, widening onto it;
-  - a few stringy connective threads and branching vessels;
-  - the frame with brackets and bolts.
+    interleaving fans from opposite corners, short ones in the other corners;
+    round: the same, no radial symmetry (owner, 18.10: a sphincter of radial
+    bellies read as a flower). No straps on top, no pale tendon ribbons or
+    connective threads (owner, 18.10: straps and "bones" looked wrong);
+  - a few dark branching vessels;
+  - square: the frame with brackets and bolts; round: no metal - a ragged fleshy lip
+    in the planet's skin, rolled over both faces and flaring into the ground
+    (owner, 18.10: it must grow out of the planet, not look industrial).
 Wall space as AJamLivingWall's (UE axes, here in metres): width along X, height
 along Z, the front toward +Y, the centre at the origin.
 
 The mesh stays whole: AJamLivingWall cuts its holes in the material (M_Jam_Gritty,
 LivingHoles) by position in the mesh's own space; UV0 runs along every strand
 (u around, v along), so the fibre texture follows it.
-Material slots: 0 Muscle, 1 Tendon, 2 Vessel, 3 Membrane, 4 FrameMetal.
+Material slots: 0 Muscle, 1 Tendon, 2 Vessel, 3 Membrane, 4 FrameMetal (round: the lip,
+given the planet's skin by Scripts/jam_flesh.py skin_wall).
 """
 import math
 import os
@@ -168,36 +171,35 @@ def frame_square(parts):
             bolt(parts, (z, FRAME_DEPTH, x))
 
 
-def frame_round(parts):
-    segs = 64
-    verts, uvs, faces = [], [], []
-    prof = [(INNER, -FRAME_DEPTH), (INNER, FRAME_DEPTH), (2.0, FRAME_DEPTH), (2.0, -FRAME_DEPTH)]
-    for k in range(segs + 1):
-        a = 2 * math.pi * k / segs
-        for r, y in prof + [prof[0]]:
-            verts.append((r * math.cos(a), y, r * math.sin(a)))
-            uvs.append((k / segs * 24.0, (r + y) * 2.0))
-    cols = len(prof) + 1
-    for k in range(segs):
-        for j in range(len(prof)):
-            i = k * cols + j
-            faces.append([i, i + cols, i + cols + 1, i + 1])
-    parts.add(verts, uvs, faces, METAL, frame=True)
-    for a in anchors_round():
-        d = -a / np.linalg.norm(a)
-        box(parts, a, (0.13, FRAME_DEPTH * 1.25, 0.05), math.atan2(d[0], d[2]))
-    for k in range(16):
-        a = 2 * math.pi * (k + 0.5) / 16
-        bolt(parts, (1.9 * math.cos(a), FRAME_DEPTH, 1.9 * math.sin(a)))
-
-
 def anchors_square():
     c = INNER * 0.96
     return [np.array(p) for p in ((-c, 0, -c), (0, 0, -INNER), (c, 0, -c), (INNER, 0, 0), (c, 0, c), (0, 0, INNER), (-c, 0, c), (-INNER, 0, 0))]
 
 
-def anchors_round():
-    return [np.array((INNER * math.cos(a), 0.0, INNER * math.sin(a))) for a in np.radians(np.arange(225, 585, 45))]
+def lip_round(parts, rng):
+    """The round wall's rim: a ragged fleshy lip over the edge of the tissue, rolled over both faces
+    and flaring out and back into the ground (crater floor, tunnel wall) around it. A closed profile
+    turned around the axis; its crest height and radii wander with the angle."""
+    segs = 160
+    mid = -0.11  # the tissue's mid-depth: the back half mirrors the front about it
+    front = [(1.62, -0.06), (1.70, 0.04), (1.79, 0.13), (1.91, 0.18), (2.03, 0.14), (2.16, 0.04), (2.30, -0.04), (2.45, -0.11)]  # the outer edge at mid-depth: under the ground
+    prof = front + [(r, 2 * mid - y) for r, y in front[::-1]]
+    waves = [(k, rng.uniform(0.3, 1.0) / k ** 0.6, rng.uniform(0, 2 * math.pi), rng.uniform(0, 2 * math.pi)) for k in range(2, 9)]
+    verts, uvs = [], []
+    for i in range(segs + 1):
+        th = 2 * math.pi * i / segs
+        swell = sum(a * math.sin(k * th + p) for k, a, p, _ in waves) / 2.2       # ~-1..1, crest height
+        drift = sum(a * math.sin(k * th + q) for k, a, _, q in waves) / 2.2       # ~-1..1, how far it reaches in
+        for j, (r, y) in enumerate(prof):
+            rim = 1.0 - min(abs(r - 1.91) / 0.55, 1.0)                           # 1 at the crest, 0 at the ends
+            rr = r + 0.14 * drift * (1.0 - (r - 1.62) / 0.83)
+            yy = mid + (y - mid) * (1.0 + 0.9 * swell * rim)  # swollen lobes, and places it nearly sinks away
+            verts.append((rr * math.cos(th), yy, rr * math.sin(th)))
+            uvs.append((th / (2 * math.pi) * 12.0, j / (len(prof) - 1) * 2.0))
+    cols = len(prof)
+    faces = [[i * cols + j, (i + 1) * cols + j, (i + 1) * cols + j + 1, i * cols + j + 1]
+             for i in range(segs) for j in range(cols - 1)]
+    parts.add(verts, uvs, faces, METAL)
 
 
 # --- tissue: exposed anatomy, in layers ---------------------------------------------------------------
@@ -237,10 +239,11 @@ def flat_tube(parts, path, r_w, r_d, sides, mat, grooves=0, groove=0.0):
     return w, d
 
 
-def belly(parts, rng, a, b, r_max, bend=0.0, depth=0.0, tendon_a=True, tendon_b=True, flat=0.45, path=None):
-    """A fusiform muscle from a to b: ONE closed solid body, thick in the middle, tapering into
-    tendons, fluted along its length (the fibres are the texture along it and these grooves). A
-    tendon end becomes a pale flat ribbon fanning out onto its attachment. Returns its path."""
+def belly(parts, rng, a, b, r_max, bend=0.0, depth=0.0, flat=0.45, path=None):
+    """A fusiform muscle from a to b: ONE closed solid body, thick in the middle, tapering to both
+    ends, fluted along its length (the fibres are the texture along it and these grooves). It grows
+    straight out of the frame or lip at a: no pale tendon ribbons (owner, 18.10: they read as
+    bones). Returns its path."""
     if path is None:
         a, b = np.asarray(a, float), np.asarray(b, float)
         ab = b - a
@@ -250,43 +253,13 @@ def belly(parts, rng, a, b, r_max, bend=0.0, depth=0.0, tendon_a=True, tendon_b=
         path = spline(ctrl, 0.04)
     seg = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(path, axis=0), axis=1))])
     s = seg / seg[-1]
-    ta = rng.uniform(0.13, 0.2) if tendon_a else 0.0
-    tb = 1.0 - (rng.uniform(0.13, 0.2) if tendon_b else 0.0)
-    u = np.clip((s - ta) / (tb - ta), 0.0, 1.0)
+    u = s
     # Fusiform: the belly swells off-centre a little, like a real one.
     peak = rng.uniform(0.4, 0.6)
     shape = np.where(u < peak, np.sin(0.5 * math.pi * u / peak), np.sin(0.5 * math.pi * (1 - u) / (1 - peak))) ** 0.7
     r = 0.015 + r_max * shape
-    idx = np.nonzero((s >= ta) & (s <= tb))[0]
-    flat_tube(parts, path[idx], r[idx], r[idx] * flat, 24, MUSCLE, grooves=int(rng.integers(11, 16)), groove=0.05)
-    # Aponeuroses: pale flat ribbons from the belly to the attachment, widening onto it.
-    for end, rng_idx in ((tendon_a, np.nonzero(s <= ta + 0.02)[0]), (tendon_b, np.nonzero(s >= tb - 0.02)[0])):
-        if not end or len(rng_idx) < 2:
-            continue
-        p = path[rng_idx]
-        frac = np.linspace(0, 1, len(p))
-        at_frame = frac if rng_idx[0] != 0 else frac[::-1]           # 1 at the frame
-        width = r[rng_idx].max() * 0.6 + (0.22 - r[rng_idx].max() * 0.6) * at_frame ** 2
-        flat_tube(parts, p, width, 0.008 + 0.012 * (1 - at_frame), 8, TENDON)
+    flat_tube(parts, path, r, r * flat, 24, MUSCLE, grooves=int(rng.integers(11, 16)), groove=0.0)  # no flutes (in game they read as yarn); the draw keeps the layout seed
     return path
-
-def threads(parts, rng, paths, count):
-    """Stringy connective fibres stretched across the gaps between neighbouring bellies."""
-    made = 0
-    for _ in range(count * 6):
-        if made >= count:
-            break
-        i, j = rng.choice(len(paths), 2, replace=False)
-        p = paths[i][int(rng.integers(len(paths[i]) // 5, 4 * len(paths[i]) // 5))]
-        q = paths[j][int(np.argmin(np.linalg.norm(paths[j] - p, axis=1)))]
-        gap = np.linalg.norm(q - p)
-        if not 0.12 < gap < 0.6:
-            continue
-        mid = (p + q) / 2 + Y * rng.uniform(-0.03, 0.02)
-        path = spline([p, mid, q], 0.04)
-        tube(parts, path, rng.uniform(0.006, 0.014), 5, VESSEL if rng.random() < 0.3 else TENDON)
-        made += 1
-
 
 def cords(parts, rng, paths, count):
     """Vessels and nerves: a few branching cords along the borders between muscles, in front."""
@@ -318,8 +291,8 @@ def cords(parts, rng, paths, count):
 
 def fascia(parts, rng, round_):
     """The back layer: a continuous muscular mass across the whole opening (front and back
-    surfaces), bulging, its fibres diagonal (square) or radial (round) in UV0; a round one
-    puckers in toward the middle like a sphincter's floor. The bellies sink into it."""
+    surfaces), bulging, its fibres diagonal in UV0 (clipped to a disc on a round wall). The
+    bellies sink into it."""
     n = 72
     lim = INNER + 0.04
     front, back, uvs = [], [], []
@@ -328,17 +301,10 @@ def fascia(parts, rng, round_):
             x, z = -lim + 2 * lim * i / n, -lim + 2 * lim * k / n
             r = math.hypot(x, z)
             bulge = 0.025 * math.sin(x * 3.3 + 0.4) * math.sin(z * 2.9 - 0.8) + 0.012 * math.sin(x * 8.1 - z * 6.7)
-            if round_:
-                th = math.atan2(z, x)
-                pucker = -0.06 * math.exp(-(r / 0.4) ** 2) * (1.0 + 0.25 * math.sin(10 * th))
-                y = -0.06 + bulge + pucker
-                uvs.append((th / (2 * math.pi) * 8.0, r * 1.6))
-            else:
-                y = -0.06 + bulge
-                uvs.append(((x - z) * 0.7071 * 0.8, (x + z) * 0.7071 * 1.6))
+            y = -0.06 + bulge
+            uvs.append(((x - z) * 0.7071 * 0.8, (x + z) * 0.7071 * 1.6))
             # Flutes along the fibres on the front surface.
-            along = r if round_ else (x - z) * 0.7071
-            y += 0.006 * math.sin(along * 55.0)
+            y += 0.006 * math.sin((x - z) * 0.7071 * 55.0)
             front.append((x, y, z))
             back.append((x, -0.17 - 0.02 * (1 - min(1.0, r / lim)), z))
     faces = []
@@ -362,42 +328,48 @@ def tissue_square(parts, rng):
         a = np.array((-c, 0.0, -c))
         dirn = np.array((math.cos(math.radians(ang)), 0.0, math.sin(math.radians(ang))))
         paths.append(belly(parts, rng, a, a + dirn * length * rng.uniform(0.95, 1.05), r, bend=rng.uniform(-0.1, 0.1),
-                           depth=rng.uniform(-0.02, 0.02), tendon_b=False))
+                           depth=rng.uniform(-0.02, 0.02)))
     for ang, length, r in ((191, 2.8, 0.34), (206, 2.65, 0.37), (221, 2.95, 0.33), (237, 2.7, 0.32), (252, 2.5, 0.3), (265, 2.1, 0.26)):
         a = np.array((c, 0.0, c))
         dirn = np.array((math.cos(math.radians(ang)), 0.0, math.sin(math.radians(ang))))
         paths.append(belly(parts, rng, a, a + dirn * length * rng.uniform(0.95, 1.05), r, bend=rng.uniform(-0.1, 0.1),
-                           depth=rng.uniform(0.0, 0.04), tendon_b=False))
+                           depth=rng.uniform(0.0, 0.04)))
     # The other two corners: short fused bellies.
     for corner, angles in (((-c, 0.0, c), (-18, -45, -72)), ((c, 0.0, -c), (162, 135, 108))):
         for ang in angles:
             dirn = np.array((math.cos(math.radians(ang)), 0.0, math.sin(math.radians(ang))))
             paths.append(belly(parts, rng, corner, np.array(corner) + dirn * rng.uniform(1.1, 1.5), rng.uniform(0.27, 0.32),
-                               bend=rng.uniform(-0.08, 0.08), depth=rng.uniform(-0.03, 0.0), tendon_b=False))
-    # Two long straps on top, crossing diagonally (sartorius-like).
-    paths.append(belly(parts, rng, (-c, 0.0, c), (c * 0.9, 0.0, -c), 0.16, bend=0.35, depth=0.17, flat=0.5))
-    paths.append(belly(parts, rng, (0.1, 0.0, INNER), (c, 0.0, -0.5), 0.13, bend=-0.2, depth=0.14, flat=0.5))
-    threads(parts, rng, paths, 30)
+                               bend=rng.uniform(-0.08, 0.08), depth=rng.uniform(-0.03, 0.0)))
     cords(parts, rng, paths, 6)
 
 def tissue_round(parts, rng):
+    """The square wall's anatomy in a disc, nothing radial: two opposed fans whose fingers
+    interleave, their origins spread along the rim under the lip; short fused bellies from the other
+    two sides."""
     fascia(parts, rng, True)
+    R = INNER * 0.97
+    def rim(deg):
+        return np.array((R * math.cos(math.radians(deg)), 0.0, R * math.sin(math.radians(deg))))
+    def along(origin, dev):
+        inward = math.atan2(-origin[2], -origin[0]) + math.radians(dev)
+        d = np.array((math.cos(inward), 0.0, math.sin(inward)))
+        return d, -2.0 * float(np.dot(origin, d))  # the chord to the far rim
     paths = []
-    # A sphincter: a thick ring of circular muscle around the middle (orbicularis-like) ...
-    ring = np.array([(0.45 * math.cos(t) + 0.03 * math.sin(3 * t), 0.02 + 0.02 * math.sin(2 * t), 0.45 * math.sin(t))
-                     for t in np.linspace(0, 2 * math.pi * 1.04, 140)])
-    flat_tube(parts, ring, 0.27, 0.2, 24, MUSCLE, grooves=13, groove=0.05)
-    paths.append(ring)
-    # ... and radial bellies from the rim that touch each other and run into the ring.
-    count = 12
-    for k in range(count):
-        ang = 2 * math.pi * k / count + rng.uniform(-0.12, 0.12)
-        a = np.array((INNER * 0.97 * math.cos(ang), 0.0, INNER * 0.97 * math.sin(ang)))
-        b = a / np.linalg.norm(a) * 0.4
-        paths.append(belly(parts, rng, a, b, rng.uniform(0.27, 0.33), bend=rng.uniform(-0.1, 0.1),
-                           depth=rng.uniform(-0.02, 0.03), tendon_b=False))
-    threads(parts, rng, paths, 24)
+    for base, devs in ((228, (-34, -19, -5, 9, 23, 37)), (41, (-37, -22, -8, 6, 20, 33))):
+        for dev in devs:
+            a = rim(base + dev * 0.4 + rng.uniform(-5, 5))
+            d, chord = along(a, dev)
+            paths.append(belly(parts, rng, a, a + d * chord * rng.uniform(0.7, 0.86), rng.uniform(0.3, 0.36),
+                               bend=rng.uniform(-0.12, 0.12), depth=rng.uniform(-0.02, 0.04)))
+    for base in (133, 312):
+        # Side by side along the rim, nearly parallel (from one point they made a star).
+        for step in (-1, 0, 1):
+            a = rim(base + step * 22 + rng.uniform(-4, 4))
+            d, chord = along(a, -step * 14 + rng.uniform(-6, 6))
+            paths.append(belly(parts, rng, a, a + d * chord * rng.uniform(0.35, 0.5), rng.uniform(0.26, 0.32),
+                               bend=rng.uniform(-0.08, 0.08), depth=rng.uniform(-0.03, 0.0)))
     cords(parts, rng, paths, 4)
+
 
 def to_bmesh(parts):
     """Into a bmesh, Y mirrored (the FBX round trip turns Blender +Y into UE -Y) and the winding reversed."""
@@ -418,12 +390,32 @@ def to_bmesh(parts):
     return bm
 
 
+def raw_meat(bm, seed):
+    """Raw meat, not smooth bellies (owner's reference, 18.10): every muscle vertex pushed along its
+    normal - lumps a few cm to a hand across, sunk along torn cracks between them."""
+    bm.normal_update()
+    off = mathutils.Vector((seed * 7.1, seed * 3.3, seed * 5.7))
+    moves = []
+    for v in bm.verts:
+        if not any(f.material_index == MUSCLE for f in v.link_faces):
+            continue
+        lumps = mathutils.noise.noise(v.co * 7.0 + off, noise_basis="PERLIN_ORIGINAL")
+        crack = mathutils.noise.noise(v.co * 5.5 + off, noise_basis="VORONOI_F2F1")  # 0 on a chunk border
+        moves.append((v, v.normal * (0.02 * lumps + 0.04 * math.sqrt(min(max(crack, 0.0) * 2.5, 1.0)) - 0.03)))
+    for v, move in moves:
+        v.co += move
+
+
 def build(name, round_, seed):
     rng = np.random.default_rng(seed)
     parts = Parts()
-    (frame_round if round_ else frame_square)(parts)
+    if round_:
+        lip_round(parts, rng)
+    else:
+        frame_square(parts)
     (tissue_round if round_ else tissue_square)(parts, rng)
     bm = to_bmesh(parts)
+    raw_meat(bm, seed)
     bmesh.ops.triangulate(bm, faces=bm.faces)
     mesh = bpy.data.meshes.new(name)
     bm.to_mesh(mesh)
