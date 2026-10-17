@@ -132,7 +132,10 @@ if eal.does_asset_exist(MAP):
     # Rebuilt in place: the map is loaded and every actor cleared (its file is edited, never deleted).
     if not les.load_level(MAP) or ues.get_editor_world().get_outer().get_path_name() != MAP:
         raise RuntimeError("load_level failed for " + MAP)
-    eas.destroy_actors([a for a in eas.get_all_level_actors() if not isinstance(a, (unreal.WorldSettings, unreal.Brush))])
+    # Volumes (post-process, etc.) are Brush subclasses too: keep only the builder brush, or every
+    # rebuild left one more PostProcess_Look behind.
+    eas.destroy_actors([a for a in eas.get_all_level_actors()
+                        if not isinstance(a, unreal.WorldSettings) and not (isinstance(a, unreal.Brush) and not isinstance(a, unreal.Volume))])
 elif not les.new_level(MAP, False):
     raise RuntimeError("new_level failed for " + MAP)
 world = ues.get_editor_world()

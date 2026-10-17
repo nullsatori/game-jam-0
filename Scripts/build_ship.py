@@ -191,7 +191,10 @@ if eal.does_asset_exist(MAP):
     # Rebuilt in place: the map is loaded and every actor cleared (its file is edited, never deleted).
     if not les.load_level(MAP) or ues.get_editor_world().get_outer().get_path_name() != MAP:
         raise RuntimeError("load_level failed for " + MAP)
-    eas.destroy_actors([a for a in eas.get_all_level_actors() if not isinstance(a, (unreal.WorldSettings, unreal.Brush))])
+    # Volumes (post-process, etc.) are Brush subclasses too: keep only the builder brush, or every
+    # rebuild left one more PostProcess_Look behind.
+    eas.destroy_actors([a for a in eas.get_all_level_actors()
+                        if not isinstance(a, unreal.WorldSettings) and not (isinstance(a, unreal.Brush) and not isinstance(a, unreal.Volume))])
 elif not les.new_level(MAP, False):
     raise RuntimeError("new_level failed for " + MAP)
 world = ues.get_editor_world()
@@ -619,6 +622,9 @@ eye_at, eye_up = on_surface("eye", 50.0)
 eye = eas.spawn_actor_from_object(unreal.load_asset("/Game/JamArt/Meshes/Planet/SM_Jam_PlanetEye"), eye_at,
                                   unreal.MathLibrary.make_rot_from_x(V(*eye_up)))
 eye.set_actor_label("Eye")
+# Placed and scaled by the owner in the editor on 2026-10-18; a rebuild keeps it there.
+eye.set_actor_transform(unreal.Transform(V(1331.0, 10573.2, -1239.3), unreal.Rotator(roll=2.0, pitch=-2.1, yaw=101.32), V(9.375, 9.375, 9.375)),
+                        False, True)
 eye.get_editor_property("static_mesh_component").set_material(0, FLESH_SET["PlanetEye"])
 eye.get_editor_property("static_mesh_component").set_editor_property("cast_shadow", False)
 # Bioluminescence: the same warm pink and orange glows, 3 m over the new surface.
