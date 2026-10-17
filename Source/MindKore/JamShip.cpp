@@ -33,6 +33,15 @@ void AJamShipController::UpdateRotation(float DeltaTime)
 	// The pawn's gravity; outside every zone the frame keeps the last one.
 	AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(GetPawn());
 	const bool bInGravity = Floater && Floater->IsInGravity();
+	const auto RotateBody = [Floater](const FQuat& Rotation)
+	{
+		if (!Floater) return;
+		// Eye height is a world-space offset, eased by the pawn. Rotating the
+		// parent must not swing that offset before the pawn's next tick.
+		const FVector EyeLocation = Floater->Camera->GetComponentLocation();
+		Floater->Body->SetWorldRotation(Rotation, false, nullptr, ETeleportType::TeleportPhysics);
+		Floater->Camera->SetWorldLocation(EyeLocation);
+	};
 	if (Floater && !bInGravity && Floater->bFreeBodyRotation)
 	{
 		// Compose in body space: after a flip, yaw still turns around the
@@ -42,9 +51,22 @@ void AJamShipController::UpdateRotation(float DeltaTime)
 		SetControlRotation(LastWrittenRotation);
 		// Teleport only orientation; preserve linear momentum. Physics rotation
 		// stays locked so collisions and the tether cannot spin the player.
-		Floater->Body->SetWorldRotation(View, false, nullptr, ETeleportType::TeleportPhysics);
+		RotateBody(View);
 		bWasFreeBodyRotation = true;
 		return;
+	}
+	if (bWasFreeBodyRotation)
+	{
+		// Rebase the walking frame on the actual exit orientation. Preserve
+		// the entire pose (including roll), then let gravity align the frame
+		// with the same easing used when walking around the planetoid.
+		const FQuat ExitView = GetControlRotation().Quaternion();
+		const FRotator Local = (GravityFrame.Inverse() * ExitView).Rotator();
+		RelativeView = FRotator(FMath::Clamp(Local.Pitch, -89.0f, 89.0f), Local.Yaw, 0.0f);
+		GravityFrame = (ExitView * RelativeView.Quaternion().Inverse()).GetNormalized();
+		SmoothedGravity = -GravityFrame.GetUpVector();
+		LastWrittenRotation = GetControlRotation();
+		bWasFreeBodyRotation = false;
 	}
 	if (SmoothedGravity.IsNearlyZero())
 	{
@@ -69,7 +91,7 @@ void AJamShipController::UpdateRotation(float DeltaTime)
 
 	// Someone else set the view (possession, a teleport, a probe): take it as the new one.
 	const FRotator Control = GetControlRotation();
-	if (bWasFreeBodyRotation || !Control.Equals(LastWrittenRotation, 0.01f))
+	if (!Control.Equals(LastWrittenRotation, 0.01f))
 	{
 		const FRotator Local = (GravityFrame.Inverse() * Control.Quaternion()).Rotator();
 		RelativeView = FRotator(Local.Pitch, Local.Yaw, 0.0f);
@@ -94,8 +116,7 @@ void AJamShipController::UpdateRotation(float DeltaTime)
 	if (Floater)
 	{
 		// Walking keeps the body upright in the gravity frame; only the head pitches.
-		Floater->Body->SetWorldRotation(GravityFrame * FRotator(0.0f, View.Yaw, 0.0f).Quaternion(),
-			false, nullptr, ETeleportType::TeleportPhysics);
+		RotateBody(GravityFrame * FRotator(0.0f, View.Yaw, 0.0f).Quaternion());
 	}
 	if (APawn* const ViewPawn = GetPawnOrSpectator())
 	{

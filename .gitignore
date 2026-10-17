@@ -5,3 +5,7 @@ DerivedDataCache/
 .vs/
 *.sln
 
+ue-mcp.local.
+ue-mcp.yml
+Plugins/
+.idea/

@@ -13,7 +13,8 @@ class UBoxComponent;
  * and that gravity eases toward the pawn's - so on the planetoid the mouse
  * looks around the local up, landing turns the world under you smoothly,
  * and walking around the sphere keeps the view level. Outside every gravity
- * zone the frame stays where it was (no snap back to world up).
+ * zone optional free body rotation uses the player's local axes. On return,
+ * the gravity frame is rebased to preserve the view before easing upright.
  */
 UCLASS()
 class MINDKORE_API AJamShipController : public APlayerController
