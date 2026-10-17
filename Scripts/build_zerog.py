@@ -28,6 +28,7 @@ import unreal
 
 # The shared living wall material (Scripts/jam_living_wall.py), found next to this script.
 sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_dust  # noqa: E402
 import jam_flesh  # noqa: E402
 import jam_living_wall  # noqa: E402
 
@@ -95,21 +96,6 @@ def tint(name, rgb):
     return mi
 
 
-def dust_material():
-    """The unlit speck AJamZeroGPawn's dust loads (M_Jam_Dust), made once."""
-    path = MATS + "/M_Jam_Dust"
-    if eal.does_asset_exist(path):
-        return
-    m = tools.create_asset("M_Jam_Dust", MATS, unreal.Material, unreal.MaterialFactoryNew())
-    m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
-    colour = mel.create_material_expression(m, unreal.MaterialExpressionConstant3Vector, -300, 0)
-    colour.set_editor_property("constant", unreal.LinearColor(0.55, 0.6, 0.7, 1.0))
-    mel.connect_material_property(colour, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    mel.recompile_material(m)
-    eal.save_asset(path, False)
-    log("made " + path)
-
-
 def label_text(text, loc, yaw, size=60.0):
     actor = spawn(unreal.TextRenderActor, loc, yaw, "Label_" + text.split()[0])
     comp = actor.get_editor_property("text_render")
@@ -151,7 +137,7 @@ PART = tint("MI_Jam_ShipPart", (0.95, 0.42, 0.05))
 OXYGEN = tint("MI_Jam_O2", (0.1, 0.35, 0.95))
 DOCK = tint("MI_Jam_Dock", (0.2, 0.9, 0.3))
 ROCKET_MAT = tint("MI_Jam_Rocket", (0.85, 0.85, 0.8))
-dust_material()
+jam_dust.material(log)  # AJamZeroGPawn's dust specks
 
 settings = world.get_world_settings()
 settings.modify()

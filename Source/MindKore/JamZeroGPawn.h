@@ -125,17 +125,17 @@ public:
 	bool bLensDistortion = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "0"))
-	int32 DustCount = 300;
+	int32 DustCount = 4000;
 
 	/** Edge of the dust cube around the camera, cm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "100.0"))
-	float DustCubeCm = 2000.0f;
+	float DustCubeCm = 1200.0f;
 
-	/** Size of one speck, cm. */
+	/** Edge of one speck's cube, cm (each 0.6-1.3 of it); the material draws a pinpoint mote about 0.15 of it across. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "0.1"))
-	float DustSpeckCm = 2.0f;
+	float DustSpeckCm = 3.0f;
 
-	/** Unlit speck material (made by Scripts/build_zerog.py); loaded at BeginPlay. */
+	/** Soft additive mote material (Scripts/jam_dust.py); loaded at BeginPlay. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View")
 	TSoftObjectPtr<UMaterialInterface> DustMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/Jam/Materials/M_Jam_Dust.M_Jam_Dust")));
 

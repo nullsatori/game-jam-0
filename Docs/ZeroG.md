@@ -93,7 +93,7 @@ Alt цепляет то, что под прицелом, в пределах `Gr
 |---|---|---|
 | `CameraFOV` | 134 | горизонтальный угол обзора (как `BodyCamFov` MindKore) |
 | `bLensDistortion` | true | линза `M_MK_LensDistort` в цепочке камеры; без неё 134° выглядит растянутым по краям |
-| `DustCount` / `DustCubeCm` / `DustSpeckCm` | 300 / 2000 / 2 | пыль вокруг камеры; материал `M_Jam_Dust` (unlit) |
+| `DustCount` / `DustCubeCm` / `DustSpeckCm` | 4000 / 1200 / 3 | пыль вокруг камеры: пылинки стоят в мире (видна скорость), размер 0.6–1.3 от `DustSpeckCm`; материал `M_Jam_Dust` (`Scripts/jam_dust.py`): мягкая точка ~0.15 куба, аддитивная, дрейф 6 см и мерцание; вид — `NS_DustMote` из MindKore, мельче и тусклее (`Brightness` 0.4, `CoreUnits` 7, `DriftCm`, `TwinkleSpeed`) |
 | `BodyMassKg` | 100 | масса тела (override) |
 | `BodyFriction` / `BodyRestitution` | 0.2 / 0.3 | физматериал тела, создаётся в BeginPlay |
 | `MaxSpeedCm` | 1200 | потолок скорости (0 — без потолка) |

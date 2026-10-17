@@ -135,11 +135,12 @@ void AJamZeroGPawn::BeginPlay()
 	{
 		FRandomStream Random(DustCount);
 		const FVector Origin = Camera->GetComponentLocation();
-		const FVector Scale(DustSpeckCm / 100.0f);
 		TArray<FTransform> Specks;
 		for (int32 Index = 0; Index < DustCount; ++Index)
 		{
 			const FVector Offset(Random.FRandRange(-0.5f, 0.5f), Random.FRandRange(-0.5f, 0.5f), Random.FRandRange(-0.5f, 0.5f));
+			// Mostly fine dust, a few larger motes.
+			const FVector Scale(DustSpeckCm / 100.0f * FMath::Lerp(0.6f, 1.3f, FMath::Square(Random.FRand())));
 			Specks.Emplace(FQuat::Identity, Origin + Offset * DustCubeCm, Scale);
 		}
 		Dust->AddInstances(Specks, /*bShouldReturnIndices=*/false, /*bWorldSpace=*/true);
