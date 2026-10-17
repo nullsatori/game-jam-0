@@ -214,6 +214,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Tether", meta = (ClampMin = "0.0"))
 	float TetherDamping = 50.0f;
 
+	// --- grapple (Left Alt) ----------------------------------------------------------
+
+	/** Alt hooks what is under the view within this, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grapple", meta = (ClampMin = "100.0"))
+	float GrappleRangeCm = 3000.0f;
+
+	/**
+	 * Pull along the line while hooked, kg cm/s^2 (100 kg: 150000 = 1500 cm/s^2).
+	 * A hooked loose body gets the same pull back, so a light one comes to you
+	 * and a heavy one or a wall takes you to it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grapple", meta = (ClampMin = "0.0"))
+	float GrapplePull = 150000.0f;
+
+	/** The hook lets go by itself this close to its point, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grapple", meta = (ClampMin = "0.0"))
+	float GrappleArriveCm = 200.0f;
+
+	// --- roll (Q/E) --------------------------------------------------------------
+
+	/** Q/E roll the view in zero-G free rotation, deg/s. Ignored in a gravity zone. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "0.0"))
+	float RollRateDegPerSec = 90.0f;
+
 	// --- prediction (while Left Shift is held) --------------------------------------
 
 	/** How far ahead the path is drawn, seconds of flight. */
@@ -392,6 +416,11 @@ public:
 	/** Console probe: aim (as Left Shift) or stop; the next drawn path logs its first contact. */
 	void ProbeAim(bool bAim);
 
+	/** Left Alt: hook what is under the view, or let go. */
+	void ToggleGrapple();
+
+	UPrimitiveComponent* GetGrappled() const { return GrappleTarget.Get(); }
+
 	/** Console probe: thrust input for the next tick (view frame: X forward, Y right, Z up) and the stabiliser. */
 	void ProbeThrust(const FVector& Input, bool bStabilise) { ThrustInput = Input; bStabilising = bStabilise; }
 
@@ -440,6 +469,10 @@ protected:
 	TObjectPtr<UPhysicsConstraintComponent> TetherConstraint = nullptr;
 
 	TWeakObjectPtr<UPrimitiveComponent> TetheredBody;
+
+	/** The hooked component and the hook point in its local space. */
+	TWeakObjectPtr<UPrimitiveComponent> GrappleTarget;
+	FVector GrappleLocalPoint = FVector::ZeroVector;
 	TWeakObjectPtr<UPrimitiveComponent> GrabCandidate;
 	FVector GrabCandidatePoint = FVector::ZeroVector;
 
@@ -455,7 +488,10 @@ private:
 	void Lift(const FInputActionValue& Value);
 	void PrimaryPressed();
 	void PushPressed();
-	void PutDown();
+	void Roll(const FInputActionValue& Value);
+	void UpdateGrapple();
+	/** On the ship map only after AJamToolPickup "Grapple" was taken; elsewhere always. */
+	bool HasGrapple() const;
 	UFUNCTION()
 	void HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp,
 		FVector NormalImpulse, const FHitResult& Hit);

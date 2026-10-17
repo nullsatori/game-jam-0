@@ -19,6 +19,7 @@
 #include "InputModifiers.h"
 #include "JamDockZone.h"
 #include "JamOxygen.h"
+#include "JamShip.h"
 #include "JamWeapons.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -182,7 +183,8 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	UInputAction* UseAction = MakeAction(TEXT("IA_ZG_Use"), EInputActionValueType::Boolean);
 	UInputAction* PrimaryAction = MakeAction(TEXT("IA_ZG_Primary"), EInputActionValueType::Boolean);
 	UInputAction* PushAction = MakeAction(TEXT("IA_ZG_Push"), EInputActionValueType::Boolean);
-	UInputAction* PutAction = MakeAction(TEXT("IA_ZG_Put"), EInputActionValueType::Boolean);
+	UInputAction* RollAction = MakeAction(TEXT("IA_ZG_Roll"), EInputActionValueType::Axis1D);
+	UInputAction* GrappleAction = MakeAction(TEXT("IA_ZG_Grapple"), EInputActionValueType::Boolean);
 	UInputAction* BulletTimeAction = MakeAction(TEXT("IA_ZG_BulletTime"), EInputActionValueType::Boolean);
 	UInputAction* CrowbarAction = MakeAction(TEXT("IA_ZG_Crowbar"), EInputActionValueType::Boolean);
 	UInputAction* TetherAction = MakeAction(TEXT("IA_ZG_Tether"), EInputActionValueType::Boolean);
@@ -198,11 +200,14 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Map(LiftAction, EKeys::SpaceBar, false, false);
 	Map(LiftAction, EKeys::LeftControl, false, true);
 	Map(StabiliseAction, EKeys::X, false, false);
-	Map(UseAction, EKeys::E, false, false);
+	// Owner 17.10: F uses/grabs/lets go, Q/E roll, V bullet time, Alt the grapple.
+	Map(UseAction, EKeys::F, false, false);
 	Map(PrimaryAction, EKeys::LeftMouseButton, false, false);
 	Map(PushAction, EKeys::RightMouseButton, false, false);
-	Map(PutAction, EKeys::F, false, false);
-	Map(BulletTimeAction, EKeys::Q, false, false);
+	Map(RollAction, EKeys::E, false, false);
+	Map(RollAction, EKeys::Q, false, true);
+	Map(GrappleAction, EKeys::LeftAlt, false, false);
+	Map(BulletTimeAction, EKeys::V, false, false);
 	Map(CrowbarAction, EKeys::G, false, false);
 	Map(TetherAction, EKeys::T, false, false);
 	Map(AimAction, EKeys::LeftShift, false, false);
@@ -230,7 +235,8 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	// Left Shift held: the predicted paths are drawn.
 	Input->BindActionValueLambda(AimAction, ETriggerEvent::Started, [this](const FInputActionValue&) { bAiming = true; });
 	Input->BindActionValueLambda(AimAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { bAiming = false; });
-	Input->BindAction(PutAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PutDown);
+	Input->BindAction(RollAction, ETriggerEvent::Triggered, this, &AJamZeroGPawn::Roll);
+	Input->BindAction(GrappleAction, ETriggerEvent::Started, this, &AJamZeroGPawn::ToggleGrapple);
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Started, this, &AJamZeroGPawn::BulletTimePressed);
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &AJamZeroGPawn::BulletTimeReleased);
 	Input->BindAction(CrowbarAction, ETriggerEvent::Started, this, &AJamZeroGPawn::ToggleCrowbar);
@@ -310,9 +316,73 @@ void AJamZeroGPawn::PushPressed()
 	Push();
 }
 
-void AJamZeroGPawn::PutDown()
+void AJamZeroGPawn::Roll(const FInputActionValue& Value)
 {
-	Release();
+	// Only free rotation turns the view about its forward axis; in a gravity
+	// zone the controller keeps the view level and drops roll input.
+	if (APlayerController* PlayerController = Cast<APlayerController>(GetController()))
+	{
+		PlayerController->AddRollInput(Value.Get<float>() * RollRateDegPerSec * GetWorld()->DeltaRealTimeSeconds);
+	}
+}
+
+bool AJamZeroGPawn::HasGrapple() const
+{
+	const AJamShipGameMode* Mode = GetWorld()->GetAuthGameMode<AJamShipGameMode>();
+	return !Mode || Mode->Tools.Contains(FName(TEXT("Grapple")));
+}
+
+void AJamZeroGPawn::ToggleGrapple()
+{
+	if (GrappleTarget.IsValid())
+	{
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG grapple: let go of %s"), *GetNameSafe(GrappleTarget->GetOwner()));
+		GrappleTarget = nullptr;
+		return;
+	}
+	if (!HasGrapple())
+	{
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG grapple: not taken yet"));
+		return;
+	}
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamGrapple), /*bTraceComplex=*/false, this);
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation(), ViewLocation() + ViewDirection() * GrappleRangeCm, ECC_Visibility, Params) || !Hit.GetComponent())
+	{
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG grapple: nothing within %.0f cm"), GrappleRangeCm);
+		return;
+	}
+	GrappleTarget = Hit.GetComponent();
+	GrappleLocalPoint = Hit.GetComponent()->GetComponentTransform().InverseTransformPosition(Hit.ImpactPoint);
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG grapple: hooked %s at %.0f cm (%s)"), *GetNameSafe(Hit.GetActor()), Hit.Distance,
+		Hit.GetComponent()->IsSimulatingPhysics() ? TEXT("loose, pulled both ways") : TEXT("fixed"));
+}
+
+void AJamZeroGPawn::UpdateGrapple()
+{
+	UPrimitiveComponent* Target = GrappleTarget.Get();
+	if (!Target)
+	{
+		GrappleTarget = nullptr;
+		return;
+	}
+	const FVector Point = Target->GetComponentTransform().TransformPosition(GrappleLocalPoint);
+	const FVector Delta = Point - Body->GetComponentLocation();
+	const float Distance = Delta.Size();
+	if (Distance <= GrappleArriveCm)
+	{
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG grapple: arrived at %s"), *GetNameSafe(Target->GetOwner()));
+		GrappleTarget = nullptr;
+		return;
+	}
+	// Equal and opposite: the line pulls both ends.
+	const FVector Pull = Delta / Distance * GrapplePull;
+	Body->AddForce(Pull);
+	if (Target->IsSimulatingPhysics())
+	{
+		Target->AddForceAtLocation(-Pull, Point);
+	}
+	DrawDebugLine(GetWorld(), ViewLocation() - FVector(0.0f, 0.0f, 20.0f), Point, FColor(120, 230, 255), false, 0.0f, 0, 1.5f);
 }
 
 void AJamZeroGPawn::ToggleCrowbar()
@@ -916,6 +986,7 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 		DetachTether();
 	}
 	DrawTether();
+	UpdateGrapple();
 	DrawPrediction();
 	// The camera: at eye height over the body in gravity, at its centre in zero-G
 	// (eased both ways), plus the shake - a fading random world-space offset.
@@ -1298,6 +1369,97 @@ namespace
 			}), 0.25f, false);
 		}), 0.25f, false);
 	}
+
+	/**
+	 * jam.ZeroG.Grapple: hook the nearest fixed block, then a light loose prop,
+	 * logging both ends' velocities after a second each; then roll the view
+	 * 45 degrees through the controller's roll input (free rotation keeps it).
+	 */
+	void RunZeroGGrapple(UWorld* World)
+	{
+		AJamZeroGPawn* Pawn = nullptr;
+		for (TActorIterator<AJamZeroGPawn> It(World); It; ++It)
+		{
+			Pawn = *It;
+			break;
+		}
+		APlayerController* PlayerController = World->GetFirstPlayerController();
+		if (!Pawn || !PlayerController)
+		{
+			return;
+		}
+		const FVector From = Pawn->GetActorLocation();
+		UPrimitiveComponent* Fixed = nullptr;
+		UPrimitiveComponent* Loose = nullptr;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			UPrimitiveComponent* Root = Cast<UPrimitiveComponent>(It->GetRootComponent());
+			if (!Root || *It == Pawn || Root->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+			{
+				continue;
+			}
+			const float Distance = FVector::Dist(From, Root->GetComponentLocation());
+			if (Distance < 500.0f || Distance > 2800.0f)
+			{
+				continue;
+			}
+			if (!Root->IsSimulatingPhysics() && Root->Bounds.SphereRadius > 150.0f && Root->Bounds.SphereRadius < 600.0f
+				&& (!Fixed || Distance < FVector::Dist(From, Fixed->GetComponentLocation())))
+			{
+				Fixed = Root;
+			}
+			if (Root->IsSimulatingPhysics() && Root->GetMass() < 30.0f
+				&& (!Loose || Distance < FVector::Dist(From, Loose->GetComponentLocation())))
+			{
+				Loose = Root;
+			}
+		}
+		const auto HookAt = [Pawn, PlayerController](UPrimitiveComponent* Target, const TCHAR* Label)
+		{
+			if (!Target)
+			{
+				UE_LOG(LogMindKore, Warning, TEXT("ZeroG grapple probe [%s]: no target in range"), Label);
+				return;
+			}
+			Pawn->Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+			Target->SetPhysicsLinearVelocity(FVector::ZeroVector);
+			PlayerController->SetControlRotation((Target->GetComponentLocation() - Pawn->Camera->GetComponentLocation()).Rotation());
+			Pawn->ToggleGrapple();
+			const FString Name = Label;
+			FTimerHandle Later;
+			Pawn->GetWorld()->GetTimerManager().SetTimer(Later, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Target, Name]()
+			{
+				UE_LOG(LogMindKore, Log, TEXT("ZeroG grapple probe [%s +1 s]: hooked %s, pawn %.0f cm/s toward it %.0f, target %s %.1f kg %.0f cm/s, distance %.0f cm"),
+					*Name, Pawn->GetGrappled() ? TEXT("yes") : TEXT("no"), Pawn->GetBodyVelocity().Size(),
+					FVector::DotProduct(Pawn->GetBodyVelocity(), (Target->GetComponentLocation() - Pawn->GetActorLocation()).GetSafeNormal()),
+					*GetNameSafe(Target->GetOwner()), Target->IsSimulatingPhysics() ? Target->GetMass() : 0.0f, Target->GetPhysicsLinearVelocity().Size(),
+					FVector::Dist(Pawn->GetActorLocation(), Target->GetComponentLocation()));
+				if (Pawn->GetGrappled())
+				{
+					Pawn->ToggleGrapple();
+				}
+			}), 1.0f, false);
+		};
+		HookAt(Fixed, TEXT("fixed block"));
+		FTimerHandle Second;
+		World->GetTimerManager().SetTimer(Second, FTimerDelegate::CreateWeakLambda(Pawn, [HookAt, Loose]() { HookAt(Loose, TEXT("light loose prop")); }), 1.5f, false);
+		FTimerHandle Third;
+		World->GetTimerManager().SetTimer(Third, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, PlayerController]()
+		{
+			const float Before = PlayerController->GetControlRotation().Roll;
+			PlayerController->AddRollInput(45.0f);
+			FTimerHandle Next;
+			Pawn->GetWorld()->GetTimerManager().SetTimer(Next, FTimerDelegate::CreateWeakLambda(Pawn, [PlayerController, Before]()
+			{
+				UE_LOG(LogMindKore, Log, TEXT("ZeroG grapple probe [roll]: control roll %.1f -> %.1f after a 45 deg roll input"), Before, PlayerController->GetControlRotation().Roll);
+			}), 0.1f, false);
+		}), 3.2f, false);
+	}
+
+	FAutoConsoleCommandWithWorld GZeroGGrapple(
+		TEXT("jam.ZeroG.Grapple"),
+		TEXT("Zero-G pawn: hook a fixed block, then a light loose prop (logging both ends after 1 s), then a 45 deg roll input."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunZeroGGrapple));
 
 	FAutoConsoleCommandWithWorld GZeroGProbe(
 		TEXT("jam.ZeroG.Probe"),
