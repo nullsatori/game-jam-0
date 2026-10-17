@@ -1,9 +1,11 @@
 """The star sky of Lvl_Jam_Ship (editor Python, called by build_ship.py).
 
 Texture: NASA SVS «Deep Star Maps 2020», galactic projection, equirectangular
-3840 x 1920 (CREDITS.md), imported once as /Game/JamArt/Textures/Sky/T_Jam_Starmap_Gal:
-  import_starmap(path, log) - BC1 (DXT1), sRGB, linear filtering, no mips (the
-      dome is sampled about 1:1 with the screen, and without mips the
+(CREDITS.md), made low-res and gritty by Scripts/make_lowres_starmap.py (owner:
+«лоу-резной как планета»; stars kept as single chunky texels) and imported once
+as /Game/JamArt/Textures/Sky/T_Jam_Starmap_Gal:
+  import_starmap(path, log) - BC1 (DXT1), sRGB, filter Nearest like the flesh
+      set, no mips (the dome is magnified on screen, and without mips the
       equirect seam needs no derivative fix), never streamed.
 Material M_Jam_SkyStars (unlit, two-sided; graph and numbers rebuilt on every
 call): the map sampled by the direction from the dome centre (equirect: u
@@ -41,7 +43,7 @@ def import_starmap(path, log):
     texture = unreal.load_asset(STARMAP)
     texture.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_DEFAULT)
     texture.set_editor_property("srgb", True)
-    texture.set_editor_property("filter", unreal.TextureFilter.TF_BILINEAR)
+    texture.set_editor_property("filter", unreal.TextureFilter.TF_NEAREST)
     texture.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS)
     texture.set_editor_property("never_stream", True)
     texture.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_SKYBOX)

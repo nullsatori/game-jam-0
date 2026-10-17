@@ -21,7 +21,7 @@ The meshes in `Content/JamArt/Meshes` (the planetoid, its eye and tentacle, the 
 
 Star map: NASA/Goddard Space Flight Center Scientific Visualization Studio, Deep Star Maps 2020 (svs.gsfc.nasa.gov/4851). Gaia DR2: ESA/Gaia/DPAC; Hipparcos, Tycho-2: ESA. Via Wikimedia Commons, attribution required.
 
-Used as `Content/JamArt/Textures/Sky/T_Jam_Starmap_Gal` (galactic projection, equirectangular 3840 x 1920, unmodified) on the sky dome of `Lvl_Jam_Ship`.
+Used as `Content/JamArt/Textures/Sky/T_Jam_Starmap_Gal` (galactic projection, equirectangular; downscaled from 3840 x 1920 to 512 x 256 keeping each block's brightest star, lightly graded and posterized by `Scripts/make_lowres_starmap.py`) on the sky dome of `Lvl_Jam_Ship`.
 
 ## Audio
 
