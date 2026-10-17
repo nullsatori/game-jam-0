@@ -6,7 +6,7 @@
 
 ## Как пересобрать
 
-Удалить `Content/Jam/Maps/Lvl_Jam_Ship.umap`, затем (редактор закрыт, замок взят):
+Существующая карта пересобирается на месте (скрипт загружает её и удаляет все акторы), удалять `.umap` не нужно. Редактор закрыт, замок взят:
 
 ```
 UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/build_ship.py" -unattended -nop4 -nosplash -nullrhi
@@ -42,14 +42,17 @@ UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/S
 | Хлам вокруг | 25 предметов 5–400 кг в 10–40 м (кубы, цилиндры, бочки) | дрейфуют до 20 см/с |
 | Пояс обломков | стена 10 × 5 камней на y ≈ −4500, x −1800…1800, z −800…800, Ø 4.4–5.2 м | `AJamBreakableRock` `Rock_*` |
 | Топливные баки | 2 шт. Ø 1.2 × 3 м, 300 кг: (0, −6000, 0), (300, −6200, 200) | `Ship.Fuel`, `Jam.NoDrift` |
-| Планетоид | шар R 30 м, центр (0, 10000, −1000), плотский цвет `MI_Jam_Flesh` | статика `Planetoid` |
-| Гравитация планетоида | сфера R 38 м (8 м над поверхностью): радиальная, 980 к центру, дышишь — O2 +5/с, HUD «Можно дышать» | `AJamGravityZone` `Gravity_Planetoid` (`bWalk`, `bRadial`) |
-| Воздушная оболочка | сфера R 40 м (10 м над поверхностью): невесомость, дышишь — O2 +5/с, HUD «Можно дышать» | `AJamGravityZone` `Air_Planetoid` (`bWalk` выкл) |
-| Зонд-заглушка и модуль навигации | на поверхности к кораблю; модуль 1 × 1 × 1, 80 кг, 1.5 м над поверхностью | `NavModule`: `Ship.Nav`, `Jam.NoDrift` |
-| Кокон вокруг модуля | 5 живых стен 2.6 × 2.6 м (4 бока и крыша) в рамке местной вертикали, лица наружу; запас разрыва 70 см, не больше 110, оглушение до 3 с; по одному тонкому месту на боках | `AJamLivingWall` `Cocoon_0..4`; бок к +X — `Jam.WallProbe` ([LivingWall](LivingWall.md)) |
-| Дробовик | шкаф на поверхности планетоида | `AJamWeaponPickup` `Pickup_Shotgun`, индекс 1 |
-| Финал-заглушки | 4 серых «щупальца» Ø 0.8 × 12 м лежат на поверхности, тёмный «глаз» Ø 4 м | статика `Tentacle_*`, `Eye` |
-| Ценный груз | 6 шт.: в корпусе, в обломке помещения, в кормовом куске, за поясом, у планетоида, у разлома | `AJamCargo` (тег `Cargo`) |
+| Планетоид | меш `SM_Jam_Planet` (Blender, `Scripts/blender/jam_planet.py`, 280k треугольников, коллизия — сам меш): R 80 м, рельеф −5…+6 м (поверхность 73.5–86.5 м от центра), центр (0, 16000, −1000) — ближний край ~73 м от корабля; материал `MI_Jam_PlanetSkin` (трипланарная кожа планеты). Раскладка всего на нём — `Scripts/planet_layout.json` | статика `Planetoid` |
+| Гравитация планетоида | сфера R = высшая точка + 8 м (94.5 м): радиальная, 980 к центру, дышишь — O2 +5/с, HUD «Можно дышать»; пещеры внутри неё | `AJamGravityZone` `Gravity_Planetoid` (`bWalk`, `bRadial`) |
+| Воздушная оболочка | сфера R = высшая точка + 10 м: невесомость, дышишь — O2 +5/с | `AJamGravityZone` `Air_Planetoid` (`bWalk` выкл) |
+| Зонд-заглушка и модуль навигации | на выровненной площадке к кораблю (−Y); модуль 1 × 1 × 1, 80 кг, 1.5 м над поверхностью | `NavModule`: `Ship.Nav`, `Jam.NoDrift` |
+| Кокон вокруг модуля | 5 живых стен 2.6 × 2.6 м (4 бока и крыша) в рамке местной вертикали, лица наружу; меш стены (анатомия), запас разрыва 80 см, не больше 110, оглушение до 3 с; по одному тонкому месту на боках | `AJamLivingWall` `Cocoon_0..4`; бок к +X — `Jam.WallProbe` ([LivingWall](LivingWall.md)) |
+| Дробовик | шкаф на второй выровненной площадке, ~30 м от кратера C1 | `AJamWeaponPickup` `Pickup_Shotgun`, индекс 1 |
+| Финал-заглушки | 4 «щупальца» — арки 10 м из земли (`SM_Jam_Tentacle`, присоски `MI_Jam_Suckers`), «глаз» Ø 4 м (`SM_Jam_PlanetEye`, радужка `MI_Jam_PlanetEye`, тусклое самосвечение) | статика `Tentacle_*`, `Eye` |
+| Ценный груз | 6 шт.: в корпусе, в обломке помещения, в кормовом куске, за поясом, в пещере (секция B, см. ниже), у разлома | `AJamCargo` (тег `Cargo`) |
+| Кратеры | 4 (C1–C4), чаши Ø 14 м, глубина 2.4 м, вал 0.6 м, плоское дно Ø 4.8 м; под дном шахта Ø 3.4 м до пещеры (падение 10–17 м, приземление на годную землю не ранит) | круглые живые стены 4 м на дне: `Crater_C1..C4`, тег `Jam.Crater`, запас 70, до 110 см |
+| Пещеры | T1 — сквозная, 264 м: устье M1 (ближняя сторона) → развилка J → под C2 → пробка P1 → под C1 → пробка P2 → под C4 → устье M2 (дальняя сторона); T2 — 127 м: устье M3 → под C3 → J. Ø 7 м, плоский пол 1.9 м под осью, ось на 64 м от центра, пандусы устьев ~25°, горловины Ø 3.7 м у пробок | круглые живые стены 4 м поперёк горловин: `CavePlug_P1/P2`, тег `Jam.CavePlug`, запас 100, до 150 см |
+| Секция B | между P1 и P2, под C1: груз и баллон O2 — попасть туда можно только сквозь пробку или мембрану C1 | `Cargo_4`, `O2_Canister_Cave` |
 
 Цвета по роли (`/Game/Jam/Materials`, экземпляры `BasicShapeMaterial`):
 корпус серо-синий, опоры серые, мусор коричневый, детали корабля оранжевые,
@@ -71,8 +74,11 @@ UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/S
 - **Внутри** — янтарные точечные лампы в каюте (4 и 2.5 cd) и шлюзе
   (2 cd), красная аварийная (10 cd, без теней); лампы пульта эмиссивные,
   красные/зелёные (`MI_Jam_PanelLamp`, пульт меняет `Color` у своих MID).
-- **Планетоид** — 5 розовых/оранжевых точечных ламп у поверхности, глаз
-  светится красным (`MI_Jam_EyeGlow`).
+- **Планетоид** — те же 5 розовых/оранжевых точечных ламп, в 3 м над новой
+  поверхностью (120 cd, радиус 25 м — на шаре втрое больше они покрывают
+  меньшую долю); глаз — тусклое самосвечение радужки. В пещерах своего света
+  нет (свет не трогали): ткань видна за счёт самосвечения материала, без теней
+  пурпурный контровой свет просвечивает в пещеры пятнами.
 - **Пост** — `PostProcess_Look`: ручная экспозиция без физической камеры,
   bias 0 (`EXPOSURE_BIAS` в скрипте), bloom 0.8, виньетка 0.5.
 
@@ -96,7 +102,9 @@ UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/S
   гравитация 0; в зоне на тело действует сила (`AddForce`, ускорение).
 - **Ходьба.** Земля — короткий свип шара (радиус −2 см) вдоль гравитации на
   `GroundProbeCm` 12; годится, если нормаль не круче `MaxGroundAngleDeg` 50°.
-  На земле WASD ведёт касательную скорость к цели `WalkSpeedCm` 450 с
+  На земле шаг идёт в плоскости земли (по нормали свипа): в плоскости
+  гравитации подъём гасился каждый кадр, и склон 25° пешка брала со скоростью
+  25 см/с. WASD ведёт скорость в этой плоскости к цели `WalkSpeedCm` 450 с
   ускорением `WalkAccelCm` 3000, без ввода — тормоз `WalkBrakingCm` 4000
   (не скользит); нормальная скорость вверх обнуляется (не отскакивает от
   пола и от кривизны планетоида). В воздухе — `AirAccelCm` 400 к вводу, не
@@ -182,31 +190,67 @@ Ship probe [airlock]: MKDoor_1 at x 1200 passable yes, key lock turned
 ZeroG pawn JamZeroGPawn_0: gravity off (zero-G) at V(X=1000.00), 0 cm/s
 Weapon JamZeroGPawn_0: Пистолет fired, 1 pellet(s), recoil 1500 kg cm/s, 11/60 left
 ZeroG pawn JamZeroGPawn_0: gravity on (walking) at V(Y=10000.00, Z=2500.00), 0 cm/s
-Ship probe [on the planetoid]: JamZeroGPawn_0 at V(X=-13.72, Y=10000.00, Z=2039.97), walking, on the ground, speed 0 cm/s, eye 110 cm over the body (. up 1.000), view gravity . gravity 1.000, view pitch -0.0 roll 0.0 in gravity space, suit yes, guns [1] Пистолет 11/60, O2 180, HP 100
+Ship probe [on the planetoid]: JamZeroGPawn_0 at V(X=-51.27, Y=15999.36, Z=7281.98), walking, on the ground, speed 0 cm/s, eye 110 cm over the body (. up 1.000), view gravity . gravity 1.000, view pitch -0.0 roll 0.0 in gravity space, suit yes, guns [1] Пистолет 11/60, O2 180, HP 100
 Ship probe [plate]: with junk - fitted no
 Ship probe [plate]: clean hull (0) - fitted yes
 Ship probe [all parts in]: hull 3/3 green, fuel 2/2 green, navigation 1/1 green
 Ship: launch - Улетел, cargo 0/6; restarting in 6 s
 ```
 
-`jam.Ship.Lap` (смоук `-game -nullrhi`) — пешка ставится на макушку
-планетоида и 35 с идёт вперёд; каждые 3 с лог: угол от старта, высота,
-совпадение направления камеры над телом с местной вертикалью, крен и наклон
-взгляда в гравитационной рамке. За 35 с при 450 см/с — ~300° большого круга
-(весь круг 191 м):
+`jam.Ship.Lap` (смоук `-game -nullrhi`) — пешка ставится над макушкой
+планетоида и 35 с идёт вперёд (+X) по большому кругу через макушку; каждые
+3 с лог: угол от старта, высота, совпадение направления камеры над телом с
+местной вертикалью, крен и наклон взгляда в гравитационной рамке. Этот круг
+проходит в 28.8 м от ближайшего кратера или устья, уклон по нему до 37.5°
+(95 % — до 24°, по `planet_layout.json`). За 35 с при 450 см/с — ~106° (весь
+круг ~503 м):
 
 ```
-Ship lap + 3 s: 25 deg from the start, height 3040 cm, on the ground, speed 450 cm/s, eye offset . local up 0.999, view roll in gravity space 0.0, pitch -7.9, view gravity . gravity 0.999
-Ship lap +21 s: 177 deg from the start, height 3040 cm, on the ground, speed 450 cm/s, eye offset . local up 0.999, view roll in gravity space 0.0, pitch -7.9, view gravity . gravity 0.999
-Ship lap +33 s: 81 deg from the start (279° пройдено), ... roll 0.0 ...
+Ship lap + 3 s: 9 deg from the start, height 8272 cm, on the ground, speed 450 cm/s, eye offset . local up 1.000, view roll in gravity space -0.0, pitch -9.2, view gravity . gravity 1.000
+Ship lap +12 s: 37 deg from the start, height 7891 cm, on the ground, speed 450 cm/s, ...
+Ship lap +18 s: 55 deg from the start, height 8406 cm, on the ground, speed 449 cm/s, ...
+Ship lap +27 s: 82 deg from the start, height 7696 cm, on the ground, speed 450 cm/s, ...
+Ship lap +36 s: 106 deg from the start, height 8207 cm, on the ground, speed 0 cm/s, ...
 ```
+
+Высота 77–84 м: пешка идёт по рельефу вверх и вниз, не отрываясь и не
+замедляясь, крен 0.
+
+`jam.Ship.Land` (с крена 150°, 600 см/с) садится на рельеф макушки:
+`Ship land  50: gravity ground, height 8279, radial -0, tangential 0 cm/s,
+body spin 0.0 deg/s ... roll 2.7`, к 80-му кадру крен 0.0.
 
 `jam.Ship.JetExit` — прыжок, второе нажатие через 0.4 с:
 
 ```
 ZeroG pawn JamZeroGPawn_0: jet exit at 1600 cm/s
-ZeroG pawn JamZeroGPawn_0: gravity off (zero-G) at V(Y=10000.00, Z=2800.63), 1155 cm/s
+ZeroG pawn JamZeroGPawn_0: gravity off (zero-G) at V(X=0.08, Y=15999.74, Z=8446.16), 732 cm/s
 ```
+
+(От макушки до края оболочки теперь ~11.7 м, поэтому скорость на выходе
+732 см/с, а не 1155.)
+
+`jam.Ship.Caves [Кратер] [Пробка]` (смоук `-game -nullrhi`): (a) пешка в
+2.5 м над мембраной кратера (`Jam.Crater`), выстрел дробовика вниз, каждые
+0.25 с — высота над плоскостью мембраны; (b) пешка в 5 м перед пробкой
+(`Jam.CavePlug`) на полу пещеры идёт на неё 3 с — сначала без выстрела
+(контроль), потом после выстрела прямо перед собой на уровне глаз:
+
+```
+Living wall JamLivingWall_10: tore 61 cells (7 hit(s), one blast, hits within 18 cm of their centre) around (-10, -1), regrowth after 3.20 s, 3 rim jet(s)
+Caves probe [crater +1.00 s]: 156 cm under the membrane, in the air, speed 882 cm/s, open cells 74
+Caves probe [crater +2.25 s]: 1661 cm under the membrane, on the ground, speed 0 cm/s, open cells 74
+Caves probe [crater]: dropped through yes - lowest 1661 cm under the membrane, now on the ground, HP 100, membrane open cells 0
+Caves probe [plug control, no shot]: through no - the pawn is 56 cm in front of the plug, on the ground, HP 100 -> 91, open cells 0
+Caves probe [plug after a shotgun blast]: through yes - the pawn is 771 cm behind the plug, on the ground, HP 91 -> 91, open cells 158
+```
+
+Пробку надо прострелить так, чтобы дыра дошла до пола (1.5 м ниже глаз):
+поэтому у пробок запас разрыва 100 и потолок 150 см. Контрольный проход
+ранит пешку на 9 (удар о стену рвёт клетку, стена выдавливает).
+
+`jam.Ship.CaveShots` (окно, не NullRHI) — кадры: планетоид издалека, на
+рельефе, кратер с края до и через 0.35 с после выстрела, пробка из пещеры.
 
 `jam.Ship.Shots` / `jam.Ship.PlanetShots` (окно `-game -windowed`, не
 NullRHI) — `HighResShot` с 5 точек корабля / сверху и сбоку планетоида, в
@@ -221,6 +265,12 @@ NullRHI) — `HighResShot` с 5 точек корабля / сверху и сб
 - **Метеориты** — не сделаны.
 - **Босс-планетоид**: проснётся по `OnLaunchAttempt`, щупальца схватят корабль
   — сейчас только статичные заглушки и событие.
+- **Планетоид**: меш 280k треугольников без Nanite, `.uasset` 15 МБ в LFS —
+  каждая переимпортированная версия добавляет столько же. Пещеры тёмные (свет
+  не менялся). Перенос модуля и груза по рельефу и через пещеры руками не
+  проверялся; секция B проверена только пробой (падение через C1, проход
+  сквозь P1), не игрой. Устья пещер — узкие косые щели, на кадрах их не
+  видно. Глаз и щупальца на кадрах вблизи не сняты.
 - **Ходьба** проверена логами (каюта, круг по планетоиду, прыжок, выход) и
   стоп-кадрами; ощущение в руках (разгон, тормоз, доворот, прыжок) не
   проверено. Приседа нет. Коллизия — только шар 40 см: голова (камера на
