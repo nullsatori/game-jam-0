@@ -118,7 +118,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Pistol.FireInterval = 0.15f;
 	Pistol.MagazineSize = 12;
 	Pistol.Reserve = 60;
-	Pistol.ReloadSeconds = 1.2f;
+	Pistol.ReloadSeconds = 0.97f; // the seat at 0.86 s, out by 0.95 (JamWeaponParts.cpp; owner 19.10: the tail halved)
 	Pistol.SpreadDeg = 0.5f;
 	Pistol.RecoilImpulse = 4000.0f;
 	Pistol.HitImpulse = 3000.0f;
@@ -615,6 +615,7 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	SettlePitch += Weapon->KickPitchDeg * RecoilSettleFraction;
 	SettleYaw += Yaw * RecoilSettleFraction;
 	SinceShotSeconds = 0.0f;
+	PrevSinceShot = -KINDA_SMALL_NUMBER; // a new shot: its case and hammer (UpdatePartEvents)
 	// A slight pitch spread so a held trigger does not repeat one sample.
 	UGameplayStatics::PlaySound2D(this, Weapon->ShotSound, 1.0f, FMath::FRandRange(0.97f, 1.03f));
 	if (USoundBase* Cycle = Weapon->CycleSound)

@@ -125,13 +125,15 @@ void UJamWeaponsComponent::SetupWeaponParts()
 	Pistol.MagInSoundSeconds = 0.86f;
 	// Muzzle up and canted, raised toward the middle: the well faces the eye. Where
 	// the pose springs pull, in stages: in; 8% further as the old magazine goes
-	// (0.3 s); back 8% short to meet the new one (0.6 s); home on the seat (0.86 s);
-	// out over the last 30 ms.
+	// (0.3 s); back 8% short to meet the new one (0.6 s); home on the seat (0.86 s),
+	// then out at once under the magazine's double knock (owner 19.10: the tail after the
+	// seat halved) - easing off at 0.88 s, fastest mid-way, level by 0.95 s; ready at
+	// 0.97 s (ReloadSeconds), the springs floating it past rest and back.
 	Pistol.ReloadBodyTurn = FRotator(32.0f, -12.0f, 30.0f);
 	Pistol.ReloadBodyOffsetCm = FVector(-3.0f, -6.0f, 11.0f);
 	Pistol.ReloadBody = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.03f, 1.0f, 0.0f, 0.0f }, { 0.28f, 1.0f, 0.0f, 0.0f },
 		{ 0.32f, 1.08f, 0.0f, 0.0f }, { 0.58f, 1.08f, 0.0f, 0.0f }, { 0.62f, 0.92f, 0.0f, 0.0f },
-		{ 0.84f, 0.92f, 0.0f, 0.0f }, { 0.88f, 1.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 0.0f, 0.0f } });
+		{ 0.84f, 0.92f, 0.0f, 0.0f }, { 0.88f, 1.0f, 0.0f, -2.0f }, { 0.95f, 0.0f, -1.0f, 0.0f } });
 	// Snappy: brisk springs, turns a little softer and later (arcs), floating ~15% past.
 	Pistol.PoseSprings = { { 6.5f, 0.55f, 0.0f }, { 6.0f, 0.55f, 0.0f }, { 6.0f, 0.5f, 0.01f },
 		{ 5.0f, 0.55f, 0.02f }, { 5.0f, 0.55f, 0.03f }, { 4.5f, 0.55f, 0.04f } };
@@ -848,10 +850,13 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 	};
 
 	// After the shot (live time: a held pose throws nothing).
+	// Only a shot restarts these (Fire sets PrevSinceShot). A gun shown resets SinceShotSeconds too
+	// and must throw nothing (owner 19.10: a switch threw a case); the gun going away after a switch
+	// has its cycle abandoned (SelectWeapon) - no case, on the way out or drawn back.
 	const float Since = SinceShotSeconds;
-	if (Since < PrevSinceShot)
+	if (Since < PrevSinceShot || ShownWeapon != CurrentWeapon)
 	{
-		PrevSinceShot = -KINDA_SMALL_NUMBER; // a new shot
+		PrevSinceShot = Since;
 	}
 	if (Weapon.CaseMesh && Crossed(PrevSinceShot, Since, Weapon.EjectSeconds))
 	{
@@ -863,6 +868,7 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 		const FRotator Facing = FRotationMatrix::MakeFromXZ(View.GetUnitAxis(EAxis::Y), View.GetUnitAxis(EAxis::Z)).Rotator()
 			+ FRotator(FMath::FRandRange(-15.0f, 15.0f), FMath::FRandRange(-20.0f, 20.0f), 0.0f);
 		SpawnDebris(Weapon.CaseMesh, FTransform(Facing, Gun.TransformPosition(Weapon.EjectPort)), Velocity, Spin, 0.012f);
+		++CasesThrown;
 	}
 	if (Crossed(PrevSinceShot, Since, Weapon.HammerSoundSeconds))
 	{
@@ -1408,6 +1414,8 @@ namespace
 			float MaxPlaceJump = 0.0f;
 			float MaxTurnJump = 0.0f;
 			int32 Frames = 0;
+			int32 Cases = 0;
+			int32 Ammo = 0;
 		};
 		TSharedRef<FProbe> Probe = MakeShared<FProbe>();
 		Probe->Start = World->GetTimeSeconds();
@@ -1448,6 +1456,58 @@ namespace
 		{
 			UE_LOG(LogMindKore, Log, TEXT("Switch probe: done - %d frames, largest frame-to-frame jump %.2f cm, %.2f deg; fire after the draw: %s"),
 				Probe->Frames, Probe->MaxPlaceJump, Probe->MaxTurnJump, Pawn->Fire() ? TEXT("fired") : TEXT("refused"));
+		});
+		// Back and forth with no shot (owner 19.10: a switch threw a case from the shotgun and the SV-98):
+		// whole switches, quick changes of mind, unarmed and back - none throws a case.
+		float At = 6.0f;
+		After(At, [Guns, Probe]() { Probe->Cases = Guns->GetCasesThrown(); });
+		int32 Switches = 0;
+		for (const int32 Gun : { 1, 2, 0, 2, 1, 0, 1, 2, 0, 1, 2, 1 })
+		{
+			After(At += 1.4f, [Guns, Gun]() { Guns->SelectWeapon(Gun); });
+			++Switches;
+		}
+		for (int32 Quick = 0; Quick < 6; ++Quick)
+		{
+			After(At += 0.15f, [Guns, Quick]() { Guns->SelectWeapon(Quick % 2 == 0 ? 2 : 1); });
+			++Switches;
+		}
+		for (int32 Round = 0; Round < 3; ++Round)
+		{
+			After(At += 1.0f, [Guns]() { Guns->Holster(); });
+			After(At += 0.8f, [Guns]() { Guns->Rearm(); });
+			Switches += 2;
+		}
+		After(At += 1.5f, [Guns, Probe, Switches]()
+		{
+			const int32 Thrown = Guns->GetCasesThrown() - Probe->Cases;
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: %d switches, no shot - %d case(s) thrown (expected 0): %s"), Switches, Thrown,
+				Thrown == 0 ? TEXT("PASS") : TEXT("FAIL"));
+		});
+		// A cycle cut short: the shotgun fired and put away mid-pump (its case due at 0.26 s), drawn
+		// back - the abandoned cycle throws nothing, not on the draw-back either; no round is lost.
+		After(At += 0.1f, [Pawn, Guns, Probe]()
+		{
+			Probe->Cases = Guns->GetCasesThrown();
+			Probe->Ammo = Guns->Weapons[1].Ammo;
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: mid-pump shot (%s): %s"), *Guns->Describe(), Pawn->Fire() ? TEXT("fired") : TEXT("refused"));
+		});
+		After(At += 0.1f, [Guns]() { Guns->SelectWeapon(2); });
+		After(At += 1.5f, [Guns]() { Guns->SelectWeapon(1); });
+		After(At += 1.6f, [Pawn, Guns, Probe]()
+		{
+			const int32 Thrown = Guns->GetCasesThrown() - Probe->Cases;
+			const int32 Ammo = Guns->Weapons[1].Ammo;
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: cycle cut by a switch and drawn back - %d case(s) (expected 0), ammo %d -> %d (expected -1): %s"),
+				Thrown, Probe->Ammo, Ammo, Thrown == 0 && Ammo == Probe->Ammo - 1 ? TEXT("PASS") : TEXT("FAIL"));
+			Probe->Cases = Guns->GetCasesThrown();
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: shot after the draw-back: %s"), Pawn->Fire() ? TEXT("fired") : TEXT("refused"));
+		});
+		After(At += 0.6f, [Guns, Probe]()
+		{
+			const int32 Thrown = Guns->GetCasesThrown() - Probe->Cases;
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: a whole pump after a shot - %d case(s) (expected 1): %s"), Thrown, Thrown == 1 ? TEXT("PASS") : TEXT("FAIL"));
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: cases done"));
 		});
 	}
 

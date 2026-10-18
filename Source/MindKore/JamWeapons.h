@@ -658,6 +658,9 @@ public:
 	/** The gun drawn in view now (the old one while it goes away), or INDEX_NONE. */
 	int32 GetShownWeapon() const { return ShownWeapon; }
 
+	/** Spent cases thrown since play began (probes: a switch throws none). */
+	int32 GetCasesThrown() const { return CasesThrown; }
+
 
 	/** Seconds left of a reload; 0 when not reloading. */
 	float GetReloadRemaining() const;
@@ -718,6 +721,7 @@ private:
 	/** Rounds this reload loads one by one (ShellMesh guns). */
 	int32 ShellsPlanned = 0;
 	float PrevSinceShot = 1000.0f;
+	int32 CasesThrown = 0;
 	float PrevReloadTime = -1.0f;
 
 	struct FPoseState
