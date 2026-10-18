@@ -140,9 +140,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights")
 	int32 SightDotWeapon = 0;
 
-	/** The dots in that moving part's mesh space, cm (SM_Jam_USP_Slide: the rear sight's two posts, the front blade, each just under its top so the three read as one line when aimed; measured from its vertices). */
+	/** The dots in that moving part's mesh space, cm (SM_Jam_USP_Slide: the rear sight's two posts, the front blade, each just under its top so the three read as one line when aimed; measured from its vertices: rear posts centred at y -1.877 / -0.985 (the notch's centre -1.431), the front post at y -1.453, its rear face at x -13.295). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights")
-	TArray<FVector> SightDotsCm = { FVector(3.6f, -1.9f, 5.82f), FVector(3.6f, -1.0f, 5.82f), FVector(-13.12f, -1.45f, 6.02f) };
+	TArray<FVector> SightDotsCm = { FVector(3.6f, -1.877f, 5.82f), FVector(3.6f, -0.985f, 5.82f), FVector(-13.27f, -1.453f, 6.02f) };
 
 	/** A dot's diameter, cm: a 2 mm insert, half sunk into the sight's face (owner: the first ones were cheap and too big). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights", meta = (ClampMin = "0.01"))
