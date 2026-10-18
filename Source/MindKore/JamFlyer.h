@@ -2,13 +2,16 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "JamFlyerAudio.h"
 #include "MKImpactReceiver.h"
 #include "JamFlyer.generated.h"
 
 class AJamFlyer;
 class USceneComponent;
 class UPhysicalMaterial;
-class USoundAttenuation;
+class UAudioComponent;
+class USoundMix;
+class USoundSubmixBase;
 class USoundBase;
 class USphereComponent;
 class UStaticMeshComponent;
@@ -227,35 +230,74 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look", meta = (ClampMin = "0.0"))
 	float FlapAmplitudeDeg = 38.0f;
 
-	/** On a hunt start and a dive, varied by pitch only (Scripts/jam_flyer_sounds.py; owner 19.10: the A take). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
-	TObjectPtr<USoundBase> ScreechSound = nullptr;
+	// --- sound (Scripts/jam_flyer_sounds.py renders the stems; Docs/Flyers.md has the chain and the mix) ---
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
-	FVector2D ScreechPitch = FVector2D(0.92f, 1.08f);
+	/** The hunt's start: the falling call (the owner's Screech A); pushes AggroDuck. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	FJamSoundEvent AggroSound;
 
-	/** The death cry. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
-	TObjectPtr<USoundBase> DeathSound = nullptr;
+	/** The dive: the same call rising, Doppler while it comes. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	FJamSoundEvent DiveSound;
 
-	/** One per downstroke (mid-beat), varied by pitch; glides are silent. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
-	TObjectPtr<USoundBase> FlapSound = nullptr;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	FJamSoundEvent DeathSound;
 
-	/** A full beat's volume; a smaller beat is quieter, under ~1/3 of FlapAmplitudeDeg none. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look", meta = (ClampMin = "0.0"))
-	float FlapVolume = 0.8f;
+	/** One per downstroke (mid-beat): louder and brighter with the beat's size, higher with its rate; glides are silent. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	FJamSoundEvent FlapSound;
 
-	/** Flaps fade out over this, cm (closer than the screech: a beat is heard only near). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look", meta = (ClampMin = "100.0"))
-	float FlapFalloffCm = 2500.0f;
+	/** A close pass (closest approach under FlyByDistanceCm at FlyByMinSpeedCm), Doppler. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	FJamSoundEvent FlyBySound;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
-	TObjectPtr<USoundBase> BiteSound = nullptr;
+	/** A round into it (alive or dead), at the hit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	FJamSoundEvent HitSound;
 
-	/** Screeches fade out over this, cm. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look", meta = (ClampMin = "100.0"))
-	float SoundFalloffCm = 5000.0f;
+	/** The bite, at the player: the beak, the wet tear and MindKore's gristle crunch. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	FJamSoundEvent BiteSound;
+
+	/** Cloth flutter between beats: a loop on the body, its volume with the flight speed. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	TObjectPtr<USoundBase> FlutterLoop = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound", meta = (ClampMin = "0.0"))
+	float FlutterVolume = 0.6f;
+
+	/** A full beat's volume scale; under ~1/3 of FlapAmplitudeDeg none. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound", meta = (ClampMin = "0.0"))
+	float FlapVolume = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound", meta = (ClampMin = "0.0"))
+	float FlyByDistanceCm = 500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound", meta = (ClampMin = "0.0"))
+	float FlyByMinSpeedCm = 900.0f;
+
+	/** The voice (aggro, dive, death): 50 m. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	FSoundAttenuationSettings VoiceAttenuation;
+
+	/** Wings, flutter, fly-by: 25 m. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	FSoundAttenuationSettings WingsAttenuation;
+
+	/** Hits and the bite: 30 m. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	FSoundAttenuationSettings ImpactAttenuation;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	FJamFlyerMix Mix;
+
+	/** Pushed on an aggro screech: ducks the ambience class for a moment. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	TObjectPtr<USoundMix> AggroDuck = nullptr;
+
+	/** In air (the listener breathes) every layer sends here instead of playing the suit's tail. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
+	TObjectPtr<USoundSubmixBase> AirReverb = nullptr;
 
 	/** A bite shakes the player's camera this much, cm (the pawn's crash shake: a hard crash ~5). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Hunt", meta = (ClampMin = "0.0"))
@@ -295,6 +337,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	void SetState(EJamFlyerState NewState, const FString& Why);
@@ -305,7 +348,7 @@ private:
 	void Bite(APawn* Player);
 	void Die(const FVector& Push);
 	void Animate(float DeltaSeconds, const FVector& Velocity, const FVector& Accel);
-	void Screech(const TCHAR* Why);
+	void Screech(const TCHAR* Why, bool bDive);
 	FVector HeadLocation() const;
 	APawn* Player() const;
 	/** "Up" for banking and circling: away from the centre around a planetoid (an inner radius), world up in a plain ball. */
@@ -344,13 +387,26 @@ private:
 	FVector LastVelocity = FVector::ZeroVector;
 	FVector SmoothedAccel = FVector::ZeroVector;
 
-	UPROPERTY(Transient)
-	TObjectPtr<USoundAttenuation> SoundAttenuation = nullptr;
+	/** Every flyer in play (the wings' and the screeches' mix ranks them by distance). */
+	static TArray<TWeakObjectPtr<AJamFlyer>> AllFlyers;
+
+	FJamSoundPlay VoicePlay;
+	bool bVoiceDoppler = false;
+	FJamSoundPlay FlyByPlay;
+	double LastFlyBySeconds = -100.0;
 
 	UPROPERTY(Transient)
-	TObjectPtr<USoundAttenuation> FlapAttenuation = nullptr;
+	TObjectPtr<UAudioComponent> Flutter = nullptr;
 
-	void PlayFlap(float Strength);
+	/** In air (the player breathes), or in vacuum (heard through the suit). */
+	bool ListenerInAir() const;
+	/** Among the nearest Mix.MaxWingSets flyers to the player (their wings are heard). */
+	bool WingsHeard() const;
+	/** A screech may start: under Mix.MaxScreeches, or it takes the farthest one's place. */
+	bool TakeScreechSlot(const TCHAR* Why);
+	void UpdateSounds(float DeltaSeconds);
+	float Doppler() const;
+	void PlayFlap(float Strength, float Rate);
 	/** The corpse falls in a gravity zone (the planetoid's radial pull), drifts elsewhere. */
 	void FallAsCorpse(float DeltaSeconds);
 	bool bLanded = false;

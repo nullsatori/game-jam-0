@@ -135,8 +135,8 @@ events, played 10–14 semitones down, band-limited, shortened.
 Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 Donor of `SW_MK_Enemy_Grunt_*` (the living wall's groan, `SC_MK_Enemy_Grunt`
 played pitched down) and of the rasp under the flyer's screeches
-(`Scripts/jam_flyer_sounds.py`; the flyer's death cry also takes a Gushy
-Impacts splat an octave down).
+(`Scripts/jam_flyer_sounds.py`). Gushy Impacts (TILE_SFX, above) gives the
+flyer its wet layers: the gurgle of the death cry, the splat of a hit, the tear of the bite.
 
 ### The flyer (`Content/JamArt/Audio/Flyer/SW_Jam_Flyer_*`)
 
@@ -148,16 +148,28 @@ the suit's reverb by `Scripts/jam_flyer_sounds.py`.
 
 - **210227 Red Tailed Hawk, eq isolated calls, roof 77mel 10am.wav** — **TRP**
   ([Freesound 616926](https://freesound.org/people/TRP/sounds/616926/)):
-  `SW_Jam_Flyer_Screech_A`.
+  the screeches (`SW_Jam_Flyer_Aggro_*`, `SW_Jam_Flyer_Dive_*`).
 - **hawk_cry** — **loganzsound**
   ([Freesound 774252](https://freesound.org/people/loganzsound/sounds/774252/)):
-  `SW_Jam_Flyer_Death`.
+  the death cry (`SW_Jam_Flyer_Death_*`).
 - **Huge wing flaps for bird, dragon, dinosaur.** (bed sheets) — **2create**
   ([Freesound 670509](https://freesound.org/people/2create/sounds/670509/)):
-  `SW_Jam_Flyer_Flap_A`.
+  the wing beats and the flutter (`SW_Jam_Flyer_Flap_*`, `_Flutter_Loop`), a chunk in the hit.
 - **Wing Flap 2.wav** (a coat) — **_stubb**
   ([Freesound 389633](https://freesound.org/people/_stubb/sounds/389633/)):
   the snap under every flap.
+- **Storks bill-clapping** — **Breviceps**
+  ([Freesound 705861](https://freesound.org/people/Breviceps/sounds/705861/)):
+  the beak clacks (the Attack layers of the screeches, the death cry and the bite).
+- **Swinging staff whoosh (strong) 04.wav** — **Nightflame**
+  ([Freesound 422513](https://freesound.org/people/Nightflame/sounds/422513/)):
+  the body of the fly-by.
+- **Woosh (stick swung in the air)** — **Dalesome**
+  ([Freesound 352719](https://freesound.org/people/Dalesome/sounds/352719/)):
+  the second layer of the fly-by.
+
+Since 19.10 every flyer sound is a set of stems (`SW_Jam_Flyer_<Event>_<Role>`);
+the donors above are layered per role (`Scripts/jam_flyer_sounds.py`).
 
 **Clean Revolver Reload** — by **Dredile**, via
 [Freesound](https://freesound.org/people/Dredile/sounds/177863/).

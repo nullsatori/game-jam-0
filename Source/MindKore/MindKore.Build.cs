@@ -27,6 +27,8 @@ public class MindKore : ModuleRules
 			"PhysicsCore",
 			// jam.Audio.LimiterProbe records the master output (UAudioMixerBlueprintLibrary).
 			"AudioMixer",
+			// FFrameGrabber: jam.Flyer.Clip records the viewport (JamClipRecorder).
+			"MovieSceneCapture",
 			// RHIGetGPUFrameCycles: the scope's cost probe (jam.Scope.Shots).
 			"RHI",
 			// AMKGlassPane builds its shards at runtime; the plugin is enabled by
