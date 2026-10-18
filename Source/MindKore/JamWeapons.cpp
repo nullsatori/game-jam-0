@@ -8,6 +8,7 @@
 #include "Engine/World.h"
 #include "JamHullTools.h"
 #include "JamLivingWall.h"
+#include "JamMuzzleFx.h"
 #include "JamZeroGPawn.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
@@ -137,6 +138,8 @@ void UJamWeaponsComponent::BeginPlay()
 		ViewModel->SetOnlyOwnerSee(true);
 		ViewModel->SetupAttachment(Camera);
 		ViewModel->RegisterComponent();
+		// Muzzle flash and powder smoke, in the same camera space as the gun (JamMuzzleFx.h).
+		NewObject<UJamMuzzleFxComponent>(GetOwner(), TEXT("MuzzleFx"))->RegisterComponent();
 	}
 }
 
@@ -391,6 +394,10 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 		UGameplayStatics::PlaySound2D(this, Sound, 1.0f, Weapon->SoundPitch);
 	}
 	const FVector Muzzle = MuzzleLocation();
+	if (UJamMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UJamMuzzleFxComponent>())
+	{
+		Fx->Shot(CurrentWeapon, Muzzle, ViewModel);
+	}
 	for (int32 Pellet = 0; Pellet < Weapon->Pellets; ++Pellet)
 	{
 		const FVector PelletDirection = Weapon->SpreadDeg > 0.0f

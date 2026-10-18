@@ -44,6 +44,12 @@ descriptions of its proportions only); no third-party model.
 
 The tracer material `/Game/MindKore/Weapons/M_MK_Tracer` is MindKore's own.
 
+The muzzle flash and powder smoke (`/Game/JamArt/FX/M_Jam_MuzzleFlash`,
+`M_Jam_MuzzleSmoke`) are the jam's own: procedural materials built by
+`Scripts/jam_muzzle_fx.py`, no texture, on the engine plane. MindKore's
+`NS_MK_MuzzleFlash` was not taken: it uses the Vefects Free_Fire pack (Fab)
+and a FootageCrate frame.
+
 ## Sky
 
 Star map: NASA/Goddard Space Flight Center Scientific Visualization Studio, Deep Star Maps 2020 (svs.gsfc.nasa.gov/4851). Gaia DR2: ESA/Gaia/DPAC; Hipparcos, Tycho-2: ESA. Via Wikimedia Commons, attribution required.
