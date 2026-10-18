@@ -60,9 +60,9 @@ def load(path):
     return x.astype(np.float64) / np.abs(x).max()
 
 
-def glide(d, a, b, st0, st1, af, amount=0.0, gain=0.0, send=None, at=0.0, length=None):
+def glide(d, a, b, st0, st1, af, amount=0.0, gain=0.0, send=None, at=0.0, length=None, release=0.08):
     """Donor slice a..b s, played as tape whose pitch glides from st0 to st1 semitones, driven,
-    filtered; peak-normalised to gain dB. length: cut (with a fade) to this many seconds."""
+    filtered; peak-normalised to gain dB. length: cut to this many seconds, fading over the last `release` s."""
     def layer():
         src = jss.fade(jss.donor(d)[int(a * SR):int(b * SR)], 0.004, 0.04)
         n_out = int(len(src) / 2 ** ((st0 + st1) / 24))
@@ -70,7 +70,7 @@ def glide(d, a, b, st0, st1, af, amount=0.0, gain=0.0, send=None, at=0.0, length
         pos = pos[pos < len(src) - 1]
         x = jss.drive(np.interp(pos, np.arange(len(src)), src), amount)
         if length:
-            x = jss.fade(x[:int(length * SR)], 0.0, 0.08)
+            x = jss.fade(x[:int(length * SR)], 0.0, release)
         if af:
             x = jss.filt(x, af)
         x = jss.fade(x, 0.003, 0.05)
@@ -78,12 +78,14 @@ def glide(d, a, b, st0, st1, af, amount=0.0, gain=0.0, send=None, at=0.0, length
     return layer
 
 
-def screech(d, a, b, st0, st1, lufs=-16.0, gurgle=None, reverb=(0.55, -6), tail=0.35):
+def screech(d, a, b, st0, st1, lufs=-16.0, gurgle=None, reverb=(0.55, -6), tail=0.35, ring=0.0):
     call = (b - a) * 2 ** (-(st0 + st1) / 24)  # the call's length once pitched down
     layers = [
         glide(d, a, b, st0, st1, f"{jss.hp(350)},{jss.lp(4000)}", 1.5, 0, send=-3),
-        # the throat ends with the call (pitched an octave and a half down it would drone 2.8x longer)
-        glide(d, a, b, st0 - 18, st1 - 18, f"{jss.hp(60)},{jss.lp(900)}", 2.5, -9, send=-8, length=call),
+        # the throat ends with the call, or rings `ring` s past it, fading (whole, an octave and a half
+        # down, it would drone 2.8x longer)
+        glide(d, a, b, st0 - 18, st1 - 18, f"{jss.hp(60)},{jss.lp(900)}", 2.5, -9, send=-8, length=call + ring,
+              release=0.08 + ring),
         glide("breath", 0.58, 1.02, st0 + 6, st1 + 4, f"{jss.hp(800)},{jss.lp(3000)}", 2.5, -14, send=-6),
         lambda: jss.sub(90, 45, 0.2, -16, amount=1.5, sweep=0.08),
     ]
@@ -101,13 +103,14 @@ def flap(w_a, w_b, c_a, c_b, pitch=-3, lufs=-24.0):
     ], reverb=(0.2, -14), gr=3.0, lufs=lufs, psat=(2.0, -12), send_lp=1000, tail=0.17)
 
 
-# Owner 19.10 ("the tails are too long, we take the A sounds"): only the A takes, the reverb about
-# a third of before and every tail cut to `tail` s after the body (the last moment within 20 dB of
-# the peak) with a cos^2 fade - no click.
+# Owner 19.10: "the tails are too long, we take the A sounds" - only the A takes, the reverb about a
+# third of before, the tail cut `tail` s after the body (the last moment within 20 dB of the peak)
+# with a cos^2 fade, no click; then of the screech alone "now far too short" - it gets a longer
+# reverb and tail and its throat rings 0.3 s past the call (the death cry and the flap stay as cut).
 # The hawk's calls (s): 4.55-5.0, 6.65-7.15, 9.2-9.55; the close cry 0.03-0.72.
 # The big wings' beats: 2.45-3.15, 3.75-4.2, 5.1-5.5, 6.5-6.85; the coat flap 0.12-0.55.
 SOUNDS = {
-    "Screech_A": screech("hawk", 4.55, 5.0, -5, -7),
+    "Screech_A": screech("hawk", 4.55, 5.0, -5, -7, reverb=(1.5, -5), tail=0.7, ring=0.3),
     "Death": screech("cry", 0.03, 0.72, -9, -16, lufs=-15.0, gurgle=(2.50, 2.80, 0.55), reverb=(0.7, -5)),
     "Flap_A": flap(2.45, 3.15, 0.12, 0.55),
 }
