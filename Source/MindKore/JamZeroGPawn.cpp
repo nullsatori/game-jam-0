@@ -1617,6 +1617,9 @@ namespace
 		}
 		// The coupled-push measurement keeps the held thing where it was grabbed.
 		Pawn->bHoldInFront = false;
+		// The ship's mode locks the guns until their pickups; the probe takes them itself.
+		Pawn->Guns->UnlockWeapon(2);
+		Pawn->Guns->UnlockWeapon(0);
 		LogProbe(TEXT("before"), Pawn);
 		// One frame of aiming the push: the predicted path logs its first contact.
 		Pawn->ProbeAim(true);

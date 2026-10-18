@@ -168,7 +168,8 @@ ZeroG crash: StaticMeshActor_6 at 1300 cm/s, self damage 35.0
 ## Как сделать невесомый уровень
 
 1. WorldSettings: `bGlobalGravitySet = true`, `GlobalGravityZ = 0`,
-   GameMode Override = `AJamZeroGGameMode`.
+   GameMode Override = `AJamShipGameMode` (наследник `AJamZeroGGameMode`: тот же дрейф
+   хлама, плюс зоны, кислород и пикапы — один режим на всех картах, 18.10).
 2. Хлам — `AMKPhysicsProp` (меш с простой коллизией, `MassKg`). Режим сам
    обнуляет демпфирование и даёт дрейф; скрипт карты тоже ставит damping 0.
 3. Опоры, от которых отталкиваться, — любая статика, блокирующая Visibility.

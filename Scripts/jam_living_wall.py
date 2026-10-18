@@ -39,11 +39,16 @@ SCALARS = {
 }
 
 
-def material(log):
+def material(log, rebuild=False):
     eal = unreal.EditorAssetLibrary
     mel = unreal.MaterialEditingLibrary
     tools = unreal.AssetToolsHelpers.get_asset_tools()
-    # The graph is rebuilt in place on every call: a graph change needs no asset deletion.
+    # Map builders take the saved material as it is: emptying a loaded graph can
+    # assert !IsRooted (18.10, build_zerog.py under the ship mode). A graph change
+    # passes rebuild=True from a fresh editor whose only job is this material.
+    if not rebuild and eal.does_asset_exist(BASE) and eal.does_asset_exist(INSTANCE):
+        return unreal.load_asset(INSTANCE)
+    # rebuild: the graph is rebuilt in place, no asset deletion.
     if eal.does_asset_exist(BASE):
         m = unreal.load_asset(BASE)
         mel.delete_all_material_expressions(m)

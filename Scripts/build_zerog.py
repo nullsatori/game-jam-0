@@ -10,13 +10,14 @@ A closed 80 x 80 x 50 m box centred on the origin, lit for play (the
 light the shell does not shadow, a low sky light and a fixed exposure.
 Shapes are coloured by role: anchors grey, junk mid grey-brown, ship parts
 orange, oxygen blue, the dock outlined in green. WorldSettings: global
-gravity 0 and the AJamZeroGGameMode override. Inside: floating junk
-(AMKPhysicsProp, 5-500 kg; AJamZeroGGameMode gives it drift and spin on
+gravity 0 and the AJamShipGameMode override (the one mode of every map). Inside: floating junk
+(AMKPhysicsProp, 5-500 kg; the mode (AJamZeroGGameMode's StartPlay) gives it drift and spin on
 StartPlay), static 4 m anchor blocks to push off, a rocket stand-in at the far
 +X end with the dock zone and four tagged ship parts (Ship.Part) 20-40 m away,
 oxygen canisters, a glass pane in a floating frame, an impact dummy,
 a living wall (AJamLivingWall) closing an alcove against the shell with a ship
-part inside, and the PlayerStart at the origin facing +X, 1 m from the first anchor's face.
+part inside, and the PlayerStart at the origin facing +X, 1 m from the first anchor's face,
+with the gun and grapple pickups beside it.
 Everything is seeded: the same map every run.
 """
 import math
@@ -143,7 +144,8 @@ settings = world.get_world_settings()
 settings.modify()
 settings.set_editor_property("global_gravity_set", True)
 settings.set_editor_property("global_gravity_z", 0.0)
-settings.set_editor_property("default_game_mode", unreal.JamZeroGGameMode.static_class())
+# One pawn, one rule set on every map (owner 18.10): the ship's mode; the guns come from pickups.
+settings.set_editor_property("default_game_mode", unreal.JamShipGameMode.static_class())
 
 # --- the box -----------------------------------------------------------------
 HX, HY, HZ, T = 4000.0, 4000.0, 2500.0, 100.0
@@ -189,6 +191,15 @@ ppv.set_editor_property("settings", pp)
 
 # --- player, anchors, rocket -------------------------------------------------------
 spawn(unreal.PlayerStart, V(0, 0, 0), 0, "PlayerStart")
+# The guns and the grapple on pickups beside the start, as on the other maps (F takes them).
+for index, (name, y) in enumerate((("PISTOL", -250.0), ("SHOTGUN", -400.0), ("SV-98", -550.0))):
+    gun = spawn(unreal.JamWeaponPickup, V(150, y, -60), 90, "Pickup_" + name)
+    gun.set_actor_scale3d(V(0.3, 0.5, 1.2))
+    gun.set_editor_property("weapon_index", index)
+    label_text(name, V(150, y, 60), 90, 25.0)
+grapple = spawn(unreal.JamToolPickup, V(150, -700, -60), 90, "Pickup_Grapple")
+grapple.set_actor_scale3d(V(0.3, 0.5, 1.2))
+label_text("GRAPPLE", V(150, -700, 60), 90, 25.0)
 ANCHORS = [V(300, 0, 0), V(-2000, 1500, 500), V(1500, -2200, -800), V(-1800, -2000, 1200), V(2200, 2000, -1500)]
 for i, centre in enumerate(ANCHORS):
     block("Anchor_%d" % i, centre, (400, 400, 400), material=ANCHOR)
