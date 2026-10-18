@@ -105,21 +105,21 @@ UJamMuzzleFxComponent::UJamMuzzleFxComponent()
 	Sniper.SmokeTear = 0.3f;
 	// Volumetric clouds: a thin pistol puff, a big torn shotgun cloud that shoves the
 	// older ones, the SV-98's brake ring.
-	Pistol.CloudCm = 70.0f;
-	Pistol.CloudVoxels = 24;
-	Pistol.CloudThrowCm = 200.0f;
-	Pistol.CloudExtinction = 0.045f;
+	Pistol.CloudCm = 55.0f;
+	Pistol.CloudVoxels = 20;
+	Pistol.CloudThrowCm = 260.0f;
+	Pistol.CloudExtinction = 0.03f;
 	Pistol.TunnelCm = 6.0f;
 	Shotgun.CloudCm = 130.0f;
 	Shotgun.CloudVoxels = 40;
-	Shotgun.CloudThrowCm = 220.0f;
-	Shotgun.CloudExtinction = 0.06f;
+	Shotgun.CloudThrowCm = 280.0f;
+	Shotgun.CloudExtinction = 0.018f;
 	Shotgun.TunnelCm = 12.0f;
 	Shotgun.ShoveCm = 90.0f;
 	Sniper.CloudCm = 120.0f;
 	Sniper.CloudVoxels = 36;
-	Sniper.CloudThrowCm = 250.0f;
-	Sniper.CloudExtinction = 0.06f;
+	Sniper.CloudThrowCm = 300.0f;
+	Sniper.CloudExtinction = 0.022f;
 	Sniper.TunnelCm = 8.0f;
 	Guns = { Pistol, Shotgun, Sniper };
 }
@@ -335,6 +335,7 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FVector& Muzzle)
 		Volume->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		// The box about its centre (by default it grows from a corner: a cloud cut to one octant).
 		Volume->bPivotAtCentroid = true;
+
 		Volume->RegisterComponent();
 		UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(CloudMaterial.Get(), this);
 		Volume->SetMaterial(0, Material);
@@ -353,9 +354,11 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FVector& Muzzle)
 	Cloud->Basis = View;
 	// The gas leaves along the bore and dies down to a slow inertial drift: no air, no buoyancy.
 	// The shooter is thrown back by the recoil, so the cloud ends up hanging ahead of the sight.
-	// Thrown towards the sight line 1.2 m ahead: the cloud hangs where the next round passes.
+	// Thrown to hang 2 m ahead, beside and below the sight line: framed, the target clear;
+	// the next round grazes its edge and opens a tunnel there.
 	const FVector Eye = Smoke->GetComponentLocation();
-	Cloud->Velocity = (Eye + View.GetForwardVector() * 120.0f - Muzzle).GetSafeNormal() * Gun.CloudThrowCm;
+	const FVector Hang = Eye + View.RotateVector(FVector(200.0f, 20.0f, -16.0f));
+	Cloud->Velocity = (Hang - Muzzle).GetSafeNormal() * Gun.CloudThrowCm;
 	Cloud->DriftVelocity = View.RotateVector(FVector(1.0f, FMath::FRandRange(-0.3f, 0.3f), FMath::FRandRange(-0.3f, 0.3f))) * Gun.SmokeDriftCm;
 	Cloud->Age = 0.0f;
 	Cloud->Seed = FMath::FRand();
@@ -370,7 +373,7 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FVector& Muzzle)
 		const FVector Direction = Index < Ring ? FVector(0.35f, FMath::Cos(Around), FMath::Sin(Around)).GetSafeNormal() : FMath::VRand();
 		const FVector Reach = Direction * Gun.SmokeSpreadCm * FMath::FRandRange(0.4f, 1.0f);
 		// A voxel cloud hangs a metre or two off: puffs a little fuller than the cards by the gun.
-		Cloud->PuffThrow.Emplace(float(Reach.X), float(Reach.Y), float(Reach.Z), Gun.SmokeEndCm * 0.75f * FMath::FRandRange(0.7f, 1.0f));
+		Cloud->PuffThrow.Emplace(float(Reach.X), float(Reach.Y), float(Reach.Z), FMath::Min(Gun.SmokeEndCm * 0.75f, Gun.CloudCm * 0.2f) * FMath::FRandRange(0.7f, 1.0f));
 	}
 	Cloud->Volume->SetVolumeResolution(FIntVector(Gun.CloudVoxels));
 	Cloud->Volume->SetVisibility(true);
@@ -463,6 +466,7 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 		Material->SetScalarParameterValue(TEXT("Fade"), Fade);
 		Material->SetScalarParameterValue(TEXT("Seed"), Cloud.Seed);
 		Material->SetScalarParameterValue(TEXT("Tear"), Gun.SmokeTear);
+		Material->SetScalarParameterValue(TEXT("Stretch"), Gun.SmokeStretch);
 		Material->SetScalarParameterValue(TEXT("Extinction"), Gun.CloudExtinction);
 		Material->SetVectorParameterValue(TEXT("Eye"), FLinearColor(EyeLocal.X, EyeLocal.Y, EyeLocal.Z, EyeClearCm));
 		for (int32 Index = 0; Index < 8; ++Index)
@@ -711,7 +715,7 @@ namespace
 	 * shotgun, SV-98): a shot with the recoil left to act (the pawn drifts back, the cloud
 	 * hangs ahead), stills at +0.3 and +1.2 s; a second shot through that cloud at +1.4 s
 	 * (after the SV-98 bolt), time dilation 0.05, caught at 60 fps frames 0, 2, 4, 8, 15, 30, 45 (the tunnel
-	 * and the vortex ring); then the pawn sent into the cloud at 250 cm/s, a still
+	 * and the vortex ring); a still 1.5 s after it (normal play); then the pawn sent into the cloud at 250 cm/s, a still
 	 * every 0.15 s (flying through). Last: three shotgun shots, then ProfileGPU with
 	 * three clouds alive (the log has the GPU tree). "space": turned into the black.
 	 */
@@ -748,7 +752,8 @@ namespace
 		const auto Shot = [Controller, Look, Fx](const FString& Name)
 		{
 			Controller->SetControlRotation(Look);
-			UE_LOG(LogMindKore, Log, TEXT("Smoke moments: %s -%s"), *Name, *Fx->DescribeClouds());
+			UE_LOG(LogMindKore, Log, TEXT("Smoke moments: %s - pawn %s at %.0f cm/s;%s"), *Name, *Fx->GetOwner()->GetActorLocation().ToCompactString(),
+				Fx->GetOwner()->GetVelocity().Size(), *Fx->DescribeClouds());
 			Controller->ConsoleCommand(TEXT("HighResShot 1"));
 		};
 		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
@@ -783,11 +788,25 @@ namespace
 				After(At + 4.9f + 0.008f + Frame / 60.0f, [Shot, Name, Frame]() { Shot(FString::Printf(TEXT("%s second shot frame %d"), *Name, Frame)); });
 			}
 			After(At + 4.9f + 0.78f, [World]() { UGameplayStatics::SetGlobalTimeDilation(World, 1.0f); });
+			// Normal play between shots: 1.5 s after the second shot.
+			After(At + 6.4f, [Shot, Name]() { Shot(Name + TEXT(" settled 1.5 s after the second shot")); });
 			// Flying through: towards the first cloud, which hangs on the sight line ahead.
-			After(At + 5.9f, [Pawn, Look]() { Pawn->Body->SetPhysicsLinearVelocity(Look.Vector() * 250.0f); });
+			// Flown, not pushed: the offscreen stand runs at a few frames a second and the
+			// physics step is clamped (1/30 s), so a 250 cm/s body covered a quarter of its
+			// path. The pawn is moved along it at 250 cm/s by the clock instead.
+			TSharedRef<FVector> FlyStart = MakeShared<FVector>();
+			After(At + 6.6f, [Pawn, Look, FlyStart]()
+			{
+				*FlyStart = Pawn->Body->GetComponentLocation();
+				Pawn->Body->SetPhysicsLinearVelocity(Look.Vector() * 250.0f);
+			});
 			for (int32 Step = 0; Step < 10; ++Step)
 			{
-				After(At + 5.95f + Step * 0.15f, [Shot, Name, Step]() { Shot(FString::Printf(TEXT("%s fly-through %.2f s"), *Name, Step * 0.15f)); });
+				After(At + 6.65f + Step * 0.15f, [Pawn, Look, FlyStart, Shot, Name, Step]()
+				{
+					Pawn->Body->SetWorldLocation(*FlyStart + Look.Vector() * 250.0f * (0.05f + Step * 0.15f), false, nullptr, ETeleportType::None);
+					Shot(FString::Printf(TEXT("%s fly-through %.2f s"), *Name, Step * 0.15f));
+				});
 			}
 		}
 		// The budget: three shotgun clouds (the biggest) alive in view, then the GPU profile into the log.

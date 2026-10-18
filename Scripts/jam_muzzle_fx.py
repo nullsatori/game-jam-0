@@ -216,20 +216,29 @@ VOLUME_HLSL = """
 const float M[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
 float3 d = W - C;
 float3 l = float3(dot(d, BX), dot(d, BY), dot(d, BZ));
-float3 vox = floor(l / V);
-float3 p = (vox + 0.5) * V;
+// The density is continuous; the voxels only decide where each band edge steps (the
+// dither threshold per voxel), so the steps show on the band shells. Sampling the
+// whole density per voxel made every voxel a column along the view: seen down the
+// shot, the columns drew streaks through the centre (a cross with the grid on the
+// view axes, a starburst with it turned). The grid stays turned off those axes.
+const float3x3 G = float3x3(0.83781, -0.42777, 0.33924, 0.47767, 0.87524, -0.07605, -0.26439, 0.22576, 0.93762);
+float3 vox = floor(mul(G, l) / V);
+float3 p = l;
 float4 P[8] = { P0, P1, P2, P3, P4, P5, P6, P7 };
 float dens = 0;
 for (int i = 0; i < 8; i++)
 {
     if (P[i].w > 0)
     {
+        // Drawn out along the shot (cloud X), each clump its own weight: lumpy, not a ball.
         float3 q = p - P[i].xyz;
-        dens += exp(-dot(q, q) / (P[i].w * P[i].w));
+        q.x /= St;
+        float weight = 0.5 + 0.7 * frac(sin(i * 12.9898 + S * 78.233) * 43758.5453);
+        dens += weight * exp(-dot(q, q) / (P[i].w * P[i].w));
     }
 }
 float n = 0, amp = 0.5;
-float3 q3 = p / 9 + S * 17;
+float3 q3 = p / 7 + S * 17;
 for (int o = 0; o < 3; o++)
 {
     float3 c0 = floor(q3);
@@ -249,7 +258,7 @@ for (int o = 0; o < 3; o++)
     q3 = q3 * 2.03 + 3.7;
     amp *= 0.5;
 }
-dens = saturate(dens) * saturate((n - 0.18 - 0.25 * K) * 2.6);
+dens = saturate(dens) * saturate((n - 0.22 - 0.4 * K) * 3.0);
 float dens0 = dens;
 float4 WA[3] = { A0, A1, A2 };
 float4 WB[3] = { B0, B1, B2 };
@@ -290,7 +299,7 @@ float band = floor(saturate(dens) * 5 + th);
 float edge = band == 1 ? 1 : 0;
 float3 fringe = edge * lerp(float3(0.10, 0.22, 0.30), float3(0.30, 0.14, 0.05), fmod(abs(vox.y), 2));
 // The vortex ring glows a little: rolled smoke catching the light, read against the tunnel.
-fringe += saturate(ring) * (band > 0 ? 1 : 0) * float3(1.0, 1.1, 1.3) * 1.5;
+fringe += saturate(ring) * (band > 0 ? 1 : 0) * float3(1.0, 1.1, 1.3) * 0.5;
 return float4(band / 5, fringe);
 """
 
@@ -304,7 +313,7 @@ def _volume(m, node, custom, data, scalar, colour, mul):
             + ["WakeA%d" % i for i in range(3)] + ["WakeB%d" % i for i in range(3)]:
         vec[name] = colour(name, unreal.LinearColor(0, 0, 0, 0))
     inputs = {"W": world, "V": scalar("VoxelCm", 2.0), "F": scalar("Fade", 1.0), "S": scalar("Seed", 0.0),
-              "K": scalar("Tear", 0.2), "H": scalar("HalfCm", 35.0)}
+              "K": scalar("Tear", 0.2), "H": scalar("HalfCm", 35.0), "St": scalar("Stretch", 1.5)}
     rgba = {"C": "CloudCentre", "BX": "CloudX", "BY": "CloudY", "BZ": "CloudZ", "E": "Eye"}
     for i in range(8):
         rgba["P%d" % i] = "Puff%d" % i
@@ -326,12 +335,13 @@ def _volume(m, node, custom, data, scalar, colour, mul):
     mel.connect_material_expressions(n, "", band, "")
     fringe = node(unreal.MaterialExpressionComponentMask, r=False, g=True, b=True, a=True)
     mel.connect_material_expressions(n, "", fringe, "")
-    albedo = colour("Colour", unreal.LinearColor(0.55, 0.6, 0.68, 1.0))
+    # The grey-blue of the card smoke (owner: no blown-out white).
+    albedo = colour("Colour", unreal.LinearColor(0.30, 0.34, 0.40, 1.0))
     mel.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
     # Volume domain: the Subsurface Color pin is the extinction, 1/cm.
     mel.connect_material_property(mul(band, scalar("Extinction", 0.04)), "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
     glow = node(unreal.MaterialExpressionAdd)
-    mel.connect_material_expressions(mul(mul(albedo, band), scalar("Ambient", 0.08)), "", glow, "A")
+    mel.connect_material_expressions(mul(mul(albedo, band), scalar("Ambient", 0.06)), "", glow, "A")
     mel.connect_material_expressions(mul(mul(fringe, band), scalar("Fringe", 0.05)), "", glow, "B")
     mel.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
