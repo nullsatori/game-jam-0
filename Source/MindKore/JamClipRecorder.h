@@ -33,6 +33,8 @@ public:
 	bool IsFinished();
 
 	int32 GetFrames() const { return Received; }
+	/** Frames asked of the grabber so far: the video frame the current game frame becomes. */
+	int32 GetRequested() const { return Requested; }
 	double GetSeconds() const { return StopSeconds - StartSeconds; }
 
 private:
@@ -42,6 +44,7 @@ private:
 	bool bStopping = false;
 	int32 TicksAfterStop = 0;
 	int32 Received = 0;
+	int32 Requested = 0;
 	double StartSeconds = 0.0;
 	double StopSeconds = 0.0;
 	void Drain();

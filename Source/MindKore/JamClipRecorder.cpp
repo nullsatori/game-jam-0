@@ -206,6 +206,7 @@ void FJamClipRecorder::Tick()
 	if (!bStopping)
 	{
 		Grabber->CaptureThisFrame(FFramePayloadPtr());
+		++Requested;
 	}
 	else
 	{
