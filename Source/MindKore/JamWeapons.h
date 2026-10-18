@@ -147,6 +147,10 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound", meta = (ClampMin = "0.0"))
 	float CycleDelaySeconds = 0.0f;
 
+	/** The dry click when it fires on an empty magazine, 2D. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
+	TObjectPtr<USoundBase> EmptySound = nullptr;
+
 	/** Usable now. Set from bStartWithAllWeapons on BeginPlay; pickups unlock (UnlockWeapon). */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapon")
 	bool bUnlocked = true;

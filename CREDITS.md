@@ -69,11 +69,12 @@ Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 
 ### The jam's guns
 
-`/Game/JamArt/Audio/Weapons/SW_Jam_*` — the jam's own: cut from the Freesound
-HQ previews below, pitched down, saturated, low-passed, given a sub and a
-synthetic reverb by `Scripts/jam_space_shots.py` (18.10.2026). All
-[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/), checked on each
-sound's own Freesound page on 18.10.2026.
+`/Game/JamArt/Audio/Weapons/SW_Jam_*` — the jam's own: layered from the Freesound
+HQ previews below (pitched down, saturated, filtered, a synthesised sub under
+them, a synthetic reverb, compressed and limited) by `Scripts/jam_space_shots.py`
+(18.10.2026). All [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/),
+checked on each sound's own Freesound page on 18.10.2026 (one candidate,
+Freesound 863729, turned out CC BY 4.0 there and was not used).
 
 - **9mm pistol shot** — **michorvath**
   ([Freesound 427592](https://freesound.org/people/michorvath/sounds/427592/)):
@@ -84,12 +85,20 @@ sound's own Freesound page on 18.10.2026.
 - **gun lee enfield 303 rifle clean shot.wav** — **kyles**
   ([Freesound 450853](https://freesound.org/people/kyles/sounds/450853/)):
   `SW_Jam_Shot_SV98`.
-- **Mossberg 500A - 1 shot and pump** — **AnthonyChan0**
-  ([Freesound 159710](https://freesound.org/people/AnthonyChan0/sounds/159710/)):
-  the pump only, `SW_Jam_Pump_Shotgun`.
-- **Mosin Nagant Bolt Action Cycle** — **Zott820**
-  ([Freesound 370345](https://freesound.org/people/Zott820/sounds/370345/)):
+- **Shotgun Rack Sample.wav** — **Krovi**
+  ([Freesound 613801](https://freesound.org/people/Krovi/sounds/613801/)):
+  `SW_Jam_Pump_Shotgun`.
+- **Bolt Action Rifle Reload** (a Mauser K98) — **AugustSandberg**
+  ([Freesound 508747](https://freesound.org/people/AugustSandberg/sounds/508747/)):
   `SW_Jam_Bolt_SV98`.
+- **9mm Handgun Being Dry Fired** — **serøutōnin--deprivəd**
+  ([Freesound 674568](https://freesound.org/s/674568/)):
+  `SW_Jam_Empty_Pistol`, `SW_Jam_Empty_Shotgun`, `SW_Jam_Empty_SV98`.
+
+Rendered for listening only, not in the game (variants for the owner to pick
+from, all CC0 as above): Freesound 231248 (the S&W 686 above), 431834 «Sauer 404
+close shot» by moosegravy, 159710 «Mossberg 500A - 1 shot and pump» by
+AnthonyChan0, 370345 «Mosin Nagant Bolt Action Cycle» by Zott820.
 
 **VisceralBulletImpacts.wav** — by **u1769092**, via
 [Freesound](https://freesound.org/people/u1769092/sounds/423301/).

@@ -100,6 +100,9 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	static ConstructorHelpers::FObjectFinder<USoundBase> ShotgunPump(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Pump_Shotgun.SW_Jam_Pump_Shotgun"));
 	static ConstructorHelpers::FObjectFinder<USoundBase> SniperShot(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Shot_SV98.SW_Jam_Shot_SV98"));
 	static ConstructorHelpers::FObjectFinder<USoundBase> SniperBolt(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Bolt_SV98.SW_Jam_Bolt_SV98"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> PistolEmpty(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Empty_Pistol.SW_Jam_Empty_Pistol"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> ShotgunEmpty(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Empty_Shotgun.SW_Jam_Empty_Shotgun"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> SniperEmpty(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Empty_SV98.SW_Jam_Empty_SV98"));
 	FJamWeapon Pistol;
 	Pistol.Name = NSLOCTEXT("JamZeroG", "Pistol", "Пистолет");
 	Pistol.Damage = 25.0f;
@@ -111,6 +114,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Pistol.RecoilImpulse = 4000.0f;
 	Pistol.HitImpulse = 3000.0f;
 	Pistol.ShotSound = PistolShot.Object;
+	Pistol.EmptySound = PistolEmpty.Object;
 	Pistol.bAutomatic = true;
 	Pistol.ProjectileSpeed = 9000.0f;
 	Pistol.KickPitchDeg = 1.2f;
@@ -142,7 +146,8 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Shotgun.RangeCm = 3000.0f;
 	Shotgun.ShotSound = ShotgunShot.Object;
 	Shotgun.CycleSound = ShotgunPump.Object;
-	Shotgun.CycleDelaySeconds = 0.2f;
+	Shotgun.CycleDelaySeconds = 0.15f; // the pump's clicks at 0.26 and 0.40 s after the shot, as its animation
+	Shotgun.EmptySound = ShotgunEmpty.Object;
 	Shotgun.ProjectileSpeed = 6000.0f;
 	Shotgun.KickPitchDeg = 5.0f;
 	Shotgun.KickYawDeg = 1.2f;
@@ -179,7 +184,8 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Sniper.RangeCm = 15000.0f;
 	Sniper.ShotSound = SniperShot.Object;
 	Sniper.CycleSound = SniperBolt.Object;
-	Sniper.CycleDelaySeconds = 0.25f;
+	Sniper.CycleDelaySeconds = 0.25f; // the bolt's clicks at 0.35, 0.63, 0.87, 1.09 s after the shot
+	Sniper.EmptySound = SniperEmpty.Object;
 	Sniper.ProjectileSpeed = 40000.0f;
 	Sniper.KickPitchDeg = 8.0f;
 	Sniper.KickYawDeg = 1.0f;
@@ -495,6 +501,9 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	if (Weapon->Ammo <= 0)
 	{
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s is empty"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString());
+		// The dry click, once per interval while the trigger is held (no reserve: no reload to stop it).
+		NextShotSeconds = Now + Weapon->FireInterval;
+		UGameplayStatics::PlaySound2D(this, Weapon->EmptySound);
 		Reload();
 		return false;
 	}
