@@ -361,6 +361,26 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
 	float StowTurnLead = 0.0f;
 
+	/**
+	 * A slung long gun's way (owner 19.10): StowMidShare > 0 bends the place path through
+	 * StowMidCm - rest -> Mid over path shares 0..StowMidShare, Mid -> StowOffsetCm after -
+	 * so the rifle comes down vertical into the frame's side before it levels. With keys in
+	 * StowTurnPath / DrawTurnPath the turns follow those (seconds -> share of StowTurn)
+	 * instead of the place path shifted by StowTurnLead, with no spring Delay on them: the
+	 * keys carry the timing, so a turn can start on the draw's first frame.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	FVector StowMidCm = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch", meta = (ClampMin = "0.0", ClampMax = "0.95"))
+	float StowMidShare = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	FRuntimeFloatCurve StowTurnPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	FRuntimeFloatCurve DrawTurnPath;
+
 	/** Seconds into the draw from which the gun may fire. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch", meta = (ClampMin = "0.0"))
 	float DrawReadySeconds = 0.3f;

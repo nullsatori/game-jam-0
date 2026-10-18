@@ -163,19 +163,25 @@ void UJamWeaponsComponent::SetupWeaponParts()
 
 	// --- pump gun ---
 	FJamWeapon& Shotgun = Weapons[1];
-	// Over the right shoulder: it dips first, rises, the muzzle swinging up after the grip,
-	// and goes back past the ear (0.5 s); the shoulder takes it (the view nods). The draw
-	// swings it down over the shoulder, quick off it and slowing, and lands it with weight;
-	// fires once 0.42 s in and settled.
-	Shotgun.StowOffsetCm = FVector(-22.0f, 8.0f, 30.0f);
-	Shotgun.StowTurn = FRotator(70.0f, 20.0f, 30.0f);
-	Shotgun.StowTurnLead = -0.03f;
-	Shotgun.StowPath = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.08f, -0.08f, 0.0f, 0.0f }, { 0.42f, 1.0f, 5.0f, 0.0f },
+	// Slung over the right shoulder, muzzle up (owner 19.10): the muzzle swings up to vertical
+	// as it goes, the gun comes to the frame's right third and rises up out of it. The draw is
+	// the reverse: down into the right third, stock first, the muzzle tipping forward and down
+	// about the grip all the way, fastest mid-way, into level - never toward the eye. The
+	// shoulder takes it (the view nods); it lands with weight; fires once 0.45 s in and settled.
+	Shotgun.StowOffsetCm = FVector(2.0f, 13.0f, 95.0f);
+	Shotgun.StowMidCm = FVector(2.0f, 13.0f, -8.0f);
+	Shotgun.StowMidShare = 0.5f;
+	Shotgun.StowTurn = FRotator(86.0f, 0.0f, -10.0f);
+	Shotgun.StowPath = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.06f, -0.04f, 0.0f, 0.0f }, { 0.22f, 0.5f, 3.0f, 3.0f },
+		{ 0.42f, 1.0f, 3.0f, 0.0f }, { 0.5f, 1.0f, 0.0f, 0.0f } });
+	Shotgun.StowTurnPath = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 1.0f }, { 0.22f, 0.6f, 3.5f, 3.5f }, { 0.42f, 1.0f, 1.0f, 0.0f },
 		{ 0.5f, 1.0f, 0.0f, 0.0f } });
-	Shotgun.DrawPath = JamMakeCycleCurve({ { 0.0f, 1.0f, 0.0f, 0.0f }, { 0.05f, 1.03f, 0.0f, -3.0f }, { 0.36f, 0.0f, -4.0f, -1.0f },
-		{ 0.55f, 0.0f, 0.0f, 0.0f } });
-	Shotgun.DrawReadySeconds = 0.42f;
-	Shotgun.DrawKicks = { { 0.36f, FVector(30.0f, 0.0f, -25.0f), FRotator(-50.0f, -20.0f, -30.0f) } };
+	Shotgun.DrawPath = JamMakeCycleCurve({ { 0.0f, 1.0f, 0.0f, 0.0f }, { 0.04f, 1.02f, 0.0f, -3.0f }, { 0.24f, 0.5f, -2.5f, -2.5f },
+		{ 0.45f, 0.0f, -2.5f, -0.5f }, { 0.6f, 0.0f, 0.0f, 0.0f } });
+	Shotgun.DrawTurnPath = JamMakeCycleCurve({ { 0.0f, 1.0f, 0.0f, -1.2f }, { 0.25f, 0.45f, -3.2f, -3.2f }, { 0.5f, 0.0f, -0.6f, 0.0f },
+		{ 0.6f, 0.0f, 0.0f, 0.0f } });
+	Shotgun.DrawReadySeconds = 0.45f;
+	Shotgun.DrawKicks = { { 0.45f, FVector(30.0f, 0.0f, -25.0f), FRotator(-50.0f, -20.0f, -30.0f) } };
 	Shotgun.StowViewNudge = FRotator(0.8f, 0.4f, 0.0f);
 	Shotgun.StowViewNudgeSeconds = 0.4f;
 	Shotgun.DrawViewNudge = FRotator(-0.6f, 0.3f, 0.0f);
@@ -223,20 +229,27 @@ void UJamWeaponsComponent::SetupWeaponParts()
 
 	// --- SV-98 ---
 	FJamWeapon& Sniper = Weapons[2];
-	// Over the left shoulder, heavier and slower: across to the left, muzzle up after the
-	// grip, gone at 0.6 s; the shoulder takes it. The draw brings it in from the upper left
-	// and lands it at 0.45 s; fires once 0.5 s in and settled.
-	Sniper.StowOffsetCm = FVector(-8.0f, -55.0f, 35.0f);
-	// Muzzle up 40, yaw 12, roll 28 at most; the turns lead, so on the draw the rifle is already
-	// pointing down-range as it comes into view.
-	Sniper.StowTurn = FRotator(40.0f, -12.0f, -28.0f);
-	Sniper.StowTurnLead = 0.1f;
-	Sniper.StowPath = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.1f, -0.08f, 0.0f, 0.0f }, { 0.5f, 1.0f, 4.0f, 0.0f },
+	// Slung over the left shoulder, muzzle up (owner 19.10: «draw у снайперки все еще не под тем
+	// углом»): the draw brings it down vertical - muzzle up, the bolt turned a little inward -
+	// stock first toward the frame's left third, the muzzle tipping forward and down about the
+	// grip from the first frame - one continuous turn, fastest mid-way (owner 19.10: «угол
+	// менялся на протяжении анимации»), easing into level with the springs' overshoot (0.6 s)
+	// - never toward the eye; the put-away is the reverse.
+	// Heavier and slower than the shotgun; fires once 0.55 s in and settled.
+	Sniper.StowOffsetCm = FVector(3.0f, -38.0f, 90.0f);
+	Sniper.StowMidCm = FVector(3.0f, -38.0f, -4.0f);
+	Sniper.StowMidShare = 0.5f;
+	Sniper.StowTurn = FRotator(88.0f, 0.0f, 12.0f);
+	Sniper.StowPath = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.08f, -0.04f, 0.0f, 0.0f }, { 0.25f, 0.5f, 3.0f, 3.0f },
+		{ 0.5f, 1.0f, 3.0f, 0.0f }, { 0.6f, 1.0f, 0.0f, 0.0f } });
+	Sniper.StowTurnPath = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 1.0f }, { 0.25f, 0.6f, 3.0f, 3.0f }, { 0.45f, 1.0f, 1.0f, 0.0f },
 		{ 0.6f, 1.0f, 0.0f, 0.0f } });
-	Sniper.DrawPath = JamMakeCycleCurve({ { 0.0f, 1.0f, 0.0f, 0.0f }, { 0.06f, 1.03f, 0.0f, -2.5f }, { 0.45f, 0.0f, -3.5f, -1.0f },
-		{ 0.7f, 0.0f, 0.0f, 0.0f } });
-	Sniper.DrawReadySeconds = 0.5f;
-	Sniper.DrawKicks = { { 0.45f, FVector(25.0f, 0.0f, -20.0f), FRotator(-40.0f, 20.0f, 25.0f) } };
+	Sniper.DrawPath = JamMakeCycleCurve({ { 0.0f, 1.0f, 0.0f, 0.0f }, { 0.05f, 1.02f, 0.0f, -3.0f }, { 0.3f, 0.5f, -2.2f, -2.2f },
+		{ 0.6f, 0.0f, -1.5f, -0.3f }, { 0.8f, 0.0f, 0.0f, 0.0f } });
+	Sniper.DrawTurnPath = JamMakeCycleCurve({ { 0.0f, 1.0f, 0.0f, -1.2f }, { 0.3f, 0.45f, -2.8f, -2.8f }, { 0.58f, 0.0f, -0.6f, 0.0f },
+		{ 0.75f, 0.0f, 0.0f, 0.0f } });
+	Sniper.DrawReadySeconds = 0.6f;
+	Sniper.DrawKicks = { { 0.6f, FVector(25.0f, 0.0f, -20.0f), FRotator(-40.0f, 10.0f, 15.0f) } };
 	Sniper.StowViewNudge = FRotator(1.0f, -0.5f, 0.0f);
 	Sniper.StowViewNudgeSeconds = 0.45f;
 	Sniper.DrawViewNudge = FRotator(-0.8f, -0.4f, 0.0f);
@@ -345,15 +358,41 @@ void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State,
 		}
 	};
 	// Where each channel is pulled at shot time S and reload time R (< 0: no reload).
-	const auto Goal = [&Weapon, ReloadLength, &Away](int32 Channel, float S, float R, float W)
+	// The turns' own paths, when the gun has them (a slung rifle: vertical first, levelled last).
+	const bool bTurnPaths = Weapon.StowTurnPath.GetRichCurveConst()->GetNumKeys() > 0 && Weapon.DrawTurnPath.GetRichCurveConst()->GetNumKeys() > 0;
+	const auto TurnAway = [&Weapon, &Switch, &Away, bTurnPaths](float W)
 	{
-		const float Off = Away(Channel < 3 ? W : W + Weapon.StowTurnLead);
+		if (!bTurnPaths)
+		{
+			return Away(W + Weapon.StowTurnLead);
+		}
+		switch (Switch.Stage)
+		{
+		case ESwitch::Stow: return JamEvalCycle(Weapon.StowTurnPath, W);
+		case ESwitch::Draw: return JamEvalCycle(Weapon.DrawTurnPath, W);
+		case ESwitch::Away: return 1.0f;
+		default: return 0.0f;
+		}
+	};
+	// The place on the put-away path at share Off: straight, or bent through StowMidCm.
+	const auto AwayPlace = [&Weapon](float Off)
+	{
+		const float Mid = Weapon.StowMidShare;
+		if (Mid <= 0.0f)
+		{
+			return Weapon.StowOffsetCm * Off;
+		}
+		return Off <= Mid ? Weapon.StowMidCm * (Off / Mid) : FMath::Lerp(Weapon.StowMidCm, Weapon.StowOffsetCm, (Off - Mid) / (1.0f - Mid));
+	};
+	const auto Goal = [&Weapon, ReloadLength, &Away, &TurnAway, &AwayPlace](int32 Channel, float S, float R, float W)
+	{
+		const float Off = Channel < 3 ? Away(W) : TurnAway(W);
 		const float Shot = JamEvalCycle(Weapon.ActionBody, S);
 		// The reload's stages, stepping out over its last 30 ms.
 		const float Reload = R >= 0.0f ? JamEvalCycle(Weapon.ReloadBody, R) * FMath::Clamp((ReloadLength - R) / 0.03f, 0.0f, 1.0f) : 0.0f;
 		if (Channel < 3)
 		{
-			return Weapon.ActionBodyOffsetCm[Channel] * Shot + Weapon.ReloadBodyOffsetCm[Channel] * Reload + Weapon.StowOffsetCm[Channel] * Off;
+			return Weapon.ActionBodyOffsetCm[Channel] * Shot + Weapon.ReloadBodyOffsetCm[Channel] * Reload + AwayPlace(Off)[Channel];
 		}
 		const FVector StowTurn(Weapon.StowTurn.Pitch, Weapon.StowTurn.Yaw, Weapon.StowTurn.Roll);
 		const FVector ShotTurn(Weapon.ActionBodyTurn.Pitch, Weapon.ActionBodyTurn.Yaw, Weapon.ActionBodyTurn.Roll);
@@ -436,7 +475,10 @@ void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State,
 			State.Place[Axis] += State.PlaceVelocity[Axis] * Dt;
 		}
 		// The turns trail the motion: the muzzle dips while the gun rises, points back across, cants into it.
-		const FVector Drag(-PoseTurnLag.X * State.PlaceVelocity.Z, -PoseTurnLag.Y * State.PlaceVelocity.Y, PoseTurnLag.Z * State.PlaceVelocity.Y);
+		// (Not on a put-away or a draw: their turns are laid out on their own paths.)
+		const float DragScale = Switch.Stage == ESwitch::Stow || Switch.Stage == ESwitch::Draw ? 0.0f : 1.0f;
+		const FVector Drag = DragScale * FVector(-PoseTurnLag.X * State.PlaceVelocity.Z, -PoseTurnLag.Y * State.PlaceVelocity.Y,
+			PoseTurnLag.Z * State.PlaceVelocity.Y);
 		// The way back out of a reload swings less past rest in pitch and roll; elsewhere the float stays.
 		if (R1 >= 0.0f)
 		{
@@ -446,11 +488,15 @@ void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State,
 		{
 			State.bExit = false;
 		}
+		// Own turn paths carry their own timing: their springs take them at once, or a draw
+		// from rest would hold still for the delay (owner 19.10: «слишком долго вертикально»).
+		const bool bOwnTurnTiming = bTurnPaths && (Switch.Stage == ESwitch::Stow || Switch.Stage == ESwitch::Draw);
 		for (int32 Axis = 0; Axis < 3; ++Axis)
 		{
 			const FJamAimSpring& Spring = Springs[3 + Axis];
 			const float W = 2.0f * PI * Spring.Hz;
-			const float To = Goal(3 + Axis, S1 - Spring.Delay, R1 >= 0.0f ? R1 - Spring.Delay : -1.0f, W1 - Spring.Delay) + Drag[Axis];
+			const float SwitchDelay = bOwnTurnTiming ? 0.0f : Spring.Delay;
+			const float To = Goal(3 + Axis, S1 - Spring.Delay, R1 >= 0.0f ? R1 - Spring.Delay : -1.0f, W1 - SwitchDelay) + Drag[Axis];
 			const float Damping = State.bExit && Axis != 1 ? FMath::Max(Spring.Damping, PoseExitTurnDamping) : Spring.Damping;
 			State.TurnVelocity[Axis] += (W * W * (To - State.Turn[Axis]) - 2.0f * Damping * W * State.TurnVelocity[Axis]) * Dt;
 			State.Turn[Axis] += State.TurnVelocity[Axis] * Dt;
@@ -1075,9 +1121,14 @@ namespace
 				{
 					const float T = Index * 0.01f;
 					const float Path = JamEvalCycle(Phase == 1 ? Weapon.StowPath : Weapon.DrawPath, T);
-					UE_LOG(LogMindKore, Log, TEXT("Pose trace: %s %s t=%.2f place=(%.3f,%.3f,%.3f) turn=(%.3f,%.3f,%.3f) part=(%.4f,0,0)"),
+					// The bore's angle to the eye: from the grip, the gun's line against the way back to the camera.
+					const FQuat Rotation = FRotator(Turn[Index].X, Turn[Index].Y, Turn[Index].Z).Quaternion() * Weapon.ViewOffset.GetRotation();
+					const FVector Grip = Weapon.ViewOffset.GetTranslation() + Place[Index];
+					const FVector Bore = Rotation.RotateVector(Gun == 0 ? -FVector::ForwardVector : FVector::ForwardVector);
+					const float ToEye = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(Bore, (-Grip).GetSafeNormal())));
+					UE_LOG(LogMindKore, Log, TEXT("Pose trace: %s %s t=%.2f place=(%.3f,%.3f,%.3f) turn=(%.3f,%.3f,%.3f) part=(%.4f,0,0) bore_to_eye=%.1f"),
 						Names[Gun], Phase == 1 ? TEXT("stow") : TEXT("draw"), T, Place[Index].X, Place[Index].Y, Place[Index].Z,
-						Turn[Index].X, Turn[Index].Y, Turn[Index].Z, Path);
+						Turn[Index].X, Turn[Index].Y, Turn[Index].Z, Path, ToEye);
 				}
 			}
 		}
