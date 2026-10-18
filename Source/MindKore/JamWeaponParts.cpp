@@ -28,6 +28,12 @@ namespace
 	TAutoConsoleVariable<float> CVarReloadPoseAt(TEXT("jam.Weapons.ReloadPoseAt"), -1.0f,
 		TEXT("Hold the gun in view this many seconds into a reload (a round-by-round gun loads two rounds); < 0: live."));
 
+	/** jam.Weapons.StowPoseAt / DrawPoseAt: the gun held this many seconds into its put-away / its draw (stills); < 0 off. */
+	TAutoConsoleVariable<float> CVarStowPoseAt(TEXT("jam.Weapons.StowPoseAt"), -1.0f,
+		TEXT("Hold the gun in view this many seconds into its put-away; < 0: live."));
+	TAutoConsoleVariable<float> CVarDrawPoseAt(TEXT("jam.Weapons.DrawPoseAt"), -1.0f,
+		TEXT("Hold the gun in view this many seconds into its draw; < 0: live."));
+
 	/** Rounds a held reload pose loads, for jam.Weapons.ReloadPoseAt. */
 	constexpr int32 PoseShells = 2;
 
@@ -67,6 +73,11 @@ void UJamWeaponsComponent::SetupWeaponParts()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Case9(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_Case_9mm.SM_Jam_Case_9mm"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Case762(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_Case_762x54R.SM_Jam_Case_762x54R"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Shell12(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_Shell_12ga.SM_Jam_Shell_12ga"));
+	// MindKore's own sketch Foley for its tool swap (synthesised, no donor: MindKore Docs/CREDITS.md).
+	static ConstructorHelpers::FObjectFinder<USoundBase> HolsterSeat(TEXT("/Game/MindKore/Audio/SW_MK_Holster_Seat.SW_MK_Holster_Seat"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> HolsterDraw(TEXT("/Game/MindKore/Audio/SW_MK_Holster_Draw.SW_MK_Holster_Draw"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> SlingStow(TEXT("/Game/MindKore/Audio/SW_MK_Crowbar_Stow.SW_MK_Crowbar_Stow"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> SlingDraw(TEXT("/Game/MindKore/Audio/SW_MK_Crowbar_Draw.SW_MK_Crowbar_Draw"));
 
 	// --- USP ---
 	FJamWeapon& Pistol = Weapons[0];
@@ -113,14 +124,14 @@ void UJamWeaponsComponent::SetupWeaponParts()
 	Pistol.MagEjectSpinDeg = 320.0f;
 	Pistol.MagInSoundSeconds = 0.86f;
 	// Muzzle up and canted, raised toward the middle: the well faces the eye. Where
-	// the pose springs pull, in stages: in; 12% further as the old magazine goes
-	// (0.3 s); back 10% short to meet the new one (0.6 s); home on the seat (0.86 s);
+	// the pose springs pull, in stages: in; 8% further as the old magazine goes
+	// (0.3 s); back 8% short to meet the new one (0.6 s); home on the seat (0.86 s);
 	// out over the last 30 ms.
-	Pistol.ReloadBodyTurn = FRotator(40.0f, -15.0f, 30.0f);
+	Pistol.ReloadBodyTurn = FRotator(32.0f, -12.0f, 30.0f);
 	Pistol.ReloadBodyOffsetCm = FVector(-3.0f, -6.0f, 11.0f);
 	Pistol.ReloadBody = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.03f, 1.0f, 0.0f, 0.0f }, { 0.28f, 1.0f, 0.0f, 0.0f },
-		{ 0.32f, 1.12f, 0.0f, 0.0f }, { 0.58f, 1.12f, 0.0f, 0.0f }, { 0.62f, 0.9f, 0.0f, 0.0f },
-		{ 0.84f, 0.9f, 0.0f, 0.0f }, { 0.88f, 1.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 0.0f, 0.0f } });
+		{ 0.32f, 1.08f, 0.0f, 0.0f }, { 0.58f, 1.08f, 0.0f, 0.0f }, { 0.62f, 0.92f, 0.0f, 0.0f },
+		{ 0.84f, 0.92f, 0.0f, 0.0f }, { 0.88f, 1.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 0.0f, 0.0f } });
 	// Snappy: brisk springs, turns a little softer and later (arcs), floating ~15% past.
 	Pistol.PoseSprings = { { 6.5f, 0.55f, 0.0f }, { 6.0f, 0.55f, 0.0f }, { 6.0f, 0.5f, 0.01f },
 		{ 5.0f, 0.55f, 0.02f }, { 5.0f, 0.55f, 0.03f }, { 4.5f, 0.55f, 0.04f } };
@@ -131,8 +142,48 @@ void UJamWeaponsComponent::SetupWeaponParts()
 		{ 0.71f, FVector(0.0f, 0.0f, -20.0f), FRotator(0.0f, 0.0f, -25.0f) },
 		{ 0.86f, FVector(0.0f, 0.0f, 120.0f), FRotator(-180.0f, 30.0f, 60.0f) } };
 
+	// Away to the holster on the right hip: a small lift first, then down and right, the
+	// muzzle tipping down ahead of the grip, faster and faster into the holster (gone at
+	// 0.32 s). The draw: a tug down out of it, then up fast - out of the holster at once,
+	// slowing in - past the rest pose (the springs float it 15% past) with a snap; fires
+	// once 0.3 s in and settled.
+	Pistol.StowOffsetCm = FVector(-12.0f, 8.0f, -28.0f);
+	Pistol.StowTurn = FRotator(-60.0f, 10.0f, 20.0f);
+	Pistol.StowTurnLead = 0.04f;
+	Pistol.StowPath = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.06f, -0.06f, 0.0f, 0.0f }, { 0.28f, 1.0f, 6.0f, 0.0f },
+		{ 0.32f, 1.0f, 0.0f, 0.0f } });
+	Pistol.DrawPath = JamMakeCycleCurve({ { 0.0f, 1.0f, 0.0f, 0.0f }, { 0.04f, 1.03f, 0.0f, -3.0f }, { 0.22f, 0.0f, -5.0f, -1.5f },
+		{ 0.38f, 0.0f, 0.0f, 0.0f } });
+	Pistol.DrawReadySeconds = 0.3f;
+	Pistol.DrawKicks = { { 0.22f, FVector(0.0f, 0.0f, 40.0f), FRotator(-60.0f, 0.0f, 20.0f) } };
+	Pistol.StowSound = HolsterSeat.Object;
+	Pistol.StowSoundSeconds = 0.3f;
+	Pistol.DrawSound = HolsterDraw.Object;
+	Pistol.DrawSoundSeconds = 0.02f;
+
 	// --- pump gun ---
 	FJamWeapon& Shotgun = Weapons[1];
+	// Over the right shoulder: it dips first, rises, the muzzle swinging up after the grip,
+	// and goes back past the ear (0.5 s); the shoulder takes it (the view nods). The draw
+	// swings it down over the shoulder, quick off it and slowing, and lands it with weight;
+	// fires once 0.42 s in and settled.
+	Shotgun.StowOffsetCm = FVector(-22.0f, 8.0f, 30.0f);
+	Shotgun.StowTurn = FRotator(70.0f, 20.0f, 30.0f);
+	Shotgun.StowTurnLead = -0.03f;
+	Shotgun.StowPath = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.08f, -0.08f, 0.0f, 0.0f }, { 0.42f, 1.0f, 5.0f, 0.0f },
+		{ 0.5f, 1.0f, 0.0f, 0.0f } });
+	Shotgun.DrawPath = JamMakeCycleCurve({ { 0.0f, 1.0f, 0.0f, 0.0f }, { 0.05f, 1.03f, 0.0f, -3.0f }, { 0.36f, 0.0f, -4.0f, -1.0f },
+		{ 0.55f, 0.0f, 0.0f, 0.0f } });
+	Shotgun.DrawReadySeconds = 0.42f;
+	Shotgun.DrawKicks = { { 0.36f, FVector(30.0f, 0.0f, -25.0f), FRotator(-50.0f, -20.0f, -30.0f) } };
+	Shotgun.StowViewNudge = FRotator(0.8f, 0.4f, 0.0f);
+	Shotgun.StowViewNudgeSeconds = 0.4f;
+	Shotgun.DrawViewNudge = FRotator(-0.6f, 0.3f, 0.0f);
+	Shotgun.DrawViewNudgeSeconds = 0.1f;
+	Shotgun.StowSound = SlingStow.Object;
+	Shotgun.StowSoundSeconds = 0.4f;
+	Shotgun.DrawSound = SlingDraw.Object;
+	Shotgun.DrawSoundSeconds = 0.05f;
 	// The spent hull flies out as the fore-end hits the back stop.
 	Shotgun.CaseMesh = Shell12.Object;
 	Shotgun.EjectPort = FVector(1.6f, 1.6f, 5.2f);
@@ -172,6 +223,28 @@ void UJamWeaponsComponent::SetupWeaponParts()
 
 	// --- SV-98 ---
 	FJamWeapon& Sniper = Weapons[2];
+	// Over the left shoulder, heavier and slower: across to the left, muzzle up after the
+	// grip, gone at 0.6 s; the shoulder takes it. The draw brings it in from the upper left
+	// and lands it at 0.45 s; fires once 0.5 s in and settled.
+	Sniper.StowOffsetCm = FVector(-20.0f, -45.0f, 35.0f);
+	// Muzzle up 40, yaw 12, roll 28 at most; the turns lead, so on the draw the rifle is already
+	// pointing down-range as it comes into view.
+	Sniper.StowTurn = FRotator(40.0f, -12.0f, -28.0f);
+	Sniper.StowTurnLead = 0.06f;
+	Sniper.StowPath = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.1f, -0.08f, 0.0f, 0.0f }, { 0.5f, 1.0f, 4.0f, 0.0f },
+		{ 0.6f, 1.0f, 0.0f, 0.0f } });
+	Sniper.DrawPath = JamMakeCycleCurve({ { 0.0f, 1.0f, 0.0f, 0.0f }, { 0.06f, 1.03f, 0.0f, -2.5f }, { 0.45f, 0.0f, -3.5f, -1.0f },
+		{ 0.7f, 0.0f, 0.0f, 0.0f } });
+	Sniper.DrawReadySeconds = 0.5f;
+	Sniper.DrawKicks = { { 0.45f, FVector(25.0f, 0.0f, -20.0f), FRotator(-40.0f, 20.0f, 25.0f) } };
+	Sniper.StowViewNudge = FRotator(1.0f, -0.5f, 0.0f);
+	Sniper.StowViewNudgeSeconds = 0.45f;
+	Sniper.DrawViewNudge = FRotator(-0.8f, -0.4f, 0.0f);
+	Sniper.DrawViewNudgeSeconds = 0.12f;
+	Sniper.StowSound = SlingStow.Object;
+	Sniper.StowSoundSeconds = 0.45f;
+	Sniper.DrawSound = SlingDraw.Object;
+	Sniper.DrawSoundSeconds = 0.06f;
 	// The case is thrown out as the bolt hits its back stop.
 	Sniper.CaseMesh = Case762.Object;
 	Sniper.EjectPort = FVector(6.0f, 1.6f, 5.0f);
@@ -181,7 +254,7 @@ void UJamWeaponsComponent::SetupWeaponParts()
 	// let go at 0.5 s (~0.6 m/s, tumbling); the fresh one swings in from the front on
 	// an arc, rocked 18 deg front-first and straightening, hangs at the mouth of the
 	// well (1.08-1.16 s), winds up (1.19 s) and is slapped home at 1.25 s, double knock.
-	// The pose target in stages as the pistol's.
+	// The pose target in stages as the pistol's, 6% each way.
 	Sniper.MagMesh = Sv98Mag.Object;
 	Sniper.MagTravelCm = FVector(0.0f, 0.0f, -9.0f);
 	Sniper.MagEjectSeconds = 0.5f;
@@ -200,11 +273,13 @@ void UJamWeaponsComponent::SetupWeaponParts()
 		{ 1.08f, 0.06f, -2.0f, 0.0f }, { 1.12f, 0.0f, 0.0f, 0.0f } });
 	Sniper.MagEjectSpinDeg = 220.0f;
 	Sniper.MagInSoundSeconds = 1.25f;
-	Sniper.ReloadBodyTurn = FRotator(30.0f, -12.0f, 30.0f);
-	Sniper.ReloadBodyOffsetCm = FVector(-6.0f, -5.0f, 6.0f);
+	// Pointed down-range (owner 19.10: it hung broadside in the air): rolled 30 deg to present
+	// the well, pitch 8 and yaw 6 only, drawn back 10 cm, in 6 and up 7 about the grip.
+	Sniper.ReloadBodyTurn = FRotator(8.0f, -6.0f, 30.0f);
+	Sniper.ReloadBodyOffsetCm = FVector(-10.0f, -6.0f, 7.0f);
 	Sniper.ReloadBody = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.03f, 1.0f, 0.0f, 0.0f }, { 0.42f, 1.0f, 0.0f, 0.0f },
-		{ 0.46f, 1.12f, 0.0f, 0.0f }, { 0.9f, 1.12f, 0.0f, 0.0f }, { 0.94f, 0.9f, 0.0f, 0.0f },
-		{ 1.23f, 0.9f, 0.0f, 0.0f }, { 1.27f, 1.0f, 0.0f, 0.0f }, { 1.4f, 1.0f, 0.0f, 0.0f } });
+		{ 0.46f, 1.06f, 0.0f, 0.0f }, { 0.9f, 1.06f, 0.0f, 0.0f }, { 0.94f, 0.94f, 0.0f, 0.0f },
+		{ 1.23f, 0.94f, 0.0f, 0.0f }, { 1.27f, 1.0f, 0.0f, 0.0f }, { 1.4f, 1.0f, 0.0f, 0.0f } });
 	// Deliberate: a heavier gun, slower springs, later turns.
 	Sniper.PoseSprings = { { 4.5f, 0.55f, 0.0f }, { 4.0f, 0.55f, 0.0f }, { 4.0f, 0.5f, 0.02f },
 		{ 3.2f, 0.55f, 0.05f }, { 3.2f, 0.55f, 0.05f }, { 2.8f, 0.55f, 0.07f } };
@@ -256,21 +331,34 @@ float UJamWeaponsComponent::GetReloadTime() const
 }
 
 void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State, float Since0, float Since1, float Reload0, float Reload1,
-	float ReloadLength, int32 Shells, float DeltaTime) const
+	float ReloadLength, int32 Shells, float DeltaTime, const FSwitchSpan& Switch) const
 {
-	// Where each channel is pulled at shot time S and reload time R (< 0: no reload).
-	const auto Goal = [&Weapon, ReloadLength](int32 Channel, float S, float R)
+	// How far toward the put-away pose at switch time W (each channel its own W).
+	const auto Away = [&Weapon, &Switch](float W)
 	{
+		switch (Switch.Stage)
+		{
+		case ESwitch::Stow: return JamEvalCycle(Weapon.StowPath, W);
+		case ESwitch::Draw: return JamEvalCycle(Weapon.DrawPath, W);
+		case ESwitch::Away: return 1.0f;
+		default: return 0.0f;
+		}
+	};
+	// Where each channel is pulled at shot time S and reload time R (< 0: no reload).
+	const auto Goal = [&Weapon, ReloadLength, &Away](int32 Channel, float S, float R, float W)
+	{
+		const float Off = Away(Channel < 3 ? W : W + Weapon.StowTurnLead);
 		const float Shot = JamEvalCycle(Weapon.ActionBody, S);
 		// The reload's stages, stepping out over its last 30 ms.
 		const float Reload = R >= 0.0f ? JamEvalCycle(Weapon.ReloadBody, R) * FMath::Clamp((ReloadLength - R) / 0.03f, 0.0f, 1.0f) : 0.0f;
 		if (Channel < 3)
 		{
-			return Weapon.ActionBodyOffsetCm[Channel] * Shot + Weapon.ReloadBodyOffsetCm[Channel] * Reload;
+			return Weapon.ActionBodyOffsetCm[Channel] * Shot + Weapon.ReloadBodyOffsetCm[Channel] * Reload + Weapon.StowOffsetCm[Channel] * Off;
 		}
+		const FVector StowTurn(Weapon.StowTurn.Pitch, Weapon.StowTurn.Yaw, Weapon.StowTurn.Roll);
 		const FVector ShotTurn(Weapon.ActionBodyTurn.Pitch, Weapon.ActionBodyTurn.Yaw, Weapon.ActionBodyTurn.Roll);
 		const FVector ReloadTurn(Weapon.ReloadBodyTurn.Pitch, Weapon.ReloadBodyTurn.Yaw, Weapon.ReloadBodyTurn.Roll);
-		return ShotTurn[Channel - 3] * Shot + ReloadTurn[Channel - 3] * Reload;
+		return ShotTurn[Channel - 3] * Shot + ReloadTurn[Channel - 3] * Reload + StowTurn[Channel - 3] * Off;
 	};
 	const TArray<FJamAimSpring>& Springs = Weapon.PoseSprings;
 	if (Springs.Num() < 6)
@@ -278,8 +366,8 @@ void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State,
 		// No springs: the targets themselves.
 		for (int32 Axis = 0; Axis < 3; ++Axis)
 		{
-			State.Place[Axis] = Goal(Axis, Since1, Reload1);
-			State.Turn[Axis] = Goal(3 + Axis, Since1, Reload1);
+			State.Place[Axis] = Goal(Axis, Since1, Reload1, Switch.Time1);
+			State.Turn[Axis] = Goal(3 + Axis, Since1, Reload1, Switch.Time1);
 		}
 		return;
 	}
@@ -300,6 +388,18 @@ void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State,
 		const float S1 = FMath::Lerp(Since0, Since1, B);
 		const float R0 = Reload1 >= 0.0f ? FMath::Lerp(Reload0, Reload1, A) : -1.0f;
 		const float R1 = Reload1 >= 0.0f ? FMath::Lerp(Reload0, Reload1, B) : -1.0f;
+		const float W0 = FMath::Lerp(Switch.Time0, Switch.Time1, A);
+		const float W1 = FMath::Lerp(Switch.Time0, Switch.Time1, B);
+		if (Switch.Stage == ESwitch::Stow || Switch.Stage == ESwitch::Draw)
+		{
+			for (const FJamPoseKick& Each : Switch.Stage == ESwitch::Stow ? Weapon.StowKicks : Weapon.DrawKicks)
+			{
+				if (Crossed(W0, W1, Each.Time))
+				{
+					Kick(Each);
+				}
+			}
+		}
 		for (const FJamPoseKick& Each : Weapon.ShotKicks)
 		{
 			if (Crossed(S0, S1, Each.Time))
@@ -331,7 +431,7 @@ void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State,
 		{
 			const FJamAimSpring& Spring = Springs[Axis];
 			const float W = 2.0f * PI * Spring.Hz;
-			const float To = Goal(Axis, S1 - Spring.Delay, R1 >= 0.0f ? R1 - Spring.Delay : -1.0f);
+			const float To = Goal(Axis, S1 - Spring.Delay, R1 >= 0.0f ? R1 - Spring.Delay : -1.0f, W1 - Spring.Delay);
 			State.PlaceVelocity[Axis] += (W * W * (To - State.Place[Axis]) - 2.0f * Spring.Damping * W * State.PlaceVelocity[Axis]) * Dt;
 			State.Place[Axis] += State.PlaceVelocity[Axis] * Dt;
 		}
@@ -350,7 +450,7 @@ void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State,
 		{
 			const FJamAimSpring& Spring = Springs[3 + Axis];
 			const float W = 2.0f * PI * Spring.Hz;
-			const float To = Goal(3 + Axis, S1 - Spring.Delay, R1 >= 0.0f ? R1 - Spring.Delay : -1.0f) + Drag[Axis];
+			const float To = Goal(3 + Axis, S1 - Spring.Delay, R1 >= 0.0f ? R1 - Spring.Delay : -1.0f, W1 - Spring.Delay) + Drag[Axis];
 			const float Damping = State.bExit && Axis != 1 ? FMath::Max(Spring.Damping, PoseExitTurnDamping) : Spring.Damping;
 			State.TurnVelocity[Axis] += (W * W * (To - State.Turn[Axis]) - 2.0f * Damping * W * State.TurnVelocity[Axis]) * Dt;
 			State.Turn[Axis] += State.TurnVelocity[Axis] * Dt;
@@ -361,16 +461,40 @@ void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State,
 void UJamWeaponsComponent::UpdatePose(const FJamWeapon& Weapon, float DeltaTime)
 {
 	static IConsoleVariable* ShotPoseAt = IConsoleManager::Get().FindConsoleVariable(TEXT("jam.Weapons.PoseAt"));
-	if (PoseWeapon != CurrentWeapon)
+	if (PoseWeapon != ShownWeapon)
 	{
+		// A gun coming into view starts from its put-away pose (out of view), not from rest.
 		Pose = FPoseState();
-		PoseWeapon = CurrentWeapon;
+		if (PoseSwitch.Stage == ESwitch::Draw || PoseSwitch.Stage == ESwitch::Away)
+		{
+			Pose.Place = Weapon.StowOffsetCm;
+			Pose.Turn = FVector(Weapon.StowTurn.Pitch, Weapon.StowTurn.Yaw, Weapon.StowTurn.Roll);
+		}
+		PoseWeapon = ShownWeapon;
 		PosePrevSince = SinceShotSeconds;
 		PosePrevReload = -1.0f;
 	}
 	// Held poses for stills: from rest up to the held moment, the same every frame.
 	const float ShotAt = ShotPoseAt ? ShotPoseAt->GetFloat() : -1.0f;
 	const float ReloadAt = CVarReloadPoseAt.GetValueOnGameThread();
+	const float StowAt = CVarStowPoseAt.GetValueOnGameThread();
+	const float DrawAt = CVarDrawPoseAt.GetValueOnGameThread();
+	if (StowAt >= 0.0f || DrawAt >= 0.0f)
+	{
+		Pose = FPoseState();
+		FSwitchSpan Span;
+		Span.Stage = StowAt >= 0.0f ? ESwitch::Stow : ESwitch::Draw;
+		Span.Time1 = StowAt >= 0.0f ? StowAt : DrawAt;
+		if (Span.Stage == ESwitch::Draw)
+		{
+			Pose.Place = Weapon.StowOffsetCm;
+			Pose.Turn = FVector(Weapon.StowTurn.Pitch, Weapon.StowTurn.Yaw, Weapon.StowTurn.Roll);
+		}
+		StepPose(Weapon, Pose, 1000.0f, 1000.0f, -1.0f, -1.0f, 0.0f, 0, Span.Time1, Span);
+		PosePrevSince = SinceShotSeconds;
+		PosePrevReload = -1.0f;
+		return;
+	}
 	if (ShotAt >= 0.0f || ReloadAt >= 0.0f)
 	{
 		Pose = FPoseState();
@@ -397,13 +521,14 @@ void UJamWeaponsComponent::UpdatePose(const FJamWeapon& Weapon, float DeltaTime)
 	{
 		PosePrevReload = 0.0f;
 	}
-	StepPose(Weapon, Pose, PosePrevSince, Since, PosePrevReload, Reload, float(ReloadEndSeconds - ReloadStartSeconds), ShellsPlanned, DeltaTime);
+	StepPose(Weapon, Pose, PosePrevSince, Since, PosePrevReload, Reload, float(ReloadEndSeconds - ReloadStartSeconds), ShellsPlanned, DeltaTime,
+		PoseSwitch);
 	PosePrevSince = Since;
 	PosePrevReload = Reload;
 }
 
 void UJamWeaponsComponent::TracePose(int32 Weapon, bool bReload, int32 Shells, float Seconds, float Step,
-	TArray<FVector>& OutPlace, TArray<FVector>& OutTurn) const
+	TArray<FVector>& OutPlace, TArray<FVector>& OutTurn, int32 SwitchPhase) const
 {
 	if (!Weapons.IsValidIndex(Weapon) || Step <= 0.0f)
 	{
@@ -412,11 +537,25 @@ void UJamWeaponsComponent::TracePose(int32 Weapon, bool bReload, int32 Shells, f
 	const FJamWeapon& Gun = Weapons[Weapon];
 	FPoseState State;
 	const float Length = ReloadDuration(Gun, Shells);
+	if (SwitchPhase == 2)
+	{
+		// A draw starts from the put-away pose.
+		State.Place = Gun.StowOffsetCm;
+		State.Turn = FVector(Gun.StowTurn.Pitch, Gun.StowTurn.Yaw, Gun.StowTurn.Roll);
+	}
 	for (float T = 0.0f; T <= Seconds + KINDA_SMALL_NUMBER; T += Step)
 	{
 		OutPlace.Add(State.Place);
 		OutTurn.Add(State.Turn);
-		if (bReload)
+		if (SwitchPhase != 0)
+		{
+			FSwitchSpan Span;
+			Span.Stage = SwitchPhase == 1 ? ESwitch::Stow : ESwitch::Draw;
+			Span.Time0 = T;
+			Span.Time1 = T + Step;
+			StepPose(Gun, State, 1000.0f, 1000.0f, -1.0f, -1.0f, 0.0f, 0, Step, Span);
+		}
+		else if (bReload)
 		{
 			StepPose(Gun, State, 1000.0f, 1000.0f, T, T + Step, Length, Shells, Step);
 		}
@@ -425,6 +564,170 @@ void UJamWeaponsComponent::TracePose(int32 Weapon, bool bReload, int32 Shells, f
 			StepPose(Gun, State, T, T + Step, -1.0f, -1.0f, 0.0f, 0, Step);
 		}
 	}
+}
+
+namespace
+{
+	/** The time on Path (sampled every 5 ms up to its end) where it is nearest Share: a redirect picks up where the gun is. */
+	float TimeAtShare(const FRuntimeFloatCurve& Path, float Share)
+	{
+		const float End = LastKeyTime(Path);
+		float Best = 0.0f;
+		float BestError = TNumericLimits<float>::Max();
+		for (float T = 0.0f; T <= End + KINDA_SMALL_NUMBER; T += 0.005f)
+		{
+			if (const float Error = FMath::Abs(JamEvalCycle(Path, T) - Share); Error < BestError)
+			{
+				Best = T;
+				BestError = Error;
+			}
+		}
+		return Best;
+	}
+}
+
+void UJamWeaponsComponent::HolsterWeapon(bool bInstant)
+{
+	bHolstered = true;
+	if (bInstant)
+	{
+		// Gone this frame (owner 19.10: grabbing something), no put-away.
+		SwitchStage = ESwitch::Away;
+		SwitchTime = 0.0f;
+		ShownWeapon = INDEX_NONE;
+		PoseWeapon = INDEX_NONE; // the next draw starts from its put-away pose
+		if (ViewModel)
+		{
+			ViewModel->SetStaticMesh(nullptr);
+			ActionInView->SetStaticMesh(nullptr);
+		}
+	}
+}
+
+void UJamWeaponsComponent::DrawWeapon(int32 Index)
+{
+	bHolstered = false;
+	if (Index != INDEX_NONE)
+	{
+		SelectWeapon(Index);
+	}
+}
+
+void UJamWeaponsComponent::FinishSwitch()
+{
+	bHolstered = false;
+	SwitchStage = ESwitch::Drawn;
+	SwitchTime = 0.0f;
+	ShownWeapon = IsWeaponUnlocked(CurrentWeapon) ? CurrentWeapon : INDEX_NONE;
+	if (ViewModel)
+	{
+		const FJamWeapon* Gun = GetWeapon();
+		ViewModel->SetStaticMesh(Gun ? Gun->ViewMesh.Get() : nullptr);
+		ActionInView->SetStaticMesh(Gun ? Gun->ActionMesh.Get() : nullptr);
+	}
+	Pose = FPoseState();
+	PoseWeapon = ShownWeapon;
+}
+
+bool UJamWeaponsComponent::IsWeaponReady() const
+{
+	if (!IsWeaponUnlocked(CurrentWeapon) || ShownWeapon != CurrentWeapon || bHolstered)
+	{
+		return false;
+	}
+	return SwitchStage == ESwitch::Drawn;
+}
+
+const FJamWeapon* UJamWeaponsComponent::UpdateSwitch(float DeltaTime, bool bHandsBusy, FSwitchSpan& OutSpan)
+{
+	const int32 Wanted = bHandsBusy || bHolstered || !IsWeaponUnlocked(CurrentWeapon) ? INDEX_NONE : CurrentWeapon;
+	const float Before = SwitchTime;
+	SwitchTime += DeltaTime;
+	const auto Show = [this](int32 Index)
+	{
+		ShownWeapon = Index;
+		if (Index == INDEX_NONE)
+		{
+			PoseWeapon = INDEX_NONE; // the next draw starts from its put-away pose, the same gun too
+		}
+		const FJamWeapon* Gun = Weapons.IsValidIndex(Index) ? &Weapons[Index] : nullptr;
+		ViewModel->SetStaticMesh(Gun ? Gun->ViewMesh.Get() : nullptr);
+		ActionInView->SetStaticMesh(Gun ? Gun->ActionMesh.Get() : nullptr);
+		SinceShotSeconds = 1000.0f;
+	};
+	const auto Play = [this](USoundBase* Sound) { if (Sound) { UGameplayStatics::PlaySound2D(this, Sound); } };
+	// The shoulder taking the gun: a nudge of the view that comes all the way back.
+	const auto Nudge = [this](const FRotator& By)
+	{
+		KickPitchLeft += By.Pitch;
+		KickYawLeft += By.Yaw;
+		KickAttackLeft = RecoilAttackSeconds;
+		SettlePitch += By.Pitch;
+		SettleYaw += By.Yaw;
+	};
+	switch (SwitchStage)
+	{
+	case ESwitch::Drawn:
+		if (Wanted != ShownWeapon)
+		{
+			SwitchStage = ShownWeapon == INDEX_NONE ? ESwitch::Away : ESwitch::Stow;
+			SwitchTime = 0.0f;
+		}
+		break;
+	case ESwitch::Stow:
+		if (Wanted == ShownWeapon)
+		{
+			// Changed its mind: back the way it went, from where it is.
+			SwitchStage = ESwitch::Draw;
+			SwitchTime = TimeAtShare(Weapons[ShownWeapon].DrawPath, JamEvalCycle(Weapons[ShownWeapon].StowPath, SwitchTime));
+		}
+		else
+		{
+			const FJamWeapon& Gun = Weapons[ShownWeapon];
+			if (Crossed(Before, SwitchTime, Gun.StowSoundSeconds)) { Play(Gun.StowSound); }
+			if (Crossed(Before, SwitchTime, Gun.StowViewNudgeSeconds)) { Nudge(Gun.StowViewNudge); }
+			if (SwitchTime >= LastKeyTime(Gun.StowPath))
+			{
+				SwitchStage = ESwitch::Away;
+				SwitchTime = 0.0f;
+				Show(INDEX_NONE);
+			}
+		}
+		break;
+	case ESwitch::Draw:
+		if (Wanted != ShownWeapon)
+		{
+			// Away again from where it is (a quick switch during the draw).
+			SwitchStage = ESwitch::Stow;
+			SwitchTime = TimeAtShare(Weapons[ShownWeapon].StowPath, JamEvalCycle(Weapons[ShownWeapon].DrawPath, SwitchTime));
+		}
+		else
+		{
+			const FJamWeapon& Gun = Weapons[ShownWeapon];
+			if (Crossed(Before, SwitchTime, Gun.DrawSoundSeconds)) { Play(Gun.DrawSound); }
+			if (Crossed(Before, SwitchTime, Gun.DrawViewNudgeSeconds)) { Nudge(Gun.DrawViewNudge); }
+			// Drawn: far enough along its path and settled close to rest (latched - the float past rest
+			// does not take it back), or at the path's end.
+			if (SwitchTime >= LastKeyTime(Gun.DrawPath) || (SwitchTime >= Gun.DrawReadySeconds
+				&& Pose.Place.Size() <= DrawReadyPlaceCm && Pose.Turn.GetAbsMax() <= DrawReadyTurnDeg))
+			{
+				SwitchStage = ESwitch::Drawn;
+			}
+		}
+		break;
+	case ESwitch::Away:
+		if (Wanted != INDEX_NONE)
+		{
+			Show(Wanted);
+			SwitchStage = ESwitch::Draw;
+			SwitchTime = 0.0f;
+		}
+		break;
+	}
+	OutSpan.Stage = SwitchStage;
+	OutSpan.Time1 = SwitchTime;
+	OutSpan.Time0 = FMath::Min(SwitchTime, FMath::Max(0.0f, SwitchTime - DeltaTime));
+	return Weapons.IsValidIndex(ShownWeapon) ? &Weapons[ShownWeapon] : nullptr;
 }
 
 FTransform UJamWeaponsComponent::GetMagPose(const FJamWeapon& Weapon, float Time)
@@ -775,6 +1078,23 @@ namespace
 				}
 			}
 		}
+		for (int32 Gun = 0; Gun < FMath::Min(3, Guns->Weapons.Num()); ++Gun)
+		{
+			const FJamWeapon& Weapon = Guns->Weapons[Gun];
+			for (const int32 Phase : { 1, 2 })
+			{
+				TArray<FVector> Place, Turn;
+				Guns->TracePose(Gun, false, 0, LastKeyTime(Phase == 1 ? Weapon.StowPath : Weapon.DrawPath) + 0.4f, 0.01f, Place, Turn, Phase);
+				for (int32 Index = 0; Index < Place.Num(); ++Index)
+				{
+					const float T = Index * 0.01f;
+					const float Path = JamEvalCycle(Phase == 1 ? Weapon.StowPath : Weapon.DrawPath, T);
+					UE_LOG(LogMindKore, Log, TEXT("Pose trace: %s %s t=%.2f place=(%.3f,%.3f,%.3f) turn=(%.3f,%.3f,%.3f) part=(%.4f,0,0)"),
+						Names[Gun], Phase == 1 ? TEXT("stow") : TEXT("draw"), T, Place[Index].X, Place[Index].Y, Place[Index].Z,
+						Turn[Index].X, Turn[Index].Y, Turn[Index].Z, Path);
+				}
+			}
+		}
 		UE_LOG(LogMindKore, Log, TEXT("Pose trace: done"));
 	}
 
@@ -949,6 +1269,155 @@ namespace
 		TEXT("jam.Weapons.MagFrames"),
 		TEXT("The USP's and the SV-98's magazine drop and insert in first person at 60 fps (HighResShot; needs a real RHI)."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunMagFrames));
+
+	/**
+	 * jam.Weapons.SwitchFrames: every gun put away and drawn, stills every 33 ms held with
+	 * jam.Weapons.StowPoseAt / DrawPoseAt (HighResShot; needs a real RHI):
+	 * JamSwitch_<gun>_<stow|draw>_<ms>.png.
+	 */
+	void RunSwitchFrames(UWorld* World)
+	{
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AJamZeroGPawn* Pawn = Controller ? Cast<AJamZeroGPawn>(Controller->GetPawn()) : nullptr;
+		IConsoleVariable* StowAt = IConsoleManager::Get().FindConsoleVariable(TEXT("jam.Weapons.StowPoseAt"));
+		IConsoleVariable* DrawAt = IConsoleManager::Get().FindConsoleVariable(TEXT("jam.Weapons.DrawPoseAt"));
+		if (!Pawn || !StowAt || !DrawAt)
+		{
+			return;
+		}
+		FVector Target = Pawn->GetActorLocation() + FVector(600.0f, 0.0f, 0.0f);
+		FVector Stand = Pawn->GetActorLocation();
+		if (TActorIterator<AJamLivingWall> Wall(World); Wall)
+		{
+			Target = Wall->GetActorLocation();
+			Stand = Target + Wall->GetFrontNormal() * 600.0f;
+		}
+		const auto Hold = [Pawn, Controller, Stand, Target]()
+		{
+			Pawn->Body->SetWorldLocation(Stand, false, nullptr, ETeleportType::TeleportPhysics);
+			Pawn->Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+			Controller->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());
+		};
+		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
+		{
+			FTimerHandle Handle;
+			Pawn->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(Pawn, MoveTemp(Step)), Seconds, false);
+		};
+		const TCHAR* Names[3] = { TEXT("pistol"), TEXT("shotgun"), TEXT("sv98") };
+		float At = 8.0f;
+		for (int32 Gun = 0; Gun < 3; ++Gun)
+		{
+			After(At, [Pawn, Hold, Gun]() { Pawn->Guns->UnlockWeapon(Gun); Pawn->Guns->FinishSwitch(); Hold(); });
+			At += 1.0f;
+			const FJamWeapon& Weapon = Pawn->Guns->Weapons[Gun];
+			for (const bool bDraw : { false, true })
+			{
+				const float End = LastKeyTime(bDraw ? Weapon.DrawPath : Weapon.StowPath) + (bDraw ? 0.3f : 0.0f);
+				for (float T = 0.0f; T <= End + KINDA_SMALL_NUMBER; T += 1.0f / 30.0f)
+				{
+					After(At, [Hold, StowAt, DrawAt, bDraw, T]()
+					{
+						Hold();
+						StowAt->Set(bDraw ? -1.0f : T, ECVF_SetByCode);
+						DrawAt->Set(bDraw ? T : -1.0f, ECVF_SetByCode);
+					});
+					After(At + 0.12f, [Controller, Name = Names[Gun], bDraw, T]()
+					{
+						Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=JamSwitch_%s_%s_%04d"), Name,
+							bDraw ? TEXT("draw") : TEXT("stow"), FMath::RoundToInt(T * 1000.0f)));
+					});
+					At += 0.25f;
+				}
+			}
+			After(At, [StowAt, DrawAt]() { StowAt->Set(-1.0f, ECVF_SetByCode); DrawAt->Set(-1.0f, ECVF_SetByCode); });
+			At += 0.5f;
+		}
+		After(At, [Hold]() { Hold(); UE_LOG(LogMindKore, Log, TEXT("Switch frames: done")); });
+	}
+
+	FAutoConsoleCommandWithWorld GSwitchFrames(
+		TEXT("jam.Weapons.SwitchFrames"),
+		TEXT("Every gun put away and drawn, stills every 33 ms (jam.Weapons.StowPoseAt / DrawPoseAt; HighResShot, needs a real RHI)."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunSwitchFrames));
+
+	/**
+	 * jam.Weapons.SwitchProbe: live switching with quick changes of mind, logged every frame -
+	 * "Switch probe: t=.. stage=.. shown=.. current=.. ready=.. place=(..) turn=(..)" and the
+	 * largest frame-to-frame jump of the pose (a pop would show as one). Pistol -> shotgun,
+	 * back to the pistol during the put-away (0.2 s), the SV-98 (0.8 s), the shotgun during
+	 * the SV-98's draw (1.6 s); a try to fire during a draw and after it; holster at once and
+	 * draw (3.6 s, 4.2 s). Runs headless too.
+	 */
+	void RunSwitchProbe(UWorld* World)
+	{
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AJamZeroGPawn* Pawn = Controller ? Cast<AJamZeroGPawn>(Controller->GetPawn()) : nullptr;
+		if (!Pawn)
+		{
+			return;
+		}
+		UJamWeaponsComponent* Guns = Pawn->Guns;
+		for (int32 Gun = 0; Gun < Guns->Weapons.Num(); ++Gun)
+		{
+			Guns->UnlockWeapon(Gun);
+		}
+		Guns->SelectWeapon(0);
+		Guns->FinishSwitch();
+		struct FProbe
+		{
+			double Start = 0.0;
+			FVector Place = FVector::ZeroVector;
+			FVector Turn = FVector::ZeroVector;
+			float MaxPlaceJump = 0.0f;
+			float MaxTurnJump = 0.0f;
+			int32 Frames = 0;
+		};
+		TSharedRef<FProbe> Probe = MakeShared<FProbe>();
+		Probe->Start = World->GetTimeSeconds();
+		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
+		{
+			FTimerHandle Handle;
+			Pawn->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(Pawn, MoveTemp(Step)), Seconds, false);
+		};
+		FTimerHandle Every;
+		Pawn->GetWorldTimerManager().SetTimer(Every, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Guns, Probe]()
+		{
+			const float T = float(Pawn->GetWorld()->GetTimeSeconds() - Probe->Start);
+			if (T > 5.0f)
+			{
+				return;
+			}
+			const FVector Place = Guns->GetPosePlace();
+			const FVector Turn = Guns->GetPoseTurn();
+			if (Probe->Frames++ > 0)
+			{
+				Probe->MaxPlaceJump = FMath::Max(Probe->MaxPlaceJump, float((Place - Probe->Place).Size()));
+				Probe->MaxTurnJump = FMath::Max(Probe->MaxTurnJump, float((Turn - Probe->Turn).GetAbsMax()));
+			}
+			Probe->Place = Place;
+			Probe->Turn = Turn;
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: t=%.3f shown=%d current=%d ready=%d place=(%.2f,%.2f,%.2f) turn=(%.2f,%.2f,%.2f)"), T,
+				Guns->GetShownWeapon(), Guns->CurrentWeapon, Guns->IsWeaponReady() ? 1 : 0, Place.X, Place.Y, Place.Z, Turn.X, Turn.Y, Turn.Z);
+		}), 0.001f, true);
+		After(0.05f, [Guns]() { Guns->SelectWeapon(1); });
+		After(0.25f, [Guns]() { Guns->SelectWeapon(0); });   // during the pistol's put-away: back
+		After(0.8f, [Guns]() { Guns->SelectWeapon(2); });
+		After(1.6f, [Guns]() { Guns->SelectWeapon(1); });    // during the SV-98's draw: away again, the shotgun
+		After(2.0f, [Pawn, Guns]() { UE_LOG(LogMindKore, Log, TEXT("Switch probe: fire at 2.0 s (%s): %s"), *Guns->Describe(), Pawn->Fire() ? TEXT("fired") : TEXT("refused")); });
+		After(3.2f, [Pawn, Guns]() { UE_LOG(LogMindKore, Log, TEXT("Switch probe: fire at 3.2 s (%s): %s"), *Guns->Describe(), Pawn->Fire() ? TEXT("fired") : TEXT("refused")); });
+		After(3.6f, [Guns]() { Guns->HolsterWeapon(true); });
+		After(4.2f, [Guns]() { Guns->DrawWeapon(); });
+		After(5.1f, [Pawn, Guns, Probe]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: done - %d frames, largest frame-to-frame jump %.2f cm, %.2f deg; fire after the draw: %s"),
+				Probe->Frames, Probe->MaxPlaceJump, Probe->MaxTurnJump, Pawn->Fire() ? TEXT("fired") : TEXT("refused"));
+		});
+	}
+
+	FAutoConsoleCommandWithWorld GSwitchProbe(
+		TEXT("jam.Weapons.SwitchProbe"),
+		TEXT("Live switching with quick changes of mind and a holster/draw, logged every frame with the largest pose jump."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunSwitchProbe));
 
 	FAutoConsoleCommandWithWorld GWeaponFrames(
 		TEXT("jam.Weapons.Frames"),

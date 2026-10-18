@@ -372,16 +372,10 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	{
 		return;
 	}
-	// A hull tool in hand (the strap, the welder) puts the gun away.
+	// A hull tool in hand (the strap, the welder) puts the gun away; a switch puts one away and
+	// draws the next (JamWeaponParts.cpp). The gun shown is the one on its way, not yet the current one.
 	const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>();
-	const FJamWeapon* Weapon = Tools && Tools->GetTool() != EJamHullTool::None ? nullptr : GetWeapon();
-	if (CurrentWeapon != ShownWeapon || !Weapon)
-	{
-		ShownWeapon = Weapon ? CurrentWeapon : INDEX_NONE;
-		ViewModel->SetStaticMesh(Weapon ? Weapon->ViewMesh.Get() : nullptr);
-		ActionInView->SetStaticMesh(Weapon ? Weapon->ActionMesh.Get() : nullptr);
-		SinceShotSeconds = 1000.0f;
-	}
+	const FJamWeapon* Weapon = UpdateSwitch(DeltaTime, Tools && Tools->GetTool() != EJamHullTool::None, PoseSwitch);
 	if (!Weapon)
 	{
 		UpdateParts(nullptr, 0.0f);
@@ -398,7 +392,7 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	float KickScale = 1.0f;
 	if (Scope)
 	{
-		Scope->AimPose(CurrentWeapon, Offset, KickScale);
+		Scope->AimPose(ShownWeapon, Offset, KickScale);
 	}
 	const float Kick = KickScale * FMath::Exp(-ViewKickReturnRate * Since);
 	const FQuat Rise = FRotator(Weapon->ViewKickRiseDeg * Kick, 0.0f, -0.3f * Weapon->ViewKickRiseDeg * Kick).Quaternion();
@@ -524,7 +518,7 @@ FString UJamWeaponsComponent::Describe() const
 void UJamWeaponsComponent::Reload()
 {
 	FJamWeapon* Weapon = IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
-	if (!Weapon || Weapon->Ammo >= Weapon->MagazineSize || Weapon->Reserve <= 0 || GetReloadRemaining() > 0.0f)
+	if (!Weapon || !IsWeaponReady() || Weapon->Ammo >= Weapon->MagazineSize || Weapon->Reserve <= 0 || GetReloadRemaining() > 0.0f)
 	{
 		return;
 	}
@@ -541,7 +535,7 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	{
 		ReloadEndSeconds = 0.0; // round-by-round loading breaks off for a shot
 	}
-	if (!Weapon || Now < NextShotSeconds || GetReloadRemaining() > 0.0f)
+	if (!Weapon || !IsWeaponReady() || Now < NextShotSeconds || GetReloadRemaining() > 0.0f)
 	{
 		return false;
 	}

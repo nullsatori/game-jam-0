@@ -338,6 +338,66 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
 	TObjectPtr<USoundBase> ShellInsertSound = nullptr;
 
+	/**
+	 * Putting the gun away and drawing it (owner 19.10: the pistol to a holster on the right
+	 * hip, the shotgun over the right shoulder, the SV-98 over the left): the pose springs
+	 * pull toward StowOffsetCm / StowTurn (out of view, camera frame) by StowPath (seconds
+	 * into the put-away; its last key: gone) and back by DrawPath (seconds into the draw,
+	 * from 1 to 0; its last key: drawn). The turns see both paths StowTurnLead s early
+	 * (positive: the muzzle leads, negative: it trails the grip).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	FVector StowOffsetCm = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	FRotator StowTurn = FRotator::ZeroRotator;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	FRuntimeFloatCurve StowPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	FRuntimeFloatCurve DrawPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	float StowTurnLead = 0.0f;
+
+	/** Seconds into the draw from which the gun may fire. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch", meta = (ClampMin = "0.0"))
+	float DrawReadySeconds = 0.3f;
+
+	/** Knocks on the pose springs, seconds into the put-away / the draw. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	TArray<FJamPoseKick> StowKicks;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	TArray<FJamPoseKick> DrawKicks;
+
+	/** The shoulder taking a heavy gun: a nudge of the view (pitch, yaw, degrees; it comes back) at these moments. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	FRotator StowViewNudge = FRotator::ZeroRotator;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	float StowViewNudgeSeconds = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	FRotator DrawViewNudge = FRotator::ZeroRotator;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Switch")
+	float DrawViewNudgeSeconds = 0.0f;
+
+	/** Holster / sling sounds, 2D, at these seconds into the put-away and the draw. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
+	TObjectPtr<USoundBase> StowSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
+	float StowSoundSeconds = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
+	TObjectPtr<USoundBase> DrawSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
+	float DrawSoundSeconds = 0.0f;
+
 	/** The shot, 2D. Space-treated offline (Scripts/jam_space_shots.py): muffled, reverberant, with a sub. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
 	TObjectPtr<USoundBase> ShotSound = nullptr;
@@ -468,6 +528,13 @@ public:
 	/** Loose cases and magazines in the world now. */
 	int32 GetDebrisCount() const { return Debris.Num(); }
 
+	/** A drawn gun fires only once its pose is this close to rest (and DrawReadySeconds into the draw). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Pose", meta = (ClampMin = "0.0"))
+	float DrawReadyPlaceCm = 4.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Pose", meta = (ClampMin = "0.0"))
+	float DrawReadyTurnDeg = 10.0f;
+
 	/** The gun's turns trail its motion: pitch per cm/s up (it dips while rising), yaw and roll per cm/s right. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Pose")
 	FVector PoseTurnLag = FVector(0.12f, 0.06f, 0.1f);
@@ -485,7 +552,8 @@ public:
 	 * (round-by-round guns load Shells rounds) of gun Weapon, sampled every Step s:
 	 * place and turn per sample. For stills and traces; the game steps them live.
 	 */
-	void TracePose(int32 Weapon, bool bReload, int32 Shells, float Seconds, float Step, TArray<FVector>& OutPlace, TArray<FVector>& OutTurn) const;
+	void TracePose(int32 Weapon, bool bReload, int32 Shells, float Seconds, float Step, TArray<FVector>& OutPlace, TArray<FVector>& OutTurn,
+		int32 SwitchPhase = 0) const;
 
 	/** The SV-98's scope (JamScope.h): made in BindInput, it raises the rifle to the eye through UpdateViewModel. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
@@ -526,6 +594,30 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
 	bool IsWeaponUnlocked(int32 Index) const { return Weapons.IsValidIndex(Index) && Weapons[Index].bUnlocked; }
+
+	/**
+	 * Put the gun away and keep it away (hands busy): animated along its own path, or
+	 * bInstant - gone this frame (owner 19.10: grabbing something). DrawWeapon brings it back.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
+	void HolsterWeapon(bool bInstant);
+
+	/**
+	 * Draw a gun along its own path - from away (after HolsterWeapon), or as a switch:
+	 * Index (INDEX_NONE: the current one) is selected first, and a gun in view goes away first.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
+	void DrawWeapon(int32 Index = -1);
+
+	/** The current gun is drawn far enough to fire (DrawReadySeconds) and no put-away is wanted. */
+	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
+	bool IsWeaponReady() const;
+
+	/** For probes and stands: any put-away / draw finished at once - the current gun drawn and ready. */
+	void FinishSwitch();
+
+	/** The gun drawn in view now (the old one while it goes away), or INDEX_NONE. */
+	int32 GetShownWeapon() const { return ShownWeapon; }
 
 	/** The gun in hand, or null when it is not unlocked (no guns yet). */
 	const FJamWeapon* GetWeapon() const { return IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr; }
@@ -601,9 +693,24 @@ private:
 		/** Swinging back out of a reload (its last 0.1 s on, until the turns settle). */
 		bool bExit = false;
 	};
+	/** Where the gun is in a switch: put away (Stow), drawn (Draw), away; Time0..Time1 the step's span. */
+	enum class ESwitch : uint8 { Drawn, Stow, Draw, Away };
+	struct FSwitchSpan
+	{
+		ESwitch Stage = ESwitch::Drawn;
+		float Time0 = 0.0f;
+		float Time1 = 0.0f;
+	};
 	/** Step the pose springs over shot time Since0..Since1 and reload time Reload0..Reload1 (< 0: none). */
 	void StepPose(const FJamWeapon& Weapon, FPoseState& State, float Since0, float Since1, float Reload0, float Reload1,
-		float ReloadLength, int32 Shells, float DeltaTime) const;
+		float ReloadLength, int32 Shells, float DeltaTime, const FSwitchSpan& Switch = FSwitchSpan()) const;
+	/** Run the switch this frame; returns the gun to show (null: away) and the span the springs step over. */
+	const FJamWeapon* UpdateSwitch(float DeltaTime, bool bHandsBusy, FSwitchSpan& OutSpan);
+	ESwitch SwitchStage = ESwitch::Away;
+	float SwitchTime = 0.0f;
+	/** HolsterWeapon until DrawWeapon. */
+	bool bHolstered = false;
+	FSwitchSpan PoseSwitch;
 	/** Live, or re-run from rest for jam.Weapons.PoseAt / ReloadPoseAt. */
 	void UpdatePose(const FJamWeapon& Weapon, float DeltaTime);
 	FPoseState Pose;

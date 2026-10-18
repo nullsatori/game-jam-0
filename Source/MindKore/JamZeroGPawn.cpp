@@ -1627,12 +1627,14 @@ namespace
 		World->GetTimerManager().SetTimer(AfterPush, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn]()
 		{
 			LogProbe(TEXT("after push"), Pawn);
+			Pawn->Guns->FinishSwitch(); // no draw: the probe shoots at once
 			Pawn->Fire();
 			FTimerHandle AfterShot;
 			Pawn->GetWorld()->GetTimerManager().SetTimer(AfterShot, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn]()
 			{
 				LogProbe(TEXT("after pistol"), Pawn);
 				Pawn->Guns->SelectWeapon(2);
+				Pawn->Guns->FinishSwitch();
 				Pawn->Fire();
 				FTimerHandle AfterSniper;
 				Pawn->GetWorld()->GetTimerManager().SetTimer(AfterSniper, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn]()
