@@ -10,6 +10,7 @@
 #include "JamCollisionImpact.h"
 #include "JamDockZone.h"
 #include "JamOxygen.h"
+#include "JamScope.h"
 #include "JamWeapons.h"
 #include "JamZeroGPawn.h"
 #include "JamShip.h"
@@ -122,7 +123,11 @@ void AJamZeroGHUD::DrawHUD()
 	}
 	const float CenterX = Canvas->ClipX * 0.5f;
 	const float CenterY = Canvas->ClipY * 0.5f;
-	DrawRect(FLinearColor(1.0f, 1.0f, 1.0f, 0.8f), CenterX - 2.0f, CenterY - 2.0f, 4.0f, 4.0f);
+	// Through the scope its reticle aims; the dot would sit on the chevron.
+	if (!Pawn->Guns->Scope || Pawn->Guns->Scope->GetAimAlpha() < 0.5f)
+	{
+		DrawRect(FLinearColor(1.0f, 1.0f, 1.0f, 0.8f), CenterX - 2.0f, CenterY - 2.0f, 4.0f, 4.0f);
+	}
 	UFont* Font = GEngine->GetMediumFont();
 
 	// Where you are drifting: a diamond on the prograde point (camera + velocity

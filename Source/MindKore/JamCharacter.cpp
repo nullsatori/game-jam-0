@@ -14,6 +14,7 @@
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "JamGravity.h"
+#include "JamScope.h"
 #include "JamWeapons.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -194,7 +195,8 @@ void AJamCharacter::Move(const FInputActionValue& Value)
 
 void AJamCharacter::Look(const FInputActionValue& Value)
 {
-	const FVector2D Axis = Value.Get<FVector2D>();
+	// Slower through the scope, as much as it magnifies (UJamScopeComponent::GetLookScale).
+	const FVector2D Axis = Value.Get<FVector2D>() * (Guns->Scope ? Guns->Scope->GetLookScale() : 1.0f);
 	AddControllerYawInput(Axis.X);
 	AddControllerPitchInput(-Axis.Y);
 }
