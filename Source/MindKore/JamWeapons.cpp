@@ -481,8 +481,30 @@ void UJamWeaponsComponent::UnlockWeapon(int32 Index)
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s unlocked"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString());
 }
 
+void UJamWeaponsComponent::Holster()
+{
+	if (bHolstered)
+	{
+		return;
+	}
+	bHolstered = true;
+	ReloadEndSeconds = 0.0; // as a switch: the reload and the last gun's cycle are abandoned
+	GetWorld()->GetTimerManager().ClearTimer(CycleTimer);
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: unarmed"), *GetNameSafe(GetOwner()));
+}
+
 void UJamWeaponsComponent::SelectWeapon(int32 Index)
 {
+	if (bHolstered && IsWeaponUnlocked(Index))
+	{
+		// Drawn again - the same gun or another.
+		bHolstered = false;
+		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: drawn"), *GetNameSafe(GetOwner()));
+		if (Index == CurrentWeapon)
+		{
+			return;
+		}
+	}
 	if (!Weapons.IsValidIndex(Index) || Index == CurrentWeapon || !Weapons[Index].bUnlocked)
 	{
 		return;
@@ -516,7 +538,7 @@ FString UJamWeaponsComponent::Describe() const
 
 void UJamWeaponsComponent::Reload()
 {
-	FJamWeapon* Weapon = IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
+	FJamWeapon* Weapon = !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
 	if (!Weapon || Weapon->Ammo >= Weapon->MagazineSize || Weapon->Reserve <= 0 || GetReloadRemaining() > 0.0f)
 	{
 		return;
@@ -528,7 +550,7 @@ void UJamWeaponsComponent::Reload()
 bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, FVector& OutRecoil)
 {
 	OutRecoil = FVector::ZeroVector;
-	FJamWeapon* Weapon = IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
+	FJamWeapon* Weapon = !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
 	const double Now = GetWorld()->GetTimeSeconds();
 	if (Weapon && Weapon->ShellMesh && Weapon->Ammo > 0 && GetReloadRemaining() > 0.0f)
 	{

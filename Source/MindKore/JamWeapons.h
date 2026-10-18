@@ -317,6 +317,10 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	int32 CurrentWeapon = 0;
 
+	/** Unarmed (Holster): CurrentWeapon stays as it was, out of hand. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
+	bool bHolstered = false;
+
 	/** Off (the ship map): every gun starts locked until a pickup unlocks it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons")
 	bool bStartWithAllWeapons = true;
@@ -426,8 +430,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
 	bool IsWeaponUnlocked(int32 Index) const { return Weapons.IsValidIndex(Index) && Weapons[Index].bUnlocked; }
 
-	/** The gun in hand, or null when it is not unlocked (no guns yet). */
-	const FJamWeapon* GetWeapon() const { return IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr; }
+	/** The gun in hand, or null: none unlocked yet, or unarmed (Holster). */
+	const FJamWeapon* GetWeapon() const { return !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr; }
+
+	/**
+	 * Unarmed: the gun goes out of view and does not fire until one is selected again (1/2/3, the wheel,
+	 * a pickup) - owner 18.10: grabbing something puts the gun away (AJamZeroGPawn::Grab).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
+	void Holster();
+
+	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
+	bool IsHolstered() const { return bHolstered; }
 
 	/** Seconds left of a reload; 0 when not reloading. */
 	float GetReloadRemaining() const;
