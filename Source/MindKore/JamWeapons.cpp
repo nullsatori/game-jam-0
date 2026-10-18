@@ -367,7 +367,16 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	}
 	// A hull tool in hand (the strap, the welder) puts the gun away.
 	const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>();
-	const FJamWeapon* Weapon = Tools && Tools->GetTool() != EJamHullTool::None ? nullptr : GetWeapon();
+	const bool bTool = Tools && Tools->GetTool() != EJamHullTool::None;
+	const FJamWeapon* Weapon = bTool ? nullptr : GetWeapon();
+	// Going unarmed: the gun is still drawn for HolsterSeconds, dropping down and away (accelerating, let go).
+	float Away = 0.0f;
+	if (!Weapon && !bTool && bHolstered && HolsterLeft > 0.0f && IsWeaponUnlocked(CurrentWeapon))
+	{
+		HolsterLeft = FMath::Max(0.0f, HolsterLeft - DeltaTime);
+		Weapon = &Weapons[CurrentWeapon];
+		Away = FMath::Square(1.0f - HolsterLeft / FMath::Max(HolsterSeconds, KINDA_SMALL_NUMBER));
+	}
 	if (CurrentWeapon != ShownWeapon || !Weapon)
 	{
 		ShownWeapon = Weapon ? CurrentWeapon : INDEX_NONE;
@@ -400,6 +409,11 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	Offset.SetRotation(Rise * FRotator(Pose.Turn.X, Pose.Turn.Y, Pose.Turn.Z).Quaternion() * Offset.GetRotation());
 	Offset.AddToTranslation(Pose.Place);
 	Offset.AddToTranslation(FVector(-Weapon->ViewKickBackCm * Kick, 0.0f, 0.0f));
+	if (Away > 0.0f)
+	{
+		Offset.AddToTranslation(FVector(-8.0f, 6.0f, -30.0f) * Away);
+		Offset.SetRotation(FRotator(-35.0f * Away, 10.0f * Away, 30.0f * Away).Quaternion() * Offset.GetRotation());
+	}
 	ViewModel->SetRelativeTransform(Offset);
 	// The moving part runs its cycle along/about the gun's own X.
 	ActionInView->SetRelativeLocationAndRotation(
@@ -488,6 +502,7 @@ void UJamWeaponsComponent::Holster()
 		return;
 	}
 	bHolstered = true;
+	HolsterLeft = HolsterSeconds;
 	ReloadEndSeconds = 0.0; // as a switch: the reload and the last gun's cycle are abandoned
 	GetWorld()->GetTimerManager().ClearTimer(CycleTimer);
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: unarmed"), *GetNameSafe(GetOwner()));

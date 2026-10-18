@@ -392,6 +392,10 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	bool bHolstered = false;
 
+	/** Going unarmed, the gun drops down and away over this long before it is gone (it does not fire meanwhile). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons", meta = (ClampMin = "0.0"))
+	float HolsterSeconds = 0.3f;
+
 	/** Off (the ship map): every gun starts locked until a pickup unlocks it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons")
 	bool bStartWithAllWeapons = true;
@@ -579,6 +583,8 @@ private:
 	void SpawnDebris(UStaticMesh* Mesh, const FTransform& Where, const FVector& Velocity, const FVector& SpinDegPerSec, float MassKg);
 
 	TArray<FRound> Rounds;
+	/** Seconds left of the drop away into unarmed. */
+	float HolsterLeft = 0.0f;
 	TArray<TWeakObjectPtr<AActor>> Debris;
 	double ReloadStartSeconds = 0.0;
 	/** Rounds this reload loads one by one (ShellMesh guns). */

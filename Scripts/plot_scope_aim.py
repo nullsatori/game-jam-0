@@ -74,3 +74,17 @@ fig2.savefig(sys.argv[2].replace(".png", "_path.png"), dpi=90)
 for aim, seg in runs.items():
     t0 = seg[0][0]
     print("aim=%d: %d samples over %.0f ms" % (aim, len(seg), (seg[-1][0] - t0) * 1000))
+# Aimed idle (the breath): the longest aimed run over 3 s, its turn once the raise and the look turn are over.
+idle = [seg for seg in segments if int(seg[0][1]) == 1 and seg[-1][0] - seg[0][0] > 3.0]
+if idle:
+    seg = max(idle, key=lambda s2: s2[-1][0] - s2[0][0])
+    seg = [r for r in seg if r[0] - seg[0][0] > 2.6]  # after the raise and the look turn (jam.Scope.AimFrames)
+    fig3, ax3 = plt.subplots(figsize=(9, 4))
+    for i, name in enumerate(("pitch", "yaw", "roll")):
+        ax3.plot([r[0] - seg[0][0] for r in seg], [r[5 + i] for r in seg], label=name)
+    ax3.set_title("%s aimed idle: the breath, degrees" % NAMES[GUN])
+    ax3.set_xlabel("s (game time)")
+    ax3.legend(loc="upper right")
+    fig3.tight_layout()
+    fig3.savefig(sys.argv[2].replace(".png", "_idle.png"), dpi=90)
+    print("idle: %d samples over %.1f s" % (len(seg), seg[-1][0] - seg[0][0]))

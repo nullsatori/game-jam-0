@@ -84,6 +84,21 @@ struct FJamGunAim
 	/** The muzzle trails the motion, degrees per cm/s of the gun: X pitch per cm/s up (it dips while rising), Y yaw and Z roll per cm/s across. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim")
 	FVector LagDegPerCmPerSec = FVector(0.1f, 0.04f, 0.05f);
+
+	/** Anticipation: before it rises the gun dips this far (cm, down) for AnticipationSeconds - the arm gathering itself. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim", meta = (ClampMin = "0.0"))
+	float AnticipationCm = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim", meta = (ClampMin = "0.0"))
+	float AnticipationSeconds = 0.08f;
+
+	/** The gun lags the camera's turn: degrees of yaw/pitch per deg/s of the view (roll half the yaw), at most 4 deg. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim", meta = (ClampMin = "0.0"))
+	float LookLag = 0.015f;
+
+	/** Aimed, the gun breathes: a slow sway of this many degrees (pitch; yaw 0.6 of it) at ~0.23 / 0.15 Hz. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim", meta = (ClampMin = "0.0"))
+	float BreathDeg = 0.15f;
 };
 
 /**
@@ -146,6 +161,14 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion")
 	TArray<FJamGunAim> Aims;
+
+	/** A gun coming into hand (drawn, switched to) starts this far from its rest pose, cm in the camera's frame (low and to the right), and rises on its Out springs. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion")
+	FVector DrawFromCm = FVector(-6.0f, 4.0f, -26.0f);
+
+	/** ...turned this much (pitch, yaw, roll, degrees): the muzzle low, canted. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion")
+	FVector DrawFromTurn = FVector(-30.0f, 10.0f, 25.0f);
 
 	/** The body's velocity changes (thrust, recoil, landing) push the gun the other way: cm/s of the gun per cm/s of the body. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion", meta = (ClampMin = "0.0"))
@@ -297,6 +320,9 @@ private:
 	bool bAimTarget = false;
 	float SinceSwitch = 0.0f;
 	FVector LastBodyVelocity = FVector::ZeroVector;
+	/** The view's turn last tick, and the gun's lag behind it (pitch, yaw, roll, degrees) this tick. */
+	FQuat LastView = FQuat::Identity;
+	FVector LookLagTurn = FVector::ZeroVector;
 	/** The camera's (world's) field of view when the scope was built. */
 	float WorldFieldOfView = 134.0f;
 };

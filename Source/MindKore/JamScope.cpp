@@ -32,9 +32,10 @@ namespace
 UJamScopeComponent::UJamScopeComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
-	// Per channel: X, Y, Z, pitch, yaw, roll; { Hz, damping, delay s }. Raising: after a short reaction Z
-	// starts first and swings fastest, X last (an arc), all under-damped (low gravity: it floats past the
-	// eye and settles slowly); the turns floatier still. Lowering: no wait, quicker, nearly critical.
+	// Per channel: X, Y, Z, pitch, yaw, roll; { Hz, damping, delay s }. Owner 18.10: «насчет анимаций делай
+	// все по-богатому, по взрослому». Raising: a dip (anticipation), then an arc - the channels staggered -
+	// under-damped (low gravity: it floats past the eye and settles slowly), the turns floatier still and
+	// lagging; aimed it breathes. Lowering: a beat later, heavier and lazier than the raise.
 	FJamGunAim Pistol;
 	// The USP (muzzle -X): the middle of its rear dots and the front dot (SightDotsCm), at arm's length -
 	// 50 cm (owner 18.10: «прицел пистолета пиздец близко»), the gun small under the target; light and
@@ -44,9 +45,13 @@ UJamScopeComponent::UJamScopeComponent()
 	Pistol.EyeCm = 50.0f;
 	Pistol.GunFieldOfView = 100.0f;
 	Pistol.KickScale = 0.55f;
-	Pistol.In = { { 3.0f, 0.55f, 0.05f }, { 3.2f, 0.6f, 0.03f }, { 3.4f, 0.5f, 0.01f }, { 2.6f, 0.45f, 0.0f }, { 2.6f, 0.45f, 0.0f }, { 2.2f, 0.36f, 0.0f } };
-	Pistol.Out = { { 4.2f, 0.75f, 0.0f }, { 4.0f, 0.75f, 0.0f }, { 4.4f, 0.7f, 0.0f }, { 3.2f, 0.5f, 0.0f }, { 3.2f, 0.5f, 0.0f }, { 3.0f, 0.5f, 0.0f } };
+	Pistol.In = { { 3.0f, 0.55f, 0.08f }, { 3.2f, 0.6f, 0.06f }, { 3.4f, 0.5f, 0.0f }, { 2.6f, 0.45f, 0.0f }, { 2.6f, 0.45f, 0.0f }, { 2.2f, 0.36f, 0.0f } };
+	Pistol.Out = { { 2.4f, 0.68f, 0.03f }, { 2.2f, 0.7f, 0.05f }, { 2.6f, 0.62f, 0.0f }, { 2.0f, 0.45f, 0.0f }, { 2.0f, 0.45f, 0.0f }, { 1.8f, 0.42f, 0.0f } };
 	Pistol.LagDegPerCmPerSec = FVector(0.06f, 0.03f, 0.09f);
+	Pistol.AnticipationCm = 0.8f;
+	Pistol.AnticipationSeconds = 0.06f;
+	Pistol.LookLag = 0.012f;
+	Pistol.BreathDeg = 0.25f;
 	FJamGunAim PumpGun;
 	// The pump gun: along the rib, the receiver's top rear edge to the bead (Scripts/blender/jam_guns.py:
 	// receiver top 1.25, bead top 1.35 over the bore; origin 4.5 under it). The stock at the shoulder,
@@ -61,9 +66,13 @@ UJamScopeComponent::UJamScopeComponent()
 	PumpGun.GunFieldOfView = 75.0f;
 	PumpGun.KickScale = 0.45f;
 	// Across first, then forward, up last: the stock comes in under the eye and rises to the shoulder.
-	PumpGun.In = { { 1.3f, 0.55f, 0.06f }, { 1.6f, 0.6f, 0.03f }, { 1.4f, 0.5f, 0.12f }, { 1.1f, 0.42f, 0.0f }, { 1.1f, 0.45f, 0.0f }, { 1.0f, 0.4f, 0.0f } };
-	PumpGun.Out = { { 2.2f, 0.75f, 0.0f }, { 2.0f, 0.75f, 0.0f }, { 2.3f, 0.7f, 0.0f }, { 1.6f, 0.5f, 0.0f }, { 1.6f, 0.5f, 0.0f }, { 1.6f, 0.5f, 0.0f } };
+	PumpGun.In = { { 1.3f, 0.55f, 0.08f }, { 1.6f, 0.6f, 0.05f }, { 1.4f, 0.5f, 0.14f }, { 1.1f, 0.42f, 0.0f }, { 1.1f, 0.45f, 0.0f }, { 1.0f, 0.4f, 0.0f } };
+	PumpGun.Out = { { 1.3f, 0.7f, 0.06f }, { 1.2f, 0.72f, 0.1f }, { 1.5f, 0.62f, 0.0f }, { 1.1f, 0.45f, 0.0f }, { 1.1f, 0.45f, 0.0f }, { 1.0f, 0.42f, 0.0f } };
 	PumpGun.LagDegPerCmPerSec = FVector(0.08f, 0.03f, 0.04f);
+	PumpGun.AnticipationCm = 1.6f;
+	PumpGun.AnticipationSeconds = 0.12f;
+	PumpGun.LookLag = 0.025f;
+	PumpGun.BreathDeg = 0.2f;
 	FJamGunAim Sniper;
 	// The SV-98: the eyepiece on the view axis 14 cm ahead, the objective behind it (the scope).
 	Sniper.SightRearCm = EyepieceCm;
@@ -72,9 +81,13 @@ UJamScopeComponent::UJamScopeComponent()
 	// 96: the eyepiece ~44% of the frame (owner 18.10: «прицел можно помельче, чтобы и оружие было видно нормально»).
 	Sniper.GunFieldOfView = 96.0f;
 	Sniper.KickScale = 0.25f;
-	Sniper.In = { { 1.8f, 0.58f, 0.08f }, { 2.0f, 0.62f, 0.04f }, { 2.3f, 0.55f, 0.02f }, { 1.5f, 0.45f, 0.0f }, { 1.5f, 0.45f, 0.0f }, { 1.4f, 0.42f, 0.0f } };
-	Sniper.Out = { { 2.8f, 0.75f, 0.0f }, { 2.6f, 0.75f, 0.0f }, { 2.8f, 0.7f, 0.0f }, { 2.0f, 0.5f, 0.0f }, { 2.0f, 0.5f, 0.0f }, { 2.0f, 0.5f, 0.0f } };
+	Sniper.In = { { 1.8f, 0.58f, 0.1f }, { 2.0f, 0.62f, 0.06f }, { 2.3f, 0.55f, 0.0f }, { 1.5f, 0.45f, 0.0f }, { 1.5f, 0.45f, 0.0f }, { 1.4f, 0.42f, 0.0f } };
+	Sniper.Out = { { 1.7f, 0.7f, 0.05f }, { 1.6f, 0.72f, 0.08f }, { 1.9f, 0.62f, 0.0f }, { 1.4f, 0.45f, 0.0f }, { 1.4f, 0.45f, 0.0f }, { 1.3f, 0.42f, 0.0f } };
 	Sniper.LagDegPerCmPerSec = FVector(0.1f, 0.04f, 0.05f);
+	Sniper.AnticipationCm = 1.2f;
+	Sniper.AnticipationSeconds = 0.09f;
+	Sniper.LookLag = 0.02f;
+	Sniper.BreathDeg = 0.12f;
 	Aims = { Pistol, PumpGun, Sniper };
 	LensMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/Materials/Weapons/M_Jam_ScopeLens.M_Jam_ScopeLens")));
 	ReticleMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/Materials/Weapons/M_Jam_ScopeReticle.M_Jam_ScopeReticle")));
@@ -147,6 +160,15 @@ void UJamScopeComponent::StepMotion(float DeltaTime, bool bAim)
 		const bool bGo = SinceSwitch >= Springs[Axis].Delay;
 		Goal[Axis] = (bGo == bAimTarget) ? AimPlace[Axis] : RestPlace[Axis];
 	}
+	// Anticipation: a raise starts with a dip.
+	if (bAimTarget && SinceSwitch < Aim.AnticipationSeconds)
+	{
+		Goal.Z = FMath::Min(Goal.Z, Place.Z) - Aim.AnticipationCm;
+	}
+	// Aimed, it breathes: two slow, unrelated sines (pitch, yaw).
+	const float Now = GetWorld()->GetTimeSeconds();
+	const FVector Breath = bAimTarget ? Aim.BreathDeg * FVector(FMath::Sin(2.0f * PI * 0.23f * Now), 0.6f * FMath::Sin(2.0f * PI * 0.15f * Now + 1.3f), 0.0f)
+		: FVector::ZeroVector;
 	const FVector TurnEnd = (SinceSwitch >= Springs[3].Delay) == bAimTarget ? AimTurn : FVector::ZeroVector;
 	// x'' = w^2 (goal - x) - 2 zeta w x', semi-implicit Euler in steps of at most 4 ms (stable at the 4.4 Hz ends).
 	const int32 Steps = FMath::Clamp(FMath::CeilToInt(DeltaTime / 0.004f), 1, 32);
@@ -161,7 +183,7 @@ void UJamScopeComponent::StepMotion(float DeltaTime, bool bAim)
 		}
 		// The turns chase the aimed turn plus the drag of the motion: the muzzle dips while rising, points back across, cants.
 		const FVector Lag = Aim.LagDegPerCmPerSec;
-		const FVector TurnGoal = TurnEnd + FVector(-Lag.X * PlaceVelocity.Z, -Lag.Y * PlaceVelocity.Y, Lag.Z * PlaceVelocity.Y);
+		const FVector TurnGoal = TurnEnd + Breath + LookLagTurn + FVector(-Lag.X * PlaceVelocity.Z, -Lag.Y * PlaceVelocity.Y, Lag.Z * PlaceVelocity.Y);
 		for (int32 Axis = 0; Axis < 3; ++Axis)
 		{
 			const FJamAimSpring& Spring = Springs[3 + Axis];
@@ -173,7 +195,8 @@ void UJamScopeComponent::StepMotion(float DeltaTime, bool bAim)
 	// Settled: snap exactly onto the end (the sight line on the axis to the micron), and at the hip stop.
 	const FVector End = bAimTarget ? AimPlace : RestPlace;
 	const FVector EndTurn = bAimTarget ? AimTurn : FVector::ZeroVector;
-	if (SinceSwitch > 0.2f && (Place - End).Size() < 0.01f && PlaceVelocity.Size() < 0.05f && (Turn - EndTurn).Size() < 0.01f && TurnVelocity.Size() < 0.05f)
+	if (!bAimTarget && SinceSwitch > 0.2f && (Place - End).Size() < 0.01f && PlaceVelocity.Size() < 0.05f && (Turn - EndTurn).Size() < 0.01f
+		&& TurnVelocity.Size() < 0.05f && LookLagTurn.Size() < 0.01f)
 	{
 		Place = End;
 		Turn = EndTurn;
@@ -334,16 +357,32 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	const FVector BodyVelocity = GetOwner()->GetVelocity();
 	const FVector BodyChange = Camera->GetComponentQuat().UnrotateVector(BodyVelocity - LastBodyVelocity);
 	LastBodyVelocity = BodyVelocity;
+	// The view's turn rate, in its own frame: the gun lags behind it (yaw and pitch back, a roll into a yaw).
+	const FQuat View = Camera->GetComponentQuat();
+	const FRotator Turned = (LastView.Inverse() * View).Rotator();
+	LastView = View;
+	const float LookLag = Aims.IsValidIndex(Current) ? Aims[Current].LookLag : 0.0f;
+	LookLagTurn = DeltaTime > 0.0f
+		? (FVector(-Turned.Pitch, -Turned.Yaw, -0.5f * Turned.Yaw) * (LookLag / DeltaTime)).BoundToCube(4.0f)
+		: FVector::ZeroVector;
 	if (!bGunInView || Current != MotionWeapon)
 	{
-		// No gun, or another one: it starts from its rest pose.
+		// No gun, or another one coming into hand: it rises from low and to the side on its Out springs.
 		bMoving = bAimTarget = false;
 		Alpha = 0.0f;
 		MotionWeapon = bGunInView ? Current : INDEX_NONE;
+		if (bGunInView)
+		{
+			bMoving = true;
+			SinceSwitch = 1.0f;
+			Place = Weapons->Weapons[Current].ViewOffset.GetTranslation() + DrawFromCm;
+			Turn = DrawFromTurn;
+			PlaceVelocity = TurnVelocity = FVector::ZeroVector;
+		}
 	}
 	if (bGunInView)
 	{
-		if (!bMoving && (bWants || BodyChange.Size() * SwayPerBodyVelocity > 0.5f))
+		if (!bMoving && (bWants || BodyChange.Size() * SwayPerBodyVelocity > 0.5f || LookLagTurn.Size() > 0.2f))
 		{
 			bMoving = true;
 			Place = Weapons->Weapons[Current].ViewOffset.GetTranslation();
@@ -369,7 +408,7 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	{
 		Dot->SetVisibility(bDotsInView);
 	}
-	Capture->bCaptureEveryFrame = bScopeInView && Alpha > 0.0f;
+	Capture->bCaptureEveryFrame = bScopeInView && Alpha > 0.01f; // not for a draw's overshoot toward the eye
 	if (Alpha > 0.0f || WasAlpha > 0.0f)
 	{
 		// The world keeps the bodycam's field (owner: no zoom outside the scope);
@@ -544,7 +583,9 @@ namespace
 	 * (HighResShot; needs a real RHI). The zero-G pawn stands before the living wall nearest to 20 m;
 	 * time runs at a tenth so the stills land every 33 ms of game time. For each gun (pistol, pump gun,
 	 * SV-98): 25 stills through the raise (0..0.8 s), a shot at 1.3 s and 18 stills after it, 16 through
-	 * the lowering (JamAim_<gun>_<phase>_<nn>_<ms>.png). jam.Scope.Trace logs the springs throughout.
+	 * the lowering (JamAim_<gun>_<phase>_<nn>_<ms>.png). Then the SV-98 aimed under a 60 deg/s turn of the
+	 * view (look), 4 s of aimed idle at full speed (the breath), going unarmed (holster) and drawn again
+	 * (draw). jam.Scope.Trace logs the springs throughout.
 	 */
 	void RunScopeAimFrames(UWorld* World)
 	{
@@ -592,7 +633,7 @@ namespace
 				Pawn->Guns->UnlockWeapon(Gun);
 				Controller->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());
 			});
-			const float In = At + 0.6f;
+			const float In = At + 2.0f; // the draw (DrawFromCm) settled first
 			After(In, [Scope]() { Scope->SetHeld(true); });
 			for (int32 Index = 0; Index < 25; ++Index)
 			{
@@ -612,6 +653,34 @@ namespace
 			}
 			At = Out + 1.0f;
 		}
+		// The SV-98 again: aimed, the view swung 60 deg/s for 0.3 s (the gun lags), then 4 s of aimed idle at
+		// full speed (the breath, in the trace), then unarmed (the drop away) and drawn again (the rise).
+		After(At, [Scope]() { Scope->SetHeld(true); });
+		const float Look = At + 1.5f;
+		for (int32 Tick = 0; Tick < 18; ++Tick)
+		{
+			After(Look + Tick / 60.0f, [Controller]() { Controller->SetControlRotation(Controller->GetControlRotation() + FRotator(0.0f, 1.0f, 0.0f)); });
+		}
+		for (int32 Index = 0; Index < 18; ++Index)
+		{
+			After(Look + Index / 30.0f + 0.001f, [Still, Index]() { Still(2, TEXT("look"), Index, Index / 30.0f); });
+		}
+		const float Idle = Look + 1.0f;
+		After(Idle, [World]() { UGameplayStatics::SetGlobalTimeDilation(World, 1.0f); });
+		After(Idle + 4.0f, [World]() { UGameplayStatics::SetGlobalTimeDilation(World, 0.1f); });
+		const float Away = Idle + 4.2f;
+		After(Away, [Scope, Pawn]() { Scope->SetHeld(false); Pawn->Guns->Holster(); });
+		for (int32 Index = 0; Index < 12; ++Index)
+		{
+			After(Away + Index / 30.0f + 0.001f, [Still, Index]() { Still(2, TEXT("holster"), Index, Index / 30.0f); });
+		}
+		const float Draw = Away + 0.6f;
+		After(Draw, [Pawn]() { Pawn->Guns->SelectWeapon(2); });
+		for (int32 Index = 0; Index < 24; ++Index)
+		{
+			After(Draw + Index / 30.0f + 0.001f, [Still, Index]() { Still(2, TEXT("draw"), Index, Index / 30.0f); });
+		}
+		At = Draw + 1.0f;
 		After(At, [World, Trace, Scope]()
 		{
 			Trace->Set(0, ECVF_SetByCode);
