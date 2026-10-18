@@ -172,19 +172,19 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	// The fore-end, racked by itself 0.15 s after the shot (owner: «более резво
 	// передергивать»): yanked back 6 cm into the stop in 0.11 s, a 6% bounce off
 	// it, slammed home 0.14 s after the back click with a 5% rebound, settled at
-	// 0.47 s. The stroke runs along the line of sight, so the gun comes in to meet
-	// it - canted to show its underside, swung across the view and pulled 8 cm
-	// closer - and goes back
-	// out by 0.56 s.
+	// 0.47 s; the hand drives it, so both strokes speed up into their stops. The
+	// stroke runs along the line of sight, so the gun comes in to meet it - canted
+	// to show its underside, swung across the view and pulled 8 cm closer: ActionBody
+	// is where its pose springs pull (JamWeaponParts.cpp), in at 0.12 s, out at 0.36 s.
 	Shotgun.ActionMesh = Pump.Object;
 	// 6 cm (owner, round 2: «уменьши ход»): the fore-end, 3 cm further forward now, stops at the receiver's front.
 	Shotgun.ActionTravelCm = -6.0f;
-	Shotgun.ActionTravel = MakeCycleCurve({ { 0.15f, 0.0f, 0.0f, 6.0f }, { 0.26f, 1.0f, 20.0f, -4.0f }, { 0.28f, 0.94f, 0.0f, 0.0f },
-		{ 0.4f, 0.0f, -22.0f, 3.0f }, { 0.42f, 0.05f, 0.0f, 0.0f }, { 0.47f, 0.0f, 0.0f, 0.0f } });
+	Shotgun.ActionTravel = MakeCycleCurve({ { 0.15f, 0.0f, 0.0f, 2.0f }, { 0.26f, 1.0f, 24.0f, -5.0f }, { 0.28f, 0.92f, 0.0f, 0.0f },
+		{ 0.4f, 0.0f, -26.0f, 4.0f }, { 0.42f, 0.06f, 0.0f, 0.0f }, { 0.47f, 0.0f, 0.0f, 0.0f } });
 	Shotgun.ActionBodyTurn = FRotator(6.0f, -15.0f, 22.0f);
 	Shotgun.ActionBodyOffsetCm = FVector(-8.0f, -3.0f, 2.0f);
-	Shotgun.ActionBody = MakeCycleCurve({ { 0.12f, 0.0f, 0.0f, 0.0f }, { 0.22f, 1.05f, 0.0f, 0.0f }, { 0.26f, 1.0f, 0.0f, 0.0f },
-		{ 0.36f, 1.0f, 0.0f, 0.0f }, { 0.48f, 0.0f, -12.0f, -1.5f }, { 0.51f, -0.04f, 0.0f, 0.0f }, { 0.56f, 0.0f, 0.0f, 0.0f } });
+	Shotgun.ActionBody = MakeCycleCurve({ { 0.12f, 0.0f, 0.0f, 0.0f }, { 0.135f, 1.0f, 0.0f, 0.0f }, { 0.36f, 1.0f, 0.0f, 0.0f },
+		{ 0.375f, 0.0f, 0.0f, 0.0f }, { 0.56f, 0.0f, 0.0f, 0.0f } });
 	FJamWeapon Sniper;
 	Sniper.Name = NSLOCTEXT("JamZeroG", "Sniper", "Снапа");
 	Sniper.Damage = 150.0f;
@@ -213,21 +213,22 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	// The bolt at the rear of the receiver, turning about the bore at its handle
 	// (1.5 cm behind the trigger, 4.5 cm up), on the sound's clicks (up +0.35 s,
 	// back +0.63 s, home +0.87 s, down +1.09 s): lifted 60 deg into its stop with a
-	// 4% drop back, pulled 9 cm back into the stop with a 7% bounce, a beat, pushed
-	// home with a 3.5% knock, locked down with a 5% bounce. The rifle cants to
-	// show its right side meanwhile, back by 1.25 s.
+	// 5% drop back, pulled 9 cm back - faster and faster - into the stop with an 8%
+	// bounce, a beat, slammed home with a 4% knock, locked down with a 6% bounce.
+	// The rifle cants to show its right side meanwhile: ActionBody, in at 0.2 s,
+	// out at 1.05 s, is where its pose springs pull.
 	Sniper.ActionMesh = Sv98Bolt.Object;
 	Sniper.ActionPivot = FVector(-1.5f, 0.0f, 4.5f);
 	Sniper.ActionTravelCm = -9.0f;
 	Sniper.ActionTurnDeg = 60.0f;
-	Sniper.ActionTurn = MakeCycleCurve({ { 0.25f, 0.0f, 0.0f, 2.0f }, { 0.35f, 1.0f, 12.0f, -2.0f }, { 0.38f, 0.96f, 0.0f, 0.0f },
-		{ 0.42f, 1.0f, 0.0f, 0.0f }, { 0.99f, 1.0f, 0.0f, 0.0f }, { 1.09f, 0.0f, -14.0f, 2.5f }, { 1.12f, 0.05f, 0.0f, 0.0f },
+	Sniper.ActionTurn = MakeCycleCurve({ { 0.25f, 0.0f, 0.0f, 1.0f }, { 0.35f, 1.0f, 14.0f, -3.0f }, { 0.38f, 0.95f, 0.0f, 0.0f },
+		{ 0.42f, 1.0f, 0.0f, 0.0f }, { 0.99f, 1.0f, 0.0f, 0.0f }, { 1.09f, 0.0f, -16.0f, 3.0f }, { 1.115f, 0.06f, 0.0f, 0.0f },
 		{ 1.18f, 0.0f, 0.0f, 0.0f } });
-	Sniper.ActionTravel = MakeCycleCurve({ { 0.42f, 0.0f, 0.0f, 0.0f }, { 0.63f, 1.0f, 11.0f, -3.0f }, { 0.665f, 0.93f, 0.0f, 0.0f },
-		{ 0.72f, 0.93f, 0.0f, 0.0f }, { 0.87f, 0.0f, -14.0f, 2.5f }, { 0.895f, 0.035f, 0.0f, 0.0f }, { 0.93f, 0.0f, 0.0f, 0.0f } });
+	Sniper.ActionTravel = MakeCycleCurve({ { 0.42f, 0.0f, 0.0f, 0.0f }, { 0.63f, 1.0f, 13.0f, -4.0f }, { 0.66f, 0.92f, 0.0f, 0.0f },
+		{ 0.72f, 0.93f, 0.0f, 0.0f }, { 0.87f, 0.0f, -16.0f, 3.0f }, { 0.89f, 0.04f, 0.0f, 0.0f }, { 0.93f, 0.0f, 0.0f, 0.0f } });
 	Sniper.ActionBodyTurn = FRotator(3.0f, -8.0f, -14.0f);
-	Sniper.ActionBody = MakeCycleCurve({ { 0.2f, 0.0f, 0.0f, 0.0f }, { 0.32f, 1.04f, 0.0f, 0.0f }, { 0.37f, 1.0f, 0.0f, 0.0f },
-		{ 1.05f, 1.0f, 0.0f, 0.0f }, { 1.17f, 0.0f, -12.0f, -1.5f }, { 1.2f, -0.03f, 0.0f, 0.0f }, { 1.25f, 0.0f, 0.0f, 0.0f } });
+	Sniper.ActionBody = MakeCycleCurve({ { 0.2f, 0.0f, 0.0f, 0.0f }, { 0.215f, 1.0f, 0.0f, 0.0f }, { 1.05f, 1.0f, 0.0f, 0.0f },
+		{ 1.065f, 0.0f, 0.0f, 0.0f }, { 1.25f, 0.0f, 0.0f, 0.0f } });
 	Weapons = { Pistol, Shotgun, Sniper };
 	SetupWeaponParts();
 
@@ -394,11 +395,10 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	}
 	const float Kick = KickScale * FMath::Exp(-ViewKickReturnRate * Since);
 	const FQuat Rise = FRotator(Weapon->ViewKickRiseDeg * Kick, 0.0f, -0.3f * Weapon->ViewKickRiseDeg * Kick).Quaternion();
-	const float BodyShare = EvalCycle(Weapon->ActionBody, Since);
-	const float ReloadShare = GetReloadBodyShare(*Weapon);
-	Offset.SetRotation(Rise * (Weapon->ActionBodyTurn * BodyShare).Quaternion() * (Weapon->ReloadBodyTurn * ReloadShare).Quaternion()
-		* Offset.GetRotation());
-	Offset.AddToTranslation(Weapon->ActionBodyOffsetCm * BodyShare + Weapon->ReloadBodyOffsetCm * ReloadShare);
+	// The whole gun's pose in the cycle and the reload: a mass on springs (JamWeaponParts.cpp).
+	UpdatePose(*Weapon, DeltaTime);
+	Offset.SetRotation(Rise * FRotator(Pose.Turn.X, Pose.Turn.Y, Pose.Turn.Z).Quaternion() * Offset.GetRotation());
+	Offset.AddToTranslation(Pose.Place);
 	Offset.AddToTranslation(FVector(-Weapon->ViewKickBackCm * Kick, 0.0f, 0.0f));
 	ViewModel->SetRelativeTransform(Offset);
 	// The moving part runs its cycle along/about the gun's own X.
