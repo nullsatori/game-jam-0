@@ -12,6 +12,11 @@ slide, SM_Jam_USP_Frame and SM_Jam_USP_Slide (Scripts/blender/jam_usp_split.py),
 are imported next to the long guns with its material M_MK_USP_Soviet; the frame
 gets SM_MK_USP_Soviet's Muzzle socket. The long guns get a Muzzle socket on the
 bore at their front (the trigger origin sits 4.5 cm under the bore), X along it.
+The parts for reloads and spent rounds come from the same scripts:
+SM_Jam_SV98_Mag, SM_Jam_USP_Mag, SM_Jam_USP_Hammer (the USP's material), and
+the cases SM_Jam_Case_9mm, SM_Jam_Case_762x54R, SM_Jam_Shell_12ga. Brass is
+MindKore's own MI_MK_Post_Brass (copied byte for byte with its parent
+M_CRTV03_Solid from MindKore's Admin art); the shell's hull is MI_Jam_Shell_Hull.
 Each gun's parts together are checked against the whole gun's bounds.
 Without JAM_FBX_DIR the import is skipped and only the materials and sockets are (re)made.
 """
@@ -119,8 +124,13 @@ def get_gun(name):
 
 slots = {"Walnut": part("MI_Jam_Gun_Walnut", (0.16, 0.065, 0.028), 0.0, 0.55),
          "BlackOxide": part("MI_Jam_Gun_BlackOxide", (0.035, 0.036, 0.04), 1.0, 0.38),
-         "Rubber": part("MI_Jam_Gun_Rubber", (0.015, 0.015, 0.015), 0.0, 0.9)}
-for name in ("SM_Jam_Shotgun", "SM_Jam_Shotgun_Pump", "SM_Jam_SV98", "SM_Jam_SV98_Bolt"):
+         "Rubber": part("MI_Jam_Gun_Rubber", (0.015, 0.015, 0.015), 0.0, 0.9),
+         "Hull": part("MI_Jam_Shell_Hull", (0.11, 0.018, 0.012), 0.0, 0.6),
+         "Brass": unreal.load_asset("/Game/MindKore/Art/Admin/Post/MI_MK_Post_Brass")}
+if not slots["Brass"]:
+    raise RuntimeError("MI_MK_Post_Brass missing: copy it and M_CRTV03_Solid from MindKore's Content/MindKore/Art/Admin")
+for name in ("SM_Jam_Shotgun", "SM_Jam_Shotgun_Pump", "SM_Jam_SV98", "SM_Jam_SV98_Bolt", "SM_Jam_SV98_Mag", "SM_Jam_USP_Mag",
+             "SM_Jam_Case_9mm", "SM_Jam_Case_762x54R", "SM_Jam_Shell_12ga"):
     gun = get_gun(name)
     materials = gun.get_editor_property("static_materials")
     for index, slot in enumerate(materials):
@@ -128,6 +138,11 @@ for name in ("SM_Jam_Shotgun", "SM_Jam_Shotgun_Pump", "SM_Jam_SV98", "SM_Jam_SV9
         if slot_name not in slots:
             raise RuntimeError("unexpected slot " + slot_name)
         gun.set_material(index, slots[slot_name])
+    if name.startswith(("SM_Jam_Case", "SM_Jam_Shell", "SM_Jam_USP_Mag", "SM_Jam_SV98_Mag")):
+        # Loose in the world (UJamWeaponsComponent::SpawnDebris): a simulated body needs a collision shape.
+        meshes = unreal.get_editor_subsystem(unreal.StaticMeshEditorSubsystem)
+        meshes.remove_collisions(gun)
+        meshes.add_simple_collisions(gun, unreal.ScriptCollisionShapeType.BOX)
     if "_" not in name[len("SM_Jam_"):]:
         # On the bore (Z 4.5 over the trigger origin), at the very front.
         set_muzzle(gun, unreal.Vector(gun.get_bounding_box().max.x, 0.0, 4.5), unreal.Rotator(0.0, 0.0, 0.0))
@@ -143,14 +158,15 @@ log("SM_MK_USP_Soviet: %d triangles, material %s, bounds %s, Muzzle %s %s" % (
     usp.get_num_triangles(0), usp.get_material(0).get_path_name(), bounds(usp),
     usp_muzzle.get_editor_property("relative_location"), usp_muzzle.get_editor_property("relative_rotation")))
 usp_parts = []
-for name in ("SM_Jam_USP_Frame", "SM_Jam_USP_Slide"):
+for name in ("SM_Jam_USP_Frame", "SM_Jam_USP_Slide", "SM_Jam_USP_Hammer"):
     mesh = get_gun(name)
     for index in range(len(mesh.get_editor_property("static_materials"))):
         mesh.set_material(index, usp.get_material(0))
     if name.endswith("Frame"):
         set_muzzle(mesh, usp_muzzle.get_editor_property("relative_location"), usp_muzzle.get_editor_property("relative_rotation"))
     eal.save_asset(MESHES + "/" + name, False)
-    usp_parts.append(mesh)
+    if not name.endswith("Hammer"):  # the hammer sits on its pin, not in the gun's frame
+        usp_parts.append(mesh)
     log("%s: %d triangles, bounds %s" % (name, mesh.get_num_triangles(0), bounds(mesh)))
 # The parts together must be the whole USP, in its frame (a shifted import would show here).
 lo = [min(bounds(m)[0][i] for m in usp_parts) for i in range(3)]

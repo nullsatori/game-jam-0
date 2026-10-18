@@ -29,15 +29,6 @@ namespace
 	TAutoConsoleVariable<float> CVarPoseAt(TEXT("jam.Weapons.PoseAt"), -1.0f,
 		TEXT("Hold the gun in view (kick and moving part) this many seconds after its last shot; < 0: live."));
 
-	/** One key of a moving part's curve: seconds since the shot, share of the travel/turn, slopes in share per second. */
-	struct FJamCycleKey
-	{
-		float Time;
-		float Value;
-		float Arrive;
-		float Leave;
-	};
-
 	/**
 	 * Cubic keys with broken tangents: the slopes are the curve's shape. A part that
 	 * hits a stop arrives with speed (a steep arrive) and leaves the other way (the
@@ -62,6 +53,16 @@ namespace
 		const FRichCurve* Rich = Curve.GetRichCurveConst();
 		return Rich && Rich->GetNumKeys() > 0 ? Rich->Eval(Seconds) : 0.0f;
 	}
+}
+
+FRuntimeFloatCurve JamMakeCycleCurve(std::initializer_list<FJamCycleKey> Keys)
+{
+	return MakeCycleCurve(Keys);
+}
+
+float JamEvalCycle(const FRuntimeFloatCurve& Curve, float Seconds)
+{
+	return EvalCycle(Curve, Seconds);
 }
 
 float FJamWeapon::GetActionCycleSeconds() const
@@ -138,7 +139,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Shotgun.FireInterval = 0.5f;
 	Shotgun.MagazineSize = 6;
 	Shotgun.Reserve = 24;
-	Shotgun.ReloadSeconds = 2.0f;
+	Shotgun.ReloadSeconds = 0.42f; // per round: it loads round by round (JamWeaponParts.cpp)
 	Shotgun.Pellets = 8;
 	Shotgun.SpreadDeg = 6.0f;
 	Shotgun.RecoilImpulse = 25000.0f;
@@ -157,14 +158,15 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Shotgun.ViewMesh = PumpGun.Object;
 	Shotgun.ViewOffset = FTransform(FRotator::ZeroRotator, FVector(26.0f, 11.0f, -12.0f));
 	// The fore-end, racked by itself 0.15 s after the shot (owner: «более резво
-	// передергивать»): yanked back 8 cm into the stop in 0.11 s, a 6% bounce off
+	// передергивать»): yanked back 6 cm into the stop in 0.11 s, a 6% bounce off
 	// it, slammed home 0.14 s after the back click with a 5% rebound, settled at
 	// 0.47 s. The stroke runs along the line of sight, so the gun comes in to meet
 	// it - canted to show its underside, swung across the view and pulled 8 cm
 	// closer - and goes back
 	// out by 0.56 s.
 	Shotgun.ActionMesh = Pump.Object;
-	Shotgun.ActionTravelCm = -8.0f;
+	// 6 cm (owner, round 2: «уменьши ход»): the fore-end, 3 cm further forward now, stops at the receiver's front.
+	Shotgun.ActionTravelCm = -6.0f;
 	Shotgun.ActionTravel = MakeCycleCurve({ { 0.15f, 0.0f, 0.0f, 6.0f }, { 0.26f, 1.0f, 20.0f, -4.0f }, { 0.28f, 0.94f, 0.0f, 0.0f },
 		{ 0.4f, 0.0f, -22.0f, 3.0f }, { 0.42f, 0.05f, 0.0f, 0.0f }, { 0.47f, 0.0f, 0.0f, 0.0f } });
 	Shotgun.ActionBodyTurn = FRotator(6.0f, -15.0f, 22.0f);
@@ -178,7 +180,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Sniper.FireInterval = 0.5f;
 	Sniper.MagazineSize = 4;
 	Sniper.Reserve = 16;
-	Sniper.ReloadSeconds = 2.5f;
+	Sniper.ReloadSeconds = 1.7f; // the magazine out and in (JamWeaponParts.cpp)
 	Sniper.RecoilImpulse = 70000.0f;
 	Sniper.HitImpulse = 60000.0f;
 	Sniper.RangeCm = 15000.0f;
@@ -213,6 +215,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Sniper.ActionBody = MakeCycleCurve({ { 0.2f, 0.0f, 0.0f, 0.0f }, { 0.32f, 1.04f, 0.0f, 0.0f }, { 0.37f, 1.0f, 0.0f, 0.0f },
 		{ 1.05f, 1.0f, 0.0f, 0.0f }, { 1.17f, 0.0f, -12.0f, -1.5f }, { 1.2f, -0.03f, 0.0f, 0.0f }, { 1.25f, 0.0f, 0.0f, 0.0f } });
 	Weapons = { Pistol, Shotgun, Sniper };
+	SetupWeaponParts();
 
 	// MindKore's own content.
 	static ConstructorHelpers::FObjectFinder<UMKImpactDataAsset> DefaultImpactData(
@@ -250,6 +253,7 @@ void UJamWeaponsComponent::BeginPlay()
 		ActionInView->SetOnlyOwnerSee(true);
 		ActionInView->SetupAttachment(ViewModel);
 		ActionInView->RegisterComponent();
+		MakePartComponents(*ViewModel);
 		// Muzzle flash and powder smoke, in the same camera space as the gun (JamMuzzleFx.h).
 		NewObject<UJamMuzzleFxComponent>(GetOwner(), TEXT("MuzzleFx"))->RegisterComponent();
 	}
@@ -258,6 +262,7 @@ void UJamWeaponsComponent::BeginPlay()
 void UJamWeaponsComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	UpdatePartEvents(DeltaTime);
 	if (ReloadEndSeconds > 0.0 && GetWorld()->GetTimeSeconds() >= ReloadEndSeconds && Weapons.IsValidIndex(CurrentWeapon))
 	{
 		FJamWeapon& Weapon = Weapons[CurrentWeapon];
@@ -357,6 +362,7 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	}
 	if (!Weapon)
 	{
+		UpdateParts(nullptr, 0.0f);
 		return;
 	}
 	SinceShotSeconds += DeltaTime;
@@ -368,15 +374,18 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	const float Kick = FMath::Exp(-ViewKickReturnRate * Since);
 	const FQuat Rise = FRotator(Weapon->ViewKickRiseDeg * Kick, 0.0f, -0.3f * Weapon->ViewKickRiseDeg * Kick).Quaternion();
 	const float BodyShare = EvalCycle(Weapon->ActionBody, Since);
+	const float ReloadShare = GetReloadBodyShare(*Weapon);
 	FTransform Offset = Weapon->ViewOffset;
-	Offset.SetRotation(Rise * (Weapon->ActionBodyTurn * BodyShare).Quaternion() * Offset.GetRotation());
-	Offset.AddToTranslation(Weapon->ActionBodyOffsetCm * BodyShare);
+	Offset.SetRotation(Rise * (Weapon->ActionBodyTurn * BodyShare).Quaternion() * (Weapon->ReloadBodyTurn * ReloadShare).Quaternion()
+		* Offset.GetRotation());
+	Offset.AddToTranslation(Weapon->ActionBodyOffsetCm * BodyShare + Weapon->ReloadBodyOffsetCm * ReloadShare);
 	Offset.AddToTranslation(FVector(-Weapon->ViewKickBackCm * Kick, 0.0f, 0.0f));
 	ViewModel->SetRelativeTransform(Offset);
 	// The moving part runs its cycle along/about the gun's own X.
 	ActionInView->SetRelativeLocationAndRotation(
 		Weapon->ActionPivot + FVector(Weapon->ActionTravelCm * EvalCycle(Weapon->ActionTravel, Since), 0.0f, 0.0f),
 		FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Weapon->ActionTurnDeg * EvalCycle(Weapon->ActionTurn, Since))));
+	UpdateParts(Weapon, Since);
 }
 
 FTransform UJamWeaponsComponent::GetMuzzleTransform() const
@@ -485,8 +494,8 @@ void UJamWeaponsComponent::Reload()
 	{
 		return;
 	}
-	ReloadEndSeconds = GetWorld()->GetTimeSeconds() + Weapon->ReloadSeconds;
-	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: reloading %s, %.1f s"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString(), Weapon->ReloadSeconds);
+	const float Seconds = StartReloadTimeline(*Weapon);
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: reloading %s, %.2f s"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString(), Seconds);
 }
 
 bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, FVector& OutRecoil)
@@ -494,6 +503,10 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	OutRecoil = FVector::ZeroVector;
 	FJamWeapon* Weapon = IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
 	const double Now = GetWorld()->GetTimeSeconds();
+	if (Weapon && Weapon->ShellMesh && Weapon->Ammo > 0 && GetReloadRemaining() > 0.0f)
+	{
+		ReloadEndSeconds = 0.0; // round-by-round loading breaks off for a shot
+	}
 	if (!Weapon || Now < NextShotSeconds || GetReloadRemaining() > 0.0f)
 	{
 		return false;

@@ -81,7 +81,7 @@ def merge(parts):
 
 STOCK = [(0.0, -1.0, -13.5, 2.1), (10, -0.7, -11.6, 2.05), (22, -0.2, -8.4, 1.9), (30, 0.2, -5.0, 1.6),
          (34, 0.5, -4.4, 1.5), (38.5, 1.0, -3.8, 1.45)]
-PUMP = [(61, -0.1, -3.7, 1.75), (62.2, 0.2, -4.0, 2.0), (76.8, 0.2, -4.0, 2.0), (78, -0.1, -3.7, 1.75)]
+PUMP = [(64, -0.1, -3.7, 1.75), (65.2, 0.2, -4.0, 2.0), (79.8, 0.2, -4.0, 2.0), (81, -0.1, -3.7, 1.75)]  # 3 cm ahead of gun_r17's: a 6 cm stroke clears the receiver
 PARTS = {
     "Walnut": [loft([section(*s) for s in STOCK])],
     "BlackOxide": [loft([section(38.5, 1.25, -4.0, 1.45), section(58.0, 1.25, -4.0, 1.45)]),
@@ -97,7 +97,7 @@ PARTS = {
 }
 # The fore-end and its grip grooves: the moving part, pulled back along -X.
 PUMP_PART = {"Walnut": [loft([section(*s) for s in PUMP])]
-                       + [tube(ring_path(x, 0.2, -4.0, 2.0), 0.16, True) for x in np.arange(63.5, 76, 2.4)]}
+                       + [tube(ring_path(x, 0.2, -4.0, 2.0), 0.16, True) for x in np.arange(66.5, 79, 2.4)]}
 
 # --- the SV-98 (cm, same frame; Blender -Y is the rifle's right side in UE: the bolt) ---
 def ring(x, z, r, m=12, wire=0.25):
@@ -126,7 +126,6 @@ SV98 = {
         taper(58.0, 112.0, 1.35, 0.95),                                                      # barrel
         loft([section(112.0, 1.7, -1.7, 1.7, 16, 2.0), section(121.0, 1.7, -1.7, 1.7, 16, 2.0)]),  # muzzle brake
         ring(114.5, 0.0, 1.75, 16, 0.22), ring(117.0, 0.0, 1.75, 16, 0.22), ring(119.5, 0.0, 1.75, 16, 0.22),
-        loft([section(44.5, -4.0, -10.5, 1.3), section(51.5, -4.0, -10.0, 1.3)]),          # magazine
         tube([[36.0, 0, -3.8], [37.0, 0, -6.4], [41.0, 0, -7.2], [44.0, 0, -6.2], [44.5, 0, -4.2]], 0.35),  # guard
         tube([[41.2, 0, -4.0], [41.0, 0, -5.0], [40.4, 0, -5.6]], 0.25),                   # trigger
         taper(39.0, 45.0, 2.1, 1.6, z=7.0), taper(45.0, 64.0, 1.5, 1.5, z=7.0),            # scope: eyepiece, tube
@@ -164,6 +163,22 @@ BOLT = {"BlackOxide": [
 ]}
 
 
+# The box magazine (moving part): drops out down -Z, a fresh one goes back up.
+SV98_MAG = {"BlackOxide": [loft([section(44.5, -4.0, -10.5, 1.3), section(51.5, -4.0, -10.0, 1.3)])]}
+
+
+# --- spent cases and the shotgun shell (cm, base at the origin, mouth along +X) ---
+def turned(profile, m=16):
+    """A body of revolution along X from (x, radius) pairs."""
+    return loft([section(x, r, -r, r, m, 2.0) for x, r in profile])
+
+
+CASE_9MM = {"Brass": [turned([(0.0, 0.5), (0.13, 0.5), (0.13, 0.42), (0.25, 0.42), (0.25, 0.49), (1.92, 0.48)])]}
+CASE_762R = {"Brass": [turned([(0.0, 0.72), (0.16, 0.72), (0.16, 0.61), (3.9, 0.58), (4.3, 0.43), (5.37, 0.43)])]}
+SHELL_12GA = {"Brass": [turned([(0.0, 1.13), (0.15, 1.13), (0.15, 1.03), (1.6, 1.03)])],
+              "Hull": [turned([(1.6, 1.0), (6.6, 1.0), (6.9, 0.9)])]}
+
+
 def export_gun(name, parts, origin):
     """One mesh, slot per material, verts in metres around origin (cm), written as <name>.fbx."""
     bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -198,5 +213,8 @@ export_gun("SM_Jam_Shotgun", PARTS, SHOTGUN_ORIGIN)
 export_gun("SM_Jam_Shotgun_Pump", PUMP_PART, SHOTGUN_ORIGIN)
 export_gun("SM_Jam_SV98", SV98, SV98_ORIGIN)
 export_gun("SM_Jam_SV98_Bolt", BOLT, BOLT_PIVOT)
+export_gun("SM_Jam_SV98_Mag", SV98_MAG, SV98_ORIGIN)
+for name, parts in (("SM_Jam_Case_9mm", CASE_9MM), ("SM_Jam_Case_762x54R", CASE_762R), ("SM_Jam_Shell_12ga", SHELL_12GA)):
+    export_gun(name, parts, np.zeros(3))
 # UJamWeaponsComponent's FJamWeapon::ActionPivot for the bolt (UE cm; Y 0, so no handedness flip).
 print("JAMGUN: SV-98 bolt pivot in SM_Jam_SV98 %s cm" % (BOLT_PIVOT - SV98_ORIGIN))
