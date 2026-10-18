@@ -459,6 +459,7 @@ void AJamLivingWall::ReceiveResolvedImpact_Implementation(const FMKResolvedImpac
 	Pending.Add({ FVector2D(Local.X, Local.Z), Side, ResolvedImpact.SourceActor, Point, ResolvedImpact.ShotDirection });
 	if (Pending.Num() == 1)
 	{
+		PendingSince = GetWorld()->GetTimeSeconds();
 		UE_LOG(LogMindKore, Verbose, TEXT("Living wall %s: hit, surface %d"), *GetName(), int32(ResolvedImpact.SurfaceKind));
 	}
 }
@@ -467,8 +468,8 @@ void AJamLivingWall::ReceiveResolvedImpact_Implementation(const FMKResolvedImpac
 
 void AJamLivingWall::ProcessHits(double Now)
 {
-	// Impacts arrive during the frame (a shotgun's pellets all in one Fire);
-	// one source's impacts of one frame are one blast.
+	// Impacts arrive over BlastWindowSeconds (a shotgun's flying pellets);
+	// one source's impacts of one window are one blast.
 	TMap<AActor*, TArray<int32>> BySource;
 	for (int32 Index = 0; Index < Pending.Num(); ++Index)
 	{
@@ -840,7 +841,7 @@ void AJamLivingWall::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	const double Now = GetWorld()->GetTimeSeconds();
-	if (!Pending.IsEmpty())
+	if (!Pending.IsEmpty() && Now - PendingSince >= BlastWindowSeconds)
 	{
 		ProcessHits(Now);
 	}
@@ -987,6 +988,13 @@ namespace
 			UE_LOG(LogMindKore, Warning, TEXT("Wall probe: %s did not fire"), *Pawn->Guns->Describe());
 		}
 		return bFired;
+	}
+
+	/** From a shotgun shot DistanceCm away to the wall working out the blast: the pellets' flight and the wall's blast window. */
+	float BlastLandsAfter(const AJamLivingWall* Wall, const AJamZeroGPawn* Pawn, float DistanceCm)
+	{
+		const float Speed = Pawn->Guns->Weapons[1].ProjectileSpeed;
+		return (Speed > 0.0f ? DistanceCm / Speed : 0.0f) + Wall->BlastWindowSeconds;
 	}
 
 	/** Would the pawn's sphere swept along the normal through Point touch this wall? */
@@ -1139,7 +1147,7 @@ namespace
 			AimAndFire(Pawn, 1, Aim);
 			// Out of the module's way, to the side.
 			PlacePawn(Pawn, Aim + Front * 400.0f + Wall->GetActorForwardVector() * 300.0f);
-			WallAfter(Wall, 0.1f, [Wall, Module, Front]()
+			WallAfter(Wall, 0.1f + BlastLandsAfter(Wall, Pawn, 400.0f), [Wall, Module, Front]()
 			{
 				const FVector Hole = Wall->GetLastWoundCentre();
 				Module->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
@@ -1314,7 +1322,7 @@ namespace
 						WallAfter(Wall, 0.9f, [Wall, Pawn, Centre, Front]()
 						{
 							AimAndFire(Pawn, 1, Centre);
-							WallAfter(Wall, 0.1f, [Wall, Pawn]() { Launch(Wall, Pawn, Wall->GetLastWoundCentre(), TEXT("fly through the shotgun hole +0.1 s")); });
+							WallAfter(Wall, 0.1f + BlastLandsAfter(Wall, Pawn, 500.0f), [Wall, Pawn]() { Launch(Wall, Pawn, Wall->GetLastWoundCentre(), TEXT("fly through the shotgun hole, torn +0.1 s")); });
 							WatchUntilClosed(Wall, Pawn, TEXT("shotgun 5 m, flight"), false, [Wall, Pawn, Centre, Front]()
 							{
 								PlacePawn(Pawn, Centre + Front * 500.0f);
@@ -1322,7 +1330,7 @@ namespace
 								{
 									// Parked in the hole: the closing weave must push it out, not trap it.
 									AimAndFire(Pawn, 1, Centre);
-									WallAfter(Wall, 0.35f, [Wall, Pawn]() // once the tear has opened (BlastTearSeconds)
+									WallAfter(Wall, 0.35f + BlastLandsAfter(Wall, Pawn, 500.0f), [Wall, Pawn]() // once the tear has opened (BlastTearSeconds)
 									{
 										// Only into a hole the sphere fits: teleported into strands, the
 										// solver throws it out at tens of m/s (seen: 71 m/s, 325 damage).

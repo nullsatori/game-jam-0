@@ -31,8 +31,9 @@ class USoundBase;
  * Tearing. Every impact (IMKImpactReceiver: rounds, and thrown props through
  * the collision-impact path) wounds the skin within TearRadiusCm of its point;
  * a single hit's cells keep their collision (held-down pistol fire must never
- * open a way through). BurstMinHits or more impacts from one source in one
- * frame (the shotgun's pellets) are one blast: it tears its cells and the disc covering them all plus
+ * open a way through). BurstMinHits or more impacts from one source within
+ * BlastWindowSeconds (the shotgun's pellets: they fly, and land a few
+ * milliseconds apart) are one blast: it tears its cells and the disc covering them all plus
  * BurstMarginCm, at most BurstMaxRadiusCm - otherwise eight pellets would
  * leave eight 20 cm holes and never one a body fits through.
  *
@@ -143,9 +144,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Tear", meta = (ClampMin = "0.0"))
 	float TearRadiusCm = 15.0f;
 
-	/** Impacts from one source in one frame that count as one blast. */
+	/** Impacts from one source within BlastWindowSeconds that count as one blast. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Tear", meta = (ClampMin = "2"))
 	int32 BurstMinHits = 3;
+
+	/**
+	 * Impacts are held this long after the first before they are worked out
+	 * together: a shotgun's flying pellets land within milliseconds of each
+	 * other, not in one frame. Must stay under the fastest gun's FireInterval
+	 * (the pistol's 0.15 s), or a held-down pistol would add up to a blast.
+	 * 0: one frame, as before the rounds flew.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Tear", meta = (ClampMin = "0.0"))
+	float BlastWindowSeconds = 0.06f;
 
 	/** A blast tears the disc covering its hits plus this. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Tear", meta = (ClampMin = "0.0"))
@@ -390,6 +401,8 @@ private:
 	TSet<int32> Twitching;
 	TArray<FWound> Wounds;
 	TArray<FPendingHit> Pending;
+	/** When the first of Pending arrived. */
+	double PendingSince = 0.0;
 	TMap<TWeakObjectPtr<AActor>, double> LastSqueeze;
 	/** Hole slots of the skin material (M_Jam_Gritty HOLES). */
 	static constexpr int32 MaxHoles = 6;

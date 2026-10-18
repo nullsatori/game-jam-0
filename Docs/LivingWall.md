@@ -92,8 +92,14 @@
 **Разрыв.** Любое попадание через `MKDeliverResolvedImpact` рвёт клетки, центр
 которых ближе `TearRadiusCm` к точке попадания. Это пули, а также удары
 предметов и пешки через `JamCollisionImpact`: пешка, врезавшаяся на 770 см/с,
-рвёт 1–2 клетки. Если от одного источника за один кадр пришло `BurstMinHits`
-попаданий или больше (дробь), это один выстрел. Он рвёт ещё и круг, который
+рвёт 1–2 клетки. Если от одного источника за `BlastWindowSeconds` (0.06 с,
+считая от первого попадания) пришло `BurstMinHits` попаданий или больше
+(дробь), это один выстрел. Окно нужно потому, что дробины теперь летят
+(см. [RecoilWeapons](RecoilWeapons.md)) и долетают с разницей в
+миллисекунды, а не в одном кадре; стена держит попадания окно и только потом
+разбирает их. Окно меньше интервала пистолета (0.15 с), так что зажатый
+пистолет не складывается в выстрел. `BlastWindowSeconds = 0` — старое
+правило «один кадр». Он рвёт ещё и круг, который
 накрывает все попадания, плюс `BurstMarginCm`, но не больше
 `BurstMaxRadiusCm`. Без этого правила восемь дробин оставили бы восемь дырок
 по 20 см, и ни в одну не пролезть.
@@ -115,7 +121,7 @@
 большая рана начинает зарастать позже малой.
 
 **Вид меша и дыры.** С `SkinMesh` меш целый: клетки — только невидимая
-коллизия и логика. Каждая рана (одна на источник за кадр, так что дробь — одна
+коллизия и логика. Каждая рана (одна на источник за окно, так что дробь — одна
 дыра) — аналитический контур `AJamLivingWall::WoundGap` вокруг точки попадания:
 радиус (TearRadius × 1.2 у пули; у дробового — разброс дроби + запас, не больше
 потолка) × волна из гармоник 2–5 (амплитуды и фазы из случайного `Seed` раны,
@@ -256,6 +262,26 @@ Wall probe [shotgun 5 m]: whole again at +3.80 s after the shot, most open 50 ce
 Wall probe [fly through the shotgun hole +0.1 s]: passed yes - deepest 165 cm behind the wall plane, now 154 cm behind, HP 100 -> 100
 Wall probe [control: fly at the whole wall]: passed no - deepest 48 cm in front of the wall plane, now 193 cm in front, HP 97 -> 89
 ```
+
+С летящими дробинами (18.10, ветка `jam-weapons`, `Lvl_Jam_ZeroG`; дробь
+6000 см/с, пуля пистолета 9000 см/с): «+N s» считается от выстрела, поэтому
+к старым числам прибавились полёт 5 м (0.08 с) и окно стены (0.06 с); пролёт
+и «парковка» в дыре запускаются через столько же позже (`BlastLandsAfter`).
+
+```
+Wall probe [pistol 3 m]: round 1, open 0 cells, pawn sphere through the aim point blocked
+... (раунды 2–8 так же: open 0 cells, blocked)
+Living wall JamLivingWall_1: tore 78 cells (8 hit(s), one blast, hits within 46 cm of their centre) around (2, 14), regrowth after 2.60 s, 3 rim jet(s)
+Wall probe [shotgun 5 m]: whole again at +4.68 s after the shot, most open 78 cells, passable (largest clear radius >= pawn radius) until +3.80 s, the sweep through the hole centre clear until +2.98 s
+Living wall JamLivingWall_1: tore 62 cells (5 hit(s), one blast, hits within 42 cm of their centre) around (15, 10), regrowth after 2.60 s, 3 rim jet(s)
+Wall probe [fly through the shotgun hole, torn +0.1 s]: passed yes - deepest 249 cm behind the wall plane, now 181 cm behind, HP 100 -> 91
+Wall probe [parked in the hole]: closed with the pawn 699 cm in front of the plane (clear of the weave: yes), HP 88
+Wall probe [control: fly at the whole wall]: passed no - deepest 48 cm in front of the wall plane, now 188 cm in front, HP 88 -> 80
+```
+
+Во втором и третьем выстреле в стену попали 5 и 6 дробин из 8, отдельных
+поздних попаданий в логе нет; вероятно, остальные ушли в щели плетения
+(8 см на стыках клеток). С хитсканом это число не замерялось, сравнения нет.
 
 Кокон на корабле: дробовик — проходимо до +4.16 с, модуль: `clear radius 90 cm
 (a 1 m face needs 71)`, `+3.1 s centre 595 cm in front of the plane ... - out`.
