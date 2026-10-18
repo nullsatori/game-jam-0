@@ -148,13 +148,13 @@ the suit's reverb by `Scripts/jam_flyer_sounds.py`.
 
 - **210227 Red Tailed Hawk, eq isolated calls, roof 77mel 10am.wav** — **TRP**
   ([Freesound 616926](https://freesound.org/people/TRP/sounds/616926/)):
-  `SW_Jam_Flyer_Screech_A`, `_B`.
+  `SW_Jam_Flyer_Screech_A`.
 - **hawk_cry** — **loganzsound**
   ([Freesound 774252](https://freesound.org/people/loganzsound/sounds/774252/)):
-  `SW_Jam_Flyer_Screech_C`, `SW_Jam_Flyer_Death`.
+  `SW_Jam_Flyer_Death`.
 - **Huge wing flaps for bird, dragon, dinosaur.** (bed sheets) — **2create**
   ([Freesound 670509](https://freesound.org/people/2create/sounds/670509/)):
-  `SW_Jam_Flyer_Flap_A`, `_B`, `_C`.
+  `SW_Jam_Flyer_Flap_A`.
 - **Wing Flap 2.wav** (a coat) — **_stubb**
   ([Freesound 389633](https://freesound.org/people/_stubb/sounds/389633/)):
   the snap under every flap.

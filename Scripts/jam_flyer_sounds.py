@@ -10,7 +10,7 @@ The donors are found by file name anywhere under the donor dirs (all CC0, CREDIT
   554907__nox_sound__male_breath_fast_loop_stereo.wav  Nox_Sound (Freesound 554907) - the rasp
   866651__tile_sfx__gushy-impacts-blood.m4a            TILE_SFX (Freesound 866651) - the gurgle
 (the four previews: Saved/Donors/<id>/ after the 19.10 download; the last two in
-MindKore's SFX/ folder). Writes SW_Jam_Flyer_{Screech_A,B,C, Death, Flap_A,B,C}.wav
+MindKore's SFX/ folder). Writes SW_Jam_Flyer_{Screech_A, Death, Flap_A}.wav
 into <out dir> for
   JAM_WAV_DIR=<out dir> JAM_AUDIO_DEST=/Game/JamArt/Audio/Flyer UnrealEditor-Cmd ... Scripts/jam_import_audio.py
 and, unless <listen dir> is "-", the same at 48 kHz plus INDEX_flyer.txt (the measured table).
@@ -60,15 +60,17 @@ def load(path):
     return x.astype(np.float64) / np.abs(x).max()
 
 
-def glide(d, a, b, st0, st1, af, amount=0.0, gain=0.0, send=None, at=0.0):
+def glide(d, a, b, st0, st1, af, amount=0.0, gain=0.0, send=None, at=0.0, length=None):
     """Donor slice a..b s, played as tape whose pitch glides from st0 to st1 semitones, driven,
-    filtered; peak-normalised to gain dB."""
+    filtered; peak-normalised to gain dB. length: cut (with a fade) to this many seconds."""
     def layer():
         src = jss.fade(jss.donor(d)[int(a * SR):int(b * SR)], 0.004, 0.04)
         n_out = int(len(src) / 2 ** ((st0 + st1) / 24))
         pos = np.cumsum(2 ** (np.linspace(st0, st1, n_out) / 12))
         pos = pos[pos < len(src) - 1]
         x = jss.drive(np.interp(pos, np.arange(len(src)), src), amount)
+        if length:
+            x = jss.fade(x[:int(length * SR)], 0.0, 0.08)
         if af:
             x = jss.filt(x, af)
         x = jss.fade(x, 0.003, 0.05)
@@ -76,17 +78,19 @@ def glide(d, a, b, st0, st1, af, amount=0.0, gain=0.0, send=None, at=0.0):
     return layer
 
 
-def screech(d, a, b, st0, st1, lufs=-16.0, gurgle=None, reverb=(1.6, -4)):
+def screech(d, a, b, st0, st1, lufs=-16.0, gurgle=None, reverb=(0.55, -6), tail=0.35):
+    call = (b - a) * 2 ** (-(st0 + st1) / 24)  # the call's length once pitched down
     layers = [
         glide(d, a, b, st0, st1, f"{jss.hp(350)},{jss.lp(4000)}", 1.5, 0, send=-3),
-        glide(d, a, b, st0 - 18, st1 - 18, f"{jss.hp(60)},{jss.lp(900)}", 2.5, -9, send=-8),
+        # the throat ends with the call (pitched an octave and a half down it would drone 2.8x longer)
+        glide(d, a, b, st0 - 18, st1 - 18, f"{jss.hp(60)},{jss.lp(900)}", 2.5, -9, send=-8, length=call),
         glide("breath", 0.58, 1.02, st0 + 6, st1 + 4, f"{jss.hp(800)},{jss.lp(3000)}", 2.5, -14, send=-6),
         lambda: jss.sub(90, 45, 0.2, -16, amount=1.5, sweep=0.08),
     ]
     if gurgle:
         g_a, g_b, at = gurgle
         layers.append(glide("gushy", g_a, g_b, -12, -14, f"{jss.hp(80)},{jss.lp(900)}", 2.0, -4, send=-6, at=at))
-    return dict(layers=layers, reverb=reverb, gr=5.0, lufs=lufs, psat=(3.0, -8), send_lp=2500)
+    return dict(layers=layers, reverb=reverb, gr=5.0, lufs=lufs, psat=(3.0, -8), send_lp=2500, tail=tail)
 
 
 def flap(w_a, w_b, c_a, c_b, pitch=-3, lufs=-24.0):
@@ -94,20 +98,39 @@ def flap(w_a, w_b, c_a, c_b, pitch=-3, lufs=-24.0):
         glide("wings", w_a, w_b, pitch, pitch - 1, f"{jss.hp(70)},{jss.lp(2500)}", 1.2, 0, send=-10),
         glide("coat", c_a, c_b, pitch - 2, pitch - 3, f"{jss.hp(80)},{jss.lp(3000)}", 1.0, -8, send=-12),
         lambda: jss.sub(70, 40, 0.08, -18, amount=1.5, sweep=0.03),
-    ], reverb=(0.6, -12), gr=3.0, lufs=lufs, psat=(2.0, -12), send_lp=1000)
+    ], reverb=(0.2, -14), gr=3.0, lufs=lufs, psat=(2.0, -12), send_lp=1000, tail=0.17)
 
 
+# Owner 19.10 ("the tails are too long, we take the A sounds"): only the A takes, the reverb about
+# a third of before and every tail cut to `tail` s after the body (the last moment within 20 dB of
+# the peak) with a cos^2 fade - no click.
 # The hawk's calls (s): 4.55-5.0, 6.65-7.15, 9.2-9.55; the close cry 0.03-0.72.
 # The big wings' beats: 2.45-3.15, 3.75-4.2, 5.1-5.5, 6.5-6.85; the coat flap 0.12-0.55.
 SOUNDS = {
     "Screech_A": screech("hawk", 4.55, 5.0, -5, -7),
-    "Screech_B": screech("hawk", 6.65, 7.15, -7, -9),
-    "Screech_C": screech("cry", 0.03, 0.72, -4, -6),
-    "Death": screech("cry", 0.03, 0.72, -9, -16, lufs=-15.0, gurgle=(2.50, 2.80, 0.55), reverb=(2.2, -3)),
+    "Death": screech("cry", 0.03, 0.72, -9, -16, lufs=-15.0, gurgle=(2.50, 2.80, 0.55), reverb=(0.7, -5)),
     "Flap_A": flap(2.45, 3.15, 0.12, 0.55),
-    "Flap_B": flap(3.75, 4.2, 0.12, 0.55, pitch=-4),
-    "Flap_C": flap(5.1, 5.5, 0.12, 0.55, pitch=-2),
 }
+
+
+def body_end(y):
+    """The last moment (s) the 10 ms envelope is within 20 dB of its peak."""
+    env = np.convolve(np.abs(y.mean(axis=1)), np.ones(480) / 480, "same")
+    return np.nonzero(env > env.max() * 0.1)[0][-1] / SR
+
+
+def cut_tail(y, tail, lufs):
+    """Fade out over `tail` s after the body (cos^2: no click), cut there, back to the LUFS target."""
+    start = int(body_end(y) * SR)
+    n = min(len(y), start + int(tail * SR))
+    g = np.ones(n)
+    g[start:n] = np.cos(np.linspace(0, np.pi / 2, n - start)) ** 2
+    y = y[:n] * g[:, None]
+    gain = 0.0
+    for _ in range(4):
+        z, _ = jss.limit(y * 10 ** (gain / 20))
+        gain += lufs - jss.loudness(z)[0]
+    return jss.limit(y * 10 ** (gain / 20))[0]
 
 
 def main():
@@ -121,8 +144,9 @@ def main():
     rows = []
     for i, (name, spec) in enumerate(SOUNDS.items()):
         y, _ = jss.render(spec, seed=100 + i)
+        y = cut_tail(y, spec["tail"], spec["lufs"])
         m = jss.measure(y)
-        rows.append(f"{name} | {m['len']:.2f} s | peak {m['peak']:.1f} dBFS | LUFS-I {m['lufs']:.1f} | rise {m['rise']:.1f} ms | "
+        rows.append(f"{name} | {m['len']:.2f} s, tail {m['len'] - body_end(y):.2f} s after the body | peak {m['peak']:.1f} dBFS | LUFS-I {m['lufs']:.1f} | rise {m['rise']:.1f} ms | "
                     f"<80/80-250/250-1k/1k-3k/>3k % {'/'.join(f'{v:.0f}' for v in m['b_all'])}")
         print(rows[-1])
         jss.write(os.path.join(out_dir, f"SW_Jam_Flyer_{name}.wav"), y, jss.OUT_SR)

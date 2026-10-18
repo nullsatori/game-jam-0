@@ -140,26 +140,10 @@ AJamFlyer::AJamFlyer()
 
 	// Recorded donors heard through the suit (Scripts/jam_flyer_sounds.py, CREDITS.md); the bite is MindKore's gristle crunch.
 	static ConstructorHelpers::FObjectFinder<USoundBase> ScreechA(TEXT("/Game/JamArt/Audio/Flyer/SW_Jam_Flyer_Screech_A.SW_Jam_Flyer_Screech_A"));
-	static ConstructorHelpers::FObjectFinder<USoundBase> ScreechB(TEXT("/Game/JamArt/Audio/Flyer/SW_Jam_Flyer_Screech_B.SW_Jam_Flyer_Screech_B"));
-	static ConstructorHelpers::FObjectFinder<USoundBase> ScreechC(TEXT("/Game/JamArt/Audio/Flyer/SW_Jam_Flyer_Screech_C.SW_Jam_Flyer_Screech_C"));
 	static ConstructorHelpers::FObjectFinder<USoundBase> Death(TEXT("/Game/JamArt/Audio/Flyer/SW_Jam_Flyer_Death.SW_Jam_Flyer_Death"));
 	static ConstructorHelpers::FObjectFinder<USoundBase> FlapA(TEXT("/Game/JamArt/Audio/Flyer/SW_Jam_Flyer_Flap_A.SW_Jam_Flyer_Flap_A"));
-	static ConstructorHelpers::FObjectFinder<USoundBase> FlapB(TEXT("/Game/JamArt/Audio/Flyer/SW_Jam_Flyer_Flap_B.SW_Jam_Flyer_Flap_B"));
-	static ConstructorHelpers::FObjectFinder<USoundBase> FlapC(TEXT("/Game/JamArt/Audio/Flyer/SW_Jam_Flyer_Flap_C.SW_Jam_Flyer_Flap_C"));
-	for (USoundBase* Sound : { ScreechA.Object, ScreechB.Object, ScreechC.Object })
-	{
-		if (Sound)
-		{
-			ScreechSounds.Add(Sound);
-		}
-	}
-	for (USoundBase* Sound : { FlapA.Object, FlapB.Object, FlapC.Object })
-	{
-		if (Sound)
-		{
-			FlapSounds.Add(Sound);
-		}
-	}
+	ScreechSound = ScreechA.Object;
+	FlapSound = FlapA.Object;
 	DeathSound = Death.Object;
 	static ConstructorHelpers::FObjectFinder<USoundBase> Crunch(TEXT("/Game/MindKore/Audio/Impact/SC_MK_Hit_Limb.SC_MK_Hit_Limb"));
 	BiteSound = Crunch.Object;
@@ -246,7 +230,7 @@ FVector AJamFlyer::PickWanderPoint(const FVector& From, const FVector& Forward, 
 
 void AJamFlyer::Screech(const TCHAR* Why)
 {
-	USoundBase* Sound = ScreechSounds.IsEmpty() ? nullptr : ScreechSounds[FMath::RandHelper(ScreechSounds.Num())].Get();
+	USoundBase* Sound = ScreechSound.Get();
 	const float Pitch = FMath::FRandRange(ScreechPitch.X, ScreechPitch.Y);
 	if (Sound)
 	{
@@ -263,7 +247,7 @@ namespace JamFlyerParts
 
 void AJamFlyer::PlayFlap(float Strength)
 {
-	USoundBase* Sound = FlapSounds.IsEmpty() ? nullptr : FlapSounds[FMath::RandHelper(FlapSounds.Num())].Get();
+	USoundBase* Sound = FlapSound.Get();
 	if (!Sound || Strength < 0.35f)
 	{
 		return;

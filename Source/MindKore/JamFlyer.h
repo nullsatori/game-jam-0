@@ -227,9 +227,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look", meta = (ClampMin = "0.0"))
 	float FlapAmplitudeDeg = 38.0f;
 
-	/** On a hunt start and a dive, one at random (Scripts/jam_flyer_sounds.py). */
+	/** On a hunt start and a dive, varied by pitch only (Scripts/jam_flyer_sounds.py; owner 19.10: the A take). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
-	TArray<TObjectPtr<USoundBase>> ScreechSounds;
+	TObjectPtr<USoundBase> ScreechSound = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
 	FVector2D ScreechPitch = FVector2D(0.92f, 1.08f);
@@ -238,9 +238,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
 	TObjectPtr<USoundBase> DeathSound = nullptr;
 
-	/** One per downstroke (mid-beat), one at random; glides are silent. */
+	/** One per downstroke (mid-beat), varied by pitch; glides are silent. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
-	TArray<TObjectPtr<USoundBase>> FlapSounds;
+	TObjectPtr<USoundBase> FlapSound = nullptr;
 
 	/** A full beat's volume; a smaller beat is quieter, under ~1/3 of FlapAmplitudeDeg none. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look", meta = (ClampMin = "0.0"))
