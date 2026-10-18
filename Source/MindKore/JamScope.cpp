@@ -18,13 +18,26 @@
 #include "JamLivingWall.h"
 #include "JamWeapons.h"
 #include "JamZeroGPawn.h"
+#include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "MindKore.h"
 #include "TimerManager.h"
 
+namespace
+{
+	TAutoConsoleVariable<int32> CVarScopeTrace(TEXT("jam.Scope.Trace"), 0,
+		TEXT("Log the scope's aim springs every tick (Scope trace: t, place, turn, alpha) - for plotting the curves."));
+}
+
 UJamScopeComponent::UJamScopeComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	// X, Y, Z, pitch, yaw, roll. In: after a short reaction, Z first and quickest (up), Y, then X (in) - the arc; all a little
+	// under-damped (low gravity: it floats 8-12% past the eye and settles in about 0.8 s). The turns are
+	// slower and floatier still: the muzzle comes round late.
+	AimIn = { { 1.8f, 0.58f, 0.08f }, { 2.0f, 0.62f, 0.04f }, { 2.3f, 0.55f, 0.02f }, { 1.5f, 0.45f, 0.0f }, { 1.5f, 0.45f, 0.0f }, { 1.4f, 0.42f, 0.0f } };
+	// Out: no wait, quicker, nearly critical - it drops away rather than floats.
+	AimOut = { { 2.8f, 0.75f, 0.0f }, { 2.6f, 0.75f, 0.0f }, { 2.8f, 0.7f, 0.0f }, { 2.0f, 0.5f, 0.0f }, { 2.0f, 0.5f, 0.0f }, { 2.0f, 0.5f, 0.0f } };
 	LensMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/Materials/Weapons/M_Jam_ScopeLens.M_Jam_ScopeLens")));
 	ReticleMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/Materials/Weapons/M_Jam_ScopeReticle.M_Jam_ScopeReticle")));
 	SightDotMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/Materials/Weapons/M_Jam_SightDot.M_Jam_SightDot")));
@@ -50,15 +63,74 @@ float UJamScopeComponent::GetLookScale() const
 
 void UJamScopeComponent::AimPose(int32 Weapon, FTransform& Rest, float& KickScale) const
 {
-	if (Weapon != ScopedWeapon || Alpha <= 0.0f)
+	if (Weapon != ScopedWeapon || !bMoving)
 	{
 		return;
 	}
-	// At the eye: the scope's axis (parallel to the gun's X) on the camera's, the
-	// eyepiece EyeReliefCm ahead.
-	Rest.SetTranslation(FMath::Lerp(Rest.GetTranslation(), FVector(EyeReliefCm, 0.0f, 0.0f) - EyepieceCm, Alpha));
-	Rest.SetRotation(FQuat::Slerp(Rest.GetRotation(), FQuat::Identity, Alpha));
+	// The springs' pose; at the eye it is exactly the scope's axis on the camera's, the eyepiece
+	// EyeReliefCm ahead, with the rest pose's turn (none on the SV-98).
+	Rest.SetTranslation(Place);
+	Rest.SetRotation(FRotator(Turn.X, Turn.Y, Turn.Z).Quaternion() * Rest.GetRotation());
 	KickScale = FMath::Lerp(1.0f, AimKickScale, Alpha);
+}
+
+void UJamScopeComponent::StepMotion(float DeltaTime, bool bAim)
+{
+	const FVector RestPlace = Weapons->Weapons[ScopedWeapon].ViewOffset.GetTranslation();
+	const FVector AimPlace = FVector(EyeReliefCm, 0.0f, 0.0f) - EyepieceCm;
+	if (bAim != bAimTarget)
+	{
+		bAimTarget = bAim;
+		SinceSwitch = 0.0f;
+	}
+	SinceSwitch += DeltaTime;
+	const TArray<FJamAimSpring>& Springs = bAimTarget ? AimIn : AimOut;
+	if (Springs.Num() < 6)
+	{
+		return;
+	}
+	// Each place channel heads for its end once its delay has passed, from the other end until then.
+	FVector Goal;
+	for (int32 Axis = 0; Axis < 3; ++Axis)
+	{
+		const bool bGo = SinceSwitch >= Springs[Axis].Delay;
+		Goal[Axis] = (bGo == bAimTarget) ? AimPlace[Axis] : RestPlace[Axis];
+	}
+	// x'' = w^2 (goal - x) - 2 zeta w x', semi-implicit Euler in steps of at most 4 ms (stable at the 3 Hz ends).
+	const int32 Steps = FMath::Clamp(FMath::CeilToInt(DeltaTime / 0.004f), 1, 32);
+	const float Dt = DeltaTime / Steps;
+	for (int32 Step = 0; Step < Steps; ++Step)
+	{
+		for (int32 Axis = 0; Axis < 3; ++Axis)
+		{
+			const float W = 2.0f * PI * Springs[Axis].Hz;
+			PlaceVelocity[Axis] += (W * W * (Goal[Axis] - Place[Axis]) - 2.0f * Springs[Axis].Damping * W * PlaceVelocity[Axis]) * Dt;
+			Place[Axis] += PlaceVelocity[Axis] * Dt;
+		}
+		// The turns chase the drag of the motion: the muzzle dips while rising, points back across, cants.
+		const FVector TurnGoal(-PitchLag * PlaceVelocity.Z, -YawLag * PlaceVelocity.Y, RollLag * PlaceVelocity.Y);
+		for (int32 Axis = 0; Axis < 3; ++Axis)
+		{
+			const FJamAimSpring& Spring = Springs[3 + Axis];
+			const float W = 2.0f * PI * Spring.Hz;
+			TurnVelocity[Axis] += (W * W * (TurnGoal[Axis] - Turn[Axis]) - 2.0f * Spring.Damping * W * TurnVelocity[Axis]) * Dt;
+			Turn[Axis] += TurnVelocity[Axis] * Dt;
+		}
+	}
+	// Settled: snap exactly onto the end (the eyepiece aligned to the micron), and at the hip stop.
+	const FVector End = bAimTarget ? AimPlace : RestPlace;
+	if (SinceSwitch > 0.2f && (Place - End).Size() < 0.01f && PlaceVelocity.Size() < 0.05f && Turn.Size() < 0.01f && TurnVelocity.Size() < 0.05f)
+	{
+		Place = End;
+		PlaceVelocity = TurnVelocity = Turn = FVector::ZeroVector;
+		bMoving = bAimTarget;
+	}
+	const FVector Way = AimPlace - RestPlace;
+	Alpha = FMath::Clamp(FVector::DotProduct(Place - RestPlace, Way) / Way.SizeSquared(), 0.0f, 1.0f);
+	if (!bMoving && !bAimTarget)
+	{
+		Alpha = 0.0f;
+	}
 }
 
 void UJamScopeComponent::BindInput(UEnhancedInputComponent& Input, UInputMappingContext& Mapping)
@@ -200,9 +272,35 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	const bool bWants = bHeld && bScopeInView && Weapons->CurrentWeapon == ScopedWeapon
 		&& !(Tools && Tools->GetTool() != EJamHullTool::None) && Weapons->GetReloadRemaining() <= 0.0f;
 	const float WasAlpha = Alpha;
-	Progress = FMath::Clamp(Progress + (bWants ? DeltaTime : -DeltaTime) / AimSeconds, 0.0f, 1.0f);
-	// Smootherstep: no speed at either end, fastest halfway.
-	Alpha = Progress * Progress * Progress * (Progress * (Progress * 6.0f - 15.0f) + 10.0f);
+	// The body's velocity change this frame, in the camera's frame: the gun's inertia sways it the other way.
+	const FVector BodyVelocity = GetOwner()->GetVelocity();
+	const FVector BodyChange = Camera->GetComponentQuat().UnrotateVector(BodyVelocity - LastBodyVelocity);
+	LastBodyVelocity = BodyVelocity;
+	if (!bScopeInView)
+	{
+		// Another gun in hand: the rifle starts from its rest pose when it comes back.
+		bMoving = bAimTarget = false;
+		Alpha = 0.0f;
+	}
+	else
+	{
+		if (!bMoving && (bWants || BodyChange.Size() * SwayPerBodyVelocity > 0.5f))
+		{
+			bMoving = true;
+			Place = Weapons->Weapons[ScopedWeapon].ViewOffset.GetTranslation();
+			PlaceVelocity = Turn = TurnVelocity = FVector::ZeroVector;
+		}
+		if (bMoving)
+		{
+			PlaceVelocity -= (BodyChange * SwayPerBodyVelocity).GetClampedToMaxSize(MaxSwayCmPerSec);
+			StepMotion(DeltaTime, bWants);
+		}
+	}
+	if (CVarScopeTrace.GetValueOnGameThread() && bMoving)
+	{
+		UE_LOG(LogMindKore, Log, TEXT("Scope trace: t=%.4f aim=%d place=%.3f,%.3f,%.3f turn=%.3f,%.3f,%.3f alpha=%.4f"), GetWorld()->GetTimeSeconds(),
+			bAimTarget ? 1 : 0, Place.X, Place.Y, Place.Z, Turn.X, Turn.Y, Turn.Z, Alpha);
+	}
 	Lens->SetVisibility(bScopeInView);
 	Reticle->SetVisibility(bScopeInView);
 	// The sight dots ride on the moving part of their gun (the USP's slide) while that part is in view.
@@ -381,4 +479,75 @@ namespace
 		TEXT("jam.Scope.Shots"),
 		TEXT("Stills of the SV-98's scope at a living wall ~20 m away: hip, raising, aimed (centre, edge), a shot through the bolt cycle, hip again, the pistol sight dots; GPU/frame time at the hip and aimed (HighResShot; needs a real RHI)."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunScopeShots));
+
+	/**
+	 * jam.Scope.AimFrames: the raise and the lowering frame by frame (HighResShot; needs a real RHI). The
+	 * zero-G pawn looks at the living wall nearest to 20 m with the SV-98; time runs at a tenth so the
+	 * stills land every 33 ms of game time: 25 through the raise (0..0.8 s), 16 through the lowering
+	 * (JamAim_in_<nn>_<ms>.png, JamAim_out_<nn>_<ms>.png). jam.Scope.Trace logs the springs every tick
+	 * meanwhile, for the curves.
+	 */
+	void RunScopeAimFrames(UWorld* World)
+	{
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AJamZeroGPawn* Pawn = Controller ? Cast<AJamZeroGPawn>(Controller->GetPawn()) : nullptr;
+		UJamScopeComponent* Scope = Pawn ? Pawn->FindComponentByClass<UJamScopeComponent>() : nullptr;
+		IConsoleVariable* Trace = IConsoleManager::Get().FindConsoleVariable(TEXT("jam.Scope.Trace"));
+		if (!Scope || !Trace)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Scope aim frames: needs the AJamZeroGPawn with its scope"));
+			return;
+		}
+		FVector Target = Pawn->GetActorLocation() + FVector(2000.0f, 0.0f, 0.0f);
+		float Best = TNumericLimits<float>::Max();
+		for (TActorIterator<AJamLivingWall> It(World); It; ++It)
+		{
+			const float Error = FMath::Abs(FVector::Dist(It->GetActorLocation(), Pawn->GetActorLocation()) - 2000.0f);
+			if (Error < Best)
+			{
+				Best = Error;
+				Target = It->GetActorLocation();
+			}
+		}
+		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
+		{
+			FTimerHandle Handle;
+			Pawn->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(Pawn, MoveTemp(Step)), Seconds, false);
+		};
+		const auto Still = [Controller, Scope](const TCHAR* Phase, int32 Index, float Seconds)
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Scope aim frames: %s %02d at %.3f s - %s"), Phase, Index, Seconds, *Scope->Describe());
+			Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=JamAim_%s_%02d_%03d"), Phase, Index, FMath::RoundToInt(Seconds * 1000.0f)));
+		};
+		// Long first wait: shaders may still compile. Timers count game time, slowed from 9 s on.
+		After(8.0f, [Pawn, Controller, Target]()
+		{
+			Pawn->Guns->UnlockWeapon(2);
+			Controller->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());
+		});
+		After(9.0f, [World, Trace]() { UGameplayStatics::SetGlobalTimeDilation(World, 0.1f); Trace->Set(1, ECVF_SetByCode); });
+		const float In = 9.2f;
+		const float Out = In + 1.5f;
+		After(In, [Scope]() { Scope->SetHeld(true); });
+		for (int32 Index = 0; Index < 25; ++Index)
+		{
+			After(In + Index / 30.0f + 0.001f, [Still, Index]() { Still(TEXT("in"), Index, Index / 30.0f); });
+		}
+		After(Out, [Scope]() { Scope->SetHeld(false); });
+		for (int32 Index = 0; Index < 16; ++Index)
+		{
+			After(Out + Index / 30.0f + 0.001f, [Still, Index]() { Still(TEXT("out"), Index, Index / 30.0f); });
+		}
+		After(Out + 1.0f, [World, Trace, Scope]()
+		{
+			Trace->Set(0, ECVF_SetByCode);
+			UGameplayStatics::SetGlobalTimeDilation(World, 1.0f);
+			UE_LOG(LogMindKore, Log, TEXT("Scope aim frames: done - %s"), *Scope->Describe());
+		});
+	}
+
+	FAutoConsoleCommandWithWorld GScopeAimFrames(
+		TEXT("jam.Scope.AimFrames"),
+		TEXT("The SV-98's raise and lowering every 33 ms of game time (time at a tenth), with jam.Scope.Trace on (HighResShot; needs a real RHI)."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunScopeAimFrames));
 }
