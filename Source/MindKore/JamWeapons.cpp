@@ -22,6 +22,61 @@
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
+namespace
+{
+	/** jam.Weapons.PoseAt: the gun in view held this many seconds after a shot (stills through a cycle); < 0 off. */
+	TAutoConsoleVariable<float> CVarPoseAt(TEXT("jam.Weapons.PoseAt"), -1.0f,
+		TEXT("Hold the gun in view (kick and moving part) this many seconds after its last shot; < 0: live."));
+
+	/** One key of a moving part's curve: seconds since the shot, share of the travel/turn, slopes in share per second. */
+	struct FJamCycleKey
+	{
+		float Time;
+		float Value;
+		float Arrive;
+		float Leave;
+	};
+
+	/**
+	 * Cubic keys with broken tangents: the slopes are the curve's shape. A part that
+	 * hits a stop arrives with speed (a steep arrive) and leaves the other way (the
+	 * rebound) - the knock MindKore's hammer gets from its damped cosine
+	 * (MKComputeFireReaction), here as keys the owner can drag in the editor.
+	 */
+	FRuntimeFloatCurve MakeCycleCurve(std::initializer_list<FJamCycleKey> Keys)
+	{
+		TArray<FRichCurveKey> RichKeys;
+		for (const FJamCycleKey& Key : Keys)
+		{
+			FRichCurveKey& Rich = RichKeys.Emplace_GetRef(Key.Time, Key.Value, Key.Arrive, Key.Leave, RCIM_Cubic);
+			Rich.TangentMode = RCTM_Break;
+		}
+		FRuntimeFloatCurve Curve;
+		Curve.GetRichCurve()->SetKeys(RichKeys);
+		return Curve;
+	}
+
+	float EvalCycle(const FRuntimeFloatCurve& Curve, float Seconds)
+	{
+		const FRichCurve* Rich = Curve.GetRichCurveConst();
+		return Rich && Rich->GetNumKeys() > 0 ? Rich->Eval(Seconds) : 0.0f;
+	}
+}
+
+float FJamWeapon::GetActionCycleSeconds() const
+{
+	float Seconds = 0.0f;
+	for (const FRuntimeFloatCurve* Curve : { &ActionTravel, &ActionTurn, &ActionBody })
+	{
+		const FRichCurve* Rich = Curve->GetRichCurveConst();
+		if (Rich && Rich->GetNumKeys() > 0)
+		{
+			Seconds = FMath::Max(Seconds, Rich->GetLastKey().Time);
+		}
+	}
+	return Seconds;
+}
+
 UJamWeaponsComponent::UJamWeaponsComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -31,9 +86,13 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	// The rounds fly slow enough to be seen: the shotgun's pellets spread as a cloud.
 	// MindKore's own meshes (CREDITS.md): its enemies' USP, the hero's pump gun;
 	// the SV-98 built the same way (Scripts/blender/jam_guns.py).
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Usp(TEXT("/Game/MindKore/Weapons/USP/SM_MK_USP_Soviet.SM_MK_USP_Soviet"));
+	// Each in two parts, the frame and what moves (Scripts/blender/jam_usp_split.py, jam_guns.py).
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Usp(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_USP_Frame.SM_Jam_USP_Frame"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> UspSlide(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_USP_Slide.SM_Jam_USP_Slide"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PumpGun(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_Shotgun.SM_Jam_Shotgun"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pump(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_Shotgun_Pump.SM_Jam_Shotgun_Pump"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sv98(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_SV98.SM_Jam_SV98"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sv98Bolt(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_SV98_Bolt.SM_Jam_SV98_Bolt"));
 	FJamWeapon Pistol;
 	Pistol.Name = NSLOCTEXT("JamZeroG", "Pistol", "Пистолет");
 	Pistol.Damage = 25.0f;
@@ -54,10 +113,18 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	// The USP's muzzle is its -X, the grip at the origin: turned to face the view.
 	Pistol.ViewMesh = Usp.Object;
 	Pistol.ViewOffset = FTransform(FRotator(0.0f, 180.0f, 0.0f), FVector(30.0f, 9.0f, -10.0f));
+	// The slide: blown back 4 cm in 35 ms (fast out, slowing on the spring), a beat on
+	// the stop, driven home faster and faster, a 7% rebound off the frame, settled at
+	// 0.145 s - inside the 0.15 s of automatic fire.
+	Pistol.ActionMesh = UspSlide.Object;
+	Pistol.ActionTravelCm = 4.0f;
+	Pistol.ActionTravel = MakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 70.0f }, { 0.035f, 1.0f, 8.0f, 0.0f }, { 0.05f, 0.96f, -3.0f, -3.0f },
+		{ 0.1f, 0.0f, -38.0f, 6.0f }, { 0.115f, 0.07f, 0.0f, 0.0f }, { 0.145f, 0.0f, 0.0f, 0.0f } });
 	FJamWeapon Shotgun;
 	Shotgun.Name = NSLOCTEXT("JamZeroG", "Shotgun", "Дробовик");
 	Shotgun.Damage = 12.0f;
-	Shotgun.FireInterval = 0.8f;
+	// The pump stroke sets the pace (its cycle ends at 0.56 s).
+	Shotgun.FireInterval = 0.5f;
 	Shotgun.MagazineSize = 6;
 	Shotgun.Reserve = 24;
 	Shotgun.ReloadSeconds = 2.0f;
@@ -75,10 +142,26 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	// Butt -> muzzle along +X, the origin on the trigger.
 	Shotgun.ViewMesh = PumpGun.Object;
 	Shotgun.ViewOffset = FTransform(FRotator::ZeroRotator, FVector(26.0f, 11.0f, -12.0f));
+	// The fore-end, racked by itself 0.15 s after the shot (owner: «более резво
+	// передергивать»): yanked back 8 cm into the stop in 0.11 s, a 6% bounce off
+	// it, slammed home 0.14 s after the back click with a 5% rebound, settled at
+	// 0.47 s. The stroke runs along the line of sight, so the gun comes in to meet
+	// it - canted to show its underside, swung across the view and pulled 8 cm
+	// closer - and goes back
+	// out by 0.56 s.
+	Shotgun.ActionMesh = Pump.Object;
+	Shotgun.ActionTravelCm = -8.0f;
+	Shotgun.ActionTravel = MakeCycleCurve({ { 0.15f, 0.0f, 0.0f, 6.0f }, { 0.26f, 1.0f, 20.0f, -4.0f }, { 0.28f, 0.94f, 0.0f, 0.0f },
+		{ 0.4f, 0.0f, -22.0f, 3.0f }, { 0.42f, 0.05f, 0.0f, 0.0f }, { 0.47f, 0.0f, 0.0f, 0.0f } });
+	Shotgun.ActionBodyTurn = FRotator(6.0f, -15.0f, 22.0f);
+	Shotgun.ActionBodyOffsetCm = FVector(-8.0f, -3.0f, 2.0f);
+	Shotgun.ActionBody = MakeCycleCurve({ { 0.12f, 0.0f, 0.0f, 0.0f }, { 0.22f, 1.05f, 0.0f, 0.0f }, { 0.26f, 1.0f, 0.0f, 0.0f },
+		{ 0.36f, 1.0f, 0.0f, 0.0f }, { 0.48f, 0.0f, -12.0f, -1.5f }, { 0.51f, -0.04f, 0.0f, 0.0f }, { 0.56f, 0.0f, 0.0f, 0.0f } });
 	FJamWeapon Sniper;
 	Sniper.Name = NSLOCTEXT("JamZeroG", "Sniper", "Снапа");
 	Sniper.Damage = 150.0f;
-	Sniper.FireInterval = 1.2f;
+	// The bolt sets the pace (its cycle ends at 1.25 s).
+	Sniper.FireInterval = 0.5f;
 	Sniper.MagazineSize = 4;
 	Sniper.Reserve = 16;
 	Sniper.ReloadSeconds = 2.5f;
@@ -94,6 +177,24 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	// Low and to the right: its scope sits 11.5 cm over the trigger.
 	Sniper.ViewMesh = Sv98.Object;
 	Sniper.ViewOffset = FTransform(FRotator::ZeroRotator, FVector(22.0f, 13.0f, -16.0f));
+	// The bolt at the rear of the receiver, turning about the bore at its handle
+	// (1.5 cm behind the trigger, 4.5 cm up), on the sound's clicks (up +0.35 s,
+	// back +0.63 s, home +0.87 s, down +1.09 s): lifted 60 deg into its stop with a
+	// 4% drop back, pulled 9 cm back into the stop with a 7% bounce, a beat, pushed
+	// home with a 3.5% knock, locked down with a 5% bounce. The rifle cants to
+	// show its right side meanwhile, back by 1.25 s.
+	Sniper.ActionMesh = Sv98Bolt.Object;
+	Sniper.ActionPivot = FVector(-1.5f, 0.0f, 4.5f);
+	Sniper.ActionTravelCm = -9.0f;
+	Sniper.ActionTurnDeg = 60.0f;
+	Sniper.ActionTurn = MakeCycleCurve({ { 0.25f, 0.0f, 0.0f, 2.0f }, { 0.35f, 1.0f, 12.0f, -2.0f }, { 0.38f, 0.96f, 0.0f, 0.0f },
+		{ 0.42f, 1.0f, 0.0f, 0.0f }, { 0.99f, 1.0f, 0.0f, 0.0f }, { 1.09f, 0.0f, -14.0f, 2.5f }, { 1.12f, 0.05f, 0.0f, 0.0f },
+		{ 1.18f, 0.0f, 0.0f, 0.0f } });
+	Sniper.ActionTravel = MakeCycleCurve({ { 0.42f, 0.0f, 0.0f, 0.0f }, { 0.63f, 1.0f, 11.0f, -3.0f }, { 0.665f, 0.93f, 0.0f, 0.0f },
+		{ 0.72f, 0.93f, 0.0f, 0.0f }, { 0.87f, 0.0f, -14.0f, 2.5f }, { 0.895f, 0.035f, 0.0f, 0.0f }, { 0.93f, 0.0f, 0.0f, 0.0f } });
+	Sniper.ActionBodyTurn = FRotator(3.0f, -8.0f, -14.0f);
+	Sniper.ActionBody = MakeCycleCurve({ { 0.2f, 0.0f, 0.0f, 0.0f }, { 0.32f, 1.04f, 0.0f, 0.0f }, { 0.37f, 1.0f, 0.0f, 0.0f },
+		{ 1.05f, 1.0f, 0.0f, 0.0f }, { 1.17f, 0.0f, -12.0f, -1.5f }, { 1.2f, -0.03f, 0.0f, 0.0f }, { 1.25f, 0.0f, 0.0f, 0.0f } });
 	Weapons = { Pistol, Shotgun, Sniper };
 
 	// MindKore's own content (CREDITS.md lists the sound donors).
@@ -137,6 +238,12 @@ void UJamWeaponsComponent::BeginPlay()
 		ViewModel->SetOnlyOwnerSee(true);
 		ViewModel->SetupAttachment(Camera);
 		ViewModel->RegisterComponent();
+		ActionInView = NewObject<UStaticMeshComponent>(GetOwner(), TEXT("GunActionInView"));
+		ActionInView->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		ActionInView->SetCastShadow(false);
+		ActionInView->SetOnlyOwnerSee(true);
+		ActionInView->SetupAttachment(ViewModel);
+		ActionInView->RegisterComponent();
 	}
 }
 
@@ -237,36 +344,49 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	{
 		ShownWeapon = Weapon ? CurrentWeapon : INDEX_NONE;
 		ViewModel->SetStaticMesh(Weapon ? Weapon->ViewMesh.Get() : nullptr);
-		ViewKick = 0.0f;
+		ActionInView->SetStaticMesh(Weapon ? Weapon->ActionMesh.Get() : nullptr);
+		SinceShotSeconds = 1000.0f;
 	}
 	if (!Weapon)
 	{
 		return;
 	}
-	ViewKick *= FMath::Exp(-ViewKickReturnRate * DeltaTime);
+	SinceShotSeconds += DeltaTime;
+	const float PoseAt = CVarPoseAt.GetValueOnGameThread();
+	const float Since = PoseAt >= 0.0f ? PoseAt : SinceShotSeconds;
 	// Back along the view, the muzzle up and a little roll, about the grip (the
 	// meshes' origin); the rise turns about the camera's right axis whichever
-	// way the mesh itself faces.
-	const FQuat Rise = FRotator(Weapon->ViewKickRiseDeg * ViewKick, 0.0f, -0.3f * Weapon->ViewKickRiseDeg * ViewKick).Quaternion();
+	// way the mesh itself faces. Springs back at ViewKickReturnRate.
+	const float Kick = FMath::Exp(-ViewKickReturnRate * Since);
+	const FQuat Rise = FRotator(Weapon->ViewKickRiseDeg * Kick, 0.0f, -0.3f * Weapon->ViewKickRiseDeg * Kick).Quaternion();
+	const float BodyShare = EvalCycle(Weapon->ActionBody, Since);
 	FTransform Offset = Weapon->ViewOffset;
-	Offset.SetRotation(Rise * Offset.GetRotation());
-	Offset.AddToTranslation(FVector(-Weapon->ViewKickBackCm * ViewKick, 0.0f, 0.0f));
+	Offset.SetRotation(Rise * (Weapon->ActionBodyTurn * BodyShare).Quaternion() * Offset.GetRotation());
+	Offset.AddToTranslation(Weapon->ActionBodyOffsetCm * BodyShare);
+	Offset.AddToTranslation(FVector(-Weapon->ViewKickBackCm * Kick, 0.0f, 0.0f));
 	ViewModel->SetRelativeTransform(Offset);
+	// The moving part runs its cycle along/about the gun's own X.
+	ActionInView->SetRelativeLocationAndRotation(
+		Weapon->ActionPivot + FVector(Weapon->ActionTravelCm * EvalCycle(Weapon->ActionTravel, Since), 0.0f, 0.0f),
+		FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Weapon->ActionTurnDeg * EvalCycle(Weapon->ActionTurn, Since))));
 }
 
-FVector UJamWeaponsComponent::MuzzleLocation() const
+FTransform UJamWeaponsComponent::GetMuzzleTransform() const
 {
-	const UStaticMesh* Mesh = ViewModel ? ViewModel->GetStaticMesh().Get() : nullptr;
-	if (!Mesh)
+	const FJamWeapon* Weapon = GetWeapon();
+	if (!ViewModel || !ViewModel->GetStaticMesh() || !Weapon)
 	{
-		return GetOwner()->GetActorLocation();
+		const APawn* Pawn = Cast<APawn>(GetOwner());
+		return FTransform(Pawn ? Pawn->GetViewRotation() : GetOwner()->GetActorRotation(), GetOwner()->GetActorLocation());
 	}
-	if (ViewModel->DoesSocketExist(TEXT("Muzzle")))
-	{
-		return ViewModel->GetSocketLocation(TEXT("Muzzle"));
-	}
-	// No socket (the pump gun): the front of the mesh, on its bore (local Z 0).
-	return ViewModel->GetComponentTransform().TransformPosition(FVector(Mesh->GetBoundingBox().Max.X, 0.0f, 0.0f));
+	// The bore's line is the view's forward carried through the kick: the gun's
+	// world rotation without its rest turn in ViewOffset (the USP sits turned 180).
+	const FQuat Bore = ViewModel->GetComponentQuat() * Weapon->ViewOffset.GetRotation().Inverse();
+	const FVector Location = ViewModel->DoesSocketExist(TEXT("Muzzle"))
+		? ViewModel->GetSocketLocation(TEXT("Muzzle"))
+		// No socket (a mesh not from Scripts/jam_weapons.py): its front, on its origin's line.
+		: ViewModel->GetComponentTransform().TransformPosition(FVector(ViewModel->GetStaticMesh()->GetBoundingBox().Max.X, 0.0f, 0.0f));
+	return FTransform(Bore, Location);
 }
 
 void UJamWeaponsComponent::BindInput(UEnhancedInputComponent& Input, UInputMappingContext& Mapping)
@@ -376,7 +496,8 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 		return false;
 	}
 	--Weapon->Ammo;
-	NextShotSeconds = Now + Weapon->FireInterval;
+	// Not before the slide, the pump or the bolt is home again.
+	NextShotSeconds = Now + FMath::Max(Weapon->FireInterval, Weapon->GetActionCycleSeconds());
 	// One kick per shot, whatever the pellets do. Guns cost no oxygen.
 	OutRecoil = -Direction * Weapon->RecoilImpulse;
 	const float Yaw = Weapon->KickYawDeg * (FMath::RandBool() ? 1.0f : -1.0f);
@@ -385,12 +506,12 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	KickAttackLeft = RecoilAttackSeconds;
 	SettlePitch += Weapon->KickPitchDeg * RecoilSettleFraction;
 	SettleYaw += Yaw * RecoilSettleFraction;
-	ViewKick = 1.0f;
+	SinceShotSeconds = 0.0f;
 	for (USoundBase* Sound : ShotSounds)
 	{
 		UGameplayStatics::PlaySound2D(this, Sound, 1.0f, Weapon->SoundPitch);
 	}
-	const FVector Muzzle = MuzzleLocation();
+	const FVector Muzzle = GetMuzzleTransform().GetLocation();
 	for (int32 Pellet = 0; Pellet < Weapon->Pellets; ++Pellet)
 	{
 		const FVector PelletDirection = Weapon->SpreadDeg > 0.0f
@@ -566,4 +687,110 @@ namespace
 		TEXT("jam.Weapons.Shots"),
 		TEXT("First-person stills of the pistol and the shotgun, then the SV-98 at rest: at rest, +0.05 s after a shot, then +0.12 s (pistol) / +0.45 s (shotgun, the hole) (HighResShot; needs a real RHI)."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunWeaponShots));
+
+	/**
+	 * jam.Weapons.Cycles: the moving parts frame by frame (HighResShot; needs a real
+	 * RHI). Logs every gun's curves at 5 ms, then for each gun: jam.Weapons.PoseAt
+	 * holds the gun in view at points through its cycle (kick included) and a still
+	 * is taken of each (JamCycle_<gun>_<nn>_<ms>.png in Saved/Screenshots), then one
+	 * live shot with a still at +0.05 s; 1.5 s later, away from the still's long
+	 * frame, one more shot and two tries to fire again - inside the cycle (refused)
+	 * and just after it (fired), each logged with the seconds really gone by.
+	 */
+	void RunWeaponCycles(UWorld* World)
+	{
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AJamZeroGPawn* Pawn = Controller ? Cast<AJamZeroGPawn>(Controller->GetPawn()) : nullptr;
+		IConsoleVariable* PoseAt = IConsoleManager::Get().FindConsoleVariable(TEXT("jam.Weapons.PoseAt"));
+		if (!Pawn || !PoseAt)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Weapon cycles: needs the AJamZeroGPawn"));
+			return;
+		}
+		for (const FJamWeapon& Weapon : Pawn->Guns->Weapons)
+		{
+			const float Cycle = Weapon.GetActionCycleSeconds();
+			UE_LOG(LogMindKore, Log, TEXT("Weapon cycle: %s cycle %.3f s, fire interval %.2f s, travel %.1f cm, turn %.0f deg"),
+				*Weapon.Name.ToString(), Cycle, Weapon.FireInterval, Weapon.ActionTravelCm, Weapon.ActionTurnDeg);
+			for (int32 Step = 0; Step * 0.005f <= Cycle + 0.0001f; ++Step)
+			{
+				const float T = Step * 0.005f;
+				UE_LOG(LogMindKore, Log, TEXT("Weapon cycle sample: %d t=%.3f travel=%.4f turn=%.4f body=%.4f"), int32(&Weapon - Pawn->Guns->Weapons.GetData()), T,
+					EvalCycle(Weapon.ActionTravel, T), EvalCycle(Weapon.ActionTurn, T), EvalCycle(Weapon.ActionBody, T));
+			}
+		}
+		FVector Target = Pawn->GetActorLocation() + FVector(600.0f, 0.0f, 0.0f);
+		FVector Stand = Pawn->GetActorLocation();
+		if (TActorIterator<AJamLivingWall> Wall(World); Wall)
+		{
+			Target = Wall->GetActorLocation();
+			Stand = Target + Wall->GetFrontNormal() * 600.0f;
+		}
+		const auto Hold = [Pawn, Controller, Stand, Target]()
+		{
+			Pawn->Body->SetWorldLocation(Stand, false, nullptr, ETeleportType::TeleportPhysics);
+			Pawn->Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+			Controller->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());
+		};
+		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
+		{
+			FTimerHandle Handle;
+			Pawn->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(Pawn, MoveTemp(Step)), Seconds, false);
+		};
+		const TCHAR* Names[3] = { TEXT("pistol"), TEXT("shotgun"), TEXT("sv98") };
+		const TArray<float> Phases[3] = {
+			{ 0.0f, 0.012f, 0.025f, 0.035f, 0.05f, 0.07f, 0.09f, 0.1f, 0.115f, 0.145f },
+			{ 0.12f, 0.18f, 0.22f, 0.26f, 0.28f, 0.33f, 0.37f, 0.4f, 0.42f, 0.47f, 0.51f, 0.56f },
+			{ 0.25f, 0.3f, 0.35f, 0.38f, 0.5f, 0.63f, 0.665f, 0.75f, 0.82f, 0.87f, 0.99f, 1.05f, 1.09f, 1.12f, 1.25f } };
+		// Inside the cycle, then just after it (or the fire interval, whichever is longer).
+		const float Retry[3][2] = { { 0.1f, 0.17f }, { 0.4f, 0.6f }, { 1.0f, 1.3f } };
+		float At = 8.0f; // shaders may still compile
+		for (int32 Gun = 0; Gun < 3; ++Gun)
+		{
+			After(At, [Pawn, Hold, PoseAt, Gun]() { PoseAt->Set(-1.0f, ECVF_SetByCode); Pawn->Guns->UnlockWeapon(Gun); Hold(); });
+			At += 1.5f;
+			for (int32 Index = 0; Index < Phases[Gun].Num(); ++Index)
+			{
+				const float T = Phases[Gun][Index];
+				After(At, [Hold, PoseAt, T]() { Hold(); PoseAt->Set(T, ECVF_SetByCode); });
+				After(At + 0.2f, [Pawn, Controller, Name = Names[Gun], Index, T]()
+				{
+					const FJamWeapon* Weapon = Pawn->Guns->GetWeapon();
+					const UStaticMeshComponent* Part = Pawn->Guns->ActionInView;
+					UE_LOG(LogMindKore, Log, TEXT("Weapon cycles: %s %02d at %.3f s - travel %.3f turn %.3f, part at %s %s, muzzle %s"), Name, Index, T,
+						Weapon ? EvalCycle(Weapon->ActionTravel, T) : 0.0f, Weapon ? EvalCycle(Weapon->ActionTurn, T) : 0.0f,
+						*Part->GetRelativeLocation().ToCompactString(), *Part->GetRelativeRotation().ToCompactString(),
+						*Pawn->Guns->GetMuzzleTransform().ToHumanReadableString());
+					Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=JamCycle_%s_%02d_%04d"), Name, Index, FMath::RoundToInt(T * 1000.0f)));
+				});
+				At += 0.5f;
+			}
+			TSharedRef<double> ShotAt = MakeShared<double>(0.0);
+			After(At, [Pawn, Hold, PoseAt, ShotAt]() { PoseAt->Set(-1.0f, ECVF_SetByCode); Hold(); Pawn->Fire(); *ShotAt = Pawn->GetWorld()->GetTimeSeconds(); });
+			After(At + 0.05f, [Controller, Name = Names[Gun]]()
+			{
+				UE_LOG(LogMindKore, Log, TEXT("Weapon cycles: %s live +0.05 s"), Name);
+				Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=JamCycle_%s_live_0050"), Name));
+			});
+			After(At + 1.5f, [Pawn, Hold, ShotAt]() { Hold(); Pawn->Fire(); *ShotAt = Pawn->GetWorld()->GetTimeSeconds(); });
+			for (const float Try : Retry[Gun])
+			{
+				After(At + 1.5f + Try, [Pawn, Hold, Name = Names[Gun], ShotAt]()
+				{
+					Hold();
+					const double Since = Pawn->GetWorld()->GetTimeSeconds() - *ShotAt;
+					const bool bFired = Pawn->Fire();
+					UE_LOG(LogMindKore, Log, TEXT("Weapon cycles: %s fire again %.3f s after the shot (cycle %.3f s): %s"), Name, Since,
+						Pawn->Guns->GetWeapon()->GetActionCycleSeconds(), bFired ? TEXT("fired") : TEXT("refused"));
+				});
+			}
+			At += 4.0f;
+		}
+		After(At, [Hold]() { Hold(); UE_LOG(LogMindKore, Log, TEXT("Weapon cycles: done")); });
+	}
+
+	FAutoConsoleCommandWithWorld GWeaponCycles(
+		TEXT("jam.Weapons.Cycles"),
+		TEXT("The guns' moving parts frame by frame (jam.Weapons.PoseAt), a live shot each and the fire gate (HighResShot; needs a real RHI)."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunWeaponCycles));
 }

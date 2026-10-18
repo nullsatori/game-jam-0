@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Curves/CurveFloat.h"
 #include "JamWeapons.generated.h"
 
 class UEnhancedInputComponent;
@@ -89,6 +90,51 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|View")
 	FTransform ViewOffset;
 
+	/**
+	 * The gun's moving part in view - the pistol's slide, the shotgun's fore-end, the
+	 * SV-98's bolt - hung on ViewMesh with its origin at ActionPivot. After every shot
+	 * it runs one cycle, ActionTravel and ActionTurn sampled at the seconds since the
+	 * shot; the gun cannot fire again before the cycle is over (GetActionCycleSeconds).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Action")
+	TObjectPtr<UStaticMesh> ActionMesh = nullptr;
+
+	/** Where ActionMesh's origin sits in ViewMesh's space, cm (the bolt turns about ViewMesh's X through it). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Action")
+	FVector ActionPivot = FVector::ZeroVector;
+
+	/** The part's travel along ViewMesh's X at ActionTravel 1, cm (signed: back is +X on the USP, -X on the long guns). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Action")
+	float ActionTravelCm = 0.0f;
+
+	/** The part's turn about ViewMesh's X at ActionTurn 1, degrees (the bolt handle's lift). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Action")
+	float ActionTurnDeg = 0.0f;
+
+	/** Seconds since the shot -> share of ActionTravelCm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Action")
+	FRuntimeFloatCurve ActionTravel;
+
+	/** Seconds since the shot -> share of ActionTurnDeg. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Action")
+	FRuntimeFloatCurve ActionTurn;
+
+	/**
+	 * The whole gun turned this way, in the camera's frame about the grip, at
+	 * ActionBody 1: canted and swung across the view while the part works, so a
+	 * stroke along the line of sight reads on screen.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Action")
+	FRotator ActionBodyTurn = FRotator::ZeroRotator;
+
+	/** ...and moved this far, cm in the camera's frame (X forward, Y right, Z up), at ActionBody 1. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Action")
+	FVector ActionBodyOffsetCm = FVector::ZeroVector;
+
+	/** Seconds since the shot -> share of ActionBodyTurn and ActionBodyOffsetCm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Action")
+	FRuntimeFloatCurve ActionBody;
+
 	/** Pitch of the blast sound: a small gun cracks, a big one booms. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.1"))
 	float SoundPitch = 1.0f;
@@ -100,6 +146,9 @@ struct FJamWeapon
 	/** Rounds in the magazine now. Set to MagazineSize on BeginPlay. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapon")
 	int32 Ammo = 0;
+
+	/** Seconds from a shot until the gun is home: the last key of ActionTravel / ActionTurn / ActionBody (0 without them). */
+	float GetActionCycleSeconds() const;
 };
 
 /**
@@ -117,7 +166,8 @@ struct FJamWeapon
  * The shooter's push is not applied here: Fire returns it and the pawn applies
  * it its own way (the zero-G body takes all of it, the test room's character a
  * small fraction). The view's kick is applied here, through the owner's control
- * rotation, and the gun in view (ViewMesh, on the owner's camera) kicks too.
+ * rotation, and the gun in view (ViewMesh, on the owner's camera) kicks too and
+ * runs its moving part's cycle (ActionMesh), which also gates the next shot.
  */
 UCLASS(ClassGroup = (Jam), meta = (BlueprintSpawnableComponent))
 class MINDKORE_API UJamWeaponsComponent : public UActorComponent
@@ -182,6 +232,19 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	TObjectPtr<UStaticMeshComponent> ViewModel = nullptr;
 
+	/** The gun's moving part (FJamWeapon::ActionMesh), on ViewModel. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
+	TObjectPtr<UStaticMeshComponent> ActionInView = nullptr;
+
+	/**
+	 * The muzzle of the gun in view, world space, as it is drawn this frame (kick
+	 * included): X out of the bore, along the gun's own line. ViewModel's Muzzle
+	 * socket (every gun has one); without a gun in view, the owner's location and
+	 * view. For flash and smoke; rounds fly from the eye, not from here.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
+	FTransform GetMuzzleTransform() const;
+
 	/** Rounds in flight now. */
 	int32 GetRoundsInFlight() const { return Rounds.Num(); }
 
@@ -245,7 +308,6 @@ private:
 	void UpdateViewModel(float DeltaTime);
 	/** Turn the owner's view by degrees in the view's own frame. */
 	void TurnView(float PitchDeg, float YawDeg) const;
-	FVector MuzzleLocation() const;
 	void SelectStep(int32 Step);
 
 	TArray<FRound> Rounds;
@@ -254,8 +316,8 @@ private:
 	float KickAttackLeft = 0.0f;
 	float SettlePitch = 0.0f;
 	float SettleYaw = 0.0f;
-	/** 1 on a shot, springing back to 0: the gun in view's kick. */
-	float ViewKick = 0.0f;
+	/** Seconds since the gun in view last fired: drives its kick and its moving part's cycle. */
+	float SinceShotSeconds = 1000.0f;
 	int32 ShownWeapon = INDEX_NONE;
 
 	double NextShotSeconds = 0.0;

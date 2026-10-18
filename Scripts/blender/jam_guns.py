@@ -2,11 +2,14 @@
 
   blender.exe -b --factory-startup --python Scripts/blender/jam_guns.py -- <out_dir>
 
-Writes SM_Jam_Shotgun.fbx and SM_Jam_SV98.fbx into out_dir (not the
-repository); Scripts/jam_weapons.py imports them. Both are laid in gun space
-for a first-person view: UE axes (in metres), X butt -> muzzle, Z up, origin on
-the trigger. No UVs (plain colour materials). Material slots: 0 Walnut (wood),
-1 BlackOxide (metal), 2 Rubber (recoil pad, eyecup).
+Writes SM_Jam_Shotgun.fbx and SM_Jam_SV98.fbx and their moving parts,
+SM_Jam_Shotgun_Pump.fbx (the fore-end) and SM_Jam_SV98_Bolt.fbx, into out_dir
+(not the repository); Scripts/jam_weapons.py imports them. All are laid in gun
+space for a first-person view: UE axes (in metres), X butt -> muzzle, Z up,
+origin on the trigger - except the bolt, whose origin is its pivot on the bore
+axis (BOLT_PIVOT; UJamWeaponsComponent turns it about X there). No UVs (plain
+colour materials). Material slots: Walnut (wood), BlackOxide (metal), Rubber
+(recoil pad, eyecup), only those a mesh uses.
 
 The shotgun is MindKore's own: the 92 cm Soviet pump gun that gun_r17.py
 builds from primitives for the operator's back (concept 01, "дворовый
@@ -80,8 +83,7 @@ STOCK = [(0.0, -1.0, -13.5, 2.1), (10, -0.7, -11.6, 2.05), (22, -0.2, -8.4, 1.9)
          (34, 0.5, -4.4, 1.5), (38.5, 1.0, -3.8, 1.45)]
 PUMP = [(61, -0.1, -3.7, 1.75), (62.2, 0.2, -4.0, 2.0), (76.8, 0.2, -4.0, 2.0), (78, -0.1, -3.7, 1.75)]
 PARTS = {
-    "Walnut": [loft([section(*s) for s in STOCK]), loft([section(*s) for s in PUMP])]
-              + [tube(ring_path(x, 0.2, -4.0, 2.0), 0.16, True) for x in np.arange(63.5, 76, 2.4)],
+    "Walnut": [loft([section(*s) for s in STOCK])],
     "BlackOxide": [loft([section(38.5, 1.25, -4.0, 1.45), section(58.0, 1.25, -4.0, 1.45)]),
                    cyl(58.0, 92.0, 1.05),
                    cyl(58.0, 83.0, 1.1, z=-2.3),
@@ -93,6 +95,9 @@ PARTS = {
                    cyl(91.3, 91.7, 0.2, z=1.15, m=8)],
     "Rubber": [loft([section(-1.6, -1.0, -13.5, 2.1), section(0.0, -1.0, -13.5, 2.1)])],
 }
+# The fore-end and its grip grooves: the moving part, pulled back along -X.
+PUMP_PART = {"Walnut": [loft([section(*s) for s in PUMP])]
+                       + [tube(ring_path(x, 0.2, -4.0, 2.0), 0.16, True) for x in np.arange(63.5, 76, 2.4)]}
 
 # --- the SV-98 (cm, same frame; Blender -Y is the rifle's right side in UE: the bolt) ---
 def ring(x, z, r, m=12, wire=0.25):
@@ -107,8 +112,9 @@ def taper(x0, x1, r0, r1, z=0.0, m=20):
 SV98 = {
     "Walnut": [
         loft([section(1.0, -2.0, -16.0, 1.9), section(4.0, -1.5, -16.0, 1.9)]),             # butt upright
-        loft([section(4.0, 1.2, -2.8, 1.8), section(18.0, 1.6, -2.4, 1.8),                  # cheek rest / comb
-              section(30.0, 1.4, -2.6, 1.7), section(34.0, 0.6, -3.2, 1.6)]),
+        loft([section(4.0, 1.2, -2.8, 1.8), section(18.0, 1.6, -2.4, 1.8),                  # cheek rest / comb,
+              section(24.0, 0.4, -2.7, 1.7), section(28.0, -1.0, -2.9, 1.7),                # dropping to a wrist
+              section(34.0, -1.1, -3.2, 1.6)]),                                               # the bolt rides back over
         loft([section(4.0, -13.0, -16.0, 1.7), section(16.0, -12.2, -15.0, 1.6),            # lower bar
               section(26.0, -11.0, -13.6, 1.5)]),
         tube([[24.0, 0, -12.8], [27.0, 0, -11.4], [30.0, 0, -9.4], [32.6, 0, -7.0], [34.6, 0, -4.2], [35.4, 0, -2.0]], 1.6, ring=12),                   # grip, closes the thumbhole
@@ -123,8 +129,6 @@ SV98 = {
         loft([section(44.5, -4.0, -10.5, 1.3), section(51.5, -4.0, -10.0, 1.3)]),          # magazine
         tube([[36.0, 0, -3.8], [37.0, 0, -6.4], [41.0, 0, -7.2], [44.0, 0, -6.2], [44.5, 0, -4.2]], 0.35),  # guard
         tube([[41.2, 0, -4.0], [41.0, 0, -5.0], [40.4, 0, -5.6]], 0.25),                   # trigger
-        tube([[53.0, -1.5, 1.0], [53.0, -4.0, 0.2], [52.2, -5.2, -1.2]], 0.45),            # bolt handle
-        loft([section(51.4, -0.7, -2.3, 0.9), section(53.0, -0.4, -2.6, 0.9)]),            # its knob
         taper(39.0, 45.0, 2.1, 1.6, z=7.0), taper(45.0, 64.0, 1.5, 1.5, z=7.0),            # scope: eyepiece, tube
         taper(64.0, 72.0, 1.5, 2.5, z=7.0), taper(72.0, 76.0, 2.5, 2.5, z=7.0),            # objective bell
         loft([section(54.0, 10.6, 8.0, 0.9), section(56.0, 10.6, 8.0, 0.9)]),              # elevation turret
@@ -138,6 +142,26 @@ SV98 = {
         taper(37.0, 39.0, 2.3, 2.2, z=7.0),                                                  # eyecup
     ],
 }
+
+
+# The bolt (moving part), at the rear of the receiver as on the real rifle: the
+# handle comes out on the right behind the scope's rear ring, over the trigger,
+# bent down and back to a ball knob; the body runs forward in the receiver under
+# the scope, its shroud behind the receiver. All about the bore axis at the handle.
+def ball(c, r, m=12):
+    xs = np.linspace(-r, r, 9)
+    rs = np.sqrt(np.maximum(r * r - xs * xs, 1e-4))
+    V, F = loft([section(c[0] + x, c[2] + q, c[2] - q, q, m, 2.0) for x, q in zip(xs, rs)])
+    return V + np.array([0.0, c[1], 0.0]), F
+
+
+BOLT_PIVOT = np.array([39.5, 0.0, 0.0])
+BOLT = {"BlackOxide": [
+    tube([[39.5, -1.4, 0.8], [39.2, -3.8, 0.0], [38.2, -4.9, -1.6]], 0.45),                 # handle, down and back
+    ball((38.0, -5.0, -1.9), 0.95),                                                          # ball knob
+    cyl(35.0, 52.0, 0.85),                                                                    # bolt body (in the receiver)
+    loft([section(32.0, 1.15, -1.15, 1.15, 20, 2.0), section(35.0, 1.15, -1.15, 1.15, 20, 2.0)]),  # shroud
+]}
 
 
 def export_gun(name, parts, origin):
@@ -169,5 +193,10 @@ def export_gun(name, parts, origin):
     print("JAMGUN: %s, %d verts, %d faces, bounds %s .. %s m" % (path, len(verts), len(faces), lo.round(3), hi.round(3)))
 
 
-export_gun("SM_Jam_Shotgun", PARTS, np.array([48.4, 0.0, -4.5]))
-export_gun("SM_Jam_SV98", SV98, np.array([41.0, 0.0, -4.5]))
+SHOTGUN_ORIGIN, SV98_ORIGIN = np.array([48.4, 0.0, -4.5]), np.array([41.0, 0.0, -4.5])
+export_gun("SM_Jam_Shotgun", PARTS, SHOTGUN_ORIGIN)
+export_gun("SM_Jam_Shotgun_Pump", PUMP_PART, SHOTGUN_ORIGIN)
+export_gun("SM_Jam_SV98", SV98, SV98_ORIGIN)
+export_gun("SM_Jam_SV98_Bolt", BOLT, BOLT_PIVOT)
+# UJamWeaponsComponent's FJamWeapon::ActionPivot for the bolt (UE cm; Y 0, so no handedness flip).
+print("JAMGUN: SV-98 bolt pivot in SM_Jam_SV98 %s cm" % (BOLT_PIVOT - SV98_ORIGIN))
