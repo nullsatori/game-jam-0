@@ -20,6 +20,8 @@ public class MindKore : ModuleRules
 			"EnhancedInput",
 			"Niagara",
 			"PhysicsCore",
+			// jam.Audio.LimiterProbe records the master output (UAudioMixerBlueprintLibrary).
+			"AudioMixer",
 			// AMKGlassPane builds its shards at runtime; the plugin is enabled by
 			// default in UE 5.8, so it needs no .uproject entry.
 			"ProceduralMeshComponent",

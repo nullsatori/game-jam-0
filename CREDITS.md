@@ -62,7 +62,7 @@ Nothing below is used as recorded: every in-game sound was cut from a donor,
 played down, layered and re-recorded into a wave of MindKore by a script.
 
 **MindKore's shot** (`SW_MK_Blast_Transient`, `SW_MK_Blast_Tail`; no longer
-played by the jam's guns since 18.10, see below) — cut from
+played as recorded by the jam's guns since 18.10; its 231248 donor is a layer of two of them, see below) — cut from
 **Smith & Wesson 686 Plus 4 Inch Barrel .357 Mag** by **AugustSandberg**
 ([Freesound 231248](https://freesound.org/people/AugustSandberg/sounds/231248/)).
 Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
@@ -76,9 +76,9 @@ them, a synthetic reverb, compressed and limited) by `Scripts/jam_space_shots.py
 checked on each sound's own Freesound page on 18.10.2026 (one candidate,
 Freesound 863729, turned out CC BY 4.0 there and was not used).
 
-- **9mm pistol shot** — **michorvath**
-  ([Freesound 427592](https://freesound.org/people/michorvath/sounds/427592/)):
-  `SW_Jam_Shot_Pistol`.
+- **Smith & Wesson 686 Plus 4 Inch Barrel .357 Mag** — **AugustSandberg**
+  ([Freesound 231248](https://freesound.org/people/AugustSandberg/sounds/231248/),
+  MindKore's shot above): `SW_Jam_Shot_Pistol`, the body of `SW_Jam_Shot_Shotgun`.
 - **20 gauge shotgun** — **michorvath**
   ([Freesound 427595](https://freesound.org/people/michorvath/sounds/427595/)):
   `SW_Jam_Shot_Shotgun`.
@@ -95,8 +95,8 @@ Freesound 863729, turned out CC BY 4.0 there and was not used).
   ([Freesound 674568](https://freesound.org/s/674568/)):
   `SW_Jam_Empty_Pistol`, `SW_Jam_Empty_Shotgun`, `SW_Jam_Empty_SV98`.
 
-Rendered for listening only, not in the game (variants for the owner to pick
-from, all CC0 as above): Freesound 231248 (the S&W 686 above), 431834 «Sauer 404
+Rendered for listening only, not in the game (variants the owner did not pick,
+all CC0 as above): Freesound 427592 «9mm pistol shot» by michorvath, 431834 «Sauer 404
 close shot» by moosegravy, 159710 «Mossberg 500A - 1 shot and pump» by
 AnthonyChan0, 370345 «Mosin Nagant Bolt Action Cycle» by Zott820.
 

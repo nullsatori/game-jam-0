@@ -3,8 +3,8 @@
     python Scripts/jam_space_shots.py <donor dir> <out dir> [<listen dir>]
 
 Downloads the donors (Freesound HQ previews, all CC0 - CREDITS.md) into <donor dir>
-when missing and renders every sound in SOUNDS. The defaults (game=True) go to
-<out dir> as SW_Jam_<name>.wav for Scripts/jam_import_audio.py; with <listen dir>
+when missing and renders every sound in SOUNDS. The game's sounds (game=True, or game="<asset name>")
+go to <out dir> as SW_Jam_<name>.wav for Scripts/jam_import_audio.py; with <listen dir>
 every variant is written there too (<name>_space.wav, the shot donors dry as
 Donor_<id>_dry.wav, mocks of a shot with its cycle and of a pistol burst) with
 INDEX.txt, the measured table.
@@ -323,30 +323,33 @@ BOLT_B = ("370345", [(0.05, 0.28, 0.006), (0.38, 0.60, 0.192), (0.77, 1.00, 0.38
           [0.073, 0.110, 0.110, 0.117])
 DRY_FIRE = ("674568", [(0.0, 0.25, 0.0)], [0.075])
 SOUNDS = {
-    # pistol: the 9mm; B heavier and longer, C MindKore's revolver in the same build
-    "Shot_Pistol": dict(game=True, lufs=-19.5, gr=6, psat=(3, -8), reverb=(1.5, -3),
+    # In game since the owner's pick on 18.10 ("все выстрелы берем С"): the C of each gun, under the
+    # default asset names; A and B are rendered for listening only. Behind the master limiter
+    # (SM_Jam_Master) the pistol sits at -16.5 LUFS: its burst may sum over 0 dBFS, the limiter holds it.
+    # pistol: A the 9mm; B heavier and longer; C MindKore's revolver in the same build
+    "Shot_Pistol_A_9mm": dict(lufs=-19.5, gr=6, psat=(3, -8), reverb=(1.5, -3),
                         layers=shot("427592", 0.105, 1.0, -2, 2500, -3, 1500, -12, (90, 38, 0.15, -1), b_len=0.2)),
     "Shot_Pistol_B_heavy": dict(lufs=-19.5, gr=7, psat=(4, -6), reverb=(2.0, -2),
                                 layers=shot("427592", 0.105, 1.0, -2, 2200, -4, 1300, -14, (85, 34, 0.25, 0),
                                             rumble=(-12, -6), b_len=0.25)),
-    "Shot_Pistol_C_revolver": dict(lufs=-19.5, gr=6, psat=(3, -8), reverb=(1.5, -3),
+    "Shot_Pistol_C_revolver": dict(game="Shot_Pistol", lufs=-16.5, gr=6, psat=(3, -8), reverb=(1.5, -3),
                                    layers=shot(*S686, 1.0, -2, 2500, -3, 1500, -12, (90, 38, 0.15, -1), b_len=0.2)),
-    # shotgun: the 20 gauge; B an explosion (rumble, longer sub, longer tail); C the 686's body under it
-    "Shot_Shotgun": dict(game=True, lufs=-13, gr=7, psat=(3, -6), reverb=(2.6, -2),
+    # shotgun: A the 20 gauge; B an explosion (rumble, longer sub, longer tail); C the 686's body under it
+    "Shot_Shotgun_A_20ga": dict(lufs=-13, gr=7, psat=(3, -6), reverb=(2.6, -2),
                          layers=shot("427595", 0.025, 1.37, -3, 2200, -4, 1100, -12, (80, 34, 0.3, 0))),
     "Shot_Shotgun_B_blast": dict(lufs=-12.5, gr=8, psat=(4, -4), reverb=(3.2, -1),
                                  layers=shot("427595", 0.025, 1.37, -3, 2000, -5, 1000, -14, (75, 30, 0.4, 1),
                                              rumble=(-12, -4))),
-    "Shot_Shotgun_C_mixed": dict(lufs=-13, gr=7, psat=(3, -6), reverb=(2.6, -2),
+    "Shot_Shotgun_C_mixed": dict(game="Shot_Shotgun", lufs=-13.5, gr=7, psat=(3, -6), reverb=(2.6, -2),
                                  layers=shot("427595", 0.025, 1.37, -3, 2200, -4, 1100, -10, (80, 34, 0.3, 0),
                                              body_from=S686)),
-    # SV-98: the Lee Enfield; B the Sauer 404; C deeper and longer still
-    "Shot_SV98": dict(game=True, lufs=-13.5, gr=7, psat=(3, -6), reverb=(3.4, -1),
+    # SV-98: A the Lee Enfield; B the Sauer 404; C deeper and longer still
+    "Shot_SV98_A_enfield": dict(lufs=-13.5, gr=7, psat=(3, -6), reverb=(3.4, -1),
                       layers=shot("450853", 0.005, 1.39, -3, 2000, -5, 850, -12, (70, 30, 0.5, -1), rumble=(-12, -5))),
     "Shot_SV98_B_sauer": dict(lufs=-13, gr=7, psat=(3, -6), reverb=(3.4, -1),
                               layers=shot("431834", 0.505, 1.5, -3, 2000, -5, 850, -12, (70, 30, 0.5, 1),
                                           rumble=(-12, -5))),
-    "Shot_SV98_C_deep": dict(lufs=-13, gr=8, psat=(4, -4), reverb=(4.2, 0),
+    "Shot_SV98_C_deep": dict(game="Shot_SV98", lufs=-12.5, gr=8, psat=(4, -4), reverb=(4.2, 0),
                              layers=shot("450853", 0.005, 1.39, -4, 1600, -6, 750, -15, (60, 28, 0.7, 0),
                                          rumble=(-14, -3))),
     # pump: back then forward (heavy). A the clean rack sample (default), B v1's Mossberg
@@ -361,7 +364,7 @@ SOUNDS = {
     "Empty_SV98": dict(game=True, **mech(*DRY_FIRE, heavy=[0], pitch=-8, lufs=-22)),
 }
 # in-game delay of each cycle after its shot (JamWeapons.cpp CycleDelaySeconds)
-CYCLE_MOCKS = {"Shotgun": ("Shot_Shotgun", "Pump_Shotgun", 0.15), "SV98": ("Shot_SV98", "Bolt_SV98", 0.25)}
+CYCLE_MOCKS = {"Shotgun": ("Shot_Shotgun_C_mixed", "Pump_Shotgun", 0.15), "SV98": ("Shot_SV98_C_deep", "Bolt_SV98", 0.25)}
 DRY = {"427592": (0.105, 1.0), "427595": (0.025, 1.37), "450853": (0.005, 1.39), "231248": (2.005, 1.0),
        "431834": (0.505, 1.5)}
 
@@ -420,7 +423,8 @@ def main():
                                                     for k in ("b_all", "b_att", "b_body", "b_tail")))
         print(" | ".join(rows[-1]))
         if spec.get("game"):
-            write(os.path.join(out_dir, f"SW_Jam_{name}.wav"), y, OUT_SR)
+            asset = spec["game"] if isinstance(spec["game"], str) else name
+            write(os.path.join(out_dir, f"SW_Jam_{asset}.wav"), y, OUT_SR)
         if listen:
             write(os.path.join(listen, f"{name}_space.wav"), y, SR)
     for name, m in (("Pump_Shotgun", PUMP_A), ("Pump_Shotgun_B_mossberg", PUMP_B), ("Bolt_SV98", BOLT_A),
@@ -439,7 +443,7 @@ def main():
         mock[:len(a)] += a
         mock[int(delay * SR):int(delay * SR) + len(b)] += b
         write(os.path.join(listen, f"Mock_{gun}_shot_then_cycle_space.wav"), mock, SR)
-    for name in ("Shot_Pistol", "Shot_Pistol_B_heavy"):  # eight shots at the pistol's FireInterval 0.15 s
+    for name in ("Shot_Pistol_C_revolver",):  # eight shots at the pistol's FireInterval 0.15 s
         a = rendered[name]
         burst = np.zeros((int(7 * 0.15 * SR) + len(a), 2))
         for k in range(8):
@@ -449,7 +453,10 @@ def main():
                 f"<80/80-250/250-1k/1k-3k/>3k {'/'.join(f'{v:.0f}' for v in bands(burst.mean(axis=1)))} %")
         print(line)
         rows.append((line,))
-        write(os.path.join(listen, f"Mock_{name}_burst8_space.wav"), burst / max(1.0, np.abs(burst).max() / 0.99), SR)
+        # as the game plays it: through a -1 dBFS limiter (ours; the game's is SMX_Jam_MasterLimiter)
+        limited, lim = limit(burst)
+        print(f"  through a -1 dBFS limiter: {lim:.1f} dB of limiting, LUFS-I {loudness(limited)[0]:.1f}")
+        write(os.path.join(listen, f"Mock_{name}_burst8_limited_space.wav"), limited, SR)
     with open(os.path.join(listen, "INDEX.txt"), "w", encoding="utf-8") as f:
         f.write(" | ".join(hdr) + "\n" + "\n".join(" | ".join(r) for r in rows) + "\n")
 
