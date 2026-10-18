@@ -106,20 +106,20 @@ UJamMuzzleFxComponent::UJamMuzzleFxComponent()
 	// Volumetric clouds: a thin pistol puff, a big torn shotgun cloud that shoves the
 	// older ones, the SV-98's brake ring.
 	Pistol.CloudCm = 55.0f;
-	Pistol.CloudVoxels = 20;
+	Pistol.CloudVoxels = 12;
 	Pistol.CloudThrowCm = 260.0f;
 	Pistol.CloudExtinction = 0.03f;
 	Pistol.TunnelCm = 6.0f;
 	Shotgun.CloudCm = 130.0f;
-	Shotgun.CloudVoxels = 40;
+	Shotgun.CloudVoxels = 26;
 	Shotgun.CloudThrowCm = 280.0f;
 	Shotgun.CloudExtinction = 0.018f;
 	Shotgun.TunnelCm = 12.0f;
 	Shotgun.ShoveCm = 90.0f;
-	Sniper.CloudCm = 120.0f;
-	Sniper.CloudVoxels = 36;
+	Sniper.CloudCm = 90.0f;
+	Sniper.CloudVoxels = 18;
 	Sniper.CloudThrowCm = 300.0f;
-	Sniper.CloudExtinction = 0.022f;
+	Sniper.CloudExtinction = 0.012f;
 	Sniper.TunnelCm = 8.0f;
 	Guns = { Pistol, Shotgun, Sniper };
 }
@@ -371,7 +371,7 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FVector& Muzzle)
 		// As the cards: a ring about the bore leaning forward (a brake), or every way.
 		const float Around = Ring > 0 ? UE_TWO_PI * (Index + FMath::FRandRange(-0.25f, 0.25f)) / Ring : 0.0f;
 		const FVector Direction = Index < Ring ? FVector(0.35f, FMath::Cos(Around), FMath::Sin(Around)).GetSafeNormal() : FMath::VRand();
-		const FVector Reach = Direction * Gun.SmokeSpreadCm * FMath::FRandRange(0.4f, 1.0f);
+		const FVector Reach = Direction * FMath::Min(Gun.SmokeSpreadCm, Gun.CloudCm * 0.2f) * FMath::FRandRange(0.4f, 1.0f);
 		// A voxel cloud hangs a metre or two off: puffs a little fuller than the cards by the gun.
 		Cloud->PuffThrow.Emplace(float(Reach.X), float(Reach.Y), float(Reach.Z), FMath::Min(Gun.SmokeEndCm * 0.75f, Gun.CloudCm * 0.2f) * FMath::FRandRange(0.7f, 1.0f));
 	}
@@ -455,7 +455,9 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 		const float Throw = 1.0f - FMath::Exp(-Cloud.Age / 0.12f);
 		const float Grow = 1.0f - FMath::Exp(-Cloud.Age / 0.15f);
 		const float X = Cloud.Age / CloudSeconds;
-		const float Fade = FMath::Min(Cloud.Age / 0.05f, 1.0f) * (X < 0.6f ? 1.0f : FMath::Square((1.0f - X) / 0.4f));
+		// Fades in (squared, over 0.4 s) as it leaves the muzzle: a fresh cloud a metre from
+		// the eye must not fill the frame; it comes up where it hangs.
+		const float Fade = FMath::Square(FMath::Min(Cloud.Age / 0.4f, 1.0f)) * (X < 0.6f ? 1.0f : FMath::Square((1.0f - X) / 0.4f));
 		UMaterialInstanceDynamic* Material = Cloud.Material;
 		Material->SetVectorParameterValue(TEXT("CloudCentre"), FLinearColor(FVector3f(Cloud.Centre)));
 		Material->SetVectorParameterValue(TEXT("CloudX"), FLinearColor(FVector3f(Cloud.Basis.GetAxisX())));

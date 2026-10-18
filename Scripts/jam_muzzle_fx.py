@@ -216,91 +216,106 @@ VOLUME_HLSL = """
 const float M[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
 float3 d = W - C;
 float3 l = float3(dot(d, BX), dot(d, BY), dot(d, BZ));
-// The density is continuous; the voxels only decide where each band edge steps (the
-// dither threshold per voxel), so the steps show on the band shells. Sampling the
-// whole density per voxel made every voxel a column along the view: seen down the
-// shot, the columns drew streaks through the centre (a cross with the grid on the
-// view axes, a starburst with it turned). The grid stays turned off those axes.
+// Sampling the whole density per voxel made every voxel a column along the view: seen
+// down the shot, the columns drew streaks through the centre (a cross with the grid on
+// the view axes, a starburst with it turned). Now the voxel only decides presence (the
+// silhouette, the tunnel walls) and the inside is banded from the smooth density. The
+// grid stays turned off the view axes.
 const float3x3 G = float3x3(0.83781, -0.42777, 0.33924, 0.47767, 0.87524, -0.07605, -0.26439, 0.22576, 0.93762);
 float3 vox = floor(mul(G, l) / V);
-float3 p = l;
+// Two density samples: at the voxel centre (it decides the silhouette, in clean voxel
+// cubes, and steps the tunnel walls) and at the point itself (the smooth inside: bands
+// from the continuous density, so no view-long columns draw streaks).
+float3 pc = mul((vox + 0.5) * V, G);
 float4 P[8] = { P0, P1, P2, P3, P4, P5, P6, P7 };
-float dens = 0;
-for (int i = 0; i < 8; i++)
-{
-    if (P[i].w > 0)
-    {
-        // Drawn out along the shot (cloud X), each clump its own weight: lumpy, not a ball.
-        float3 q = p - P[i].xyz;
-        q.x /= St;
-        float weight = 0.5 + 0.7 * frac(sin(i * 12.9898 + S * 78.233) * 43758.5453);
-        dens += weight * exp(-dot(q, q) / (P[i].w * P[i].w));
-    }
-}
-float n = 0, amp = 0.5;
-float3 q3 = p / 7 + S * 17;
-for (int o = 0; o < 3; o++)
-{
-    float3 c0 = floor(q3);
-    float3 f = frac(q3);
-    f = f * f * (3 - 2 * f);
-    float3 k = float3(127.1, 311.7, 74.7);
-    float h000 = frac(sin(dot(c0, k)) * 43758.5453);
-    float h100 = frac(sin(dot(c0 + float3(1, 0, 0), k)) * 43758.5453);
-    float h010 = frac(sin(dot(c0 + float3(0, 1, 0), k)) * 43758.5453);
-    float h110 = frac(sin(dot(c0 + float3(1, 1, 0), k)) * 43758.5453);
-    float h001 = frac(sin(dot(c0 + float3(0, 0, 1), k)) * 43758.5453);
-    float h101 = frac(sin(dot(c0 + float3(1, 0, 1), k)) * 43758.5453);
-    float h011 = frac(sin(dot(c0 + float3(0, 1, 1), k)) * 43758.5453);
-    float h111 = frac(sin(dot(c0 + float3(1, 1, 1), k)) * 43758.5453);
-    n += amp * lerp(lerp(lerp(h000, h100, f.x), lerp(h010, h110, f.x), f.y),
-                    lerp(lerp(h001, h101, f.x), lerp(h011, h111, f.x), f.y), f.z);
-    q3 = q3 * 2.03 + 3.7;
-    amp *= 0.5;
-}
-dens = saturate(dens) * saturate((n - 0.22 - 0.4 * K) * 3.0);
-float dens0 = dens;
 float4 WA[3] = { A0, A1, A2 };
 float4 WB[3] = { B0, B1, B2 };
 float WR[3] = { R0, R1, R2 };
+float D2[2] = { 0, 0 };
+for (int s = 0; s < 2; s++)
+{
+    float3 p = s == 0 ? pc : l;
+    float d = 0;
+    for (int i = 0; i < 8; i++)
+    {
+        if (P[i].w > 0)
+        {
+            // Drawn out along the shot (cloud X), each clump its own weight: lumpy, not a ball.
+            float3 q = p - P[i].xyz;
+            q.x /= St;
+            float weight = 0.5 + 0.7 * frac(sin(i * 12.9898 + S * 78.233) * 43758.5453);
+            d += weight * exp(-dot(q, q) / (P[i].w * P[i].w));
+        }
+    }
+    float n = 0, amp = 0.5;
+    float3 q3 = p / 7 + S * 17;
+    // The voxel's own sample takes 3 octaves (the silhouette); the smooth inside 2 (cost).
+    for (int o = 0; o < 3 - s; o++)
+    {
+        float3 c0 = floor(q3);
+        float3 f = frac(q3);
+        f = f * f * (3 - 2 * f);
+        float3 k = float3(127.1, 311.7, 74.7);
+        float h000 = frac(sin(dot(c0, k)) * 43758.5453);
+        float h100 = frac(sin(dot(c0 + float3(1, 0, 0), k)) * 43758.5453);
+        float h010 = frac(sin(dot(c0 + float3(0, 1, 0), k)) * 43758.5453);
+        float h110 = frac(sin(dot(c0 + float3(1, 1, 0), k)) * 43758.5453);
+        float h001 = frac(sin(dot(c0 + float3(0, 0, 1), k)) * 43758.5453);
+        float h101 = frac(sin(dot(c0 + float3(1, 0, 1), k)) * 43758.5453);
+        float h011 = frac(sin(dot(c0 + float3(0, 1, 1), k)) * 43758.5453);
+        float h111 = frac(sin(dot(c0 + float3(1, 1, 1), k)) * 43758.5453);
+        n += amp * lerp(lerp(lerp(h000, h100, f.x), lerp(h010, h110, f.x), f.y),
+                        lerp(lerp(h001, h101, f.x), lerp(h011, h111, f.x), f.y), f.z);
+        q3 = q3 * 2.03 + 3.7;
+        amp *= 0.5;
+    }
+    d = saturate(d) * saturate((n - 0.22 - 0.4 * K) * 3.0);
+    for (int w = 0; w < 3; w++)
+    {
+        if (WA[w].w > 0)
+        {
+            // The tunnel: bored at once, widening as the wake spreads, closing after a second or so.
+            float3 rel = p - WA[w].xyz;
+            float rd = length(rel - dot(rel, WB[w].xyz) * WB[w].xyz);
+            float r = WA[w].w * (1 + 1.5 * saturate(WB[w].w / 0.6));
+            d *= lerp(1, smoothstep(r * 0.7, r * 1.3, rd), saturate(1.6 - WB[w].w));
+        }
+    }
+    // The eye clears; the box faces fade (the volume ends there, a straight cut would show).
+    float3 al = abs(p);
+    d *= smoothstep(E.w * 0.4, E.w, length(p - E.xyz)) * smoothstep(H, H * 0.7, max(al.x, max(al.y, al.z))) * F;
+    D2[s] = d;
+}
 float ring = 0;
 for (int w = 0; w < 3; w++)
 {
-    if (WA[w].w <= 0)
-    {
-        continue;
-    }
-    float age = WB[w].w;
-    float3 rel = p - WA[w].xyz;
-    float along = dot(rel, WB[w].xyz);
-    float rd = length(rel - along * WB[w].xyz);
-    // The tunnel: bored at once, widening as the wake spreads, closing after a second or so.
-    float r = WA[w].w * (1 + 1.5 * saturate(age / 0.6));
-    float hold = saturate(1.6 - age);
-    dens *= lerp(1, smoothstep(r * 0.7, r * 1.3, rd), hold);
-    if (WR[w] > 0)
+    if (WA[w].w > 0 && WR[w] > 0)
     {
         // The vortex ring: smoke rolled into a torus that travels on along the wake and widens.
+        float age = WB[w].w;
+        float3 rel = l - WA[w].xyz;
+        float along = dot(rel, WB[w].xyz);
+        float rd = length(rel - along * WB[w].xyz);
         float R = WA[w].w * 2.2 * (1 + 1.2 * age);
         float2 t = float2(rd - R, along - WR[w] * age);
         float tube = max(V * 1.2, WA[w].w * 0.8);
         ring += exp(-dot(t, t) / (tube * tube)) * saturate(1 - age / 1.2);
     }
 }
-dens = max(dens, ring * saturate(dens0 * 3 + 0.6));
-float de = length(p - E.xyz);
-dens *= smoothstep(E.w * 0.4, E.w, de) * F;
-// Fade out before the box faces: the volume ends there, a straight cut would show.
-float3 al = abs(l);
-dens *= smoothstep(H, H * 0.7, max(al.x, max(al.y, al.z)));
 int3 b = int3(vox) & 3;
 float th = (M[((b.x + b.z) & 3) + 4 * ((b.y + 2 * b.z) & 3)] + 0.5) / 16;
-float band = floor(saturate(dens) * 5 + th);
+// 4 bands, a narrow dither ramp: crisp steps. The voxel decides whether there is smoke
+// at all (cubes at the silhouette and in the tunnel walls); inside, the smooth density
+// picks the band.
+bool cube = D2[0] * 4 + th >= 1;
+float inner = floor(saturate(D2[1]) * 4 + 0.5 + (th - 0.5) * 0.3);
+float band = cube ? clamp(inner, 1, 4) : 0;
+band = max(band, (ring * saturate(D2[0] * 3 + 0.6) * 4 + th >= 1) ? 1 : 0);
 float edge = band == 1 ? 1 : 0;
 float3 fringe = edge * lerp(float3(0.10, 0.22, 0.30), float3(0.30, 0.14, 0.05), fmod(abs(vox.y), 2));
 // The vortex ring glows a little: rolled smoke catching the light, read against the tunnel.
 fringe += saturate(ring) * (band > 0 ? 1 : 0) * float3(1.0, 1.1, 1.3) * 0.5;
-return float4(band / 5, fringe);
+return float4(band / 4, fringe);
 """
 
 
@@ -336,12 +351,15 @@ def _volume(m, node, custom, data, scalar, colour, mul):
     fringe = node(unreal.MaterialExpressionComponentMask, r=False, g=True, b=True, a=True)
     mel.connect_material_expressions(n, "", fringe, "")
     # The grey-blue of the card smoke (owner: no blown-out white).
-    albedo = colour("Colour", unreal.LinearColor(0.30, 0.34, 0.40, 1.0))
+    # Darker than the cards: the renderer's in-scattering cannot be clamped from the
+    # material, so the albedo keeps a lamp 2-3 m away from pushing the lit side past
+    # light grey.
+    albedo = colour("Colour", unreal.LinearColor(0.16, 0.18, 0.22, 1.0))
     mel.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
     # Volume domain: the Subsurface Color pin is the extinction, 1/cm.
     mel.connect_material_property(mul(band, scalar("Extinction", 0.04)), "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
     glow = node(unreal.MaterialExpressionAdd)
-    mel.connect_material_expressions(mul(mul(albedo, band), scalar("Ambient", 0.06)), "", glow, "A")
+    mel.connect_material_expressions(mul(mul(albedo, band), scalar("Ambient", 0.12)), "", glow, "A")
     mel.connect_material_expressions(mul(mul(fringe, band), scalar("Fringe", 0.05)), "", glow, "B")
     mel.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
