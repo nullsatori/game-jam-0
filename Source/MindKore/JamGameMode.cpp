@@ -156,7 +156,7 @@ void AJamZeroGHUD::DrawHUD()
 	const FMKInteractionOffer& Offer = Pawn->Interaction->CurrentOffer;
 	if (Offer.IsOffered())
 	{
-		FString Line = TEXT("[E] ") + Offer.Action.ToString();
+		FString Line = TEXT("[F] ") + Offer.Action.ToString(); // the zero-G pawn interacts on F
 		if (!Offer.bAvailable)
 		{
 			Line += TEXT(" - ") + Offer.Reason.ToString();

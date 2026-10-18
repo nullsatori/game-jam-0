@@ -17,6 +17,11 @@ and a back corridor. The stations sit along the partition and in the hall:
   7 SHOOT           AMKImpactDummy
   8 APPLIANCES      BP_MK_Microwave, BP_MK_Toilet (AMKAppliance children)
 
+The player is the game's one pawn (AJamZeroGPawn) under the ship's mode
+(AJamShipGameMode): a gravity zone over the room lets it walk, with the same
+controls as everywhere (F interacts, RMB grabs, Q/E roll); the three gun
+pickups stand by the start. World gravity stays normal for the props.
+
 Every number is centimetres. The script deletes an existing map first and
 asserts the editor world is the new one before it spawns anything (a failed
 new_level leaves the previous level open and would receive the actors).
@@ -126,6 +131,7 @@ package = world.get_outer().get_path_name()
 if package != MAP:
     raise RuntimeError("editor world is %s, not %s: refusing to spawn" % (package, MAP))
 log("new level " + package)
+world.get_world_settings().set_editor_property("default_game_mode", unreal.JamShipGameMode.static_class())
 
 # --- shell -------------------------------------------------------------------
 W, D, H, T = 1600.0, 1200.0, 300.0, 20.0     # room size and wall thickness
@@ -187,6 +193,15 @@ ppv.set_editor_property("settings", settings)
 
 # --- 8 player start ----------------------------------------------------------
 spawn(unreal.PlayerStart, V(800, 150, 100), 90, "PlayerStart")
+# The ship's mode: walking and air come from a gravity zone over the whole room; the guns from pickups.
+room_zone = spawn(unreal.JamGravityZone, V(W / 2, D / 2, H / 2), 0, "Gravity_Room")
+room_zone.get_editor_property("zone").set_box_extent(V(W / 2, D / 2, H / 2 + 50))
+room_zone.set_editor_property("refill_per_second", 30.0)
+for index, (name, x) in enumerate((("PISTOL", 1000.0), ("SHOTGUN", 1120.0), ("SV-98", 1240.0))):
+    gun = spawn(unreal.JamWeaponPickup, V(x, 120, 60), 90, "Pickup_" + name)
+    gun.set_actor_scale3d(V(0.3, 0.5, 1.2))
+    gun.set_editor_property("weapon_index", index)
+    label_text(name, V(x, 120, 160), 90)
 
 # --- 1 door + key --------------------------------------------------------------
 fx = DOOR_X0 + frame_w / 2
