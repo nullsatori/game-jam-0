@@ -14,6 +14,19 @@ class USoundBase;
 class UStaticMesh;
 class UStaticMeshComponent;
 
+/** One key of a moving part's curve: seconds, share of the travel/turn, slopes in share per second (cubic, broken tangents). */
+struct FJamCycleKey
+{
+	float Time;
+	float Value;
+	float Arrive;
+	float Leave;
+};
+
+MINDKORE_API FRuntimeFloatCurve JamMakeCycleCurve(std::initializer_list<FJamCycleKey> Keys);
+/** The curve at Seconds; 0 when it has no keys. */
+MINDKORE_API float JamEvalCycle(const FRuntimeFloatCurve& Curve, float Seconds);
+
 /** One gun. Impulses are kg cm/s (velocity change = impulse / mass). */
 USTRUCT(BlueprintType)
 struct FJamWeapon
@@ -37,6 +50,7 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0"))
 	int32 Reserve = 60;
 
+	/** The whole reload; for a gun that loads round by round (ShellMesh), the seconds per round. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
 	float ReloadSeconds = 1.2f;
 
@@ -134,6 +148,112 @@ struct FJamWeapon
 	/** Seconds since the shot -> share of ActionBodyTurn and ActionBodyOffsetCm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Action")
 	FRuntimeFloatCurve ActionBody;
+
+	/** The hammer (the USP's), on ViewMesh, turning about ViewMesh's Y through HammerPivot (the mesh's origin is its pin). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Parts")
+	TObjectPtr<UStaticMesh> HammerMesh = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Parts")
+	FVector HammerPivot = FVector::ZeroVector;
+
+	/** Its turn at HammerTurn 1, degrees about ViewMesh's Y (negative: the top toward -X). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Parts")
+	float HammerTurnDeg = 0.0f;
+
+	/** Seconds since the shot -> share of HammerTurnDeg: 1 fallen, below 0 pushed back past cocked. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Parts")
+	FRuntimeFloatCurve HammerTurn;
+
+	/** The spent case thrown out EjectSeconds after each shot, from EjectPort (ViewMesh space, cm); none: no case. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Parts")
+	TObjectPtr<UStaticMesh> CaseMesh = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Parts")
+	FVector EjectPort = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Parts", meta = (ClampMin = "0.0"))
+	float EjectSeconds = 0.0f;
+
+	/** The case's speed on top of the shooter's, cm/s in the camera's frame (X forward, Y right, Z up). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Parts")
+	FVector EjectVelocity = FVector(-40.0f, 220.0f, 120.0f);
+
+	/**
+	 * The magazine, on ViewMesh in its frame, moved by MagTravelCm x MagTravel (seconds
+	 * since the reload began). At MagEjectSeconds it leaves as a loose body in the world;
+	 * the fresh one shows from MagInSeconds and the curve brings it home.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
+	TObjectPtr<UStaticMesh> MagMesh = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
+	FVector MagTravelCm = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
+	FRuntimeFloatCurve MagTravel;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload", meta = (ClampMin = "0.0"))
+	float MagEjectSeconds = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload", meta = (ClampMin = "0.0"))
+	float MagInSeconds = 0.0f;
+
+	/**
+	 * A gun that loads round by round (the pump gun's tube): each round, ReloadSeconds
+	 * long, rises from ShellFrom to ShellTo (ViewMesh space, cm; the mesh's base) on
+	 * ShellInsert, tilted ShellTiltDeg about Y at the start, and counts at ShellSeatSeconds.
+	 * A shot breaks the loading off when the tube holds a round.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
+	TObjectPtr<UStaticMesh> ShellMesh = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
+	FVector ShellFrom = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
+	FVector ShellTo = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
+	float ShellTiltDeg = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
+	FRuntimeFloatCurve ShellInsert;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload", meta = (ClampMin = "0.0"))
+	float ShellSeatSeconds = 0.0f;
+
+	/** The whole gun during a reload, as ActionBodyTurn/Offset: ReloadBody rises from the start and falls into the end. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
+	FRotator ReloadBodyTurn = FRotator::ZeroRotator;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
+	FVector ReloadBodyOffsetCm = FVector::ZeroVector;
+
+	/** Seconds from the reload's start (and to its end, mirrored) -> share of ReloadBodyTurn/Offset; its last key is the lead before the first round. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
+	FRuntimeFloatCurve ReloadBody;
+
+	/** Mechanism sounds, 2D, none by default: the hammer HammerSoundSeconds after a shot. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
+	TObjectPtr<USoundBase> HammerSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound", meta = (ClampMin = "0.0"))
+	float HammerSoundSeconds = 0.0f;
+
+	/** The magazine let go, at MagEjectSeconds of the reload. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
+	TObjectPtr<USoundBase> MagOutSound = nullptr;
+
+	/** The fresh magazine seated, at MagInSoundSeconds of the reload. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
+	TObjectPtr<USoundBase> MagInSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound", meta = (ClampMin = "0.0"))
+	float MagInSoundSeconds = 0.0f;
+
+	/** Each round pushed into the tube, at its ShellSeatSeconds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
+	TObjectPtr<USoundBase> ShellInsertSound = nullptr;
 
 	/** The shot, 2D. Space-treated offline (Scripts/jam_space_shots.py): muffled, reverberant, with a sub. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
@@ -244,6 +364,27 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	TObjectPtr<UStaticMeshComponent> ActionInView = nullptr;
 
+	/** The hammer, the magazine and the round being loaded, on ViewModel (JamWeaponParts.cpp). */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
+	TObjectPtr<UStaticMeshComponent> HammerInView = nullptr;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
+	TObjectPtr<UStaticMeshComponent> MagInView = nullptr;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
+	TObjectPtr<UStaticMeshComponent> ShellInView = nullptr;
+
+	/** Spent cases and dropped magazines kept in the world at most; the oldest goes first. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Parts", meta = (ClampMin = "0"))
+	int32 MaxDebris = 48;
+
+	/** ...and any farther than this from the shooter goes. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Parts", meta = (ClampMin = "100.0"))
+	float DebrisRangeCm = 5000.0f;
+
+	/** Loose cases and magazines in the world now. */
+	int32 GetDebrisCount() const { return Debris.Num(); }
+
 	/**
 	 * The muzzle of the gun in view, world space, as it is drawn this frame (kick
 	 * included): X out of the bore, along the gun's own line. ViewModel's Muzzle
@@ -318,7 +459,29 @@ private:
 	void TurnView(float PitchDeg, float YawDeg) const;
 	void SelectStep(int32 Step);
 
+	// JamWeaponParts.cpp: the hammer, cases, magazines and round-by-round loading.
+	/** Fill the guns' parts and reload curves; from the constructor (ConstructorHelpers). */
+	void SetupWeaponParts();
+	void MakePartComponents(USceneComponent& Parent);
+	/** Start the reload's timeline; returns its length. */
+	float StartReloadTimeline(const FJamWeapon& Weapon);
+	/** Seconds into the reload, or < 0 when none (jam.Weapons.ReloadPoseAt holds one). */
+	float GetReloadTime() const;
+	/** Share of ReloadBodyTurn/Offset now. */
+	float GetReloadBodyShare(const FJamWeapon& Weapon) const;
+	/** Pose the parts for this frame; null: hide them. */
+	void UpdateParts(const FJamWeapon* Weapon, float SinceShot);
+	/** Events crossed since the last tick: the case out, the magazine let go, a round counted, the sounds. */
+	void UpdatePartEvents(float DeltaTime);
+	void SpawnDebris(UStaticMesh* Mesh, const FTransform& Where, const FVector& Velocity, const FVector& SpinDegPerSec, float MassKg);
+
 	TArray<FRound> Rounds;
+	TArray<TWeakObjectPtr<AActor>> Debris;
+	double ReloadStartSeconds = 0.0;
+	/** Rounds this reload loads one by one (ShellMesh guns). */
+	int32 ShellsPlanned = 0;
+	float PrevSinceShot = 1000.0f;
+	float PrevReloadTime = -1.0f;
 	float KickPitchLeft = 0.0f;
 	float KickYawLeft = 0.0f;
 	float KickAttackLeft = 0.0f;
