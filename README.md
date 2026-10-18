@@ -85,6 +85,7 @@ Unreal Engine 5.8, C++.
 | BulletTime | замедление времени (V) | [BulletTime](Docs/BulletTime.md) |
 | JamCharacter | наземная пешка | [JamCharacter](Docs/JamCharacter.md) |
 | LivingWall | живая стена: заживает от пистолета, дробовик открывает проход (новый код джема, контент MindKore) | [LivingWall](Docs/LivingWall.md) |
+| Flyers | летуны (по мотивам скального наездника): стая в своей зоне, зрение, охота с пике и укусом-толчком, деаггро, труп дрейфует; модель из Blender-скрипта | [Flyers](Docs/Flyers.md) |
 
 Лицензии контента: [CREDITS](CREDITS.md).
 
