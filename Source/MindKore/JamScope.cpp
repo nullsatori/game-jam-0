@@ -54,16 +54,17 @@ UJamScopeComponent::UJamScopeComponent()
 	Pistol.BreathDeg = 0.25f;
 	FJamGunAim PumpGun;
 	// The pump gun: along the rib, the receiver's top rear edge to the bead (Scripts/blender/jam_guns.py:
-	// receiver top 1.25, bead top 1.35 over the bore; origin 4.5 under it). The stock at the shoulder,
-	// the eye 28 cm behind the receiver's rear, the comb just under the view (Config/DefaultEngine.ini
-	// NearClipPlane 2: at the engine's 10 cm the comb in front of the eye was cut away). Heavy: a later
-	// start, a slower, bigger arc, a slow settle.
+	// receiver top 1.25, bead top 1.35 over the bore; origin 4.5 under it). The eye 45 cm behind the
+	// receiver's rear, the gun's field 85: picked from stills of 16-65 cm and 65-90 deg (owner 19.10:
+	// «приклад поменьше» - at 28 cm / 75 the stock filled the bottom of the frame); the butt stays in
+	// front of the eye (NearClipPlane 2, Config/DefaultEngine.ini). Heavy: a later start, a slower,
+	// bigger arc, a slow settle.
 	// The eye a little over the rib (1.2 cm at the receiver): the rib rises to the bead as a shotgun is pointed,
 	// and the comb stays under the receiver instead of covering it.
 	PumpGun.SightRearCm = FVector(-9.9f, 0.0f, 7.05f);
 	PumpGun.SightFrontCm = FVector(43.1f, 0.0f, 5.85f);
-	PumpGun.EyeCm = 28.0f;
-	PumpGun.GunFieldOfView = 75.0f;
+	PumpGun.EyeCm = 45.0f;
+	PumpGun.GunFieldOfView = 85.0f;
 	PumpGun.KickScale = 0.45f;
 	// Across first, then forward, up last: the stock comes in under the eye and rises to the shoulder.
 	PumpGun.In = { { 1.3f, 0.55f, 0.08f }, { 1.6f, 0.6f, 0.05f }, { 1.4f, 0.5f, 0.14f }, { 1.1f, 0.42f, 0.0f }, { 1.1f, 0.45f, 0.0f }, { 1.0f, 0.4f, 0.0f } };
@@ -367,18 +368,27 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		: FVector::ZeroVector;
 	if (!bGunInView || Current != MotionWeapon)
 	{
-		// No gun, or another one coming into hand: it rises from low and to the side on its Out springs.
-		bMoving = bAimTarget = false;
+		// No gun, or another one: it starts from its rest pose.
+		bMoving = bAimTarget = bDrawing = false;
 		Alpha = 0.0f;
 		MotionWeapon = bGunInView ? Current : INDEX_NONE;
-		if (bGunInView)
-		{
-			bMoving = true;
-			SinceSwitch = 1.0f;
-			Place = Weapons->Weapons[Current].ViewOffset.GetTranslation() + DrawFromCm;
-			Turn = DrawFromTurn;
-			PlaceVelocity = TurnVelocity = FVector::ZeroVector;
-		}
+	}
+	if (bGunInView && bPendingDraw)
+	{
+		// The stand-in draw (UJamWeaponsComponent::Draw): from low and to the side, up on the Out springs.
+		bPendingDraw = false;
+		bDrawing = bMoving = true;
+		bAimTarget = false;
+		SinceSwitch = 1.0f;
+		Place = Weapons->Weapons[Current].ViewOffset.GetTranslation() + DrawFromCm;
+		Turn = DrawFromTurn;
+		PlaceVelocity = TurnVelocity = FVector::ZeroVector;
+	}
+	if (bDrawing && (!bMoving || ((Place - Weapons->Weapons[Current].ViewOffset.GetTranslation()).Size() < 0.3f
+		&& PlaceVelocity.Size() < 2.0f && Turn.Size() < 1.0f)))
+	{
+		bDrawing = false;
+		UE_LOG(LogMindKore, Log, TEXT("Scope: draw settled"));
 	}
 	if (bGunInView)
 	{
@@ -530,6 +540,9 @@ namespace
 		After(12.2f, [Controller]() { Controller->ConsoleCommand(TEXT("HighResShot 2 filename=JamScope_03b_aimed_x2")); });
 		After(12.4f, [Hold, Edge]() { Hold(Edge); });
 		After(12.6f, [Shot]() { Shot(TEXT("04_aimed_wall_edge")); });
+		// Into the dark (space above the wall), then back on the wall for the shot.
+		After(12.65f, [Hold, Centre]() { Hold(Centre + FVector(0.0f, 0.0f, 2500.0f)); });
+		After(12.8f, [Shot]() { Shot(TEXT("04b_aimed_dark")); });
 		After(13.0f, [Pawn, Hold, Centre]() { Hold(Centre); Pawn->Fire(); });
 		After(13.05f, [Shot]() { Shot(TEXT("05_shot_0050")); });
 		After(13.15f, [Shot]() { Shot(TEXT("06_shot_0150")); });
@@ -698,8 +711,9 @@ namespace
 	 * jam.Guns.RmbProbe: the RMB rule, logged step by step (no stills; NullRHI is fine). Needs a loose body
 	 * (a simulating actor) and a fixed surface within 50 m in the map (Lvl_Jam_ZeroG). The zero-G pawn: with a gun out
 	 * and nothing in reach RMB aims (alpha rises, RMB up lowers it); with a gun out and the body in reach RMB
-	 * takes it and the gun goes away (unarmed); unarmed, RMB lets go, takes it again, holds on to the fixed
-	 * surface and lets go; holding, a gun selected lets the body go and is drawn.
+	 * takes it and the gun goes away at once (unarmed); RMB again lets go and the last gun comes back with a
+	 * draw that holds fire until it settles; with a hull tool in hand RMB holds on to the fixed surface and
+	 * lets go; holding, a gun selected lets the body go and is drawn.
 	 */
 	void RunRmbProbe(UWorld* World)
 	{
@@ -759,11 +773,12 @@ namespace
 		After(6.5f, [Loose, Face, Pin, Pawn]() { Pin(); Face(Loose->GetActorLocation(), Pawn->GetActorLocation(), 120.0f); });
 		After(6.7f, [Pawn, State]() { State(TEXT("gun out, body in reach")); Pawn->Use(); });
 		After(6.8f, [State]() { State(TEXT("after RMB")); });
-		// 3. Unarmed: RMB lets go, takes it again, lets go; holds on to the wall, lets go.
-		After(7.2f, [Pawn, State]() { Pawn->Use(); State(TEXT("unarmed, RMB again: let go")); });
-		After(7.5f, [Loose, Face, Pin, Pawn]() { Pin(); Face(Loose->GetActorLocation(), Pawn->GetActorLocation(), 120.0f); });
-		After(7.7f, [Pawn, State]() { State(TEXT("unarmed, body in reach")); Pawn->Use(); State(TEXT("unarmed, after RMB")); });
-		After(8.0f, [Pawn, State]() { Pawn->Use(); State(TEXT("unarmed, RMB again: let go")); });
+		// 3. Unarmed, RMB again: let go - the last gun comes back with a draw, no shot until it settles.
+		After(7.2f, [Pawn, State]() { Pawn->Use(); State(TEXT("holding, RMB again: let go")); });
+		After(7.25f, [Pawn, State]() { const bool bFired = Pawn->Fire(); State(bFired ? TEXT("fire during the draw: FIRED") : TEXT("fire during the draw: refused")); });
+		After(8.1f, [Pawn, State]() { State(Pawn->Guns->IsDrawing() ? TEXT("0.9 s after: still drawing") : TEXT("0.9 s after: draw settled")); });
+		// Holding on to the hull needs free hands or a hull tool (a gun out aims): the strap in hand.
+		After(8.2f, [Pawn]() { Pawn->HullTools->SelectTool(EJamHullTool::Strap); });
 		// The nearest fixed surface from where the probe started: rays out six ways, the first static hit.
 		After(8.3f, [World, Face, Pawn, Home = Pawn->GetActorLocation()]()
 		{
@@ -784,11 +799,11 @@ namespace
 				Face(Nearest.ImpactPoint, Nearest.ImpactPoint + Nearest.ImpactNormal * 200.0f, 120.0f);
 			}
 		});
-		After(8.5f, [Pawn, State]() { State(TEXT("unarmed, the wall ahead")); Pawn->Use(); State(TEXT("unarmed, after RMB on the wall")); });
-		After(8.8f, [Pawn, State]() { Pawn->Use(); State(TEXT("clinging, RMB again")); });
-		// 4. Holding, a gun selected (2): the body is let go, the gun drawn.
+		After(8.5f, [Pawn, State]() { State(TEXT("strap in hand, the wall ahead")); Pawn->Use(); State(TEXT("strap in hand, after RMB on the wall")); });
+		After(8.8f, [Pawn, State]() { Pawn->Use(); State(TEXT("clinging, RMB again")); Pawn->HullTools->SelectTool(EJamHullTool::None); });
+		// 4. A gun out, the body taken (unarmed), then a gun selected (2): the body is let go, the gun drawn.
 		After(9.1f, [Loose, Face, Pin, Pawn]() { Pin(); Face(Loose->GetActorLocation(), Pawn->GetActorLocation(), 120.0f); });
-		After(9.3f, [Pawn, State]() { Pawn->Use(); State(TEXT("unarmed, holding again")); Pawn->Guns->SelectWeapon(1); });
+		After(9.3f, [Pawn, State]() { Pawn->Use(); State(TEXT("gun out, body taken again")); Pawn->Guns->SelectWeapon(1); });
 		After(9.5f, [State]() { State(TEXT("gun 2 selected while holding")); UE_LOG(LogMindKore, Log, TEXT("RMB probe: done")); });
 	}
 
@@ -796,4 +811,68 @@ namespace
 		TEXT("jam.Guns.RmbProbe"),
 		TEXT("The RMB rule step by step: aim with a gun out, grab (unarmed) with a loose body in reach, the hands when unarmed, a gun drawn while holding (Lvl_Jam_ZeroG)."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunRmbProbe));
+
+	/**
+	 * jam.Scope.AimStills <gun> <eye:fov> [<eye:fov> ...]: one gun aimed at the living wall nearest to
+	 * 20 m with each eye distance (cm) and gun field of view in turn, a settled still of each
+	 * (JamAimStill_<gun>_<eye>_<fov>.png) - for choosing them by eye. Needs a real RHI.
+	 */
+	void RunAimStills(const TArray<FString>& Args, UWorld* World)
+	{
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AJamZeroGPawn* Pawn = Controller ? Cast<AJamZeroGPawn>(Controller->GetPawn()) : nullptr;
+		UJamScopeComponent* Scope = Pawn ? Pawn->FindComponentByClass<UJamScopeComponent>() : nullptr;
+		const int32 Gun = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 1;
+		if (!Scope || !Scope->Aims.IsValidIndex(Gun))
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Aim stills: needs the AJamZeroGPawn and a gun with an aim"));
+			return;
+		}
+		FVector Target = Pawn->GetActorLocation() + FVector(2000.0f, 0.0f, 0.0f);
+		float Best = TNumericLimits<float>::Max();
+		for (TActorIterator<AJamLivingWall> It(World); It; ++It)
+		{
+			const float Error = FMath::Abs(FVector::Dist(It->GetActorLocation(), Pawn->GetActorLocation()) - 2000.0f);
+			if (Error < Best)
+			{
+				Best = Error;
+				Target = It->GetActorLocation();
+			}
+		}
+		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
+		{
+			FTimerHandle Handle;
+			Pawn->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(Pawn, MoveTemp(Step)), Seconds, false);
+		};
+		After(6.0f, [Pawn, Controller, Target, Scope, Gun]()
+		{
+			Pawn->Guns->UnlockWeapon(Gun);
+			Controller->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());
+			Scope->SetHeld(true);
+		});
+		float At = 8.0f;
+		for (int32 Index = 1; Index < Args.Num(); ++Index)
+		{
+			FString Eye, Fov;
+			if (!Args[Index].Split(TEXT(":"), &Eye, &Fov))
+			{
+				continue;
+			}
+			const float EyeCm = FCString::Atof(*Eye);
+			const float FieldOfView = FCString::Atof(*Fov);
+			After(At, [Scope, Gun, EyeCm, FieldOfView]() { Scope->Aims[Gun].EyeCm = EyeCm; Scope->Aims[Gun].GunFieldOfView = FieldOfView; });
+			After(At + 2.5f, [Controller, Scope, Gun, EyeCm, FieldOfView]()
+			{
+				UE_LOG(LogMindKore, Log, TEXT("Aim stills: gun %d eye %.0f cm, gun FOV %.0f - %s"), Gun, EyeCm, FieldOfView, *Scope->Describe());
+				Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=JamAimStill_%d_%02.0f_%02.0f"), Gun, EyeCm, FieldOfView));
+			});
+			At += 3.0f;
+		}
+		After(At, []() { UE_LOG(LogMindKore, Log, TEXT("Aim stills: done")); });
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GAimStills(
+		TEXT("jam.Scope.AimStills"),
+		TEXT("jam.Scope.AimStills <gun> <eye:fov> ...: a settled aimed still for each eye distance / gun field of view (HighResShot; needs a real RHI)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunAimStills));
 }

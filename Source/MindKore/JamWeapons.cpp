@@ -376,14 +376,6 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>();
 	const bool bTool = Tools && Tools->GetTool() != EJamHullTool::None;
 	const FJamWeapon* Weapon = bTool ? nullptr : GetWeapon();
-	// Going unarmed: the gun is still drawn for HolsterSeconds, dropping down and away (accelerating, let go).
-	float Away = 0.0f;
-	if (!Weapon && !bTool && bHolstered && HolsterLeft > 0.0f && IsWeaponUnlocked(CurrentWeapon))
-	{
-		HolsterLeft = FMath::Max(0.0f, HolsterLeft - DeltaTime);
-		Weapon = &Weapons[CurrentWeapon];
-		Away = FMath::Square(1.0f - HolsterLeft / FMath::Max(HolsterSeconds, KINDA_SMALL_NUMBER));
-	}
 	if (CurrentWeapon != ShownWeapon || !Weapon)
 	{
 		ShownWeapon = Weapon ? CurrentWeapon : INDEX_NONE;
@@ -416,11 +408,6 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	Offset.SetRotation(Rise * FRotator(Pose.Turn.X, Pose.Turn.Y, Pose.Turn.Z).Quaternion() * Offset.GetRotation());
 	Offset.AddToTranslation(Pose.Place);
 	Offset.AddToTranslation(FVector(-Weapon->ViewKickBackCm * Kick, 0.0f, 0.0f));
-	if (Away > 0.0f)
-	{
-		Offset.AddToTranslation(FVector(-8.0f, 6.0f, -30.0f) * Away);
-		Offset.SetRotation(FRotator(-35.0f * Away, 10.0f * Away, 30.0f * Away).Quaternion() * Offset.GetRotation());
-	}
 	ViewModel->SetRelativeTransform(Offset);
 	// The moving part runs its cycle along/about the gun's own X.
 	ActionInView->SetRelativeLocationAndRotation(
@@ -509,23 +496,51 @@ void UJamWeaponsComponent::Holster()
 		return;
 	}
 	bHolstered = true;
-	HolsterLeft = HolsterSeconds;
 	ReloadEndSeconds = 0.0; // as a switch: the reload and the last gun's cycle are abandoned
 	GetWorld()->GetTimerManager().ClearTimer(CycleTimer);
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: unarmed"), *GetNameSafe(GetOwner()));
+}
+
+void UJamWeaponsComponent::Rearm()
+{
+	if (!bHolstered || !IsWeaponUnlocked(CurrentWeapon))
+	{
+		return;
+	}
+	bHolstered = false;
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: rearmed - %s"), *GetNameSafe(GetOwner()), *Weapons[CurrentWeapon].Name.ToString());
+	Draw();
+}
+
+void UJamWeaponsComponent::Draw()
+{
+	// HOOK - the draw (owner 19.10). Stand-in: the gun rises from low right on its aim springs
+	// (UJamScopeComponent::StartDraw) and does not fire until it has settled (IsDrawing, Fire).
+	// The anim thread's per-gun draw (jam-anim3 pose springs: the pistol from a right-hip holster,
+	// the shotgun over the right shoulder, the SV-98 over the left) replaces this body.
+	if (Scope)
+	{
+		Scope->StartDraw();
+	}
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: draw %s"), *GetNameSafe(GetOwner()), Weapons.IsValidIndex(CurrentWeapon) ? *Weapons[CurrentWeapon].Name.ToString() : TEXT("-"));
+}
+
+bool UJamWeaponsComponent::IsDrawing() const
+{
+	return Scope && Scope->IsDrawing();
 }
 
 void UJamWeaponsComponent::SelectWeapon(int32 Index)
 {
 	if (bHolstered && IsWeaponUnlocked(Index))
 	{
-		// Drawn again - the same gun or another.
-		bHolstered = false;
-		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: drawn"), *GetNameSafe(GetOwner()));
+		// Out of unarmed: the same gun or another, drawn.
 		if (Index == CurrentWeapon)
 		{
+			Rearm();
 			return;
 		}
+		bHolstered = false;
 	}
 	if (!Weapons.IsValidIndex(Index) || Index == CurrentWeapon || !Weapons[Index].bUnlocked)
 	{
@@ -536,6 +551,7 @@ void UJamWeaponsComponent::SelectWeapon(int32 Index)
 	GetWorld()->GetTimerManager().ClearTimer(CycleTimer);
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s (%d/%d)"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString(),
 		Weapons[Index].Ammo, Weapons[Index].Reserve);
+	Draw();
 }
 
 float UJamWeaponsComponent::GetReloadRemaining() const
@@ -578,7 +594,8 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	{
 		ReloadEndSeconds = 0.0; // round-by-round loading breaks off for a shot
 	}
-	if (!Weapon || Now < NextShotSeconds || GetReloadRemaining() > 0.0f)
+	// Not before the draw has settled.
+	if (!Weapon || Now < NextShotSeconds || GetReloadRemaining() > 0.0f || IsDrawing())
 	{
 		return false;
 	}

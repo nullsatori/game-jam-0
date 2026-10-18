@@ -403,9 +403,7 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	bool bHolstered = false;
 
-	/** Going unarmed, the gun drops down and away over this long before it is gone (it does not fire meanwhile). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons", meta = (ClampMin = "0.0"))
-	float HolsterSeconds = 0.3f;
+
 
 	/** Off (the ship map): every gun starts locked until a pickup unlocks it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons")
@@ -539,11 +537,24 @@ public:
 	const FJamWeapon* GetWeapon() const { return !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr; }
 
 	/**
-	 * Unarmed: the gun goes out of view and does not fire until one is selected again (1/2/3, the wheel,
-	 * a pickup) - owner 18.10: grabbing something puts the gun away (AJamZeroGPawn::Grab).
+	 * Unarmed, at once: the gun leaves the view in the same frame and does not fire (owner 18-19.10: a
+	 * grab - AJamZeroGPawn::Grab). Rearm (the grab let go) or a selection brings a gun back with a Draw.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
 	void Holster();
+
+	/** Back from unarmed to the last gun, with a Draw (AJamZeroGPawn::Release). */
+	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
+	void Rearm();
+
+	/**
+	 * HOOK - a gun coming into hand (Rearm, a switch). Stand-in now: UJamScopeComponent::StartDraw raises
+	 * it from low right; the anim thread's per-gun draw replaces this body. Fire waits for IsDrawing.
+	 */
+	void Draw();
+
+	/** The draw still running: no shot yet. */
+	bool IsDrawing() const;
 
 	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
 	bool IsHolstered() const { return bHolstered; }
@@ -602,8 +613,6 @@ private:
 	void SpawnDebris(UStaticMesh* Mesh, const FTransform& Where, const FVector& Velocity, const FVector& SpinDegPerSec, float MassKg);
 
 	TArray<FRound> Rounds;
-	/** Seconds left of the drop away into unarmed. */
-	float HolsterLeft = 0.0f;
 	TArray<TWeakObjectPtr<AActor>> Debris;
 	double ReloadStartSeconds = 0.0;
 	/** Rounds this reload loads one by one (ShellMesh guns). */

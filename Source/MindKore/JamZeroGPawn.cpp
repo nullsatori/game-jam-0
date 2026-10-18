@@ -751,6 +751,8 @@ void AJamZeroGPawn::Release()
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: let go of %s"), *GetNameSafe(GrabbedBody->GetOwner()));
 	}
 	GrabbedBody = nullptr;
+	// Hands free: back to the last gun, drawn (owner 19.10).
+	Guns->Rearm();
 }
 
 void AJamZeroGPawn::ToggleTether()
