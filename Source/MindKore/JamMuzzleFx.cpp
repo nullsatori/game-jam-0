@@ -37,11 +37,15 @@ UJamMuzzleFxComponent::UJamMuzzleFxComponent()
 	Pistol.LightIntensity = 30.0f;
 	Pistol.SmokePuffs = 4;
 	Pistol.SmokeSeconds = 3.0f;
-	Pistol.SmokeStartCm = 6.0f;
-	Pistol.SmokeEndCm = 30.0f;
-	Pistol.SmokeSpreadCm = 12.0f;
-	Pistol.SmokeBackCm = 10.0f;
-	Pistol.SmokeOpacity = 0.3f;
+	Pistol.SmokeStartCm = 5.0f;
+	Pistol.SmokeEndCm = 18.0f;
+	Pistol.SmokeSpreadCm = 8.0f;
+	Pistol.SmokeBackCm = 6.0f;
+	Pistol.SmokeOpacity = 0.22f;
+	// A thin puff.
+	Pistol.SmokeDriftCm = 2.0f;
+	Pistol.SmokeStretch = 1.8f;
+	Pistol.SmokeTear = 0.15f;
 	// Shotgun: a big wide fireball (a big charge, an open bore), many grains, the most smoke.
 	FJamMuzzleFx Shotgun;
 	Shotgun.FlashLobes = 14;
@@ -53,13 +57,17 @@ UJamMuzzleFxComponent::UJamMuzzleFxComponent()
 	Shotgun.Sparks = 8;
 	Shotgun.SparkSpeed = 600.0f;
 	Shotgun.LightIntensity = 60.0f;
-	Shotgun.SmokePuffs = 9;
+	Shotgun.SmokePuffs = 10;
 	Shotgun.SmokeSeconds = 4.5f;
 	Shotgun.SmokeStartCm = 10.0f;
-	Shotgun.SmokeEndCm = 55.0f;
-	Shotgun.SmokeSpreadCm = 25.0f;
-	Shotgun.SmokeBackCm = 25.0f;
-	Shotgun.SmokeOpacity = 0.25f;
+	Shotgun.SmokeEndCm = 34.0f;
+	Shotgun.SmokeSpreadCm = 22.0f;
+	Shotgun.SmokeBackCm = 18.0f;
+	Shotgun.SmokeOpacity = 0.4f;
+	// A torn cloud.
+	Shotgun.SmokeDriftCm = 3.0f;
+	Shotgun.SmokeStretch = 1.3f;
+	Shotgun.SmokeTear = 0.6f;
 	// SV-98: a tight core forward and the muzzle brake's two side jets.
 	FJamMuzzleFx Sniper;
 	Sniper.FlashLobes = 5;
@@ -72,13 +80,18 @@ UJamMuzzleFxComponent::UJamMuzzleFxComponent()
 	Sniper.Sparks = 4;
 	Sniper.SparkSpeed = 800.0f;
 	Sniper.LightIntensity = 70.0f;
-	Sniper.SmokePuffs = 7;
+	Sniper.SmokePuffs = 10;
 	Sniper.SmokeSeconds = 4.5f;
-	Sniper.SmokeStartCm = 8.0f;
-	Sniper.SmokeEndCm = 45.0f;
-	Sniper.SmokeSpreadCm = 18.0f;
-	Sniper.SmokeBackCm = 18.0f;
-	Sniper.SmokeOpacity = 0.3f;
+	Sniper.SmokeStartCm = 6.0f;
+	Sniper.SmokeEndCm = 18.0f;
+	Sniper.SmokeSpreadCm = 28.0f;
+	Sniper.SmokeBackCm = 6.0f;
+	Sniper.SmokeOpacity = 0.35f;
+	// A long ring/cone out of the brake.
+	Sniper.SmokeDriftCm = 3.0f;
+	Sniper.SmokeRing = 0.8f;
+	Sniper.SmokeStretch = 2.0f;
+	Sniper.SmokeTear = 0.3f;
 	Guns = { Pistol, Shotgun, Sniper };
 }
 
@@ -105,7 +118,7 @@ void UJamMuzzleFxComponent::BeginPlay()
 		return Sprites;
 	};
 	Flash = Make(TEXT("MuzzleFlash"), FlashMaterial.LoadSynchronous(), 4);
-	Smoke = Make(TEXT("MuzzleSmoke"), SmokeMaterial.LoadSynchronous(), 3);
+	Smoke = Make(TEXT("MuzzleSmoke"), SmokeMaterial.LoadSynchronous(), 7);
 	Light = NewObject<UPointLightComponent>(GetOwner(), TEXT("MuzzleLight"));
 	Light->SetMobility(EComponentMobility::Movable);
 	// No inverse square: the smoke is born right on the light, and 1/d^2 at a few
@@ -187,9 +200,20 @@ void UJamMuzzleFxComponent::Shot(int32 Weapon, const FVector& Muzzle, const USce
 	{
 		FPuff& Puff = Puffs.AddDefaulted_GetRef();
 		Puff.Origin = FlashOrigin;
-		// A sphere of directions; behind a muzzle brake half the puffs lean out of its ports.
-		const float Side = Gun.SideJetCm > 0.0f && Index % 2 ? (Index % 4 == 1 ? 1.0f : -1.0f) : 0.0f;
-		Puff.Direction = (FMath::VRand() + FVector(0.0f, Side, 0.0f)).GetSafeNormal();
+		// A ring around the bore leaning forward (a cone, out of a brake's ports), or a sphere of directions.
+		const int32 Ring = FMath::RoundToInt(Gun.SmokePuffs * Gun.SmokeRing);
+		if (Index < Ring)
+		{
+			const float Around = UE_TWO_PI * (Index + FMath::FRandRange(-0.25f, 0.25f)) / Ring;
+			Puff.Direction = FVector(0.35f, FMath::Cos(Around), FMath::Sin(Around)).GetSafeNormal();
+		}
+		else
+		{
+			Puff.Direction = FMath::VRand();
+		}
+		Puff.DriftCm = Gun.SmokeDriftCm * FMath::FRandRange(0.5f, 1.0f);
+		Puff.Stretch = FMath::FRandRange(1.0f, Gun.SmokeStretch);
+		Puff.Tear = Gun.SmokeTear;
 		Puff.SpreadCm = Gun.SmokeSpreadCm * FMath::FRandRange(0.4f, 1.0f);
 		Puff.BackCm = Gun.SmokeBackCm * FMath::FRandRange(0.5f, 1.0f);
 		Puff.StartCm = Gun.SmokeStartCm;
@@ -278,7 +302,8 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		}
 	}
 
-	// The smoke: puffs swell and spread fast at first, then creep; the cloud rolls back over the gun.
+	// The smoke, in vacuum: thrown out and swollen within a few tenths of a second,
+	// then frozen in shape and drifting straight on (no air to slow it, nothing to lift it).
 	if (Puffs.IsEmpty() && Smoke->GetInstanceCount() == 0)
 	{
 		return;
@@ -298,13 +323,19 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	for (const FPuff& Puff : Puffs)
 	{
 		const float X = Puff.Age / Puff.Life;
-		const float Spread = 1.0f - FMath::Cube(1.0f - X);
-		const float Grow = 1.0f - FMath::Square(1.0f - X);
-		const FVector Location = GunInCamera.TransformPosition(Puff.Origin) + Puff.Direction * Puff.SpreadCm * Spread - FVector(Puff.BackCm * Spread, 0.0f, 0.0f);
-		const float Size = FMath::Lerp(Puff.StartCm, Puff.EndCm, Grow);
-		const int32 Instance = Smoke->AddInstance(Sprite(Location, FVector::UpVector, Size, Size));
-		const float Opacity = Puff.Opacity * FMath::Min(Puff.Age / 0.1f, 1.0f) * FMath::Pow(1.0f - X, 1.5f);
-		Smoke->SetCustomData(Instance, { Opacity, Puff.Seed, Puff.Seed * 6.2831853f + Puff.Spin * Puff.Age }, true);
+		const float Throw = 1.0f - FMath::Exp(-Puff.Age / 0.12f);
+		const float Grow = 1.0f - FMath::Exp(-Puff.Age / 0.15f);
+		const FVector Location = GunInCamera.TransformPosition(Puff.Origin) + Puff.Direction * (Puff.SpreadCm * Throw + Puff.DriftCm * Puff.Age)
+			- FVector(Puff.BackCm * Throw, 0.0f, 0.0f);
+		const float Width = FMath::Lerp(Puff.StartCm, Puff.EndCm, Grow);
+		// A wisp drawn out along the shot (the bore, camera forward).
+		const int32 Instance = Smoke->AddInstance(Sprite(Location, FVector::ForwardVector, Width * Puff.Stretch, Width));
+		const float Opacity = Puff.Opacity * FMath::Min(Puff.Age / 0.05f, 1.0f) * FMath::Pow(1.0f - X, 1.5f);
+		// Heat shimmer behind a fresh puff, gone by 100 ms.
+		const float Shimmer = FMath::Max(0.0f, 1.0f - Puff.Age / 0.1f);
+		// Its size too: the material's texel grid stays the same in cm on every puff.
+		Smoke->SetCustomData(Instance, { Opacity, Puff.Seed, Puff.Seed * 6.2831853f + Puff.Spin * Puff.Age, Puff.Tear, Shimmer,
+			Width * Puff.Stretch, Width }, true);
 	}
 }
 

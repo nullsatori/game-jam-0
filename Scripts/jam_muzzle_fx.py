@@ -2,7 +2,7 @@
 
   UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/jam_muzzle_fx.py" -unattended -nop4 -nosplash -nullrhi
 
-Rebuilt in place on every run. Both draw a soft round sprite on the engine plane
+Rebuilt in place on every run. Both draw a sprite on the engine plane
 (/Engine/BasicShapes/Plane, UV 0..1), one instance per sprite in an instanced
 mesh; the component turns each plane to the camera and feeds per-instance
 custom data:
@@ -14,8 +14,13 @@ custom data:
   M_Jam_MuzzleSmoke  translucent, two-sided foliage (lit from behind it glows
                      through), lit per pixel (Surface ForwardShading: the
                      sun with its shadows, lamps, the flash's light; a few
-                     sparse sprites, so cheap enough): a thin grey puff, 3-octave value noise
-                     inside a gaussian. Data 0 opacity, 1 seed, 2 spin (rad).
+                     sparse sprites, so cheap enough): a grey-blue puff,
+                     deliberately low-res - a 1.2 cm texel grid per puff, 3-octave
+                     value noise in a gaussian cut into 5 Bayer-dithered
+                     density bands, a scanline fringe on the outer band, a
+                     heat shimmer (2D-offset refraction) while fresh.
+                     Data 0 opacity, 1 seed, 2 spin (rad), 3 tear, 4 shimmer,
+                     5 length and 6 width of the sprite, cm (for the texel grid).
 
 No texture: the shapes are maths, nothing third-party.
 """
@@ -53,13 +58,22 @@ col = lerp(col, float3(1.0, 0.92, 0.78), saturate(t * 2.5 - 1.0));
 return I * (gas * 0.8 + gas * gas * gas * 2.5) * col;
 """
 
+# The smoke keeps the jam's low-res look on purpose (owner, 19.10): a texel grid
+# per puff of TEXEL cm cells (the same size on a small puff and a big one), its density cut into BANDS steps with an ordered 4x4 Bayer
+# dither between them (crisp, not a blurry blob), a faint scanline fringe on the
+# outer band. Returns (opacity, fringe rgb).
 SMOKE_HLSL = """
-float2 p = UV * 2 - 1;
+const float TEXEL = 1.2;
+const float BANDS = 5;
+float2 GRID = max(float2(L, W) / TEXEL, 4);
+const float M[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+float2 cell = floor(UV * GRID);
+float2 p = (cell + 0.5) / GRID * 2 - 1;
 float c = cos(R), s = sin(R);
-p = float2(c * p.x - s * p.y, s * p.x + c * p.y);
+float2 pr = float2(c * p.x - s * p.y, s * p.x + c * p.y);
 float r2 = dot(p, p);
 float n = 0, amp = 0.5;
-float2 q = p * 2.2 + S * 17;
+float2 q = pr * 2.2 + S * 17;
 for (int o = 0; o < 3; o++)
 {
     float2 i = floor(q);
@@ -73,7 +87,24 @@ for (int o = 0; o < 3; o++)
     q = q * 2.03 + 3.7;
     amp *= 0.5;
 }
-return A * saturate(1 - r2) * exp(-r2 * 2.5) * saturate(n * 1.8 - 0.35);
+// Tear raises the noise floor: rags and holes instead of a whole puff.
+float d = saturate(1 - r2) * exp(-r2 * 2.0) * saturate((n - 0.22 - 0.22 * T) * 2.6);
+int2 b = int2(cell) & 3;
+float band = floor(d * BANDS + (M[b.y * 4 + b.x] + 0.5) / 16);
+float edge = band == 1 ? 1 : 0;
+float row = fmod(floor(Parameters.SvPosition.y * 0.5), 2);
+float3 fringe = edge * lerp(float3(0.10, 0.22, 0.30), float3(0.30, 0.14, 0.05), row);
+return float4(A * band / BANDS, fringe);
+"""
+
+# Heat shimmer: a texel-stepped screen offset inside a fresh puff (2D-offset refraction).
+SHIMMER_HLSL = """
+float2 GRID = max(float2(L, W) / 1.2, 4);
+float2 cell = floor(UV * GRID);
+float2 p = (cell + 0.5) / GRID * 2 - 1;
+float hx = frac(sin(dot(cell + S * 31, float2(127.1, 311.7))) * 43758.5453);
+float hy = frac(sin(dot(cell + S * 31, float2(269.5, 183.3))) * 43758.5453);
+return Sh * saturate(1 - dot(p, p)) * (float2(hx, hy) - 0.5) * 0.008;
 """
 
 
@@ -146,17 +177,33 @@ def _flash(m, node, custom, data, scalar, colour, mul):
 
 def _smoke(m, node, custom, data, scalar, colour, mul):
     uv = node(unreal.MaterialExpressionTextureCoordinate)
-    puff = custom(SMOKE_HLSL, "Puff", unreal.CustomMaterialOutputType.CMOT_FLOAT1,
-                  {"UV": uv, "A": data(0), "S": data(1), "R": data(2)})
-    grey = colour("Colour", unreal.LinearColor(0.6, 0.6, 0.62, 1.0))
-    mel.connect_material_property(grey, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    puff = custom(SMOKE_HLSL, "Puff", unreal.CustomMaterialOutputType.CMOT_FLOAT4,
+                  {"UV": uv, "A": data(0), "S": data(1), "R": data(2), "T": data(3), "L": data(5), "W": data(6)})
+    opacity = node(unreal.MaterialExpressionComponentMask, r=True, g=False, b=False, a=False)
+    mel.connect_material_expressions(puff, "", opacity, "")
+    fringe = node(unreal.MaterialExpressionComponentMask, r=False, g=True, b=True, a=True)
+    mel.connect_material_expressions(puff, "", fringe, "")
+    # Grey-blue, darker than before: lit by the muzzle light it warms, it never clips to white.
+    tint = colour("Colour", unreal.LinearColor(0.30, 0.34, 0.40, 1.0))
+    mel.connect_material_property(tint, "", unreal.MaterialProperty.MP_BASE_COLOR)
     # Thin smoke scatters light through itself: lit from behind (the sun past the cloud) it glows too.
-    mel.connect_material_property(grey, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
+    mel.connect_material_property(tint, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
     mel.connect_material_property(scalar("Roughness", 1.0), "", unreal.MaterialProperty.MP_ROUGHNESS)
-    # A little light of its own: a thin grey veil stays readable against black space
-    # (owner's call, 18.10), the scene's light still dominates where there is any.
-    mel.connect_material_property(mul(grey, scalar("Ambient", 0.15)), "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    mel.connect_material_property(puff, "", unreal.MaterialProperty.MP_OPACITY)
+    # A little light of its own so the veil stays readable against black space
+    # (owner's call, 18.10), plus the scanline fringe on its outer band.
+    glow = node(unreal.MaterialExpressionAdd)
+    mel.connect_material_expressions(mul(tint, scalar("Ambient", 0.25)), "", glow, "A")
+    mel.connect_material_expressions(mul(fringe, scalar("Fringe", 0.5)), "", glow, "B")
+    mel.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    mel.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
+    mode = [n for n in dir(unreal.RefractionMode) if "2D" in n.upper()]
+    if mode:
+        m.set_editor_property("refraction_method", getattr(unreal.RefractionMode, mode[0]))
+        shimmer = custom(SHIMMER_HLSL, "Shimmer", unreal.CustomMaterialOutputType.CMOT_FLOAT2,
+                         {"UV": uv, "S": data(1), "Sh": data(4), "L": data(5), "W": data(6)})
+        mel.connect_material_property(shimmer, "", unreal.MaterialProperty.MP_REFRACTION)
+    else:
+        unreal.log_warning("muzzle fx: no 2D-offset refraction mode, no heat shimmer")
 
 
 def build():

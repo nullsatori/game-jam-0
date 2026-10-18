@@ -72,7 +72,7 @@ struct FJamMuzzleFx
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
 	float SmokeEndCm = 16.0f;
 
-	/** How far the puffs' centres end from the muzzle, in every direction... */
+	/** How far the puffs' centres are thrown from the muzzle: fast, then they freeze (no air to slow or lift them)... */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
 	float SmokeSpreadCm = 8.0f;
 
@@ -80,17 +80,36 @@ struct FJamMuzzleFx
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
 	float SmokeBackCm = 6.0f;
 
-	/** A puff's peak opacity: sparse smoke stays low. */
+	/** A puff's peak opacity (of its densest band): sparse smoke stays low. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float SmokeOpacity = 0.15f;
+
+	/** After the throw, each puff keeps drifting straight on at this speed, cm/s: inertia, no buoyancy. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
+	float SmokeDriftCm = 2.0f;
+
+	/** Share of the puffs thrown as a ring around the bore (a muzzle brake's ring/cone); the rest go every way. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float SmokeRing = 0.0f;
+
+	/** Puffs are wisps drawn out along the shot, up to this length over width. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "1.0"))
+	float SmokeStretch = 1.5f;
+
+	/** 0: a whole puff; 1: torn into rags and holes. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float SmokeTear = 0.2f;
 };
 
 /**
  * Muzzle flash and powder smoke of the jam guns, in vacuum: no air carries a
  * flame tongue or blows the smoke away. The flash is a brief irregular burst
  * of hot gas - ragged lobes, a few sparks, side jets from a muzzle brake - with
- * a light; the smoke is a few thin puffs, lit by the scene, that swell and
- * spread slowly from the muzzle, roll back over the gun and fade over seconds.
+ * a light; the smoke is a few thin puffs, lit by the scene, thrown out fast
+ * and then frozen, drifting on without buoyancy, fading over seconds. The
+ * smoke keeps the jam's low-res look on purpose: a texel grid per puff, 5
+ * density bands with Bayer-dithered steps, a faint scanline fringe on its
+ * edge, a heat shimmer behind it for its first 100 ms.
  *
  * Everything lives in the owner's camera space, like the gun in view: the
  * cloud stays around the gun when the view turns or the recoil throws the
@@ -149,6 +168,9 @@ private:
 		float Age = 0.0f;
 		float Seed = 0.0f;
 		float Spin = 0.0f;
+		float DriftCm = 0.0f;
+		float Stretch = 1.0f;
+		float Tear = 0.0f;
 	};
 
 	/** A camera-facing sprite at Location (camera space), XAxis along its length (projected on the view plane). */
