@@ -104,6 +104,13 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	static ConstructorHelpers::FObjectFinder<USoundBase> PistolEmpty(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Empty_Pistol.SW_Jam_Empty_Pistol"));
 	static ConstructorHelpers::FObjectFinder<USoundBase> ShotgunEmpty(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Empty_Shotgun.SW_Jam_Empty_Shotgun"));
 	static ConstructorHelpers::FObjectFinder<USoundBase> SniperEmpty(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Empty_SV98.SW_Jam_Empty_SV98"));
+	// The mechanism hooks of JamWeaponParts.cpp (hammer, magazines, shells), same donors' treatment.
+	static ConstructorHelpers::FObjectFinder<USoundBase> PistolHammer(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Hammer_Pistol.SW_Jam_Hammer_Pistol"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> PistolMagOut(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_MagOut_Pistol.SW_Jam_MagOut_Pistol"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> PistolMagIn(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_MagIn_Pistol.SW_Jam_MagIn_Pistol"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> SniperMagOut(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_MagOut_SV98.SW_Jam_MagOut_SV98"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> SniperMagIn(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_MagIn_SV98.SW_Jam_MagIn_SV98"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> ShotgunShell(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Shell_Shotgun.SW_Jam_Shell_Shotgun"));
 	FJamWeapon Pistol;
 	Pistol.Name = NSLOCTEXT("JamZeroG", "Pistol", "Пистолет");
 	Pistol.Damage = 25.0f;
@@ -116,6 +123,9 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Pistol.HitImpulse = 3000.0f;
 	Pistol.ShotSound = PistolShot.Object;
 	Pistol.EmptySound = PistolEmpty.Object;
+	Pistol.HammerSound = PistolHammer.Object;
+	Pistol.MagOutSound = PistolMagOut.Object;
+	Pistol.MagInSound = PistolMagIn.Object;
 	Pistol.bAutomatic = true;
 	Pistol.ProjectileSpeed = 9000.0f;
 	Pistol.KickPitchDeg = 1.2f;
@@ -149,6 +159,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Shotgun.CycleSound = ShotgunPump.Object;
 	Shotgun.CycleDelaySeconds = 0.15f; // the pump's clicks at 0.26 and 0.40 s after the shot, as its animation
 	Shotgun.EmptySound = ShotgunEmpty.Object;
+	Shotgun.ShellInsertSound = ShotgunShell.Object;
 	Shotgun.ProjectileSpeed = 6000.0f;
 	Shotgun.KickPitchDeg = 5.0f;
 	Shotgun.KickYawDeg = 1.2f;
@@ -188,6 +199,8 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Sniper.CycleSound = SniperBolt.Object;
 	Sniper.CycleDelaySeconds = 0.25f; // the bolt's clicks at 0.35, 0.63, 0.87, 1.09 s after the shot
 	Sniper.EmptySound = SniperEmpty.Object;
+	Sniper.MagOutSound = SniperMagOut.Object;
+	Sniper.MagInSound = SniperMagIn.Object;
 	Sniper.ProjectileSpeed = 40000.0f;
 	Sniper.KickPitchDeg = 8.0f;
 	Sniper.KickYawDeg = 1.0f;

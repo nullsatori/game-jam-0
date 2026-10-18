@@ -94,6 +94,18 @@ Freesound 863729, turned out CC BY 4.0 there and was not used).
 - **9mm Handgun Being Dry Fired** — **serøutōnin--deprivəd**
   ([Freesound 674568](https://freesound.org/s/674568/)):
   `SW_Jam_Empty_Pistol`, `SW_Jam_Empty_Shotgun`, `SW_Jam_Empty_SV98`.
+- **1911 .45 Hammer Cocking.wav** — **shelbyshark**
+  ([Freesound 508243](https://freesound.org/people/shelbyshark/sounds/508243/)):
+  `SW_Jam_Hammer_Pistol`.
+- **A Glock handgun having its magazine removed and re-inserted // 3 takes** —
+  **serøutōnin--deprivəd** ([Freesound 854460](https://freesound.org/s/854460/)):
+  `SW_Jam_MagOut_Pistol`, `SW_Jam_MagIn_Pistol`.
+- **An M16 Rifle being reloaded while empty; full sequence** — **serøutōnin--deprivəd**
+  ([Freesound 725397](https://freesound.org/s/725397/)): `SW_Jam_MagOut_SV98`,
+  `SW_Jam_MagIn_SV98`.
+- **shell load.ogg** — **CeebFrack**
+  ([Freesound 108793](https://freesound.org/people/CeebFrack/sounds/108793/)):
+  `SW_Jam_Shell_Shotgun`.
 
 Rendered for listening only, not in the game (variants the owner did not pick,
 all CC0 as above): Freesound 427592 «9mm pistol shot» by michorvath, 431834 «Sauer 404

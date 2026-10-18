@@ -58,6 +58,10 @@ DONORS = {
     "370345": "https://cdn.freesound.org/previews/370/370345_2558531-hq.mp3",  # Zott820, Mosin Nagant bolt cycle
     "508747": "https://cdn.freesound.org/previews/508/508747_1934171-hq.mp3",  # AugustSandberg, Mauser K98 reload
     "674568": "https://cdn.freesound.org/previews/674/674568_7157894-hq.mp3",  # serøutōnin--deprivəd, 9mm dry fired
+    "508243": "https://cdn.freesound.org/previews/508/508243_8644110-hq.mp3",  # shelbyshark, 1911 .45 hammer cocking
+    "854460": "https://cdn.freesound.org/previews/854/854460_7157894-hq.mp3",  # serøutōnin--deprivəd, Glock magazine out and in
+    "725397": "https://cdn.freesound.org/previews/725/725397_7157894-hq.mp3",  # serøutōnin--deprivəd, M16 empty reload
+    "108793": "https://cdn.freesound.org/previews/108/108793_1553758-hq.mp3",  # CeebFrack, shell load
 }
 DONOR_DIR = "."
 
@@ -122,15 +126,18 @@ def drive(x, amount, bias=0.0):
 
 # ---- layers: each returns (mono samples, start s, send dB or None) ----
 
-def rec(d, pieces, pitch=0, af="", amount=0.0, gain=0.0, at=0.0, send=None, fout=0.03):
-    """Recorded slice(s) of donor d: [(start s, end s, place s)], placed, pitched, driven, filtered."""
+def rec(d, pieces, pitch=0, af="", amount=0.0, gain=0.0, at=0.0, send=None, fout=0.03, time_pitch=None):
+    """Recorded slice(s) of donor d: [(start s, end s, place s)], each pitched on its own and placed at
+    its time scaled as by time_pitch (default: pitch), then driven and filtered. A copy of a sequence
+    far lower (the thunk under a click) keeps the clicks' timing this way instead of stretching it."""
     src = donor(d)
-    end = max(p - a + b for a, b, p in pieces)
-    x = np.zeros(int(end * SR) + 1)
-    for a, b, p in pieces:
-        seg = fade(src[int(a * SR):int(b * SR)], 0.002, min(fout, (b - a) / 3))
-        x[int(p * SR):int(p * SR) + len(seg)] += seg
-    x = drive(resample(x, pitch), amount)
+    tr = 2 ** (-(pitch if time_pitch is None else time_pitch) / 12)
+    segs = [(int(p * tr * SR), resample(fade(src[int(a * SR):int(b * SR)], 0.002, min(fout, (b - a) / 3)), pitch))
+            for a, b, p in pieces]
+    x = np.zeros(max(i + len(seg) for i, seg in segs))
+    for i, seg in segs:
+        x[i:i + len(seg)] += seg
+    x = drive(x, amount)
     if af:
         x = filt(x, af)
     return x / (np.abs(x).max() + 1e-12) * 10 ** (gain / 20), at, send
@@ -296,7 +303,7 @@ def mech(d, pieces, clicks, heavy, pitch=-4, lufs=-20):
     r = 2 ** (-pitch / 12)
     layers = [
         lambda: rec(d, pieces, pitch, f"{hp(90)},{lp(2200)}", 1.5, 0, send=-4),
-        lambda: rec(d, pieces, pitch - 12, f"{hp(50)},{lp(400)}", 3.0, -4, send=-10),
+        lambda: rec(d, pieces, pitch - 12, f"{hp(50)},{lp(400)}", 3.0, -4, send=-10, time_pitch=pitch),
     ]
     for k in heavy:
         at = (pieces[k][2] + clicks[k]) * r
@@ -322,6 +329,14 @@ BOLT_A = ("508747", [(3.06, 3.30, 0.030), (3.40, 3.65, 0.147), (20.06, 20.30, 0.
 BOLT_B = ("370345", [(0.05, 0.28, 0.006), (0.38, 0.60, 0.192), (0.77, 1.00, 0.382), (1.10, 1.38, 0.550)],
           [0.073, 0.110, 0.110, 0.117])
 DRY_FIRE = ("674568", [(0.0, 0.25, 0.0)], [0.075])
+# Reload and hammer (jam-anim2's hooks, 18.10): each cut starts 20-30 ms before its click, so the
+# click lands on the hook's moment (+25-40 ms after the pitch).
+HAMMER = ("508243", [(5.47, 5.68, 0.0)], [0.02])  # the 1911's hammer: two ticks 70 ms apart
+MAG_OUT_PISTOL = ("854460", [(0.27, 0.60, 0.0)], [0.02])  # the Glock's magazine let go, sliding out
+MAG_IN_PISTOL = ("854460", [(1.845, 1.98, 0.0)], [0.015])  # ... and slapped home
+MAG_OUT_RIFLE = ("725397", [(0.40, 0.66, 0.0)], [0.06])  # the M16's magazine leaving the well
+MAG_IN_RIFLE = ("725397", [(3.10, 3.45, 0.0)], [0.03])  # ... seated
+SHELL = ("108793", [(0.20, 0.556, 0.0)], [0.03])  # a shell thumbed into a tube
 SOUNDS = {
     # In game since the owner's pick on 18.10 ("все выстрелы берем С"): the C of each gun, under the
     # default asset names; A and B are rendered for listening only. Behind the master limiter
@@ -362,6 +377,20 @@ SOUNDS = {
     "Empty_Pistol": dict(game=True, **mech(*DRY_FIRE, heavy=[0], pitch=-3, lufs=-23)),
     "Empty_Shotgun": dict(game=True, **mech(*DRY_FIRE, heavy=[0], pitch=-6, lufs=-22)),
     "Empty_SV98": dict(game=True, **mech(*DRY_FIRE, heavy=[0], pitch=-8, lufs=-22)),
+    # the hammer under the shot (masked by it, felt as a tick), the magazines, the shells
+    "Hammer_Pistol": dict(game=True, **mech(*HAMMER, heavy=[], lufs=-30)),
+    "MagOut_Pistol": dict(game=True, **mech(*MAG_OUT_PISTOL, heavy=[], lufs=-24)),
+    "MagIn_Pistol": dict(game=True, **mech(*MAG_IN_PISTOL, heavy=[0], lufs=-21)),
+    "MagOut_SV98": dict(game=True, **mech(*MAG_OUT_RIFLE, heavy=[], pitch=-5, lufs=-23)),
+    "MagIn_SV98": dict(game=True, **mech(*MAG_IN_RIFLE, heavy=[0], pitch=-5, lufs=-20)),
+    "Shell_Shotgun": dict(game=True, **mech(*SHELL, heavy=[0], lufs=-22)),
+}
+# Sequences in game timing (JamWeaponParts.cpp): (sound, seconds) from the shot or the reload's start.
+SEQUENCES = {
+    "Pistol_shot_hammer": [("Shot_Pistol_C_revolver", 0.0), ("Hammer_Pistol", 0.085)],
+    "Pistol_reload": [("MagOut_Pistol", 0.36), ("MagIn_Pistol", 0.86)],
+    "SV98_reload": [("MagOut_SV98", 0.5), ("MagIn_SV98", 1.25)],
+    "Shotgun_load3": [("Shell_Shotgun", 0.25 + n * 0.42 + 0.30) for n in range(3)],
 }
 # in-game delay of each cycle after its shot (JamWeapons.cpp CycleDelaySeconds)
 CYCLE_MOCKS = {"Shotgun": ("Shot_Shotgun_C_mixed", "Pump_Shotgun", 0.15), "SV98": ("Shot_SV98_C_deep", "Bolt_SV98", 0.25)}
@@ -443,6 +472,11 @@ def main():
         mock[:len(a)] += a
         mock[int(delay * SR):int(delay * SR) + len(b)] += b
         write(os.path.join(listen, f"Mock_{gun}_shot_then_cycle_space.wav"), mock, SR)
+    for seq, parts in SEQUENCES.items():  # through a -1 dBFS limiter, as the master plays them
+        mock = np.zeros((max(int(t * SR) + len(rendered[n]) for n, t in parts), 2))
+        for n, t in parts:
+            mock[int(t * SR):int(t * SR) + len(rendered[n])] += rendered[n]
+        write(os.path.join(listen, f"Mock_{seq}_space.wav"), limit(mock)[0], SR)
     for name in ("Shot_Pistol_C_revolver",):  # eight shots at the pistol's FireInterval 0.15 s
         a = rendered[name]
         burst = np.zeros((int(7 * 0.15 * SR) + len(a), 2))

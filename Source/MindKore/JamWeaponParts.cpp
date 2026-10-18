@@ -254,7 +254,14 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 	FJamWeapon& Weapon = Weapons[CurrentWeapon];
 	const FTransform Gun = ViewModel->GetComponentTransform();
 	const FTransform View = ViewModel->GetAttachParent()->GetComponentTransform();
-	const auto Play = [this](USoundBase* Sound) { if (Sound) { UGameplayStatics::PlaySound2D(this, Sound); } };
+	const auto Play = [this](USoundBase* Sound)
+	{
+		if (Sound)
+		{
+			UGameplayStatics::PlaySound2D(this, Sound);
+			UE_LOG(LogMindKore, Log, TEXT("Weapon %s: sound %s"), *GetNameSafe(GetOwner()), *Sound->GetName());
+		}
+	};
 
 	// After the shot (live time: a held pose throws nothing).
 	const float Since = SinceShotSeconds;
