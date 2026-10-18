@@ -153,8 +153,9 @@ def _smoke(m, node, custom, data, scalar, colour, mul):
     # Thin smoke scatters light through itself: lit from behind (the sun past the cloud) it glows too.
     mel.connect_material_property(grey, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
     mel.connect_material_property(scalar("Roughness", 1.0), "", unreal.MaterialProperty.MP_ROUGHNESS)
-    # A trace of its own light so a puff in full shadow is not a black hole.
-    mel.connect_material_property(mul(grey, scalar("Ambient", 0.04)), "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    # A little light of its own: a thin grey veil stays readable against black space
+    # (owner's call, 18.10), the scene's light still dominates where there is any.
+    mel.connect_material_property(mul(grey, scalar("Ambient", 0.15)), "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.connect_material_property(puff, "", unreal.MaterialProperty.MP_OPACITY)
 
 

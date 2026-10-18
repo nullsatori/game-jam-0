@@ -136,9 +136,11 @@ void UJamMuzzleFxComponent::Shot(int32 Weapon, const FVector& Muzzle, const USce
 	FlashOrigin = GunMesh ? GunMesh->GetComponentTransform().InverseTransformPosition(Muzzle) : Origin;
 	FlashAge = 0.0f;
 	// A new burst every shot: lobes of random size, turn and direction (leaning
-	// along the bore by FlashForward), the first one the hot core on the muzzle.
+	// along the bore by FlashForward), the first one the small white-hot core on
+	// the muzzle; the rest are yellow-orange gas from the first frame, dimmer, so
+	// the burst reads as hot gas and not a white disc.
 	FlashBits.Reset();
-	const auto Lobe = [this](const FVector& Direction, float ReachCm, float SizeCm, float Stretch, float Brightness)
+	const auto Lobe = [this](const FVector& Direction, float ReachCm, float SizeCm, float Stretch, float Brightness, float Heat)
 	{
 		FFlashBit& Bit = FlashBits.AddDefaulted_GetRef();
 		Bit.Direction = Direction;
@@ -146,6 +148,7 @@ void UJamMuzzleFxComponent::Shot(int32 Weapon, const FVector& Muzzle, const USce
 		Bit.SizeCm = SizeCm;
 		Bit.Stretch = Stretch;
 		Bit.Brightness = Brightness;
+		Bit.Heat = Heat;
 		Bit.Seed = FMath::FRand();
 		Bit.Angle = FMath::FRand() * UE_TWO_PI;
 	};
@@ -153,9 +156,9 @@ void UJamMuzzleFxComponent::Shot(int32 Weapon, const FVector& Muzzle, const USce
 	{
 		const FVector Direction = (FMath::VRand() + FVector(Gun.FlashForward, 0.0f, 0.0f)).GetSafeNormal();
 		Index == 0
-			? Lobe(Direction, Gun.FlashReachCm * 0.15f, Gun.FlashSizeCm * 0.8f, 1.0f, 1.5f)
+			? Lobe(Direction, Gun.FlashReachCm * 0.15f, Gun.FlashSizeCm * 0.5f, 1.0f, 1.5f, 1.0f)
 			: Lobe(Direction, Gun.FlashReachCm * FMath::FRandRange(0.3f, 1.0f), Gun.FlashSizeCm * FMath::FRandRange(0.6f, 1.2f),
-				FMath::FRandRange(1.0f, 1.6f), FMath::FRandRange(0.6f, 1.0f));
+				FMath::FRandRange(1.0f, 1.6f), FMath::FRandRange(0.18f, 0.3f), 0.35f);
 	}
 	if (Gun.SideJetCm > 0.0f)
 	{
@@ -166,7 +169,7 @@ void UJamMuzzleFxComponent::Shot(int32 Weapon, const FVector& Muzzle, const USce
 			{
 				const FVector Out = (FVector(0.0f, Side, 0.0f) + FMath::VRand() * 0.25f).GetSafeNormal();
 				const float Reach = Gun.SideJetCm * (0.25f + 0.35f * Index) * FMath::FRandRange(0.8f, 1.1f);
-				Lobe(Out, Reach, Gun.SideJetCm * FMath::FRandRange(0.35f, 0.5f), FMath::FRandRange(1.6f, 2.4f), 0.9f - 0.15f * Index);
+				Lobe(Out, Reach, Gun.SideJetCm * FMath::FRandRange(0.35f, 0.5f), FMath::FRandRange(1.6f, 2.4f), 0.55f - 0.1f * Index, 0.5f);
 			}
 		}
 	}
@@ -267,7 +270,7 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 					Intensity = Bit.Brightness * (Burst + Glow);
 				}
 				const int32 Instance = Flash->AddInstance(Sprite(Location, Bit.Direction, Length, Width));
-				Flash->SetCustomData(Instance, { Intensity, Bit.Seed, Bit.Speed > 0.0f ? 0.7f : Heat, Bit.Angle }, true);
+				Flash->SetCustomData(Instance, { Intensity, Bit.Seed, Bit.Speed > 0.0f ? 0.7f : Heat * Bit.Heat, Bit.Angle }, true);
 			}
 			Light->SetRelativeLocation(Muzzle);
 			Light->SetIntensity(Gun.LightIntensity * (Burst + Glow));
@@ -308,14 +311,15 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 namespace
 {
 	/**
-	 * jam.Weapons.Fx: first-person stills of each gun's flash and smoke (HighResShot;
-	 * needs a real RHI). The zero-G pawn is held 6 m in front of a living wall as in
-	 * jam.Weapons.Shots. Per gun: a warm-up shot (shaders), the gun at rest, then
+	 * jam.Weapons.Fx [space]: first-person stills of each gun's flash and smoke
+	 * (HighResShot; needs a real RHI). The zero-G pawn is held 6 m in front of a
+	 * living wall as in jam.Weapons.Shots, looking at it - or, with "space", 45
+	 * degrees to its right into the black (the smoke against empty space). Per gun: a warm-up shot (shaders), the gun at rest, then
 	 * a shot at time dilation 0.01 caught at 60 fps frames 0, 1, 2, 3, 5, 8, 12
 	 * (+0.008..+0.208 s; a hitch on the shot frame cannot skip them), the smoke at
 	 * +0.5, 1, 2 and 3 s, then the first frame of two more shots (each burst differs).
 	 */
-	void RunMuzzleFxShots(UWorld* World)
+	void RunMuzzleFxShots(const TArray<FString>& Args, UWorld* World)
 	{
 		APlayerController* Controller = World->GetFirstPlayerController();
 		AJamZeroGPawn* Pawn = Controller ? Cast<AJamZeroGPawn>(Controller->GetPawn()) : nullptr;
@@ -330,6 +334,11 @@ namespace
 		{
 			Target = Wall->GetActorLocation();
 			Stand = Target + Wall->GetFrontNormal() * 600.0f;
+			if (Args.Contains(TEXT("space")))
+			{
+				// Turned 45 degrees to the right of the wall: the black of space fills the middle of the frame.
+				Target = Stand - Wall->GetFrontNormal().RotateAngleAxis(45.0f, FVector::UpVector) * 600.0f;
+			}
 		}
 		const auto Hold = [Pawn, Controller, Stand, Target]()
 		{
@@ -390,8 +399,8 @@ namespace
 		}
 	}
 
-	FAutoConsoleCommandWithWorld GMuzzleFxShots(
+	FAutoConsoleCommandWithWorldAndArgs GMuzzleFxShots(
 		TEXT("jam.Weapons.Fx"),
-		TEXT("First-person stills of each gun's muzzle flash frame by frame (60 fps frames 0-12 at time dilation 0.01), its smoke over 3 s and two more bursts (HighResShot; needs a real RHI)."),
-		FConsoleCommandWithWorldDelegate::CreateStatic(&RunMuzzleFxShots));
+		TEXT("First-person stills of each gun's muzzle flash frame by frame (60 fps frames 0-12 at time dilation 0.01), its smoke over 3 s and two more bursts (HighResShot; needs a real RHI). 'space': look away from the wall."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunMuzzleFxShots));
 }

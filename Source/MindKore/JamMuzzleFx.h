@@ -172,6 +172,8 @@ private:
 		/** Length over width (a jet, a spark streak). */
 		float Stretch = 1.0f;
 		float Brightness = 1.0f;
+		/** Times the burst's heat: 1 the white-hot core, lower stays yellow-orange. */
+		float Heat = 1.0f;
 		float Seed = 0.0f;
 		float Angle = 0.0f;
 		/** Sparks: cm/s, 0 for a lobe. */
