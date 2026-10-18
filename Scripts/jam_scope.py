@@ -70,9 +70,13 @@ float2 p = float2(UV.y * 2 - 1, 1 - UV.x * 2);
 float r = length(p);
 // One pixel in lens radii (fwidth sums both axes: halve it).
 float aa = max(0.5 * fwidth(r), 1e-4);
-float3 c = Texture2DSample(Tex, TexSampler, p * 0.5 + 0.5).rgb;
+float2 q0 = p * 0.5 + 0.5;
+float fringe = 0.012 * dot(p, p);
+float3 c = float3(Texture2DSample(Tex, TexSampler, (p * (1 + fringe)) * 0.5 + 0.5).r,
+                  Texture2DSample(Tex, TexSampler, q0).g,
+                  Texture2DSample(Tex, TexSampler, (p * (1 - fringe)) * 0.5 + 0.5).b);
 float field = 1 - smoothstep(0.97 - aa, 0.97 + aa, r);
-float vig = 1 - 0.3 * pow(saturate(r / 0.97), 6);
+float vig = 1 - 0.45 * pow(saturate(r / 0.97), 4);
 float open = saturate(1 - abs(E.z) * 0.07);
 float lit = 1 - smoothstep(open * 1.05 - 0.12, open * 1.05 + 0.02, length(p - E.xy));
 float2 m = p / Unit;
@@ -119,8 +123,30 @@ float rim = (1 - smoothstep(1.2 * am, 2.2 * am, dAll)) * (1 - core);
 """
 
 LENS_HLSL = GEOM_HLSL + """
-float3 glass = float3(0.004, 0.006, 0.01);
-return lerp(glass, c * vig, lit) * (1 - 0.6 * rim) * field;
+// The light in the tube: the picture's mean round the middle, a faint bounce on the metal.
+float3 amb = (Texture2DSample(Tex, TexSampler, float2(0.5, 0.5)).rgb + Texture2DSample(Tex, TexSampler, float2(0.3, 0.5)).rgb
+    + Texture2DSample(Tex, TexSampler, float2(0.7, 0.5)).rgb + Texture2DSample(Tex, TexSampler, float2(0.5, 0.3)).rgb
+    + Texture2DSample(Tex, TexSampler, float2(0.5, 0.7)).rgb) * 0.2;
+// The tube seen past the exit pupil: dark anodised wall with three baffle rings, each deeper ring
+// smaller and shifted further by the eye's offset (parallax), darker inward.
+float3 tube = float3(0.006, 0.0065, 0.008) * (1.2 - 0.6 * r);
+for (int b = 1; b <= 3; b++)
+{
+    float depth = b / 3.0;
+    float2 centre = E.xy * (0.25 + 0.45 * depth);
+    float edge = abs(length(p - centre) - (0.93 - 0.14 * depth));
+    float ring = 1 - smoothstep(aa, aa + 0.022, edge);
+    tube += ring * (amb * 0.09 + 0.012) * (1.1 - 0.3 * b);
+}
+// Coated glass: a thin green-amber sheen just inside the field stop, a dark ring at the stop.
+float coat = smoothstep(0.86, 0.95, r) * (1 - smoothstep(0.95, 0.968, r));
+float3 sheen = coat * (float3(0.014, 0.024, 0.009) + 0.1 * amb * float3(0.6, 1.0, 0.45));
+float stop = 1 - smoothstep(0.95, 0.965, r) * (1 - smoothstep(0.965, 0.975, r)) * 0.9;
+// A soft glint on the ocular, upper left, drifting against the eye's offset (it moves with the head).
+float2 g = p - (float2(-0.38, -0.42) - E.xy * 0.25);
+float glint = exp(-dot(g * float2(2.6, 5.0), g * float2(2.6, 5.0))) * 0.035 + exp(-dot(g, g) * 260.0) * 0.07;
+float3 picture = c * vig;
+return (lerp(tube, picture, lit) * (1 - 0.6 * rim) * stop + sheen + glint * float3(0.9, 0.95, 1.0)) * field;
 """
 
 RETICLE_HLSL = GEOM_HLSL + """

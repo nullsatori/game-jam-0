@@ -459,6 +459,12 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	int32 CurrentWeapon = 0;
 
+	/** Unarmed (Holster): CurrentWeapon stays as it was, out of hand. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
+	bool bHolstered = false;
+
+
+
 	/** Off (the ship map): every gun starts locked until a pickup unlocks it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons")
 	bool bStartWithAllWeapons = true;
@@ -595,19 +601,32 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
 	bool IsWeaponUnlocked(int32 Index) const { return Weapons.IsValidIndex(Index) && Weapons[Index].bUnlocked; }
 
-	/**
-	 * Put the gun away and keep it away (hands busy): animated along its own path, or
-	 * bInstant - gone this frame (owner 19.10: grabbing something). DrawWeapon brings it back.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
-	void HolsterWeapon(bool bInstant);
+	/** The gun in hand, or null: none unlocked yet, or unarmed (Holster). */
+	const FJamWeapon* GetWeapon() const { return !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr; }
 
 	/**
-	 * Draw a gun along its own path - from away (after HolsterWeapon), or as a switch:
-	 * Index (INDEX_NONE: the current one) is selected first, and a gun in view goes away first.
+	 * Unarmed, at once: the gun leaves the view in the same frame and does not fire (owner 18-19.10: a
+	 * grab - AJamZeroGPawn::Grab). Rearm (the grab let go) or a selection brings a gun back with a Draw.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
-	void DrawWeapon(int32 Index = -1);
+	void Holster();
+
+	/** Back from unarmed to the last gun, with a Draw (AJamZeroGPawn::Release). */
+	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
+	void Rearm();
+
+	/**
+	 * A gun coming back into hand out of unarmed (Rearm, a selection): drawn along its own path
+	 * (JamWeaponParts.cpp - the pistol from the right-hip holster, the shotgun over the right
+	 * shoulder, the SV-98 over the left). Fire waits for IsDrawing.
+	 */
+	void Draw();
+
+	/** A put-away or draw still running for the gun in hand: no shot yet (!IsWeaponReady). */
+	bool IsDrawing() const;
+
+	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
+	bool IsHolstered() const { return bHolstered; }
 
 	/** The current gun is drawn far enough to fire (DrawReadySeconds) and no put-away is wanted. */
 	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
@@ -619,8 +638,6 @@ public:
 	/** The gun drawn in view now (the old one while it goes away), or INDEX_NONE. */
 	int32 GetShownWeapon() const { return ShownWeapon; }
 
-	/** The gun in hand, or null when it is not unlocked (no guns yet). */
-	const FJamWeapon* GetWeapon() const { return IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr; }
 
 	/** Seconds left of a reload; 0 when not reloading. */
 	float GetReloadRemaining() const;
@@ -706,10 +723,10 @@ private:
 		float ReloadLength, int32 Shells, float DeltaTime, const FSwitchSpan& Switch = FSwitchSpan()) const;
 	/** Run the switch this frame; returns the gun to show (null: away) and the span the springs step over. */
 	const FJamWeapon* UpdateSwitch(float DeltaTime, bool bHandsBusy, FSwitchSpan& OutSpan);
+	/** Unarmed at once: no gun in view, the next draw from away. */
+	void ClearView();
 	ESwitch SwitchStage = ESwitch::Away;
 	float SwitchTime = 0.0f;
-	/** HolsterWeapon until DrawWeapon. */
-	bool bHolstered = false;
 	FSwitchSpan PoseSwitch;
 	/** Live, or re-run from rest for jam.Weapons.PoseAt / ReloadPoseAt. */
 	void UpdatePose(const FJamWeapon& Weapon, float DeltaTime);

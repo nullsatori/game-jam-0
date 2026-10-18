@@ -167,6 +167,15 @@ void AJamZeroGHUD::DrawHUD()
 		DrawText(Line, Offer.bAvailable ? FLinearColor::White : FLinearColor(1.0f, 0.45f, 0.35f),
 			CenterX - Width * 0.5f, CenterY + 24.0f, Font);
 	}
+	// RMB's other job, quietly: a loose body in reach is taken (with a gun out, the gun goes away).
+	if (Pawn->GetRmbAction() == EJamRmbAction::Grab)
+	{
+		const FString Line = Pawn->Guns->GetWeapon() ? TEXT("[ПКМ] взять (оружие убрать)") : TEXT("[ПКМ] взять");
+		float Width = 0.0f;
+		float Height = 0.0f;
+		GetTextSize(Line, Width, Height, Font);
+		DrawText(Line, FLinearColor(0.85f, 0.85f, 0.8f, 0.6f), CenterX - Width * 0.5f, CenterY + 44.0f, Font);
+	}
 
 	// O2 bar, bottom left: red under a fifth.
 	const float Fraction = FMath::Clamp(Pawn->Oxygen->GetFraction(), 0.0f, 1.0f);

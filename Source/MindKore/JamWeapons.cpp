@@ -482,8 +482,58 @@ void UJamWeaponsComponent::UnlockWeapon(int32 Index)
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s unlocked"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString());
 }
 
+void UJamWeaponsComponent::Holster()
+{
+	if (bHolstered)
+	{
+		return;
+	}
+	bHolstered = true;
+	ReloadEndSeconds = 0.0; // as a switch: the reload and the last gun's cycle are abandoned
+	GetWorld()->GetTimerManager().ClearTimer(CycleTimer);
+	ClearView(); // gone this frame, no put-away (JamWeaponParts.cpp)
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: unarmed"), *GetNameSafe(GetOwner()));
+}
+
+void UJamWeaponsComponent::Rearm()
+{
+	if (!bHolstered || !IsWeaponUnlocked(CurrentWeapon))
+	{
+		return;
+	}
+	bHolstered = false;
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: rearmed - %s"), *GetNameSafe(GetOwner()), *Weapons[CurrentWeapon].Name.ToString());
+	Draw();
+}
+
+void UJamWeaponsComponent::Draw()
+{
+	// The draw (owner 19.10): with the gun wanted again, the switch (UJamWeaponsComponent::UpdateSwitch,
+	// JamWeaponParts.cpp) brings it in from away along its own path - the pistol from the right-hip
+	// holster, the shotgun over the right shoulder, the SV-98 over the left - on the pose springs;
+	// it fires once drawn and settled (IsDrawing).
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: draw %s"), *GetNameSafe(GetOwner()), Weapons.IsValidIndex(CurrentWeapon) ? *Weapons[CurrentWeapon].Name.ToString() : TEXT("-"));
+}
+
+bool UJamWeaponsComponent::IsDrawing() const
+{
+	return GetWeapon() && !IsWeaponReady();
+}
+
 void UJamWeaponsComponent::SelectWeapon(int32 Index)
 {
+	// Out of unarmed (the same gun or another): drawn. A plain switch is not a draw here - the anim
+	// thread's switching (put away, draw) owns that.
+	const bool bFromUnarmed = bHolstered && IsWeaponUnlocked(Index);
+	if (bFromUnarmed && Index == CurrentWeapon)
+	{
+		Rearm();
+		return;
+	}
+	if (bFromUnarmed)
+	{
+		bHolstered = false;
+	}
 	if (!Weapons.IsValidIndex(Index) || Index == CurrentWeapon || !Weapons[Index].bUnlocked)
 	{
 		return;
@@ -493,6 +543,10 @@ void UJamWeaponsComponent::SelectWeapon(int32 Index)
 	GetWorld()->GetTimerManager().ClearTimer(CycleTimer);
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s (%d/%d)"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString(),
 		Weapons[Index].Ammo, Weapons[Index].Reserve);
+	if (bFromUnarmed)
+	{
+		Draw();
+	}
 }
 
 float UJamWeaponsComponent::GetReloadRemaining() const
@@ -517,7 +571,7 @@ FString UJamWeaponsComponent::Describe() const
 
 void UJamWeaponsComponent::Reload()
 {
-	FJamWeapon* Weapon = IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
+	FJamWeapon* Weapon = !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
 	if (!Weapon || !IsWeaponReady() || Weapon->Ammo >= Weapon->MagazineSize || Weapon->Reserve <= 0 || GetReloadRemaining() > 0.0f)
 	{
 		return;
@@ -529,13 +583,14 @@ void UJamWeaponsComponent::Reload()
 bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, FVector& OutRecoil)
 {
 	OutRecoil = FVector::ZeroVector;
-	FJamWeapon* Weapon = IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
+	FJamWeapon* Weapon = !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
 	const double Now = GetWorld()->GetTimeSeconds();
 	if (Weapon && Weapon->ShellMesh && Weapon->Ammo > 0 && GetReloadRemaining() > 0.0f)
 	{
 		ReloadEndSeconds = 0.0; // round-by-round loading breaks off for a shot
 	}
-	if (!Weapon || !IsWeaponReady() || Now < NextShotSeconds || GetReloadRemaining() > 0.0f)
+	// Not before the gun is drawn and has settled (IsDrawing).
+	if (!Weapon || Now < NextShotSeconds || GetReloadRemaining() > 0.0f || IsDrawing())
 	{
 		return false;
 	}

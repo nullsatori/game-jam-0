@@ -230,7 +230,8 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Map(LiftAction, EKeys::SpaceBar, false, false);
 	Map(LiftAction, EKeys::LeftControl, false, true);
 	Map(StabiliseAction, EKeys::X, false, false);
-	// Owner 17.10/18.10: RMB grabs/lets go/holds on, F interacts (else pushes), Q/E roll, V bullet time, Alt the grapple.
+	// Owner 17.10/18.10: RMB aims with a gun out (grabs a loose body in reach - unarmed), else grabs/lets go/holds on (Use);
+	// F interacts (else pushes), Q/E roll, V bullet time, Alt the grapple.
 	Map(UseAction, EKeys::RightMouseButton, false, false);
 	Map(PrimaryAction, EKeys::LeftMouseButton, false, false);
 	Map(PushAction, EKeys::F, false, false);
@@ -258,6 +259,8 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindActionValueLambda(StabiliseAction, ETriggerEvent::Started, [this](const FInputActionValue&) { bStabilising = true; });
 	Input->BindActionValueLambda(StabiliseAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { bStabilising = false; });
 	Input->BindAction(UseAction, ETriggerEvent::Started, this, &AJamZeroGPawn::Use);
+	// RMB released: the aim it raised comes down (Use).
+	Input->BindActionValueLambda(UseAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { Guns->Scope->SetAimHeld(false); });
 	// Act on press. An automatic gun keeps firing while LMB is held; Fire's
 	// interval gate makes the press frame (Started and Triggered) one shot.
 	Input->BindAction(PrimaryAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PrimaryPressed);
@@ -326,8 +329,17 @@ void AJamZeroGPawn::Use()
 	{
 		return;
 	}
-	// RMB is the hands only (owner 18.10; interaction is F): holding - let go;
-	// a loose body in reach is grabbed; a fixed one (the hull) is held on to.
+	// Owner 18.10: «прицеливание ставим на пкм тоже, хватать объекты можно но в таком
+	// случае игрок переходит в Unarmed». A gun in hand: RMB grabs a loose body in reach
+	// (Grab puts the gun away), otherwise it aims while held. Unarmed or a hull tool in
+	// hand: RMB is the hands - holding, let go; a loose body in reach is grabbed; a fixed
+	// one (the hull) is held on to. Interaction stays on F.
+	if (GetRmbAction() == EJamRmbAction::Aim)
+	{
+		Guns->Scope->SetAimHeld(true);
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG RMB: aim"));
+		return;
+	}
 	if (GrabbedBody.IsValid())
 	{
 		Release();
@@ -383,6 +395,24 @@ void AJamZeroGPawn::LetGoCling()
 		ClingConstraint = nullptr;
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: let go"));
 	}
+}
+
+EJamRmbAction AJamZeroGPawn::GetRmbAction() const
+{
+	if (IsClimbingLadder())
+	{
+		return EJamRmbAction::None;
+	}
+	const bool bGunOut = Guns->GetWeapon() && HullTools->GetTool() == EJamHullTool::None && !GrabbedBody.IsValid() && !ClingConstraint;
+	if (bGunOut)
+	{
+		return GrabCandidate.IsValid() ? EJamRmbAction::Grab : EJamRmbAction::Aim;
+	}
+	if (GrabbedBody.IsValid() || ClingConstraint)
+	{
+		return EJamRmbAction::LetGo;
+	}
+	return GrabCandidate.IsValid() ? EJamRmbAction::Grab : EJamRmbAction::Cling;
 }
 
 void AJamZeroGPawn::PrimaryPressed()
@@ -656,6 +686,8 @@ bool AJamZeroGPawn::Grab(UPrimitiveComponent* Target, FVector Point)
 	GrabCandidate = nullptr;
 	Target->WakeAllRigidBodies();
 	UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: %s, %.0f kg"), *GetNameSafe(Target->GetOwner()), Target->GetMass());
+	// Both hands on it (owner 18.10: «хватать объекты можно но в таком случае игрок переходит в Unarmed»).
+	Guns->Holster();
 	return true;
 }
 
@@ -719,6 +751,8 @@ void AJamZeroGPawn::Release()
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: let go of %s"), *GetNameSafe(GrabbedBody->GetOwner()));
 	}
 	GrabbedBody = nullptr;
+	// Hands free: back to the last gun, drawn (owner 19.10).
+	Guns->Rearm();
 }
 
 void AJamZeroGPawn::ToggleTether()
@@ -1239,6 +1273,12 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 		: FVector::ZeroVector;
 	Camera->SetRelativeLocation(Body->GetComponentTransform().InverseTransformVectorNoScale(EyeOffset + Shake));
 	RefreshGrabCandidate();
+	// A gun drawn (1/2/3, the wheel) empties the hands first.
+	if (GrabbedBody.IsValid() && Guns->GetWeapon())
+	{
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: a gun drawn - letting go"));
+		Release();
+	}
 	UpdateHoldTarget();
 	UpdateDust();
 	if (!IsClimbingLadder() && !ClingConstraint && GetWorld()->GetTimeSeconds() >= LadderCooldownUntil

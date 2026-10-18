@@ -226,11 +226,11 @@ void UJamWeaponsComponent::SetupWeaponParts()
 	// Over the left shoulder, heavier and slower: across to the left, muzzle up after the
 	// grip, gone at 0.6 s; the shoulder takes it. The draw brings it in from the upper left
 	// and lands it at 0.45 s; fires once 0.5 s in and settled.
-	Sniper.StowOffsetCm = FVector(-20.0f, -45.0f, 35.0f);
+	Sniper.StowOffsetCm = FVector(-8.0f, -55.0f, 35.0f);
 	// Muzzle up 40, yaw 12, roll 28 at most; the turns lead, so on the draw the rifle is already
 	// pointing down-range as it comes into view.
 	Sniper.StowTurn = FRotator(40.0f, -12.0f, -28.0f);
-	Sniper.StowTurnLead = 0.06f;
+	Sniper.StowTurnLead = 0.1f;
 	Sniper.StowPath = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.1f, -0.08f, 0.0f, 0.0f }, { 0.5f, 1.0f, 4.0f, 0.0f },
 		{ 0.6f, 1.0f, 0.0f, 0.0f } });
 	Sniper.DrawPath = JamMakeCycleCurve({ { 0.0f, 1.0f, 0.0f, 0.0f }, { 0.06f, 1.03f, 0.0f, -2.5f }, { 0.45f, 0.0f, -3.5f, -1.0f },
@@ -586,30 +586,16 @@ namespace
 	}
 }
 
-void UJamWeaponsComponent::HolsterWeapon(bool bInstant)
+void UJamWeaponsComponent::ClearView()
 {
-	bHolstered = true;
-	if (bInstant)
+	SwitchStage = ESwitch::Away;
+	SwitchTime = 0.0f;
+	ShownWeapon = INDEX_NONE;
+	PoseWeapon = INDEX_NONE; // the next draw starts from its put-away pose
+	if (ViewModel)
 	{
-		// Gone this frame (owner 19.10: grabbing something), no put-away.
-		SwitchStage = ESwitch::Away;
-		SwitchTime = 0.0f;
-		ShownWeapon = INDEX_NONE;
-		PoseWeapon = INDEX_NONE; // the next draw starts from its put-away pose
-		if (ViewModel)
-		{
-			ViewModel->SetStaticMesh(nullptr);
-			ActionInView->SetStaticMesh(nullptr);
-		}
-	}
-}
-
-void UJamWeaponsComponent::DrawWeapon(int32 Index)
-{
-	bHolstered = false;
-	if (Index != INDEX_NONE)
-	{
-		SelectWeapon(Index);
+		ViewModel->SetStaticMesh(nullptr);
+		ActionInView->SetStaticMesh(nullptr);
 	}
 }
 
@@ -1405,8 +1391,8 @@ namespace
 		After(1.6f, [Guns]() { Guns->SelectWeapon(1); });    // during the SV-98's draw: away again, the shotgun
 		After(2.0f, [Pawn, Guns]() { UE_LOG(LogMindKore, Log, TEXT("Switch probe: fire at 2.0 s (%s): %s"), *Guns->Describe(), Pawn->Fire() ? TEXT("fired") : TEXT("refused")); });
 		After(3.2f, [Pawn, Guns]() { UE_LOG(LogMindKore, Log, TEXT("Switch probe: fire at 3.2 s (%s): %s"), *Guns->Describe(), Pawn->Fire() ? TEXT("fired") : TEXT("refused")); });
-		After(3.6f, [Guns]() { Guns->HolsterWeapon(true); });
-		After(4.2f, [Guns]() { Guns->DrawWeapon(); });
+		After(3.6f, [Guns]() { Guns->Holster(); });
+		After(4.2f, [Guns]() { Guns->Rearm(); });
 		After(5.1f, [Pawn, Guns, Probe]()
 		{
 			UE_LOG(LogMindKore, Log, TEXT("Switch probe: done - %d frames, largest frame-to-frame jump %.2f cm, %.2f deg; fire after the draw: %s"),

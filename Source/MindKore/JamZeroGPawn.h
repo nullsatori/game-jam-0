@@ -27,6 +27,21 @@ class USoundBase;
 class USphereComponent;
 struct FInputActionValue;
 
+/** What RMB does now (AJamZeroGPawn::Use; the HUD shows it). */
+UENUM(BlueprintType)
+enum class EJamRmbAction : uint8
+{
+	None,
+	/** A gun in hand, nothing loose in reach: hold to aim. */
+	Aim,
+	/** A loose body in reach: take it (a gun in hand goes away - unarmed). */
+	Grab,
+	/** Holding a body or the hull: let go. */
+	LetGo,
+	/** Unarmed or a hull tool, nothing loose in reach: hold on to what is under the crosshair. */
+	Cling,
+};
+
 /**
  * The zero-G player: a simulated sphere with its rotation locked, gravity
  * off and no damping, so momentum is kept until something changes it. The
@@ -431,6 +446,12 @@ public:
 	/** The simulated body E would grab now (null when none or something is held). */
 	UPrimitiveComponent* GetGrabCandidate() const { return GrabCandidate.Get(); }
 
+	/** What RMB would do now: aim with a gun out, grab a loose body in reach, let go, or hold on. */
+	EJamRmbAction GetRmbAction() const;
+
+	/** RMB pressed (IA_ZG_Use): aim, grab, let go or hold on - GetRmbAction. Public for jam.Guns.RmbProbe. */
+	void Use();
+
 	UFUNCTION(BlueprintCallable, Category = "Jam")
 	void ToggleCrowbar();
 
@@ -544,7 +565,6 @@ private:
 	mutable bool bLogNextPrediction = false;
 	void ToggleTether();
 	void DrawTether() const;
-	void Use();
 	void BulletTimePressed();
 	void BulletTimeReleased();
 	void ApplyThrusters(float DeltaSeconds);
