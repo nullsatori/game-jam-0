@@ -34,6 +34,12 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Usp(TEXT("/Game/MindKore/Weapons/USP/SM_MK_USP_Soviet.SM_MK_USP_Soviet"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PumpGun(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_Shotgun.SM_Jam_Shotgun"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sv98(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_SV98.SM_Jam_SV98"));
+	// Recorded CC0 donors heard through the suit (CREDITS.md, Docs/RecoilWeapons.md "Звук").
+	static ConstructorHelpers::FObjectFinder<USoundBase> PistolShot(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Shot_Pistol.SW_Jam_Shot_Pistol"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> ShotgunShot(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Shot_Shotgun.SW_Jam_Shot_Shotgun"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> ShotgunPump(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Pump_Shotgun.SW_Jam_Pump_Shotgun"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> SniperShot(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Shot_SV98.SW_Jam_Shot_SV98"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> SniperBolt(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Bolt_SV98.SW_Jam_Bolt_SV98"));
 	FJamWeapon Pistol;
 	Pistol.Name = NSLOCTEXT("JamZeroG", "Pistol", "Пистолет");
 	Pistol.Damage = 25.0f;
@@ -44,7 +50,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Pistol.SpreadDeg = 0.5f;
 	Pistol.RecoilImpulse = 4000.0f;
 	Pistol.HitImpulse = 3000.0f;
-	Pistol.SoundPitch = 1.3f;
+	Pistol.ShotSound = PistolShot.Object;
 	Pistol.bAutomatic = true;
 	Pistol.ProjectileSpeed = 9000.0f;
 	Pistol.KickPitchDeg = 1.2f;
@@ -66,7 +72,9 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Shotgun.RecoilImpulse = 25000.0f;
 	Shotgun.HitImpulse = 4000.0f;
 	Shotgun.RangeCm = 3000.0f;
-	Shotgun.SoundPitch = 0.9f;
+	Shotgun.ShotSound = ShotgunShot.Object;
+	Shotgun.CycleSound = ShotgunPump.Object;
+	Shotgun.CycleDelaySeconds = 0.2f;
 	Shotgun.ProjectileSpeed = 6000.0f;
 	Shotgun.KickPitchDeg = 5.0f;
 	Shotgun.KickYawDeg = 1.2f;
@@ -85,7 +93,9 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Sniper.RecoilImpulse = 70000.0f;
 	Sniper.HitImpulse = 60000.0f;
 	Sniper.RangeCm = 15000.0f;
-	Sniper.SoundPitch = 0.7f;
+	Sniper.ShotSound = SniperShot.Object;
+	Sniper.CycleSound = SniperBolt.Object;
+	Sniper.CycleDelaySeconds = 0.25f;
 	Sniper.ProjectileSpeed = 40000.0f;
 	Sniper.KickPitchDeg = 8.0f;
 	Sniper.KickYawDeg = 1.0f;
@@ -96,21 +106,10 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Sniper.ViewOffset = FTransform(FRotator::ZeroRotator, FVector(22.0f, 13.0f, -16.0f));
 	Weapons = { Pistol, Shotgun, Sniper };
 
-	// MindKore's own content (CREDITS.md lists the sound donors).
+	// MindKore's own content.
 	static ConstructorHelpers::FObjectFinder<UMKImpactDataAsset> DefaultImpactData(
 		TEXT("/Game/MindKore/Impacts/DA_Impact_Default.DA_Impact_Default"));
 	ImpactData = DefaultImpactData.Object;
-	static ConstructorHelpers::FObjectFinder<USoundBase> BlastTransient(
-		TEXT("/Game/MindKore/Audio/SW_MK_Blast_Transient.SW_MK_Blast_Transient"));
-	static ConstructorHelpers::FObjectFinder<USoundBase> BlastTail(
-		TEXT("/Game/MindKore/Audio/SW_MK_Blast_Tail.SW_MK_Blast_Tail"));
-	for (USoundBase* Sound : { BlastTransient.Object, BlastTail.Object })
-	{
-		if (Sound)
-		{
-			ShotSounds.Add(Sound);
-		}
-	}
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Decal(
 		TEXT("/Game/MindKore/Impacts/Decals/M_Decal_Default.M_Decal_Default"));
 	DefaultImpactDecal = Decal.Object;
@@ -324,7 +323,8 @@ void UJamWeaponsComponent::SelectWeapon(int32 Index)
 		return;
 	}
 	CurrentWeapon = Index;
-	ReloadEndSeconds = 0.0; // A switch abandons a reload.
+	ReloadEndSeconds = 0.0; // A switch abandons a reload and the last gun's cycle.
+	GetWorld()->GetTimerManager().ClearTimer(CycleTimer);
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s (%d/%d)"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString(),
 		Weapons[Index].Ammo, Weapons[Index].Reserve);
 }
@@ -386,9 +386,15 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	SettlePitch += Weapon->KickPitchDeg * RecoilSettleFraction;
 	SettleYaw += Yaw * RecoilSettleFraction;
 	ViewKick = 1.0f;
-	for (USoundBase* Sound : ShotSounds)
+	// A slight pitch spread so a held trigger does not repeat one sample.
+	UGameplayStatics::PlaySound2D(this, Weapon->ShotSound, 1.0f, FMath::FRandRange(0.97f, 1.03f));
+	if (USoundBase* Cycle = Weapon->CycleSound)
 	{
-		UGameplayStatics::PlaySound2D(this, Sound, 1.0f, Weapon->SoundPitch);
+		GetWorld()->GetTimerManager().SetTimer(CycleTimer, FTimerDelegate::CreateWeakLambda(this, [this, Cycle]()
+		{
+			UGameplayStatics::PlaySound2D(this, Cycle);
+			UE_LOG(LogMindKore, Log, TEXT("Weapon %s: cycle %s"), *GetNameSafe(GetOwner()), *Cycle->GetName());
+		}), FMath::Max(Weapon->CycleDelaySeconds, KINDA_SMALL_NUMBER), false);
 	}
 	const FVector Muzzle = MuzzleLocation();
 	for (int32 Pellet = 0; Pellet < Weapon->Pellets; ++Pellet)
@@ -422,8 +428,8 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 			Round.Tracer = Tracer;
 		}
 	}
-	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s fired, %d pellet(s), recoil %.0f kg cm/s, %d/%d left"), *GetNameSafe(GetOwner()),
-		*Weapon->Name.ToString(), Weapon->Pellets, Weapon->RecoilImpulse, Weapon->Ammo, Weapon->Reserve);
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s fired, %d pellet(s), recoil %.0f kg cm/s, %d/%d left, %s"), *GetNameSafe(GetOwner()),
+		*Weapon->Name.ToString(), Weapon->Pellets, Weapon->RecoilImpulse, Weapon->Ammo, Weapon->Reserve, *GetNameSafe(Weapon->ShotSound));
 	return true;
 }
 

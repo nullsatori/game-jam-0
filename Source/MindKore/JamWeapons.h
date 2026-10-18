@@ -89,9 +89,17 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|View")
 	FTransform ViewOffset;
 
-	/** Pitch of the blast sound: a small gun cracks, a big one booms. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.1"))
-	float SoundPitch = 1.0f;
+	/** The shot, 2D. Space-treated offline (Scripts/jam_space_shots.py): muffled, reverberant, with a sub. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
+	TObjectPtr<USoundBase> ShotSound = nullptr;
+
+	/** The pump or bolt cycling after a shot, 2D, CycleDelaySeconds after it; none: no cycle (the pistol). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
+	TObjectPtr<USoundBase> CycleSound = nullptr;
+
+	/** When the cycle starts after the shot; a slide/pump/bolt animation starts at the same moment. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound", meta = (ClampMin = "0.0"))
+	float CycleDelaySeconds = 0.0f;
 
 	/** Usable now. Set from bStartWithAllWeapons on BeginPlay; pickups unlock (UnlockWeapon). */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapon")
@@ -140,10 +148,6 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons")
 	TObjectPtr<UMKImpactDataAsset> ImpactData = nullptr;
-
-	/** Played together, 2D, on every shot at the gun's SoundPitch. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons")
-	TArray<TObjectPtr<USoundBase>> ShotSounds;
 
 	/** The tracer: this mesh (the engine sphere) stretched along the flight, in this material (MindKore's M_MK_Tracer). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Tracer")
@@ -257,6 +261,8 @@ private:
 	/** 1 on a shot, springing back to 0: the gun in view's kick. */
 	float ViewKick = 0.0f;
 	int32 ShownWeapon = INDEX_NONE;
+	/** The pending CycleSound of the last shot; a switch cancels it. */
+	FTimerHandle CycleTimer;
 
 	double NextShotSeconds = 0.0;
 	double ReloadEndSeconds = 0.0;
