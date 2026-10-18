@@ -55,10 +55,35 @@ Used as `Content/JamArt/Textures/Sky/T_Jam_Starmap_Gal` (galactic projection, eq
 Nothing below is used as recorded: every in-game sound was cut from a donor,
 played down, layered and re-recorded into a wave of MindKore by a script.
 
-**The shot** (`SW_MK_Blast_Transient`, `SW_MK_Blast_Tail`) — cut from
+**MindKore's shot** (`SW_MK_Blast_Transient`, `SW_MK_Blast_Tail`; no longer
+played by the jam's guns since 18.10, see below) — cut from
 **Smith & Wesson 686 Plus 4 Inch Barrel .357 Mag** by **AugustSandberg**
 ([Freesound 231248](https://freesound.org/people/AugustSandberg/sounds/231248/)).
 Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+
+### The jam's guns
+
+`/Game/JamArt/Audio/Weapons/SW_Jam_*` — the jam's own: cut from the Freesound
+HQ previews below, pitched down, saturated, low-passed, given a sub and a
+synthetic reverb by `Scripts/jam_space_shots.py` (18.10.2026). All
+[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/), checked on each
+sound's own Freesound page on 18.10.2026.
+
+- **9mm pistol shot** — **michorvath**
+  ([Freesound 427592](https://freesound.org/people/michorvath/sounds/427592/)):
+  `SW_Jam_Shot_Pistol`.
+- **20 gauge shotgun** — **michorvath**
+  ([Freesound 427595](https://freesound.org/people/michorvath/sounds/427595/)):
+  `SW_Jam_Shot_Shotgun`.
+- **gun lee enfield 303 rifle clean shot.wav** — **kyles**
+  ([Freesound 450853](https://freesound.org/people/kyles/sounds/450853/)):
+  `SW_Jam_Shot_SV98`.
+- **Mossberg 500A - 1 shot and pump** — **AnthonyChan0**
+  ([Freesound 159710](https://freesound.org/people/AnthonyChan0/sounds/159710/)):
+  the pump only, `SW_Jam_Pump_Shotgun`.
+- **Mosin Nagant Bolt Action Cycle** — **Zott820**
+  ([Freesound 370345](https://freesound.org/people/Zott820/sounds/370345/)):
+  `SW_Jam_Bolt_SV98`.
 
 **VisceralBulletImpacts.wav** — by **u1769092**, via
 [Freesound](https://freesound.org/people/u1769092/sounds/423301/).
