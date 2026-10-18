@@ -9,6 +9,7 @@
 #include "JamHullTools.h"
 #include "JamLivingWall.h"
 #include "JamMuzzleFx.h"
+#include "JamScope.h"
 #include "JamZeroGPawn.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
@@ -365,10 +366,16 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	// Back along the view, the muzzle up and a little roll, about the grip (the
 	// meshes' origin); the rise turns about the camera's right axis whichever
 	// way the mesh itself faces. Springs back at ViewKickReturnRate.
-	const float Kick = FMath::Exp(-ViewKickReturnRate * Since);
+	// Aimed through the scope (JamScope.h), the rifle rests at the eye and kicks less.
+	FTransform Offset = Weapon->ViewOffset;
+	float KickScale = 1.0f;
+	if (Scope)
+	{
+		Scope->AimPose(CurrentWeapon, Offset, KickScale);
+	}
+	const float Kick = KickScale * FMath::Exp(-ViewKickReturnRate * Since);
 	const FQuat Rise = FRotator(Weapon->ViewKickRiseDeg * Kick, 0.0f, -0.3f * Weapon->ViewKickRiseDeg * Kick).Quaternion();
 	const float BodyShare = EvalCycle(Weapon->ActionBody, Since);
-	FTransform Offset = Weapon->ViewOffset;
 	Offset.SetRotation(Rise * (Weapon->ActionBodyTurn * BodyShare).Quaternion() * Offset.GetRotation());
 	Offset.AddToTranslation(Weapon->ActionBodyOffsetCm * BodyShare);
 	Offset.AddToTranslation(FVector(-Weapon->ViewKickBackCm * Kick, 0.0f, 0.0f));
@@ -416,6 +423,13 @@ void UJamWeaponsComponent::BindInput(UEnhancedInputComponent& Input, UInputMappi
 		UInputAction* Select = MakeAction(*FString::Printf(TEXT("IA_Jam_Weapon%d"), Index + 1), EInputActionValueType::Boolean, Keys[Index]);
 		Input.BindActionValueLambda(Select, ETriggerEvent::Started, [this, Index](const FInputActionValue&) { SelectWeapon(Index); });
 	}
+	// The scope: made here, not on BeginPlay - a player pawn binds input before it begins play.
+	if (!Scope)
+	{
+		Scope = NewObject<UJamScopeComponent>(GetOwner(), TEXT("Scope"));
+		Scope->RegisterComponent();
+	}
+	Scope->BindInput(Input, Mapping);
 }
 
 void UJamWeaponsComponent::SelectStep(int32 Step)

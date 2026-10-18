@@ -8,6 +8,7 @@
 class UEnhancedInputComponent;
 class UInputAction;
 class UInputMappingContext;
+class UJamScopeComponent;
 class UMaterialInterface;
 class UMKImpactDataAsset;
 class USoundBase;
@@ -243,6 +244,10 @@ public:
 	/** The gun's moving part (FJamWeapon::ActionMesh), on ViewModel. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	TObjectPtr<UStaticMeshComponent> ActionInView = nullptr;
+
+	/** The SV-98's scope (JamScope.h): made in BindInput, it raises the rifle to the eye through UpdateViewModel. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
+	TObjectPtr<UJamScopeComponent> Scope = nullptr;
 
 	/**
 	 * The muzzle of the gun in view, world space, as it is drawn this frame (kick

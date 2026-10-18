@@ -20,6 +20,8 @@ public class MindKore : ModuleRules
 			"EnhancedInput",
 			"Niagara",
 			"PhysicsCore",
+			// RHIGetGPUFrameCycles: the scope's cost probe (jam.Scope.Shots).
+			"RHI",
 			// AMKGlassPane builds its shards at runtime; the plugin is enabled by
 			// default in UE 5.8, so it needs no .uproject entry.
 			"ProceduralMeshComponent",
