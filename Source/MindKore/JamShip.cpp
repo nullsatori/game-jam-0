@@ -25,6 +25,20 @@
 #include "MKVitals.h"
 #include "MindKore.h"
 #include "TimerManager.h"
+#include "GameFramework/Volume.h"
+#if WITH_EDITOR
+#include "Editor.h"
+#include "ActorFactories/ActorFactory.h"
+#include "Builders/CylinderBuilder.h"
+#include "Components/BrushComponent.h"
+#include "Engine/TriggerVolume.h"
+#include "ScopedTransaction.h"
+#include "BSPOps.h"
+#include "Model.h"
+#endif
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "JamShip"
 
@@ -153,14 +167,109 @@ AJamGravityZone::AJamGravityZone()
 	Zone->SetCanEverAffectNavigation(false);
 }
 
+void AJamGravityZone::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	Zone->SetVisibility(!IsValid(BoundaryVolume));
+}
+
+#if WITH_EDITOR
+void AJamGravityZone::CreateEditableBoundary()
+{
+	if (!GEditor || !GetWorld() || GetWorld()->IsGameWorld())
+	{
+		return;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("CreateBoundary", "Create cabin boundary"));
+	if (!IsValid(BoundaryVolume))
+	{
+		UActorFactory* Factory = GEditor->FindActorFactoryForActorClass(ATriggerVolume::StaticClass());
+		AVolume* Volume = Factory ? Cast<AVolume>(Factory->CreateActor(nullptr, GetLevel(), Zone->GetComponentTransform())) : nullptr;
+		if (!Volume)
+		{
+			return;
+		}
+		Volume->SetActorLabel(GetActorLabel() + TEXT("_Boundary"));
+		const FVector Extent = Zone->GetUnscaledBoxExtent().ComponentMax(FVector(1));
+		if (bEllipticalCylinder)
+		{
+			UCylinderBuilder* Builder = NewObject<UCylinderBuilder>(Volume, NAME_None, RF_Transactional);
+			Volume->BrushBuilder = Builder;
+			Builder->Sides = 32;
+			Builder->OuterRadius = 100;
+			Builder->Z = 200;
+			Builder->Hollow = false;
+			Builder->Build(GetWorld(), Volume);
+		}
+		Volume->SetActorTransform(Zone->GetComponentTransform());
+		Volume->SetActorScale3D(Zone->GetComponentScale() * Extent / 100.0f);
+		Volume->MarkPackageDirty();
+		Modify();
+		BoundaryVolume = Volume;
+		Zone->SetVisibility(false);
+	}
+	RebuildBoundaryCollision();
+	GEditor->SelectNone(false, true);
+	GEditor->SelectActor(BoundaryVolume, true, true);
+	GEditor->RedrawLevelEditingViewports();
+}
+
+void AJamGravityZone::RebuildBoundaryCollision()
+{
+	if (!IsValid(BoundaryVolume) || !BoundaryVolume->Brush || GetWorld()->IsGameWorld())
+	{
+		return;
+	}
+	const FScopedTransaction Transaction(LOCTEXT("RebuildBoundary", "Rebuild cabin boundary collision"));
+	BoundaryVolume->Modify();
+	BoundaryVolume->Brush->Modify();
+	// Inward-wound brush faces produce no collision hulls; preserve the shape and orient them outward.
+	double SignedVolume = 0.0;
+	for (const FPoly& Poly : BoundaryVolume->Brush->Polys->Element)
+	{
+		for (int32 I = 1; I + 1 < Poly.Vertices.Num(); ++I)
+		{
+			SignedVolume += FVector::DotProduct(FVector(Poly.Vertices[0]), FVector::CrossProduct(FVector(Poly.Vertices[I]), FVector(Poly.Vertices[I + 1])));
+		}
+	}
+	for (FPoly& Poly : BoundaryVolume->Brush->Polys->Element)
+	{
+		Poly.PolyFlags &= ~PF_NotSolid;
+		if (Poly.Vertices.Num() >= 3)
+		{
+			Poly.Base = Poly.Vertices[0];
+			Poly.Normal = FVector3f::ZeroVector;
+			Poly.CalcNormal(true);
+			if (SignedVolume < 0.0)
+			{
+				Poly.Reverse();
+			}
+		}
+	}
+	// Use the same full geometry/collision rebuild as UE's brush editing tools.
+	FBSPOps::csgPrepMovingBrush(BoundaryVolume);
+	BoundaryVolume->MarkPackageDirty();
+}
+#endif
+
 bool AJamGravityZone::Contains(const FVector& Location, float InsetCm) const
 {
+	if (IsValid(BoundaryVolume))
+	{
+		return BoundaryVolume->EncompassesPoint(Location, FMath::Max(0.0f, -InsetCm));
+	}
 	if (SphereRadiusCm > 0.0f)
 	{
 		return FVector::Dist(Location, GetActorLocation()) <= SphereRadiusCm - InsetCm;
 	}
 	const FVector Local = Zone->GetComponentTransform().InverseTransformPositionNoScale(Location);
 	const FVector Extent = Zone->GetScaledBoxExtent() - FVector(InsetCm);
+	if (bEllipticalCylinder)
+	{
+		return Extent.X > 0.0f && Extent.Y > 0.0f && Extent.Z >= 0.0f
+			&& FMath::Abs(Local.Z) <= Extent.Z
+			&& FMath::Square(Local.X / Extent.X) + FMath::Square(Local.Y / Extent.Y) <= 1.0f;
+	}
 	return FMath::Abs(Local.X) <= Extent.X && FMath::Abs(Local.Y) <= Extent.Y && FMath::Abs(Local.Z) <= Extent.Z;
 }
 
@@ -168,6 +277,34 @@ FVector AJamGravityZone::GravityAt(const FVector& Location) const
 {
 	return bRadial ? (GetActorLocation() - Location).GetSafeNormal(UE_SMALL_NUMBER, FVector::DownVector) : FVector::DownVector;
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FJamOvalZoneTest, "Jam.Gravity.OvalZone",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FJamOvalZoneTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::EditorPreview, false);
+	AJamGravityZone* Oval = World->SpawnActor<AJamGravityZone>();
+	Oval->Zone->SetBoxExtent(FVector(300, 200, 150));
+	Oval->bEllipticalCylinder = true;
+	TestTrue(TEXT("Centre has air"), Oval->Contains(FVector::ZeroVector, 0));
+	TestTrue(TEXT("Floor edge stays inside"), Oval->Contains(FVector(300, 0, -150), 0));
+	TestFalse(TEXT("Box corner is outside oval"), Oval->Contains(FVector(290, 190, 0), 0));
+	TestFalse(TEXT("Above ceiling is outside"), Oval->Contains(FVector(0, 0, 151), 0));
+	TestFalse(TEXT("Inset shrinks boundary"), Oval->Contains(FVector(300, 0, 0), 1));
+	Oval->SetActorLocationAndRotation(FVector(1000, 500, 50), FRotator(0, 90, 0));
+	Oval->SetActorScale3D(FVector(2, 1, 1));
+	TestTrue(TEXT("Rotated scaled long axis"), Oval->Contains(FVector(1000, 1050, 50), 0));
+	TestFalse(TEXT("Rotated short axis"), Oval->Contains(FVector(1210, 500, 50), 0));
+	Oval->bEllipticalCylinder = false;
+	TestTrue(TEXT("Existing box unchanged"), Oval->Contains(Oval->GetActorTransform().TransformPosition(FVector(290, 190, 0)), 0));
+	Oval->SphereRadiusCm = 100;
+	TestFalse(TEXT("Sphere takes precedence"), Oval->Contains(FVector(1000, 650, 50), 0));
+	World->DestroyWorld(false);
+	return true;
+}
+#endif
 
 // --- game mode ---------------------------------------------------------------------------
 

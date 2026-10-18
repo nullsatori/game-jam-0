@@ -7,6 +7,8 @@
 #include "MKImpactReceiver.h"
 #include "JamZeroGPawn.generated.h"
 
+class AJamLadder;
+
 class UCameraComponent;
 class UInstancedStaticMeshComponent;
 class UInputAction;
@@ -458,6 +460,9 @@ public:
 	/** Gravity here (unit direction, cm/s^2), set every tick by AJamShipGameMode; zero strength = zero-G. */
 	void SetGravity(const FVector& Direction, float StrengthCm, bool bRadial);
 
+	UFUNCTION(BlueprintPure, Category = "Jam|Ladder")
+	bool IsClimbingLadder() const { return ActiveLadder != nullptr; }
+
 	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG|Walk")
 	bool IsInGravity() const { return GravityStrengthCm > 0.0f; }
 
@@ -544,6 +549,16 @@ private:
 	void BulletTimeReleased();
 	void ApplyThrusters(float DeltaSeconds);
 	void Walk(float DeltaSeconds);
+	void ClimbLadder(float DeltaSeconds);
+	void BeginLadderClimb(AJamLadder* Ladder);
+	void EndLadderClimb();
+	void RestoreLadderBodyRadius();
+	UPROPERTY(Transient)
+	TObjectPtr<AJamLadder> ActiveLadder = nullptr;
+	TWeakObjectPtr<AJamLadder> JumpedFromLadder;
+	bool bRestoreLadderRadius = false;
+	float LadderOriginalRadiusCm = 40;
+	double LadderCooldownUntil = 0;
 	/** Walkable ground under the body; the hit (normal, surface) in OutHit. */
 	bool ProbeGround(FHitResult& OutHit) const;
 	void PlayFleshStep(const FHitResult& Ground, float Volume);

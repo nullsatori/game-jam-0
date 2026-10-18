@@ -6,6 +6,7 @@
 #include "JamShip.generated.h"
 
 class UBoxComponent;
+class AVolume;
 
 /**
  * Turns the view relative to the pawn's gravity: the view is kept as pitch
@@ -66,9 +67,28 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam|Ship")
 	TObjectPtr<UBoxComponent> Zone = nullptr;
 
+	/** Optional editable UE volume defining the actual boundary. Takes precedence over primitive shapes. Use a TriggerVolume, not a BlockingVolume. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Jam|Ship")
+	TObjectPtr<AVolume> BoundaryVolume = nullptr;
+
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+#if WITH_EDITOR
+	/** Creates an editable TriggerVolume from the current box/oval dimensions. Existing boundaries are selected, never rebuilt. */
+	UFUNCTION(CallInEditor, Category = "Jam|Ship")
+	void CreateEditableBoundary();
+
+	UFUNCTION(CallInEditor, Category = "Jam|Ship")
+	void RebuildBoundaryCollision();
+#endif
+
 	/** > 0: the zone is this sphere instead of the box, cm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship", meta = (ClampMin = "0.0"))
 	float SphereRadiusCm = 0.0f;
+
+	/** Oval footprint with flat floor/ceiling. Zone Box Extent X/Y are ellipse radii, Z is half-height. SphereRadiusCm takes precedence. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
+	bool bEllipticalCylinder = false;
 
 	/** Inside, the player walks with gravity; off: air only, the player keeps floating. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
@@ -93,7 +113,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
 	FText HudText;
 
-	/** Is Location inside the zone shrunk by InsetCm (negative grows it)? */
+	/** Is Location inside? InsetCm shrinks primitive shapes; brush volumes use their exact boundary (negative inset grows it). */
+	UFUNCTION(BlueprintPure, Category = "Jam|Ship")
 	bool Contains(const FVector& Location, float InsetCm) const;
 
 	/** Gravity direction (unit) at Location. */
