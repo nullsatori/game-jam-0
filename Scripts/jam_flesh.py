@@ -9,8 +9,9 @@ T_Jam_Gritty_*_N (1024 px, smooth filtering, every flesh map) come from
 Scripts/make_flesh_normals.py.
 
   import_textures(src_dir, normals_dir, log) - once, from the owner's lowres_256 folder
-  materials(log) - the master M_Jam_Gritty and its instances, graph and numbers
-      rebuilt in place on every call.
+  materials(log, rebuild=False) - the master M_Jam_Gritty (made once; its graph
+      rebuilt in place only with rebuild=True, from a fresh editor) and its
+      instances, whose numbers are set on every call.
 
 M_Jam_Gritty: lit, base colour = BaseColor x Tint (+ a dark vessel overlay from
 the Vessels mask), normal map x NormalStrength, roughness from the Wetness
@@ -448,9 +449,12 @@ LOOKS = {
 WALL_SLOTS = ["Muscle", "Tendon", "Vessel", "Membrane"]
 
 
-def materials(log):
+def materials(log, rebuild=False):
     """Make (once) the master and (every call) the instances; returns {look: MI} plus {"Wall_<look>": MI}."""
-    _master(log)  # the graph is rebuilt in place on every call
+    # The graph is rebuilt in place only on request: emptying the graph of a loaded,
+    # rooted master asserts !IsRooted (18.10, build_zerog.py after a wall spawn).
+    if rebuild or not eal.does_asset_exist(BASE):
+        _master(log)
     base = unreal.load_asset(BASE)
     out = {}
     for name, (scalars, vectors, textures) in LOOKS.items():

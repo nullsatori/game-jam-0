@@ -287,6 +287,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
 	float RecoilShakeCmPer10000 = 1.5f;
 
+	/** Mouse look scale before the scope's own (owner 19.10: 0.7 of the engine's raw rate). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Input", meta = (ClampMin = "0.0"))
+	float LookSensitivity = 0.7f;
+
 	// --- thrusters and stabiliser ------------------------------------------------
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Thrusters")
