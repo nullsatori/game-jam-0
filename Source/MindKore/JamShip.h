@@ -156,6 +156,13 @@ public:
 	/** The launch lever: the run is won. */
 	void EndGame();
 
+	/**
+	 * Death on this map: a new body in the cabin (the player start) with the guns
+	 * it had, the world as it is - welded seams and a cleaned hull stay
+	 * (Docs/HullRepair.md). Other maps restart the level.
+	 */
+	void RespawnInCabin(APlayerController* PlayerController);
+
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void StartPlay() override;
 

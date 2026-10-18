@@ -22,12 +22,33 @@ public:
 	AJamCleanZone();
 };
 
+UENUM()
+enum class EJamWeldResult : uint8
+{
+	OffSeam,
+	Gap,
+	Junk,
+	Welded,
+	Cut
+};
+
 /**
- * A breach in the hull. A Hull.Plate prop that enters the box snaps into the
- * socket's transform and turns static - but only while CleanZone counts no
- * foreign junk; otherwise the socket refuses with a HUD toast
- * «В корпусе мусор: n». The plate keeps its scale; place the socket where the
- * plate's centre goes, rotated as the plate (X along the hull, Z out).
+ * A breach in the hull, sealed by hand (Docs/HullRepair.md): a Hull.Plate,
+ * larger than the hole, is strapped over it from outside (UJamHullToolsComponent)
+ * and welded along the hole's contour.
+ *
+ * Socket space: the hole is HoleHalfCm around the origin in X (along the hull)
+ * and Y, the hull's outer face at SurfaceZ, +Z out. The contour is cut into
+ * SegmentCm pieces. A piece takes the seam only where the plate lies on the
+ * edge: a trace up through the hole just inside the edge meets the plate within
+ * MaxGapCm of the outer face. Coverage: a grid of traces up through the hole,
+ * the share that meets the plate.
+ *
+ * TackFraction of the contour welded: the plate is held by the seam (it stops
+ * simulating where it lies; the strap can go). SealFraction welded with
+ * SealCoverage covered and no foreign junk in CleanZone: the breach counts as
+ * sealed (bFilled, the panel's hull lamp). Junk inside: the torch does not take.
+ * Cutting takes the seam back; under the tack the plate is loose again.
  */
 UCLASS()
 class MINDKORE_API AJamPlateSocket : public AActor
@@ -37,6 +58,7 @@ class MINDKORE_API AJamPlateSocket : public AActor
 public:
 	AJamPlateSocket();
 
+	/** Where plates are looked for (and the contour drawn), socket space. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam|Ship")
 	TObjectPtr<UBoxComponent> Catch = nullptr;
 
@@ -46,17 +68,78 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
 	TObjectPtr<AJamCleanZone> CleanZone = nullptr;
 
-	/** A refusal is repeated no more often than this while the plate stays, s. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship", meta = (ClampMin = "0.0"))
-	float RefuseRepeatSeconds = 2.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
+	FVector2D HoleHalfCm = FVector2D(125.0f, 125.0f);
+
+	/** The hull's outer face above the socket's origin, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
+	float SurfaceZ = 10.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship|Weld", meta = (ClampMin = "2.0"))
+	float SegmentCm = 10.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship|Weld", meta = (ClampMin = "0.0"))
+	float MaxGapCm = 3.0f;
+
+	/** The torch melts the contour within this of its point, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship|Weld", meta = (ClampMin = "1.0"))
+	float TorchRadiusCm = 12.0f;
+
+	/** One piece of seam takes this long under the torch, s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship|Weld", meta = (ClampMin = "0.01"))
+	float SecondsPerSegment = 0.15f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship|Weld", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float TackFraction = 0.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship|Weld", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float SealFraction = 0.95f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship|Weld", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float SealCoverage = 0.9f;
+
+	/** The contour is drawn (and coverage measured) while a plate is in Catch or the player is this close, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship|Weld", meta = (ClampMin = "0.0"))
+	float ShowContourCm = 600.0f;
 
 	UPROPERTY(BlueprintReadOnly, Transient, Category = "Jam|Ship")
 	bool bFilled = false;
 
+	/** The torch at WorldPoint for DeltaSeconds: lays (or with bCut takes back) the seam within TorchRadiusCm. */
+	EJamWeldResult Weld(const FVector& WorldPoint, float DeltaSeconds, bool bCut);
+
+	/** Welded share of the contour, 0..1. */
+	float GetSeamFraction() const;
+	/** Share of the hole the plate covers, 0..1 (last measured). */
+	float GetCoverage() const { return Coverage; }
+	/** The plate over the hole now (last measured), or null. */
+	AActor* GetPlate() const { return Plate.Get(); }
+	int32 JunkCount() const;
+	bool IsTacked() const { return bTacked; }
+
 	virtual void Tick(float DeltaSeconds) override;
 
+protected:
+	virtual void BeginPlay() override;
+
 private:
-	double LastRefuseSeconds = -100.0;
+	/** Contour pieces in socket space (centre on the edge, outward normal in XY) and their seam, 0..1. */
+	TArray<FVector2D> SegmentCentre;
+	TArray<FVector2D> SegmentNormal;
+	TArray<float> Seam;
+	TArray<double> LastWelded;
+	/** Gap at each piece, last measured (cm; huge where no plate). */
+	TArray<float> Gap;
+	float Coverage = 0.0f;
+	TWeakObjectPtr<AActor> Plate;
+	bool bTacked = false;
+	double NextMeasure = 0.0;
+
+	/** The first thing a trace up through the hole at Local (socket XY) meets: its actor and height over the outer face. */
+	AActor* ProbeUp(const FVector2D& Local, float& OutGapCm) const;
+	void Measure();
+	void UpdateState();
+	void DrawContour() const;
 };
 
 /**

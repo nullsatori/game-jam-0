@@ -326,7 +326,9 @@ def hull(prefix, origin, rotation, x0, count, breaches):
                     c = V(centre[0], centre[1] + t[1] * off, centre[2] + t[2] * off)
                     block("%s_Seg%02d_Side%d_Edge%+d" % (prefix, k, i, sign), xf.transform_location(c), (SEG, strip, THICK),
                           world_rot, material=HULL)
-                holes.append((xf.transform_location(V(*centre)), world_rot))
+                # The breach frame: X along the hull, Z out of it (AJamPlateSocket; the segment's own Z may point in).
+                out = xf.transform_direction(V(*n))
+                holes.append((xf.transform_location(V(*centre)), unreal.MathLibrary.make_rot_from_zx(out, xf.transform_direction(V(1, 0, 0)))))
             else:
                 block("%s_Seg%02d_Side%d" % (prefix, k, i), xf.transform_location(V(*centre)), (SEG, SIDE, THICK),
                       world_rot, material=HULL)
@@ -457,7 +459,8 @@ for j in range(12):
 
 # --- hull plates in the junk around the ship --------------------------------------------------------
 for j, loc in enumerate([V(-1500, 2500, 1000), V(3000, -2000, -1200), V(-2800, -1500, -1500)]):
-    prop("HullPlate_%d" % j, loc, CUBE, (250, 250, 20), 60, PLATE, ["Hull.Plate", "Jam.NoDrift"])
+    # 3 x 3 m over 2.5 x 2.5 m holes: the plate rests on the edge around the hole (Docs/HullRepair.md).
+    prop("HullPlate_%d" % j, loc, CUBE, (300, 300, 20), 60, PLATE, ["Hull.Plate", "Jam.NoDrift"])
 
 # --- the floating room fragment with the pistol --------------------------------------------------------
 ROOM = (2500.0, 3000.0, 800.0)   # 6 x 4 x 3 m, open on -Y (toward the ship)

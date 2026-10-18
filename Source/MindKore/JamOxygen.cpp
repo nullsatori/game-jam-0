@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "JamShip.h"
 #include "MKVitals.h"
 #include "MindKore.h"
 #include "TimerManager.h"
@@ -87,7 +88,16 @@ void UJamOxygenComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	Pawn->DisableInput(PlayerController);
 	FTimerHandle Restart;
 	GetWorld()->GetTimerManager().SetTimer(Restart,
-		FTimerDelegate::CreateWeakLambda(PlayerController, [PlayerController]() { PlayerController->RestartLevel(); }),
+		FTimerDelegate::CreateWeakLambda(PlayerController, [PlayerController]()
+		{
+			// The ship map keeps its world (welds, a cleaned hull) and wakes you in the cabin.
+			if (AJamShipGameMode* Mode = PlayerController->GetWorld()->GetAuthGameMode<AJamShipGameMode>())
+			{
+				Mode->RespawnInCabin(PlayerController);
+				return;
+			}
+			PlayerController->RestartLevel();
+		}),
 		FMath::Max(RestartDelaySeconds, 0.01f), /*bLoop=*/false);
 }
 

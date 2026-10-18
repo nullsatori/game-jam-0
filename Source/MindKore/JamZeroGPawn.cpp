@@ -18,6 +18,7 @@
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "JamDockZone.h"
+#include "JamHullTools.h"
 #include "JamOxygen.h"
 #include "JamShip.h"
 #include "JamWeapons.h"
@@ -86,6 +87,7 @@ AJamZeroGPawn::AJamZeroGPawn()
 	Vitals = CreateDefaultSubobject<UMKVitalsComponent>(TEXT("Vitals"));
 	Oxygen = CreateDefaultSubobject<UJamOxygenComponent>(TEXT("Oxygen"));
 	Guns = CreateDefaultSubobject<UJamWeaponsComponent>(TEXT("Guns"));
+	HullTools = CreateDefaultSubobject<UJamHullToolsComponent>(TEXT("HullTools"));
 
 	// A plate struck: the armour hit cue (CC0 donors, see CREDITS.md).
 	static ConstructorHelpers::FObjectFinder<USoundBase> Crash(
@@ -209,7 +211,11 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	UInputAction* GrappleAction = MakeAction(TEXT("IA_ZG_Grapple"), EInputActionValueType::Boolean);
 	UInputAction* BulletTimeAction = MakeAction(TEXT("IA_ZG_BulletTime"), EInputActionValueType::Boolean);
 	UInputAction* CrowbarAction = MakeAction(TEXT("IA_ZG_Crowbar"), EInputActionValueType::Boolean);
-	UInputAction* TetherAction = MakeAction(TEXT("IA_ZG_Tether"), EInputActionValueType::Boolean);
+	UInputAction* StrapAction = MakeAction(TEXT("IA_ZG_Strap"), EInputActionValueType::Boolean);
+	UInputAction* WelderAction = MakeAction(TEXT("IA_ZG_Welder"), EInputActionValueType::Boolean);
+	UInputAction* ToolSecondaryAction = MakeAction(TEXT("IA_ZG_ToolSecondary"), EInputActionValueType::Boolean);
+	UInputAction* ReelAction = MakeAction(TEXT("IA_ZG_Reel"), EInputActionValueType::Axis1D);
+	UInputAction* GunKeyAction = MakeAction(TEXT("IA_ZG_GunKey"), EInputActionValueType::Boolean);
 	UInputAction* AimAction = MakeAction(TEXT("IA_ZG_Aim"), EInputActionValueType::Boolean);
 	UInputAction* JumpAction = MakeAction(TEXT("IA_ZG_Jump"), EInputActionValueType::Boolean);
 
@@ -231,7 +237,15 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Map(GrappleAction, EKeys::LeftAlt, false, false);
 	Map(BulletTimeAction, EKeys::V, false, false);
 	Map(CrowbarAction, EKeys::G, false, false);
-	Map(TetherAction, EKeys::T, false, false);
+	// Hull repair (Docs/HullRepair.md): 4 the strap (it took over the T tether), 5 the welder;
+	// R and the wheel go to the tool in hand, 1/2/3 put it away (the guns keep their own bindings).
+	Map(StrapAction, EKeys::Four, false, false);
+	Map(WelderAction, EKeys::Five, false, false);
+	Map(ToolSecondaryAction, EKeys::R, false, false);
+	Map(ReelAction, EKeys::MouseWheelAxis, false, false);
+	Map(GunKeyAction, EKeys::One, false, false);
+	Map(GunKeyAction, EKeys::Two, false, false);
+	Map(GunKeyAction, EKeys::Three, false, false);
 	Map(AimAction, EKeys::LeftShift, false, false);
 	// Space is also Lift: thrust up in zero-G, a jump (press) in a gravity zone.
 	Map(JumpAction, EKeys::SpaceBar, false, false);
@@ -248,11 +262,17 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Triggered, [this](const FInputActionValue&)
 	{
 		const FJamWeapon* Weapon = Guns->GetWeapon();
-		if (!GrabbedBody.IsValid() && Weapon && Weapon->bAutomatic)
+		if (!GrabbedBody.IsValid() && HullTools->GetTool() == EJamHullTool::None && Weapon && Weapon->bAutomatic)
 		{
 			Fire();
 		}
 	});
+	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { HullTools->PrimaryReleased(); });
+	Input->BindActionValueLambda(StrapAction, ETriggerEvent::Started, [this](const FInputActionValue&) { HullTools->SelectTool(EJamHullTool::Strap); });
+	Input->BindActionValueLambda(WelderAction, ETriggerEvent::Started, [this](const FInputActionValue&) { HullTools->SelectTool(EJamHullTool::Welder); });
+	Input->BindActionValueLambda(ToolSecondaryAction, ETriggerEvent::Started, [this](const FInputActionValue&) { HullTools->SecondaryPressed(); });
+	Input->BindActionValueLambda(ReelAction, ETriggerEvent::Started, [this](const FInputActionValue& Value) { HullTools->Reel(Value.Get<float>() > 0.0f ? 1 : -1); });
+	Input->BindActionValueLambda(GunKeyAction, ETriggerEvent::Started, [this](const FInputActionValue&) { HullTools->SelectTool(EJamHullTool::None); });
 	Input->BindAction(PushAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PushPressed);
 	// Left Shift held: the predicted paths are drawn.
 	Input->BindActionValueLambda(AimAction, ETriggerEvent::Started, [this](const FInputActionValue&) { bAiming = true; });
@@ -262,7 +282,6 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Started, this, &AJamZeroGPawn::BulletTimePressed);
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &AJamZeroGPawn::BulletTimeReleased);
 	Input->BindAction(CrowbarAction, ETriggerEvent::Started, this, &AJamZeroGPawn::ToggleCrowbar);
-	Input->BindAction(TetherAction, ETriggerEvent::Started, this, &AJamZeroGPawn::ToggleTether);
 	Input->BindAction(JumpAction, ETriggerEvent::Started, this, &AJamZeroGPawn::JumpPressed);
 	Guns->BindInput(*Input, *Mapping);
 }
@@ -300,11 +319,17 @@ void AJamZeroGPawn::Lift(const FInputActionValue& Value)
 
 void AJamZeroGPawn::Use()
 {
-	// Holding: E lets go. Otherwise what the object offers (a canister, a door)
-	// comes first; a loose body that offers nothing is grabbed.
+	// Holding: RMB lets go. Otherwise what the object offers (a canister, a door)
+	// comes first; a loose body that offers nothing is grabbed; a fixed one in
+	// reach (the hull) is held on to.
 	if (GrabbedBody.IsValid())
 	{
 		Release();
+		return;
+	}
+	if (ClingConstraint)
+	{
+		LetGoCling();
 		return;
 	}
 	if (Interaction->CurrentOffer.IsOffered())
@@ -315,6 +340,47 @@ void AJamZeroGPawn::Use()
 	if (UPrimitiveComponent* Candidate = GrabCandidate.Get())
 	{
 		Grab(Candidate, GrabCandidatePoint);
+		return;
+	}
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamClingLook), /*bTraceComplex=*/false, this);
+	FHitResult Hit;
+	if (GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation(), ViewLocation() + ViewDirection() * GrabReachCm, ECC_Visibility, Params))
+	{
+		Cling(Hit.GetComponent());
+	}
+}
+
+bool AJamZeroGPawn::Cling(UPrimitiveComponent* Target)
+{
+	if (!Target || Target->IsSimulatingPhysics() || ClingConstraint)
+	{
+		return false;
+	}
+	// The body locked to the world where it is: no drift from recoil or the torch.
+	Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	ClingConstraint = NewObject<UPhysicsConstraintComponent>(this);
+	ClingConstraint->SetupAttachment(Body);
+	ClingConstraint->RegisterComponent();
+	ClingConstraint->SetWorldLocation(Body->GetComponentLocation());
+	ClingConstraint->SetLinearXLimit(LCM_Locked, 0.0f);
+	ClingConstraint->SetLinearYLimit(LCM_Locked, 0.0f);
+	ClingConstraint->SetLinearZLimit(LCM_Locked, 0.0f);
+	ClingConstraint->SetAngularSwing1Limit(ACM_Free, 0.0f);
+	ClingConstraint->SetAngularSwing2Limit(ACM_Free, 0.0f);
+	ClingConstraint->SetAngularTwistLimit(ACM_Free, 0.0f);
+	ClingConstraint->SetConstrainedComponents(Body, NAME_None, nullptr, NAME_None);
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: holding on to %s"), *GetNameSafe(Target->GetOwner()));
+	return true;
+}
+
+void AJamZeroGPawn::LetGoCling()
+{
+	if (ClingConstraint)
+	{
+		ClingConstraint->BreakConstraint();
+		ClingConstraint->DestroyComponent();
+		ClingConstraint = nullptr;
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: let go"));
 	}
 }
 
@@ -323,6 +389,11 @@ void AJamZeroGPawn::PrimaryPressed()
 	if (GrabbedBody.IsValid())
 	{
 		ThrowHeld();
+		return;
+	}
+	if (HullTools->GetTool() != EJamHullTool::None)
+	{
+		HullTools->PrimaryPressed();
 		return;
 	}
 	Fire();

@@ -12,6 +12,7 @@
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
 #include "JamDockZone.h"
+#include "JamHullTools.h"
 #include "JamGravity.h"
 #include "JamLivingWall.h"
 #include "JamOxygen.h"
@@ -269,6 +270,42 @@ void AJamShipGameMode::EndGame()
 	}
 }
 
+
+void AJamShipGameMode::RespawnInCabin(APlayerController* PlayerController)
+{
+	if (!PlayerController)
+	{
+		return;
+	}
+	// The guns go with you; the rest of the world (seams, the cleaned hull, what was moved) stays as it is.
+	TArray<int32> Unlocked;
+	if (AJamZeroGPawn* Old = Cast<AJamZeroGPawn>(PlayerController->GetPawn()))
+	{
+		for (int32 Index = 0; Index < 8; ++Index)
+		{
+			if (Old->Guns->IsWeaponUnlocked(Index))
+			{
+				Unlocked.Add(Index);
+			}
+		}
+		Old->Release();
+		Old->DetachTether();
+		Old->LetGoCling();
+		PlayerController->UnPossess();
+		Old->Destroy();
+	}
+	RestartPlayer(PlayerController);
+	if (AJamZeroGPawn* New = Cast<AJamZeroGPawn>(PlayerController->GetPawn()))
+	{
+		for (const int32 Index : Unlocked)
+		{
+			New->Guns->UnlockWeapon(Index);
+		}
+		UE_LOG(LogMindKore, Log, TEXT("Ship: respawned in the cabin at %s, %d gun(s) kept"), *New->GetActorLocation().ToCompactString(), Unlocked.Num());
+	}
+	Toast(LOCTEXT("Respawn", "Очнулся в каюте. Швы и уборка на месте"));
+}
+
 // --- HUD ------------------------------------------------------------------------------------
 
 void AJamShipHUD::DrawHUD()
@@ -300,6 +337,47 @@ void AJamShipHUD::DrawHUD()
 		if (const AJamGravityZone* Zone = Mode->ZoneOf(Pawn); Zone && !Zone->HudText.IsEmpty())
 		{
 			DrawText(Zone->HudText.ToString(), FLinearColor(1.0f, 0.75f, 0.55f), 24.0f, Y + 20.0f, Font);
+		}
+		// Hull repair: the tool in hand, the breach nearby, holding on.
+		if (const AJamZeroGPawn* Player = Cast<AJamZeroGPawn>(Pawn))
+		{
+			const FLinearColor Tool(0.75f, 0.9f, 1.0f);
+			float Line = Canvas->ClipY - 140.0f;
+			const UJamHullToolsComponent* Tools = Player->HullTools;
+			if (Tools->GetTool() == EJamHullTool::Strap)
+			{
+				DrawText(FString::Printf(TEXT("[4] Стяжка: линий %d/%d   ЛКМ — зацепить, колесо — подмотка, R — срезать"), Tools->GetLines().Num(), Tools->MaxLines), Tool, 24.0f, Line, Font);
+				Line -= 20.0f;
+			}
+			else if (Tools->GetTool() == EJamHullTool::Welder)
+			{
+				DrawText(FString::Printf(TEXT("[5] Сварка: %s   ЛКМ — горелка, R — варить/резать   %s"), Tools->IsCutting() ? TEXT("режу") : TEXT("варю"),
+					*Tools->GetWeldStatus().ToString()), Tool, 24.0f, Line, Font);
+				Line -= 20.0f;
+			}
+			if (Player->IsClinging())
+			{
+				DrawText(TEXT("Держусь за корпус (ПКМ — отпустить)"), Tool, 24.0f, Line, Font);
+				Line -= 20.0f;
+			}
+			const AJamPlateSocket* Near = nullptr;
+			double Best = 500.0 * 500.0;
+			for (TActorIterator<AJamPlateSocket> Socket(GetWorld()); Socket; ++Socket)
+			{
+				const double Distance = FVector::DistSquared(Socket->GetActorLocation(), Player->GetActorLocation());
+				if (Distance < Best && (Socket->GetPlate() || Socket->GetSeamFraction() > 0.0f))
+				{
+					Best = Distance;
+					Near = *Socket;
+				}
+			}
+			if (Near)
+			{
+				const bool bSealed = Near->bFilled;
+				DrawText(FString::Printf(TEXT("Пробоина: перекрытие %.0f%%  шов %.0f%%%s"), Near->GetCoverage() * 100.0f, Near->GetSeamFraction() * 100.0f,
+					bSealed ? TEXT("  — заварена") : Near->IsTacked() ? TEXT("  — прихвачен") : TEXT("")),
+					bSealed ? FLinearColor(0.4f, 1.0f, 0.5f) : FLinearColor(1.0f, 0.8f, 0.4f), 24.0f, Line, Font);
+			}
 		}
 		const FText Toast = Mode->GetToast();
 		if (!Toast.IsEmpty())
@@ -857,6 +935,285 @@ namespace
 		TEXT("jam.Ship.Land"),
 		TEXT("jam.Ship.Land [Pitch] [Roll] [Speed]: fall onto the planetoid from a free, rolled view and log the landing every ~33 ms."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunShipLand));
+
+	/**
+	 * jam.Hull.Probe [Index]: hull repair on Socket_Breach<Index> (the first by default), logic only.
+	 * A plate 40 cm off the hole, the torch tried (junk inside: refused); a strap from the opposite
+	 * wall through the hole pulls it on (gaps and coverage logged); the junk is removed; the whole
+	 * contour welded (tack, seal, the panel); half cut (unsealed, still tacked), all cut (loose),
+	 * welded again; cling to the hull and fire the sniper; then death and the respawn in the cabin;
+	 * last a second plate 40 cm off the next breach: the torch must find a gap. With "shots" as the
+	 * second argument: HighResShot stills of the strapped plate and of the fresh seam (needs a real RHI).
+	 */
+	void RunHullProbe(const TArray<FString>& Args, UWorld* World)
+	{
+		AJamShipGameMode* Mode = World->GetAuthGameMode<AJamShipGameMode>();
+		AJamZeroGPawn* Pawn = PlayerPawn(World);
+		TArray<AJamPlateSocket*> Sockets;
+		for (TActorIterator<AJamPlateSocket> It(World); It; ++It)
+		{
+			Sockets.Add(*It);
+		}
+		Sockets.Sort([](const AJamPlateSocket& A, const AJamPlateSocket& B) { return A.GetName() < B.GetName(); });
+		const int32 Index = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 0;
+		const bool bShots = Args.Num() > 1 && Args[1] == TEXT("shots");
+		AActor* Plate = nullptr;
+		AActor* Spare = nullptr;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (It->ActorHasTag(TEXT("Hull.Plate")))
+			{
+				(Plate ? Spare : Plate) = *It;
+			}
+		}
+		if (!Mode || !Pawn || !Sockets.IsValidIndex(Index) || !Plate)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Hull probe: needs the ship map, the pawn, a breach %d and a Hull.Plate"), Index);
+			return;
+		}
+		AJamPlateSocket* Socket = Sockets[Index];
+		const TWeakObjectPtr<AJamPlateSocket> WeakSocket(Socket);
+		const FTransform Frame = Socket->GetActorTransform();
+		const FVector Out = Frame.GetUnitAxis(EAxis::Z);
+		UPrimitiveComponent* PlateBody = Cast<UPrimitiveComponent>(Plate->GetRootComponent());
+		// Plate 40 cm off the outer face, square to the hole; the pawn 3 m out.
+		PlateBody->SetWorldLocationAndRotation(Frame.TransformPositionNoScale(FVector(0.0f, 0.0f, Socket->SurfaceZ + 10.0f + 40.0f)), Frame.GetRotation(),
+			false, nullptr, ETeleportType::TeleportPhysics);
+		PlateBody->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		PlateBody->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		Teleport(Pawn, Socket->GetActorLocation() + Out * 300.0f + Frame.GetUnitAxis(EAxis::X) * 150.0f);
+		if (APlayerController* Controller = Cast<APlayerController>(Pawn->GetController()))
+		{
+			Controller->SetControlRotation((Socket->GetActorLocation() - Pawn->GetActorLocation()).Rotation());
+		}
+		UE_LOG(LogMindKore, Log, TEXT("Hull probe: %s, out %s, plate %s %.0f kg, junk inside %d"), *Socket->GetName(), *Out.ToCompactString(),
+			*Plate->GetName(), PlateBody->GetMass(), Socket->JunkCount());
+		const auto Contour = [WeakSocket](float Step)
+		{
+			// Torch points along the hole edge, on the plate top.
+			TArray<FVector> Points;
+			const AJamPlateSocket* S = WeakSocket.Get();
+			const FVector2D H = S->HoleHalfCm;
+			const FVector2D Corners[4] = { { -H.X, -H.Y }, { H.X, -H.Y }, { H.X, H.Y }, { -H.X, H.Y } };
+			for (int32 Side = 0; Side < 4; ++Side)
+			{
+				const FVector2D From = Corners[Side];
+				const FVector2D To = Corners[(Side + 1) % 4];
+				const int32 Count = FMath::CeilToInt32(float((To - From).Size()) / Step);
+				for (int32 K = 0; K < Count; ++K)
+				{
+					const FVector2D P = From + (To - From) * (float(K) / Count);
+					Points.Add(S->GetActorTransform().TransformPositionNoScale(FVector(P.X, P.Y, S->SurfaceZ + 20.0f)));
+				}
+			}
+			return Points;
+		};
+		const auto Report = [WeakSocket, PlateBody](const TCHAR* Stage)
+		{
+			const AJamPlateSocket* S = WeakSocket.Get();
+			int32 Hull = 0;
+			for (TActorIterator<AJamShipPanel> Panel(S->GetWorld()); Panel; ++Panel)
+			{
+				Hull = Panel->HullDone();
+			}
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [%s]: seam %.0f%%, coverage %.0f%%, plate over the hole %s, tacked %s, sealed %s, plate simulating %s, panel hull %d"),
+				Stage, S->GetSeamFraction() * 100.0f, S->GetCoverage() * 100.0f, *GetNameSafe(S->GetPlate()), S->IsTacked() ? TEXT("yes") : TEXT("no"),
+				S->bFilled ? TEXT("yes") : TEXT("no"), PlateBody->IsSimulatingPhysics() ? TEXT("yes") : TEXT("no"), Hull);
+		};
+		After(Mode, 0.5f, [WeakSocket, Contour]()
+		{
+			const TArray<FVector> Points = Contour(10.0f);
+			const EJamWeldResult Result = WeakSocket->Weld(Points[5], 0.05f, false);
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [torch, plate 40 cm off, junk inside]: %s"),
+				Result == EJamWeldResult::Junk ? TEXT("refused: junk") : Result == EJamWeldResult::Gap ? TEXT("refused: gap") : Result == EJamWeldResult::Welded ? TEXT("WELDED") : TEXT("off the seam"));
+		});
+		After(Mode, 0.6f, [Mode, Pawn, WeakSocket, PlateBody, Out, Report]()
+		{
+			// The anchor: the hull wall across the ship, straight in through the hole.
+			const FVector From = WeakSocket->GetActorLocation() - Out * 30.0f;
+			FHitResult Hit;
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(JamHullProbe), false, Pawn);
+			Params.AddIgnoredActor(PlateBody->GetOwner());
+			if (!Mode->GetWorld()->LineTraceSingleByChannel(Hit, From, From - Out * 1200.0f, ECC_Visibility, Params) || !Hit.GetComponent())
+			{
+				UE_LOG(LogMindKore, Warning, TEXT("Hull probe: no wall across the ship to anchor the strap"));
+				return;
+			}
+			const FVector OnPlate = PlateBody->GetComponentLocation() - Out * 10.0f;
+			const int32 Line = Pawn->HullTools->AddLine(Hit.GetComponent(), Hit.ImpactPoint, PlateBody, OnPlate);
+			Pawn->HullTools->SetLineLength(Line, float(FVector::Dist(Hit.ImpactPoint, OnPlate)) - 80.0f);
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [strap]: %s (%s) to the plate, %.0f cm, reeled 80 cm in"), *GetNameSafe(Hit.GetActor()),
+				Hit.GetComponent()->IsSimulatingPhysics() ? TEXT("loose") : TEXT("fixed"), FVector::Dist(Hit.ImpactPoint, OnPlate));
+		});
+		After(Mode, 4.0f, [WeakSocket, PlateBody, Contour, Report]()
+		{
+			const FVector Local = WeakSocket->GetActorTransform().InverseTransformPositionNoScale(PlateBody->GetComponentLocation());
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [strapped +3.4 s]: plate centre at %s in the breach frame (flush: Z %.0f), speed %.0f cm/s"),
+				*Local.ToCompactString(), WeakSocket->SurfaceZ + 10.0f, PlateBody->GetPhysicsLinearVelocity().Size());
+			const TArray<FVector> Points = Contour(10.0f);
+			const EJamWeldResult Result = WeakSocket->Weld(Points[5], 0.05f, false);
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [torch, strapped, junk inside]: %s"), Result == EJamWeldResult::Junk ? TEXT("refused: junk") : TEXT("NOT refused"));
+			Report(TEXT("strapped"));
+		});
+		if (bShots)
+		{
+			After(Mode, 3.8f, [Pawn]() { Cast<APlayerController>(Pawn->GetController())->ConsoleCommand(TEXT("Shot")); });
+		}
+		After(Mode, 4.2f, [Mode]()
+		{
+			int32 Removed = 0;
+			for (TActorIterator<AActor> It(Mode->GetWorld()); It; ++It)
+			{
+				if (It->ActorHasTag(TEXT("Junk.Foreign")))
+				{
+					It->Destroy();
+					++Removed;
+				}
+			}
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe: %d junk removed from the hull"), Removed);
+		});
+		After(Mode, 4.8f, [WeakSocket, Contour, Report]()
+		{
+			int32 Welded = 0;
+			int32 Gaps = 0;
+			for (const FVector& Point : Contour(5.0f))
+			{
+				for (int32 Pass = 0; Pass < 4; ++Pass)
+				{
+					const EJamWeldResult Result = WeakSocket->Weld(Point, 0.05f, false);
+					Welded += Result == EJamWeldResult::Welded ? 1 : 0;
+					Gaps += Result == EJamWeldResult::Gap ? 1 : 0;
+				}
+			}
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [welded along the contour]: %d welded torch steps, %d on a gap, junk %d"), Welded, Gaps, WeakSocket->JunkCount());
+			Report(TEXT("welded"));
+		});
+		if (bShots)
+		{
+			After(Mode, 5.0f, [Pawn]() { Cast<APlayerController>(Pawn->GetController())->ConsoleCommand(TEXT("Shot")); });
+		}
+		After(Mode, 5.2f, [Pawn, Report]()
+		{
+			Pawn->HullTools->CutAll();
+			Report(TEXT("strap cut"));
+		});
+		After(Mode, 6.5f, [WeakSocket, Contour, Report]()
+		{
+			const TArray<FVector> Points = Contour(5.0f);
+			for (int32 K = 0; K < Points.Num() / 2; ++K)
+			{
+				for (int32 Pass = 0; Pass < 4; ++Pass)
+				{
+					WeakSocket->Weld(Points[K], 0.05f, true);
+				}
+			}
+			Report(TEXT("half cut, 1.3 s after the strap went"));
+		});
+		After(Mode, 6.8f, [WeakSocket, Contour, Report]()
+		{
+			for (const FVector& Point : Contour(5.0f))
+			{
+				for (int32 Pass = 0; Pass < 4; ++Pass)
+				{
+					WeakSocket->Weld(Point, 0.05f, true);
+				}
+			}
+			Report(TEXT("all cut"));
+		});
+		After(Mode, 7.0f, [Pawn, WeakSocket, PlateBody, Out]()
+		{
+			// Back on the hole for the re-weld: the strap again.
+			FHitResult Hit;
+			const FVector From = WeakSocket->GetActorLocation() - Out * 30.0f;
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(JamHullProbe), false, Pawn);
+			Params.AddIgnoredActor(PlateBody->GetOwner());
+			if (Pawn->GetWorld()->LineTraceSingleByChannel(Hit, From, From - Out * 1200.0f, ECC_Visibility, Params))
+			{
+				const FVector OnPlate = PlateBody->GetComponentLocation() - Out * 10.0f;
+				const int32 Line = Pawn->HullTools->AddLine(Hit.GetComponent(), Hit.ImpactPoint, PlateBody, OnPlate);
+				Pawn->HullTools->SetLineLength(Line, float(FVector::Dist(Hit.ImpactPoint, OnPlate)) - 80.0f);
+			}
+		});
+		After(Mode, 9.0f, [WeakSocket, Contour, Report]()
+		{
+			for (const FVector& Point : Contour(5.0f))
+			{
+				for (int32 Pass = 0; Pass < 4; ++Pass)
+				{
+					WeakSocket->Weld(Point, 0.05f, false);
+				}
+			}
+			Report(TEXT("welded again"));
+		});
+		After(Mode, 9.3f, [Pawn, WeakSocket, Out]()
+		{
+			// Cling to the hull beside the patch and fire the sniper; then let go and fire again.
+			Pawn->HullTools->CutAll();
+			Teleport(Pawn, WeakSocket->GetActorLocation() + Out * 120.0f + WeakSocket->GetActorForwardVector() * 300.0f);
+			FHitResult Hit;
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(JamHullProbe), false, Pawn);
+			const FVector From = Pawn->Body->GetComponentLocation();
+			const bool bHull = Pawn->GetWorld()->LineTraceSingleByChannel(Hit, From, From - Out * 300.0f, ECC_Visibility, Params);
+			const bool bClung = bHull && Pawn->Cling(Hit.GetComponent());
+			Pawn->Guns->UnlockWeapon(2);
+			if (APlayerController* Controller = Cast<APlayerController>(Pawn->GetController()))
+			{
+				Controller->SetControlRotation((-Out).Rotation());
+			}
+			Pawn->Fire();
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [cling]: on %s %s, sniper fired"), *GetNameSafe(bHull ? Hit.GetActor() : nullptr), bClung ? TEXT("held") : TEXT("NOT held"));
+		});
+		After(Mode, 9.8f, [Pawn]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [cling +0.5 s]: speed %.0f cm/s"), Pawn->GetBodyVelocity().Size());
+			Pawn->LetGoCling();
+		});
+		After(Mode, 11.1f, [Pawn]()
+		{
+			Pawn->Fire();
+		});
+		After(Mode, 11.6f, [Pawn]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [let go, sniper +0.5 s]: speed %.0f cm/s"), Pawn->GetBodyVelocity().Size());
+			Pawn->Vitals->ApplyIncoming(100000.0f, EMKImpactKind::Blunt, /*bBlocked=*/false, FGuid());
+		});
+		After(Mode, 16.0f, [Mode, WeakSocket, Report]()
+		{
+			const AJamZeroGPawn* Now = PlayerPawn(Mode->GetWorld());
+			const AJamGravityZone* Zone = Now ? Mode->ZoneOf(Now) : nullptr;
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [after death +4.4 s]: pawn %s at %s, zone %s, sniper %s"), *GetNameSafe(Now),
+				Now ? *Now->GetActorLocation().ToCompactString() : TEXT("-"), Zone ? *Zone->GetName() : TEXT("none"),
+				Now && Now->Guns->IsWeaponUnlocked(2) ? TEXT("kept") : TEXT("LOST"));
+			Report(TEXT("after the respawn"));
+		});
+		if (!Spare)
+		{
+			return;
+		}
+		const TWeakObjectPtr<AJamPlateSocket> Next(Sockets[(Index + 1) % Sockets.Num()]);
+		After(Mode, 16.2f, [Next, Spare]()
+		{
+			UPrimitiveComponent* Body = Cast<UPrimitiveComponent>(Spare->GetRootComponent());
+			const FTransform At = Next->GetActorTransform();
+			Body->SetWorldLocationAndRotation(At.TransformPositionNoScale(FVector(0.0f, 0.0f, Next->SurfaceZ + 10.0f + 40.0f)), At.GetRotation(),
+				false, nullptr, ETeleportType::TeleportPhysics);
+			Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+			Body->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+		});
+		After(Mode, 16.6f, [Next]()
+		{
+			const FVector Torch = Next->GetActorTransform().TransformPositionNoScale(FVector(0.0f, -Next->HoleHalfCm.Y, Next->SurfaceZ + 20.0f));
+			const EJamWeldResult Result = Next->Weld(Torch, 0.05f, false);
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [%s, plate 40 cm off, no junk]: %s, seam %.0f%%"), *Next->GetName(),
+				Result == EJamWeldResult::Gap ? TEXT("refused: gap") : Result == EJamWeldResult::Welded ? TEXT("WELDED") : Result == EJamWeldResult::Junk ? TEXT("refused: junk") : TEXT("off the seam"),
+				Next->GetSeamFraction() * 100.0f);
+		});
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GHullProbe(
+		TEXT("jam.Hull.Probe"),
+		TEXT("jam.Hull.Probe [Index]: hull repair logic on one breach - strap, junk, weld, tack, seal, cut, cling, death and respawn."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunHullProbe));
 
 	/** jam.Ship.PlanetShots: two stills standing on the planetoid (top and side). */
 	void RunPlanetShots(UWorld* World)

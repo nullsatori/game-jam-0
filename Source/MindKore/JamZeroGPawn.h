@@ -11,6 +11,7 @@ class UCameraComponent;
 class UInstancedStaticMeshComponent;
 class UInputAction;
 class UInputMappingContext;
+class UJamHullToolsComponent;
 class UJamOxygenComponent;
 class UJamWeaponsComponent;
 class UMaterialInstanceDynamic;
@@ -38,9 +39,9 @@ struct FInputActionValue;
  * a heavy part drags the pawn as much as the pawn drags it. E, F or RMB lets
  * go; LMB throws with equal and opposite impulses.
  *
- * Towing: T throws a rope (a soft spherical distance limit, TetherLengthCm)
- * to the loose body under the view within TetherReachCm; the part follows on
- * the rope wherever you push or thrust. T again cuts it.
+ * Towing and hull repair: the strap and the welder in hand (HullTools, keys
+ * 4/5, Docs/HullRepair.md). The rope (AttachTether: a soft spherical distance
+ * limit) has no key since the strap took over towing; probes still use it.
  *
  * LMB and RMB act on press (the pistol fires while LMB is held). Holding
  * Left Shift aims: the pawn draws where a push and the current gun's recoil
@@ -109,6 +110,10 @@ public:
 	/** The guns (shared with the walkers); the recoil of a shot goes into Body whole. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UJamWeaponsComponent> Guns = nullptr;
+
+	/** Hull repair in hand: 4 the strap, 5 the welder (Docs/HullRepair.md). While one is out, LMB, R and the wheel are its. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
+	TObjectPtr<UJamHullToolsComponent> HullTools = nullptr;
 
 	// --- view ---------------------------------------------------------------
 
@@ -414,6 +419,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG")
 	UPrimitiveComponent* GetTethered() const { return TetheredBody.Get(); }
 
+	/** Hold on to a fixed thing (RMB on the hull): the body is pinned where it is, so recoil and the torch do not drift it. False when Target simulates. */
+	bool Cling(UPrimitiveComponent* Target);
+
+	void LetGoCling();
+
+	bool IsClinging() const { return ClingConstraint != nullptr; }
+
 	/** The simulated body E would grab now (null when none or something is held). */
 	UPrimitiveComponent* GetGrabCandidate() const { return GrabCandidate.Get(); }
 
@@ -486,6 +498,9 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UPhysicsConstraintComponent> TetherConstraint = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UPhysicsConstraintComponent> ClingConstraint = nullptr;
 
 	TWeakObjectPtr<UPrimitiveComponent> TetheredBody;
 
