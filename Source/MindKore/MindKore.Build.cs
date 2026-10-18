@@ -7,6 +7,11 @@ public class MindKore : ModuleRules
 	public MindKore(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.Add("UnrealEd");
+			PrivateDependencyModuleNames.Add("BSPUtils");
+		}
 
 		// Flat module layout (headers next to .cpp), as in MindKore.
 		PublicIncludePaths.Add(ModuleDirectory);

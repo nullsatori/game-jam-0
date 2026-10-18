@@ -22,6 +22,7 @@
 #include "JamOxygen.h"
 #include "JamShip.h"
 #include "JamScope.h"
+#include "JamLadder.h"
 #include "JamWeapons.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -321,6 +322,10 @@ void AJamZeroGPawn::Lift(const FInputActionValue& Value)
 
 void AJamZeroGPawn::Use()
 {
+	if (IsClimbingLadder())
+	{
+		return;
+	}
 	// RMB is the hands only (owner 18.10; interaction is F): holding - let go;
 	// a loose body in reach is grabbed; a fixed one (the hull) is held on to.
 	if (GrabbedBody.IsValid())
@@ -1093,8 +1098,102 @@ void AJamZeroGPawn::Walk(float DeltaSeconds)
 	Body->SetPhysicsLinearVelocity(Tangent + Up * Normal);
 }
 
+void AJamZeroGPawn::BeginLadderClimb(AJamLadder* Ladder)
+{
+	ActiveLadder = Ladder;
+	if (!bRestoreLadderRadius)
+	{
+		LadderOriginalRadiusCm = Body->GetUnscaledSphereRadius();
+	}
+	bRestoreLadderRadius = true;
+	Body->SetSphereRadius(FMath::Min(LadderOriginalRadiusCm, 34.0f));
+	Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	bGrounded = false;
+}
+
+void AJamZeroGPawn::EndLadderClimb()
+{
+	ActiveLadder = nullptr;
+	LadderCooldownUntil = GetWorld()->GetTimeSeconds() + 0.3;
+	RestoreLadderBodyRadius();
+}
+
+void AJamZeroGPawn::RestoreLadderBodyRadius()
+{
+	if (!bRestoreLadderRadius)
+	{
+		return;
+	}
+	const FCollisionShape Shape = FCollisionShape::MakeSphere(LadderOriginalRadiusCm * Body->GetComponentScale().GetAbsMax());
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(LadderStandUp), false, this);
+	const auto Blocked = [&](const FVector& Position)
+	{
+		return GetWorld()->OverlapBlockingTestByChannel(Position, GetActorQuat(), Body->GetCollisionObjectType(), Shape, Params);
+	};
+	if (Blocked(GetActorLocation()))
+	{
+		// Stand up from the landing without expanding into the floor or hatch edge.
+		const FVector Up = IsInGravity() ? -GravityDirection : FVector::UpVector;
+		const FVector Raised = GetActorLocation() + Up * (LadderOriginalRadiusCm - Body->GetUnscaledSphereRadius() + 0.5f);
+		if (Blocked(Raised))
+		{
+			return;
+		}
+		FHitResult Hit;
+		SetActorLocation(Raised, true, &Hit, ETeleportType::TeleportPhysics);
+		if (Hit.bBlockingHit)
+		{
+			return;
+		}
+	}
+	Body->SetSphereRadius(LadderOriginalRadiusCm);
+	bRestoreLadderRadius = false;
+}
+
+void AJamZeroGPawn::ClimbLadder(float DeltaSeconds)
+{
+	const FVector Input = ThrustInput;
+	ThrustInput = FVector::ZeroVector;
+	if (!IsValid(ActiveLadder))
+	{
+		EndLadderClimb();
+		return;
+	}
+	const FVector Wish = (ViewDirection() * Input.X + Camera->GetRightVector() * Input.Y).GetClampedToMaxSize(1.0f);
+	const FVector Velocity = Wish * ActiveLadder->ClimbSpeedCm;
+	const FVector Delta = Velocity * DeltaSeconds;
+	FHitResult Hit;
+	SetActorLocation(GetActorLocation() + Delta, true, &Hit, ETeleportType::TeleportPhysics);
+	if (Hit.bBlockingHit && !Hit.bStartPenetrating)
+	{
+		// Slide along rungs while preserving the vertical part of the input.
+		const FVector Slide = FVector::VectorPlaneProject(Delta * (1.0f - Hit.Time), Hit.Normal);
+		SetActorLocation(GetActorLocation() + Slide, true, nullptr, ETeleportType::TeleportPhysics);
+	}
+	const FVector LocalWish = ActiveLadder->GetActorTransform().InverseTransformVectorNoScale(Wish);
+	if (!ActiveLadder->IsInReach(GetActorLocation()) || LocalWish.Y < -0.1f)
+	{
+		EndLadderClimb();
+		Body->SetPhysicsLinearVelocity(Velocity);
+	}
+	else
+	{
+		Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	}
+}
+
 void AJamZeroGPawn::JumpPressed()
 {
+	if (IsClimbingLadder())
+	{
+		const FVector Away = ActiveLadder->GetActorTransform().TransformVectorNoScale(FVector(0, -1, 0));
+		const FVector Up = IsInGravity() ? -GravityDirection : FVector::UpVector;
+		JumpedFromLadder = ActiveLadder;
+		EndLadderClimb();
+		Body->SetPhysicsLinearVelocity(Away * JumpSpeedCm * 0.65f + ViewDirection() * JumpSpeedCm * 0.45f + Up * JumpSpeedCm * 0.55f);
+		LastJumpSeconds = GetWorld()->GetTimeSeconds();
+		return;
+	}
 	if (!IsInGravity())
 	{
 		return; // Zero-G: Space is the up thruster (Lift).
@@ -1142,13 +1241,46 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 	RefreshGrabCandidate();
 	UpdateHoldTarget();
 	UpdateDust();
-	if (IsInGravity())
+	if (!IsClimbingLadder() && !ClingConstraint && GetWorld()->GetTimeSeconds() >= LadderCooldownUntil
+		&& !GrabbedBody.IsValid() && !TetheredBody.IsValid() && !GrappleTarget.IsValid())
+	{
+		FVector Move = ViewDirection() * ThrustInput.X + Camera->GetRightVector() * ThrustInput.Y;
+		if (Move.IsNearlyZero() && !bGrounded)
+		{
+			Move = GetBodyVelocity().GetSafeNormal();
+		}
+		for (TActorIterator<AJamLadder> It(GetWorld()); It; ++It)
+		{
+			if (JumpedFromLadder.Get() == *It)
+			{
+				if (It->IsInReach(GetActorLocation()))
+				{
+					continue;
+				}
+				JumpedFromLadder.Reset();
+			}
+			if (It->CanEnter(GetActorLocation(), Move))
+			{
+				BeginLadderClimb(*It);
+				break;
+			}
+		}
+	}
+	if (IsClimbingLadder())
+	{
+		ClimbLadder(DeltaSeconds);
+	}
+	else if (IsInGravity())
 	{
 		Walk(DeltaSeconds);
 	}
 	else
 	{
 		ApplyThrusters(DeltaSeconds);
+	}
+	if (!IsClimbingLadder())
+	{
+		RestoreLadderBodyRadius();
 	}
 	// The cap is for zero-G: in a zone gravity bounds the speed, and the jet exit must beat it.
 	if (MaxSpeedCm > 0.0f && !IsInGravity())
