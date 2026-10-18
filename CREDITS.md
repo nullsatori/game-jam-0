@@ -134,11 +134,30 @@ events, played 10–14 semitones down, band-limited, shortened.
 [Freesound](https://freesound.org/people/nox_sound/sounds/554907/).
 Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 Donor of `SW_MK_Enemy_Grunt_*` (the living wall's groan, `SC_MK_Enemy_Grunt`
-played pitched down) and of the flyer's voice and wings
-(`Content/JamArt/Audio/Flyer/SW_Jam_Flyer_*`, `Scripts/jam_flyer_sounds.py`: breaths
-cut out, pitched and glided, filtered, driven, through the suit reverb; the
-death cry also takes a Gushy Impacts splat an octave down, the flaps one two
-octaves down).
+played pitched down) and of the rasp under the flyer's screeches
+(`Scripts/jam_flyer_sounds.py`; the flyer's death cry also takes a Gushy
+Impacts splat an octave down).
+
+### The flyer (`Content/JamArt/Audio/Flyer/SW_Jam_Flyer_*`)
+
+Freesound HQ previews (the originals need a login; no account was used),
+downloaded 19.10.2026 after the owner's approval, the licence checked on each
+page. All [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+Cut, pitched 2-9 semitones down (gliding), filtered, driven and layered through
+the suit's reverb by `Scripts/jam_flyer_sounds.py`.
+
+- **210227 Red Tailed Hawk, eq isolated calls, roof 77mel 10am.wav** — **TRP**
+  ([Freesound 616926](https://freesound.org/people/TRP/sounds/616926/)):
+  `SW_Jam_Flyer_Screech_A`, `_B`.
+- **hawk_cry** — **loganzsound**
+  ([Freesound 774252](https://freesound.org/people/loganzsound/sounds/774252/)):
+  `SW_Jam_Flyer_Screech_C`, `SW_Jam_Flyer_Death`.
+- **Huge wing flaps for bird, dragon, dinosaur.** (bed sheets) — **2create**
+  ([Freesound 670509](https://freesound.org/people/2create/sounds/670509/)):
+  `SW_Jam_Flyer_Flap_A`, `_B`, `_C`.
+- **Wing Flap 2.wav** (a coat) — **_stubb**
+  ([Freesound 389633](https://freesound.org/people/_stubb/sounds/389633/)):
+  the snap under every flap.
 
 **Clean Revolver Reload** — by **Dredile**, via
 [Freesound](https://freesound.org/people/Dredile/sounds/177863/).
