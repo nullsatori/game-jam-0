@@ -15,23 +15,47 @@ struct FJamMuzzleFx
 {
 	GENERATED_BODY()
 
-	/** The flash: a ball of hot gas swelling from FlashStartCm to FlashEndCm and dying out over FlashSeconds. */
+	/**
+	 * The flash: a burst of hot gas at the muzzle made of FlashLobes ragged blobs
+	 * (each shot its own shapes, turns and directions). White-hot for
+	 * FlashPeakSeconds (1-2 frames at 60 fps), then a fast fall to a dim orange
+	 * glow that cools out by FlashGlowSeconds, under the smoke.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "1"))
+	int32 FlashLobes = 4;
+
+	/** A lobe's diameter when grown, cm (each 0.6..1.2 of it). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
+	float FlashSizeCm = 9.0f;
+
+	/** How far the lobes are thrown from the muzzle, cm (each 0.3..1 of it). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
+	float FlashReachCm = 5.0f;
+
+	/** 0: lobes go every way; higher: they lean out along the bore. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
+	float FlashForward = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.001"))
+	float FlashPeakSeconds = 0.025f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.01"))
-	float FlashSeconds = 0.06f;
+	float FlashGlowSeconds = 0.12f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
-	float FlashStartCm = 5.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
-	float FlashEndCm = 14.0f;
-
-	/** Muzzle-brake side jets (the SV-98): two lobes out of the gun's sides, this long at the end. 0: none. */
+	/** Muzzle-brake side jets (the SV-98): lobes out of both sides of the gun reaching this far, cm. 0: none. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
 	float SideJetCm = 0.0f;
 
-	/** The flash's light on the gun and around it, candela at its peak. */
+	/** Incandescent grains flying straight out of the muzzle (no air, no gravity), and their speed, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0"))
+	int32 Sparks = 3;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
-	float LightCandela = 30.0f;
+	float SparkSpeed = 500.0f;
+
+	/** The flash's light on the gun, the smoke and around at its peak (unitless, no inverse square: about the same on all within ~1 m). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
+	float LightIntensity = 30.0f;
 
 	/** Smoke puffs per shot. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0"))
@@ -63,10 +87,10 @@ struct FJamMuzzleFx
 
 /**
  * Muzzle flash and powder smoke of the jam guns, in vacuum: no air carries a
- * flame tongue or blows the smoke away. The flash is a short spherical burst
- * (plus side jets from a muzzle brake) with a light; the smoke is a few thin
- * puffs that swell and spread slowly from the muzzle, roll back over the gun
- * and fade over seconds.
+ * flame tongue or blows the smoke away. The flash is a brief irregular burst
+ * of hot gas - ragged lobes, a few sparks, side jets from a muzzle brake - with
+ * a light; the smoke is a few thin puffs, lit by the scene, that swell and
+ * spread slowly from the muzzle, roll back over the gun and fade over seconds.
  *
  * Everything lives in the owner's camera space, like the gun in view: the
  * cloud stays around the gun when the view turns or the recoil throws the
@@ -113,6 +137,7 @@ protected:
 private:
 	struct FPuff
 	{
+		/** The muzzle at the shot, in the gun's space (camera space without a gun). */
 		FVector Origin = FVector::ZeroVector;
 		FVector Direction = FVector::ZeroVector;
 		float SpreadCm = 0.0f;
@@ -126,7 +151,7 @@ private:
 		float Spin = 0.0f;
 	};
 
-	/** A camera-facing sprite at Location (camera space), XAxis along its length. */
+	/** A camera-facing sprite at Location (camera space), XAxis along its length (projected on the view plane). */
 	static FTransform Sprite(const FVector& Location, const FVector& XAxis, float LengthCm, float WidthCm);
 
 	UPROPERTY(Transient)
@@ -138,11 +163,27 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UPointLightComponent> Light = nullptr;
 
+	/** One piece of the flash: a lobe of gas or a spark, relative to the muzzle in camera space. */
+	struct FFlashBit
+	{
+		FVector Direction = FVector::ForwardVector;
+		float ReachCm = 0.0f;
+		float SizeCm = 0.0f;
+		/** Length over width (a jet, a spark streak). */
+		float Stretch = 1.0f;
+		float Brightness = 1.0f;
+		float Seed = 0.0f;
+		float Angle = 0.0f;
+		/** Sparks: cm/s, 0 for a lobe. */
+		float Speed = 0.0f;
+		float Life = 0.1f;
+	};
+
 	TArray<FPuff> Puffs;
+	TArray<FFlashBit> FlashBits;
 	int32 FlashGun = INDEX_NONE;
 	/** The flash's muzzle in FlashGunMesh's space (or camera space without it). */
 	FVector FlashOrigin = FVector::ZeroVector;
 	TWeakObjectPtr<const USceneComponent> FlashGunMesh;
 	float FlashAge = 0.0f;
-	float FlashSeed = 0.0f;
 };

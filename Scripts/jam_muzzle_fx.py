@@ -7,9 +7,14 @@ Rebuilt in place on every run. Both draw a soft round sprite on the engine plane
 mesh; the component turns each plane to the camera and feeds per-instance
 custom data:
 
-  M_Jam_MuzzleFlash  additive, unlit: hot white core + warm halo broken into a
-                     faint ray burst. Data 0 intensity, 1 seed.
-  M_Jam_MuzzleSmoke  translucent, unlit: a thin grey puff, 3-octave value noise
+  M_Jam_MuzzleFlash  additive, unlit: one ragged lobe of hot gas - an iso-surface
+                     of 4-octave value noise falling off from the centre, its colour
+                     cooling from white-yellow to dim red with heat.
+                     Data 0 intensity, 1 seed, 2 heat (1 white-hot .. 0), 3 turn (rad).
+  M_Jam_MuzzleSmoke  translucent, two-sided foliage (lit from behind it glows
+                     through), lit per pixel (Surface ForwardShading: the
+                     sun with its shadows, lamps, the flash's light; a few
+                     sparse sprites, so cheap enough): a thin grey puff, 3-octave value noise
                      inside a gaussian. Data 0 opacity, 1 seed, 2 spin (rad).
 
 No texture: the shapes are maths, nothing third-party.
@@ -22,12 +27,30 @@ mel = unreal.MaterialEditingLibrary
 
 FLASH_HLSL = """
 float2 p = UV * 2 - 1;
+float c = cos(R), s = sin(R);
+p = float2(c * p.x - s * p.y, s * p.x + c * p.y);
 float r2 = dot(p, p);
-float a = atan2(p.y, p.x);
-float rays = 0.7 + 0.3 * sin(a * 7 + S * 40) * sin(a * 11 - S * 23);
-float core = exp(-r2 * 28);
-float halo = exp(-r2 * 5) * rays;
-return I * saturate(1 - r2) * (float3(1, 0.95, 0.85) * core * 4 + Col * halo);
+float n = 0, amp = 0.5;
+float2 q = p * 2.0 + S * 19;
+for (int o = 0; o < 4; o++)
+{
+    float2 i = floor(q);
+    float2 f = frac(q);
+    f = f * f * (3 - 2 * f);
+    float h00 = frac(sin(dot(i, float2(127.1, 311.7))) * 43758.5453);
+    float h10 = frac(sin(dot(i + float2(1, 0), float2(127.1, 311.7))) * 43758.5453);
+    float h01 = frac(sin(dot(i + float2(0, 1), float2(127.1, 311.7))) * 43758.5453);
+    float h11 = frac(sin(dot(i + float2(1, 1), float2(127.1, 311.7))) * 43758.5453);
+    n += amp * lerp(lerp(h00, h10, f.x), lerp(h01, h11, f.x), f.y);
+    q = q * 2.07 + 5.3;
+    amp *= 0.5;
+}
+// A billowy iso-surface of the noise: a ragged outline, lumps inside, no symmetry.
+float gas = saturate((n - 0.15 - 0.85 * r2) * 3.0);
+float t = saturate(H * gas * 1.4);
+float3 col = lerp(float3(0.7, 0.14, 0.03), float3(1.0, 0.5, 0.15), saturate(t * 3));
+col = lerp(col, float3(1.0, 0.92, 0.78), saturate(t * 2.5 - 1.0));
+return I * (gas * 0.8 + gas * gas * gas * 2.5) * col;
 """
 
 SMOKE_HLSL = """
@@ -67,8 +90,10 @@ def _material(name, blend, build):
         mel.delete_all_material_expressions(m)
     else:
         m = unreal.AssetToolsHelpers.get_asset_tools().create_asset(name, FOLDER, unreal.Material, unreal.MaterialFactoryNew())
-    m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT if blend == unreal.BlendMode.BLEND_ADDITIVE
+                          else unreal.MaterialShadingModel.MSM_TWO_SIDED_FOLIAGE)
     m.set_editor_property("blend_mode", blend)
+    m.set_editor_property("translucency_lighting_mode", unreal.TranslucencyLightingMode.TLM_SURFACE_PER_PIXEL_LIGHTING)
     m.set_editor_property("two_sided", True)
     m.set_editor_property("used_with_instanced_static_meshes", True)
     y = [0]
@@ -115,16 +140,21 @@ def _material(name, blend, build):
 def _flash(m, node, custom, data, scalar, colour, mul):
     uv = node(unreal.MaterialExpressionTextureCoordinate)
     burst = custom(FLASH_HLSL, "Burst", unreal.CustomMaterialOutputType.CMOT_FLOAT3,
-                   {"UV": uv, "I": data(0), "S": data(1), "Col": colour("Colour", unreal.LinearColor(1.0, 0.62, 0.28, 1.0))})
-    mel.connect_material_property(mul(burst, scalar("Brightness", 30.0)), "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+                   {"UV": uv, "I": data(0), "S": data(1), "H": data(2), "R": data(3)})
+    mel.connect_material_property(mul(burst, scalar("Brightness", 6.0)), "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 
 def _smoke(m, node, custom, data, scalar, colour, mul):
     uv = node(unreal.MaterialExpressionTextureCoordinate)
     puff = custom(SMOKE_HLSL, "Puff", unreal.CustomMaterialOutputType.CMOT_FLOAT1,
                   {"UV": uv, "A": data(0), "S": data(1), "R": data(2)})
-    mel.connect_material_property(mul(colour("Colour", unreal.LinearColor(0.62, 0.64, 0.68, 1.0)), scalar("Brightness", 1.5)),
-                                  "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    grey = colour("Colour", unreal.LinearColor(0.6, 0.6, 0.62, 1.0))
+    mel.connect_material_property(grey, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    # Thin smoke scatters light through itself: lit from behind (the sun past the cloud) it glows too.
+    mel.connect_material_property(grey, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
+    mel.connect_material_property(scalar("Roughness", 1.0), "", unreal.MaterialProperty.MP_ROUGHNESS)
+    # A trace of its own light so a puff in full shadow is not a black hole.
+    mel.connect_material_property(mul(grey, scalar("Ambient", 0.04)), "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.connect_material_property(puff, "", unreal.MaterialProperty.MP_OPACITY)
 
 
