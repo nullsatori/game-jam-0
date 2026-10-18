@@ -15,12 +15,12 @@ custom data:
                      through), lit per pixel (Surface ForwardShading: the
                      sun with its shadows, lamps, the flash's light; a few
                      sparse sprites, so cheap enough): a grey-blue puff,
-                     deliberately low-res - a 1.2 cm texel grid per puff, 3-octave
+                     deliberately low-res - a texel grid per puff (~6 px at 1080p), 3-octave
                      value noise in a gaussian cut into 5 Bayer-dithered
                      density bands, a scanline fringe on the outer band, a
                      heat shimmer (2D-offset refraction) while fresh.
                      Data 0 opacity, 1 seed, 2 spin (rad), 3 tear, 4 shimmer,
-                     5 length and 6 width of the sprite, cm (for the texel grid).
+                     5 and 6 the grid's texels along and across (set by the component).
 
 No texture: the shapes are maths, nothing third-party.
 """
@@ -59,13 +59,12 @@ return I * (gas * 0.8 + gas * gas * gas * 2.5) * col;
 """
 
 # The smoke keeps the jam's low-res look on purpose (owner, 19.10): a texel grid
-# per puff of TEXEL cm cells (the same size on a small puff and a big one), its density cut into BANDS steps with an ordered 4x4 Bayer
+# per puff, L x W cells (the component sizes a texel to ~6 px on screen), its density cut into BANDS steps with an ordered 4x4 Bayer
 # dither between them (crisp, not a blurry blob), a faint scanline fringe on the
 # outer band. Returns (opacity, fringe rgb).
 SMOKE_HLSL = """
-const float TEXEL = 1.2;
 const float BANDS = 5;
-float2 GRID = max(float2(L, W) / TEXEL, 4);
+float2 GRID = max(floor(float2(L, W)), 4);
 const float M[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
 float2 cell = floor(UV * GRID);
 float2 p = (cell + 0.5) / GRID * 2 - 1;
@@ -99,7 +98,7 @@ return float4(A * band / BANDS, fringe);
 
 # Heat shimmer: a texel-stepped screen offset inside a fresh puff (2D-offset refraction).
 SHIMMER_HLSL = """
-float2 GRID = max(float2(L, W) / 1.2, 4);
+float2 GRID = max(floor(float2(L, W)), 4);
 float2 cell = floor(UV * GRID);
 float2 p = (cell + 0.5) / GRID * 2 - 1;
 float hx = frac(sin(dot(cell + S * 31, float2(127.1, 311.7))) * 43758.5453);

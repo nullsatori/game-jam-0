@@ -237,6 +237,12 @@ FTransform UJamMuzzleFxComponent::Sprite(const FVector& Location, const FVector&
 	return FTransform(FRotationMatrix::MakeFromZX(-Location, Along).ToQuat(), Location, FVector(LengthCm / 100.0f, WidthCm / 100.0f, 1.0f));
 }
 
+namespace
+{
+	/** A smoke texel's size per cm from the eye: ~6 px of 1920 at the bodycam's FOV 134 (2 tan 67 deg = 4.71 view widths per distance). */
+	constexpr float TexelPerCm = 6.0f / 1920.0f * 4.71f;
+}
+
 void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -333,9 +339,13 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		const float Opacity = Puff.Opacity * FMath::Min(Puff.Age / 0.05f, 1.0f) * FMath::Pow(1.0f - X, 1.5f);
 		// Heat shimmer behind a fresh puff, gone by 100 ms.
 		const float Shimmer = FMath::Max(0.0f, 1.0f - Puff.Age / 0.1f);
-		// Its size too: the material's texel grid stays the same in cm on every puff.
+		// The material's texel grid, in texels along and across: a texel about 6 px on
+		// screen at 1080p wherever the puff hangs (a fixed size in cm turned into big
+		// squares near the eye), its size snapped to powers of two so the grid does
+		// not swim as the puff drifts.
+		const float TexelCm = FMath::Pow(2.0f, FMath::RoundToFloat(FMath::Log2(FMath::Max(Location.Size() * TexelPerCm, 0.05f))));
 		Smoke->SetCustomData(Instance, { Opacity, Puff.Seed, Puff.Seed * 6.2831853f + Puff.Spin * Puff.Age, Puff.Tear, Shimmer,
-			Width * Puff.Stretch, Width }, true);
+			Width * Puff.Stretch / TexelCm, Width / TexelCm }, true);
 	}
 }
 
