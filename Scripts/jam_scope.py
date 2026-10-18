@@ -1,28 +1,50 @@
-"""The SV-98 scope's eyepiece material for UJamScopeComponent (editor Python).
+"""The SV-98 scope's eyepiece and the pistol's sight dots for UJamScopeComponent (editor Python).
 
   UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/jam_scope.py" -unattended -nop4 -nosplash -nullrhi
 
-Rebuilt in place on every run. M_Jam_ScopeLens is unlit and masked, drawn on
-the engine plane (/Engine/BasicShapes/Plane) that the component lays on the
-eyepiece facing the eye: the plane's U (its local X) runs up the gun, its V
-(local Y) to the gun's right, UV 0..1 edge to edge. UV, not the local position:
-the gun is drawn first person, and a pixel's local position comes back from
-its first-person (scaled) world position. Parameters the component sets:
+Rebuilt in place on every run. Three materials:
+
+M_Jam_ScopeLens - unlit, masked, on the engine plane (/Engine/BasicShapes/Plane)
+the component lays on the eyepiece facing the eye: the plane's U (its local X)
+runs up the gun, its V (local Y) to the gun's right, UV 0..1 edge to edge. UV,
+not the local position: the gun is drawn first person, and a pixel's local
+position comes back from its first-person (scaled) world position. The picture
+with a slight falloff to a hard black field stop; the eye-relief shadow (a
+bright disc shifted by the eye's offset and shrinking as the eye leaves its
+relief - outside it the tube's dark wall); a 1-2 px darkened rim round the
+reticle's lines so they read on a bright wall.
+
+M_Jam_ScopeReticle - the reticle as a red laser projection, on a second plane
+just in front of the glass: additive, translucency pass After Motion Blur
+(past TSR, which smeared 1 px lines drawn in the lens). PSO-1 style - the
+aiming chevron, three holdover chevrons and a post under it, the side windage
+scale with a tick per unit, and the rangefinder curve for a 1.7 m figure (200 m
+on the left to 1000 m on the right) at the lower left - in units of Unit lens
+radii (the field is wide at 3x, so PSO-1 proportions to the field rather than
+true mils). Lines 1-1.4 px with a 1 px glow, no wide halo. The light is
+MindKore's bodycam projector laser (owner 18.10: «в стиле майндкора красный
+подсвет», «в майндкоре есть проектор, можно оттуда эмиссив глянуть»): the red
+of its RedLaser / M_MK_Projector_Beam (1.0, 0.045, 0.02), added over the
+picture like the beam and driven like the projector - 1 in the dark, up to its
+SunDrive 4 when the picture round the aim point is lit (from its LitRoomLuma
+0.12 to 0.6) - with its character in 2D, kept faint (owner: the fat sparkles
+were too much): drifting raster lines, grain, the haze's shimmer, the drive's
+flicker with a rare dip, rare single-pixel motes on the lines. It dims with
+the eye shadow.
+
+Both read the parameters the component sets:
 
   Scene     the scope capture's render target (linear HDR scene colour)
   Eye       x, y: the eye's offset from the eyepiece's axis, in lens radii
             (x right, y down); z: how far the eye is off its relief, cm
-  Unit      the reticle's unit in lens radii (its proportions; 0.03: the field
-            stop is 33 units out)
+  Unit      the reticle's unit in lens radii (0.018)
+  Red, Glow the reticle's light: MindKore's laser red and its strength
 
-Inside: the picture with a slight falloff to a hard black field stop; the
-eye-relief shadow (a bright disc shifted by the eye's offset and shrinking as
-the eye leaves its relief - outside it the tube's dark wall); a black PSO-1
-style reticle - the aiming chevron, three holdover chevrons and a post under
-it, the side windage scale with a tick per unit, and the rangefinder curve for
-a 1.7 m figure (200 m on the left to 1000 m on the right) at the lower left.
-At 3x the field is ~27 deg, so the reticle keeps PSO-1 proportions to the
-field rather than true mils (true mils would be a few pixels). No texture: shapes are maths, nothing third-party.
+M_Jam_SightDot - the pistol's sight inserts (2 mm engine spheres on its slide):
+the same red, a bright core where the dot faces the eye and a dark ring round
+it, a slow shimmer and a rare dip.
+
+No texture: shapes are maths, nothing third-party.
 """
 import unreal
 
@@ -30,8 +52,10 @@ FOLDER = "/Game/JamArt/Materials/Weapons"
 NAME = "M_Jam_ScopeLens"
 eal = unreal.EditorAssetLibrary
 mel = unreal.MaterialEditingLibrary
+# MindKore's laser red (MKBodycamProjectorComponent RedLaser, M_MK_Projector_Beam RedColour).
+RED = unreal.LinearColor(1.0, 0.045, 0.02, 1.0)
 
-LENS_HLSL = """
+GEOM_HLSL = """
 struct FLines
 {
     float Seg(float2 q, float2 a, float2 b)
@@ -44,7 +68,8 @@ struct FLines
 FLines F;
 float2 p = float2(UV.y * 2 - 1, 1 - UV.x * 2);
 float r = length(p);
-float aa = max(fwidth(r), 1e-4);
+// One pixel in lens radii (fwidth sums both axes: halve it).
+float aa = max(0.5 * fwidth(r), 1e-4);
 float3 c = Texture2DSample(Tex, TexSampler, p * 0.5 + 0.5).rgb;
 float field = 1 - smoothstep(0.97 - aa, 0.97 + aa, r);
 float vig = 1 - 0.3 * pow(saturate(r / 0.97), 6);
@@ -80,12 +105,49 @@ for (int j = 1; j <= 20; j++)
     d = min(d, F.Seg(m, prev, q));
     prev = q;
 }
-// Half widths in units: a bold chevron, lighter holdovers, thin scales - thick
-// enough to survive the upscaler (thin lines went grey at 1.5 px).
-float ink = max(max(1 - smoothstep(0.35 - am, 0.35 + am, dc), 1 - smoothstep(0.25 - am, 0.25 + am, dh)),
-    1 - smoothstep(0.16 - am, 0.16 + am, d));
+// Line widths in pixels (am = one pixel in units): a laser-drawn mark, crisp -
+// the chevron 1.4 px, holdovers 1.2, scales 1 - with a 1 px glow and no wider
+// halo (owner 18.10: the blurred halo was wrong).
+float cC = 1 - smoothstep(0.7 * am - 0.5 * am, 0.7 * am + 0.5 * am, dc);
+float cH = 1 - smoothstep(0.6 * am - 0.5 * am, 0.6 * am + 0.5 * am, dh);
+float cL = 1 - smoothstep(0.5 * am - 0.5 * am, 0.5 * am + 0.5 * am, d);
+float dAll = min(min(dc, dh), d);
+float core = max(max(cC, cH * 0.9), cL * 0.7);
+float edge = (1 - smoothstep(0.7 * am, 1.8 * am, dAll)) * 0.2;
+// A faint darkened pixel round the lines keeps them on a bright wall.
+float rim = (1 - smoothstep(1.2 * am, 2.2 * am, dAll)) * (1 - core);
+"""
+
+LENS_HLSL = GEOM_HLSL + """
 float3 glass = float3(0.004, 0.006, 0.01);
-return lerp(glass, c * vig, lit) * field * (1 - ink);
+return lerp(glass, c * vig, lit) * (1 - 0.6 * rim) * field;
+"""
+
+RETICLE_HLSL = GEOM_HLSL + """
+// MindKore's projector, in 2D: the raster's scan lines drifting through the
+// light, per-pixel grain, the haze's slow shimmer along the mark, the drive's
+// flicker with a rare dropout, and a few motes sparkling in the beam by the chevron.
+float2 px = p / max(aa, 1e-4);
+float scan = 0.88 + 0.12 * sin(px.y * 2.1 + Time * 31.0);
+float2 cell = floor(px * 0.5);
+float frame = floor(Time * 30.0);
+float grain = frac(sin(dot(cell + frame * float2(17.3, 5.1), float2(127.1, 311.7))) * 43758.5453);
+float shimmer = 0.92 + 0.08 * sin(Time * 6.3 + m.x * 2.1 + m.y * 1.3) * sin(Time * 10.7 - m.y * 2.9);
+float tick = floor(Time * 18.0);
+float dropout = frac(sin(tick * 12.9898) * 43758.5453) > 0.985 ? 0.7 : 1.0;
+float flicker = (0.97 + 0.03 * sin(Time * 53.0) * sin(Time * 17.0)) * dropout;
+// Motes: single pixels, rare, only on and right beside the lines (owner: the fat sparkles were too much).
+float mote = step(0.996, frac(sin(dot(floor(px) + floor(Time * 12.0) * float2(3.7, 9.1), float2(269.5, 183.3))) * 43758.5453))
+    * (1 - smoothstep(0.8 * am, 1.6 * am, dAll));
+// The projector's drive from the picture round the aim point: 1 in the dark, up
+// to its SunDrive 4 over a lit picture (its LitRoomLuma 0.12 .. 0.6).
+float3 around = Texture2DSample(Tex, TexSampler, float2(0.5, 0.5)).rgb + Texture2DSample(Tex, TexSampler, float2(0.47, 0.5)).rgb
+    + Texture2DSample(Tex, TexSampler, float2(0.53, 0.5)).rgb + Texture2DSample(Tex, TexSampler, float2(0.5, 0.47)).rgb
+    + Texture2DSample(Tex, TexSampler, float2(0.5, 0.53)).rgb;
+float luma = dot(around * 0.2, float3(0.2126, 0.7152, 0.0722));
+float drive = lerp(1.0, 4.0, saturate((luma - 0.12) / 0.48)) * flicker;
+float laser = (core * scan * (0.9 + 0.2 * grain) * shimmer + edge * shimmer + mote * 0.6) * drive;
+return Red.rgb * Glow * laser * lit * field;
 """
 
 MASK_HLSL = """
@@ -99,15 +161,56 @@ def _input(name):
     return ci
 
 
-def build():
-    path = FOLDER + "/" + NAME
+def _fresh(name):
+    path = FOLDER + "/" + name
     if eal.does_asset_exist(path):
         m = unreal.load_asset(path)
         mel.delete_all_material_expressions(m)
     else:
-        m = unreal.AssetToolsHelpers.get_asset_tools().create_asset(NAME, FOLDER, unreal.Material, unreal.MaterialFactoryNew())
+        m = unreal.AssetToolsHelpers.get_asset_tools().create_asset(name, FOLDER, unreal.Material, unreal.MaterialFactoryNew())
     m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
-    m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    return m, path
+
+
+DOT_HLSL = """
+// A tritium / fibre insert seen end on: a small bright core where the dot faces
+// the eye, the rest of the insert dark - the ring round it; the projector's slow
+// shimmer and a rare dip, no per-frame grain (the upscaler would smear it).
+float facing = saturate(dot(normalize(N), normalize(V)));
+float core = pow(facing, 12.0);
+float shimmer = 0.9 + 0.1 * sin(Time * 6.3) * sin(Time * 10.7);
+float dip = frac(sin(floor(Time * 18.0) * 12.9898) * 43758.5453) > 0.985 ? 0.6 : 1.0;
+return Red.rgb * Glow * core * shimmer * dip + float3(0.012, 0.004, 0.004) * (1.0 - core);
+"""
+
+
+def build_dot():
+    """The pistol's sight inserts: tiny, a bright core in a dark ring, the projector's red."""
+    m, path = _fresh("M_Jam_SightDot")
+    custom = mel.create_material_expression(m, unreal.MaterialExpressionCustom, -300, 0)
+    custom.set_editor_property("code", DOT_HLSL)
+    custom.set_editor_property("description", "SightDot")
+    custom.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT3)
+    custom.set_editor_property("inputs", [_input(k) for k in ("N", "V", "Time", "Red", "Glow")])
+    normal = mel.create_material_expression(m, unreal.MaterialExpressionVertexNormalWS, -600, 0)
+    view = mel.create_material_expression(m, unreal.MaterialExpressionCameraVectorWS, -600, 100)
+    time = mel.create_material_expression(m, unreal.MaterialExpressionTime, -600, 200)
+    colour = mel.create_material_expression(m, unreal.MaterialExpressionVectorParameter, -600, 300)
+    colour.set_editor_property("parameter_name", "Red")
+    colour.set_editor_property("default_value", RED)
+    glow = mel.create_material_expression(m, unreal.MaterialExpressionScalarParameter, -600, 400)
+    glow.set_editor_property("parameter_name", "Glow")
+    glow.set_editor_property("default_value", 6.0)
+    for src, pin in ((normal, "N"), (view, "V"), (time, "Time"), (colour, "Red"), (glow, "Glow")):
+        if not mel.connect_material_expressions(src, "", custom, pin):
+            raise RuntimeError("dot link failed: " + pin)
+    mel.connect_material_property(custom, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    mel.recompile_material(m)
+    eal.save_asset(path, False)
+    unreal.log("JAMSCOPE: built %s" % path)
+
+
+def _graph(m):
     y = [0]
 
     def node(cls, **props):
@@ -117,26 +220,34 @@ def build():
             n.set_editor_property(k, v)
         return n
 
-    def link(a, b, pin=""):
-        if not mel.connect_material_expressions(a, "", b, pin):
-            raise RuntimeError("link failed: %s -> %s.%s" % (a.get_name(), b.get_name(), pin))
-
     def custom(code, desc, out_type, inputs):
         n = node(unreal.MaterialExpressionCustom, code=code, description=desc, output_type=out_type,
                  inputs=[_input(k) for k in inputs])
         for k, src in inputs.items():
-            link(src, n, k)
+            if not mel.connect_material_expressions(src, "", n, k):
+                raise RuntimeError("link failed: %s -> %s.%s" % (src.get_name(), n.get_name(), k))
         return n
 
-    uv = node(unreal.MaterialExpressionTextureCoordinate)
-    scene = node(unreal.MaterialExpressionTextureObjectParameter, parameter_name="Scene",
-                 texture=unreal.load_asset("/Engine/EngineResources/Black"))
-    eye = node(unreal.MaterialExpressionVectorParameter, parameter_name="Eye",
-               default_value=unreal.LinearColor(10.0, 10.0, 20.0, 0.0))
-    unit = node(unreal.MaterialExpressionScalarParameter, parameter_name="Unit", default_value=0.03)
-    lens = custom(LENS_HLSL, "ScopeLens", unreal.CustomMaterialOutputType.CMOT_FLOAT3,
-                  {"UV": uv, "Tex": scene, "E": eye, "Unit": unit})
-    mask = custom(MASK_HLSL, "ScopeMask", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {"UV": uv})
+    inputs = {
+        "UV": node(unreal.MaterialExpressionTextureCoordinate),
+        "Tex": node(unreal.MaterialExpressionTextureObjectParameter, parameter_name="Scene",
+                    texture=unreal.load_asset("/Engine/EngineResources/Black")),
+        "E": node(unreal.MaterialExpressionVectorParameter, parameter_name="Eye",
+                  default_value=unreal.LinearColor(10.0, 10.0, 20.0, 0.0)),
+        "Unit": node(unreal.MaterialExpressionScalarParameter, parameter_name="Unit", default_value=0.018),
+        "Red": node(unreal.MaterialExpressionVectorParameter, parameter_name="Red", default_value=RED),
+        "Glow": node(unreal.MaterialExpressionScalarParameter, parameter_name="Glow", default_value=2.5),
+        "Time": node(unreal.MaterialExpressionTime),
+    }
+    return node, custom, inputs
+
+
+def build():
+    m, path = _fresh(NAME)
+    m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    node, custom, inputs = _graph(m)
+    lens = custom(LENS_HLSL, "ScopeLens", unreal.CustomMaterialOutputType.CMOT_FLOAT3, inputs)
+    mask = custom(MASK_HLSL, "ScopeMask", unreal.CustomMaterialOutputType.CMOT_FLOAT1, {"UV": inputs["UV"]})
     mel.connect_material_property(lens, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.connect_material_property(mask, "", unreal.MaterialProperty.MP_OPACITY_MASK)
     mel.recompile_material(m)
@@ -144,6 +255,21 @@ def build():
     unreal.log("JAMSCOPE: built %s" % path)
 
 
+def build_reticle():
+    """The laser layer: additive, drawn after motion blur - past TSR, which ate 1 px lines in the lens."""
+    m, path = _fresh("M_Jam_ScopeReticle")
+    m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_ADDITIVE)
+    m.set_editor_property("translucency_pass", unreal.MaterialTranslucencyPass.MTP_AFTER_MOTION_BLUR)
+    node, custom, inputs = _graph(m)
+    laser = custom(RETICLE_HLSL, "ScopeReticle", unreal.CustomMaterialOutputType.CMOT_FLOAT3, inputs)
+    mel.connect_material_property(laser, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    mel.recompile_material(m)
+    eal.save_asset(path, False)
+    unreal.log("JAMSCOPE: built %s" % path)
+
+
 if __name__ == "__main__":
     build()
+    build_reticle()
+    build_dot()
     unreal.SystemLibrary.quit_editor()

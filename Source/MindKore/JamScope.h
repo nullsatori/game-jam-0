@@ -31,9 +31,11 @@ class UTextureRenderTarget2D;
  * world in HDR into a render target, Magnification times the size it has in
  * the outer view next to the eyepiece (owner: «оптика 3х пусть будет»). A disc
  * at the eyepiece shows it through M_Jam_ScopeLens (Scripts/jam_scope.py): the
- * picture, a PSO-1 style reticle, the field stop and the eye-relief shadow -
- * the dark side of the tube that grows as the eye leaves the eyepiece's axis
- * or its relief distance.
+ * picture, the field stop and the eye-relief shadow - the dark side of the tube
+ * that grows as the eye leaves the eyepiece's axis or its relief distance. A
+ * second disc in front of it draws the PSO-1 style reticle as MindKore's red
+ * projector laser (M_Jam_ScopeReticle, after TSR). The same red lights the
+ * pistol's sight dots (SightDots).
  *
  * Scene colour is captured before post-processing and shown as unlit emissive:
  * the main view's exposure and tonemapper apply to it once, as to the world
@@ -86,9 +88,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope", meta = (ClampMin = "1.0"))
 	float Magnification = 3.0f;
 
-	/** The gun's own field of view when aimed (first-person primitives; the world keeps the bodycam's 134). */
+	/**
+	 * The gun's own field of view when aimed (first-person primitives; the world keeps the bodycam's 134).
+	 * 96: the eyepiece about 45% of the frame height, the rest of the frame the world
+	 * (owner 18.10: «прицел можно помельче, чтобы и оружие было видно нормально»; 52 filled 84%).
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope", meta = (ClampMin = "10.0", ClampMax = "170.0"))
-	float AimGunFieldOfView = 52.0f;
+	float AimGunFieldOfView = 96.0f;
 
 	/** The gun's kick in view (back and rise) when aimed, share of the hip kick: shouldered, it keeps off the eye. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope", meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -98,7 +104,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope", meta = (ClampMin = "0.0"))
 	float ShadowPerCm = 0.7f;
 
-	/** Square render target side, px (the eyepiece is about 600 px across in a 1080p frame). */
+	/** Square render target side, px (the eyepiece is about 450 px across in a 1080p frame; 768 leaves room for 4K). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope", meta = (ClampMin = "64", ClampMax = "2048"))
 	int32 RenderTargetSize = 768;
 
@@ -112,8 +118,42 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Scope")
 	TObjectPtr<UStaticMeshComponent> Lens = nullptr;
 
+	/**
+	 * M_Jam_ScopeReticle: the reticle as a red laser projection (MindKore's bodycam projector), additive,
+	 * drawn after motion blur on a second disc just in front of the glass - past TSR, which smeared the
+	 * 1 px lines when they were part of the lens.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope")
+	TSoftObjectPtr<UMaterialInterface> ReticleMaterial;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Scope")
+	TObjectPtr<UStaticMeshComponent> Reticle = nullptr;
+
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Scope")
 	TObjectPtr<UTextureRenderTarget2D> Target = nullptr;
+
+	/**
+	 * The pistol's illuminated sights (owner: «на пистолет на целик тоже можно их добавить»): glowing
+	 * dots in the scope reticle's red, on the moving part of Weapons[SightDotWeapon] - the USP's sights
+	 * are on its slide, so they ride with it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights")
+	int32 SightDotWeapon = 0;
+
+	/** The dots in that moving part's mesh space, cm (SM_Jam_USP_Slide: the rear sight's two posts, the front blade, each just under its top so the three read as one line when aimed; measured from its vertices). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights")
+	TArray<FVector> SightDotsCm = { FVector(3.6f, -1.9f, 5.82f), FVector(3.6f, -1.0f, 5.82f), FVector(-13.12f, -1.45f, 6.02f) };
+
+	/** A dot's diameter, cm: a 2 mm insert, half sunk into the sight's face (owner: the first ones were cheap and too big). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights", meta = (ClampMin = "0.01"))
+	float SightDotCm = 0.2f;
+
+	/** M_Jam_SightDot (Scripts/jam_scope.py). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights")
+	TSoftObjectPtr<UMaterialInterface> SightDotMaterial;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Scope|Sights")
+	TArray<TObjectPtr<UStaticMeshComponent>> SightDots;
 
 	/** 0 at the hip .. 1 at the eye, on the smootherstep curve. */
 	UFUNCTION(BlueprintPure, Category = "Jam|Scope")
@@ -150,6 +190,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> LensMID = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> ReticleMID = nullptr;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> AimAction = nullptr;

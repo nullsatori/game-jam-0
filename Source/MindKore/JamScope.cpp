@@ -25,6 +25,8 @@ UJamScopeComponent::UJamScopeComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	LensMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/Materials/Weapons/M_Jam_ScopeLens.M_Jam_ScopeLens")));
+	ReticleMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/Materials/Weapons/M_Jam_ScopeReticle.M_Jam_ScopeReticle")));
+	SightDotMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/Materials/Weapons/M_Jam_SightDot.M_Jam_SightDot")));
 }
 
 float UJamScopeComponent::GetCaptureFieldOfView() const
@@ -128,6 +130,41 @@ bool UJamScopeComponent::Build()
 	}
 	Lens->RegisterComponent();
 
+	// The laser layer, a hair in front of the glass (toward the eye, -X).
+	Reticle = NewObject<UStaticMeshComponent>(GetOwner(), TEXT("ScopeReticle"));
+	Reticle->SetStaticMesh(Plane);
+	Reticle->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Reticle->SetCastShadow(false);
+	Reticle->SetOnlyOwnerSee(true);
+	Reticle->SetupAttachment(Gun);
+	Reticle->SetRelativeLocationAndRotation(EyepieceCm - FVector(0.02f, 0.0f, 0.0f), FRotator(90.0f, 0.0f, 0.0f));
+	Reticle->SetRelativeScale3D(FVector(LensRadiusCm * 2.0f / 100.0f));
+	if (UMaterialInterface* Material = ReticleMaterial.LoadSynchronous())
+	{
+		ReticleMID = UMaterialInstanceDynamic::Create(Material, this);
+		ReticleMID->SetTextureParameterValue(TEXT("Scene"), Target);
+		Reticle->SetMaterial(0, ReticleMID);
+	}
+	Reticle->RegisterComponent();
+
+	static UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	UMaterialInterface* DotMaterial = SightDotMaterial.LoadSynchronous();
+	for (const FVector& At : SightDotsCm)
+	{
+		UStaticMeshComponent* Dot = NewObject<UStaticMeshComponent>(GetOwner());
+		Dot->SetStaticMesh(Sphere);
+		Dot->SetMaterial(0, DotMaterial);
+		Dot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Dot->SetCastShadow(false);
+		Dot->SetOnlyOwnerSee(true);
+		Dot->SetupAttachment(Weapons->ActionInView);
+		Dot->SetRelativeLocation(At);
+		Dot->SetRelativeScale3D(FVector(SightDotCm / 100.0f));
+		Dot->SetVisibility(false);
+		Dot->RegisterComponent();
+		SightDots.Add(Dot);
+	}
+
 	// Everything the owner has now - the gun, its moving part, flash, smoke,
 	// dust, the lens itself - stays out of the picture; tracers made later do not.
 	// What hangs on the camera (the gun, its part, the lens, flash and smoke) is
@@ -166,6 +203,14 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	// Smootherstep: no speed at either end, fastest halfway.
 	Alpha = Progress * Progress * Progress * (Progress * (Progress * 6.0f - 15.0f) + 10.0f);
 	Lens->SetVisibility(bScopeInView);
+	Reticle->SetVisibility(bScopeInView);
+	// The sight dots ride on the moving part of their gun (the USP's slide) while that part is in view.
+	const UStaticMesh* Part = Weapons->ActionInView ? Weapons->ActionInView->GetStaticMesh() : nullptr;
+	const bool bDotsInView = Part && Weapons->Weapons.IsValidIndex(SightDotWeapon) && Part == Weapons->Weapons[SightDotWeapon].ActionMesh;
+	for (UStaticMeshComponent* Dot : SightDots)
+	{
+		Dot->SetVisibility(bDotsInView);
+	}
 	Capture->bCaptureEveryFrame = Alpha > 0.0f;
 	if (Alpha > 0.0f || WasAlpha > 0.0f)
 	{
@@ -181,6 +226,10 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		// off its relief, cm. At the hip the shadow covers the glass.
 		const FVector Eye = Gun->GetRelativeTransform().InverseTransformPosition(FVector::ZeroVector) - EyepieceCm;
 		LensMID->SetVectorParameterValue(TEXT("Eye"), FLinearColor(Eye.Y * ShadowPerCm, -Eye.Z * ShadowPerCm, -Eye.X - EyeReliefCm, 0.0f));
+		if (ReticleMID)
+		{
+			ReticleMID->SetVectorParameterValue(TEXT("Eye"), FLinearColor(Eye.Y * ShadowPerCm, -Eye.Z * ShadowPerCm, -Eye.X - EyeReliefCm, 0.0f));
+		}
 	}
 }
 
@@ -199,7 +248,8 @@ namespace
 	 * Lvl_Jam_Range). The zero-G pawn stands 19.5 m before the living wall nearest
 	 * to 20 m away and looks at it: the rifle at the hip, raising, aimed at the
 	 * wall's centre and at its top edge, a shot (+0.05, +0.15, +0.6 s in the bolt
-	 * cycle, +1.5 s), then at the hip again. Every still is logged first with the
+	 * cycle, +1.5 s), at the hip again, then the pistol with its sight dots (at rest
+	 * and the slide held back). Every still is logged first with the
 	 * scope's state; GPU and frame times are sampled at the hip and aimed.
 	 */
 	void RunScopeShots(UWorld* World)
@@ -279,6 +329,8 @@ namespace
 		Measure(10.6f, TEXT("aimed"));
 		After(11.9f, [Hold, Centre]() { Hold(Centre); });
 		After(12.0f, [Shot]() { Shot(TEXT("03_aimed_wall_centre")); });
+		// The reticle close: the same frame at twice the size.
+		After(12.2f, [Controller]() { Controller->ConsoleCommand(TEXT("HighResShot 2 filename=JamScope_03b_aimed_x2")); });
 		After(12.4f, [Hold, Edge]() { Hold(Edge); });
 		After(12.6f, [Shot]() { Shot(TEXT("04_aimed_wall_edge")); });
 		After(13.0f, [Pawn, Hold, Centre]() { Hold(Centre); Pawn->Fire(); });
@@ -289,11 +341,19 @@ namespace
 		After(14.5f, [Shot]() { Shot(TEXT("08_settled_1500")); });
 		After(15.0f, [Scope]() { Scope->SetHeld(false); });
 		After(16.0f, [Hold, Shot, Centre]() { Hold(Centre); Shot(TEXT("09_hip_again")); });
-		After(16.5f, [Scope]() { UE_LOG(LogMindKore, Log, TEXT("Scope shots: done - %s"), *Scope->Describe()); });
+		// The pistol's sight dots: at rest, then the slide held back (jam.Weapons.PoseAt) - they ride on it.
+		IConsoleVariable* PoseAt = IConsoleManager::Get().FindConsoleVariable(TEXT("jam.Weapons.PoseAt"));
+		After(16.5f, [Pawn, Hold, Centre]() { Pawn->Guns->UnlockWeapon(0); Hold(Centre); });
+		After(17.5f, [Hold, Shot, Centre]() { Hold(Centre); Shot(TEXT("10_pistol_sights")); });
+		After(17.7f, [Controller]() { Controller->ConsoleCommand(TEXT("HighResShot 2 filename=JamScope_10b_pistol_x2")); });
+		After(18.0f, [PoseAt]() { if (PoseAt) { PoseAt->Set(0.035f, ECVF_SetByCode); } });
+		After(18.3f, [Hold, Shot, Centre]() { Hold(Centre); Shot(TEXT("11_pistol_slide_back")); });
+		After(18.6f, [PoseAt]() { if (PoseAt) { PoseAt->Set(-1.0f, ECVF_SetByCode); } });
+		After(19.0f, [Scope]() { UE_LOG(LogMindKore, Log, TEXT("Scope shots: done - %s"), *Scope->Describe()); });
 	}
 
 	FAutoConsoleCommandWithWorld GScopeShots(
 		TEXT("jam.Scope.Shots"),
-		TEXT("Stills of the SV-98's scope at a living wall ~20 m away: hip, raising, aimed (centre, edge), a shot through the bolt cycle, hip again; GPU/frame time at the hip and aimed (HighResShot; needs a real RHI)."),
+		TEXT("Stills of the SV-98's scope at a living wall ~20 m away: hip, raising, aimed (centre, edge), a shot through the bolt cycle, hip again, the pistol sight dots; GPU/frame time at the hip and aimed (HighResShot; needs a real RHI)."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunScopeShots));
 }
