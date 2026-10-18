@@ -171,20 +171,21 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Shotgun.ViewOffset = FTransform(FRotator::ZeroRotator, FVector(26.0f, 11.0f, -12.0f));
 	// The fore-end, racked by itself 0.15 s after the shot (owner: «более резво
 	// передергивать»): yanked back 6 cm into the stop in 0.11 s, a 6% bounce off
-	// it, slammed home 0.14 s after the back click with a 5% rebound, settled at
-	// 0.47 s. The stroke runs along the line of sight, so the gun comes in to meet
-	// it - canted to show its underside, swung across the view and pulled 8 cm
-	// closer - and goes back
-	// out by 0.56 s.
+	// it, slammed home 0.14 s after the back click with a double knock (6%, 1.5%),
+	// settled at 0.47 s; the hand drives it, so both strokes speed up into their stops. The
+	// stroke runs along the line of sight, so the gun comes in to meet it - canted
+	// to show its underside, swung across the view and pulled 8 cm closer: ActionBody
+	// is where its pose springs pull (JamWeaponParts.cpp), in at 0.12 s, out at 0.36 s.
 	Shotgun.ActionMesh = Pump.Object;
 	// 6 cm (owner, round 2: «уменьши ход»): the fore-end, 3 cm further forward now, stops at the receiver's front.
 	Shotgun.ActionTravelCm = -6.0f;
-	Shotgun.ActionTravel = MakeCycleCurve({ { 0.15f, 0.0f, 0.0f, 6.0f }, { 0.26f, 1.0f, 20.0f, -4.0f }, { 0.28f, 0.94f, 0.0f, 0.0f },
-		{ 0.4f, 0.0f, -22.0f, 3.0f }, { 0.42f, 0.05f, 0.0f, 0.0f }, { 0.47f, 0.0f, 0.0f, 0.0f } });
+	Shotgun.ActionTravel = MakeCycleCurve({ { 0.15f, 0.0f, 0.0f, 2.0f }, { 0.26f, 1.0f, 24.0f, -5.0f }, { 0.28f, 0.92f, 0.0f, 0.0f },
+		{ 0.4f, 0.0f, -26.0f, 4.0f }, { 0.415f, 0.06f, 0.0f, 0.0f }, { 0.43f, 0.0f, -2.0f, 1.5f },
+		{ 0.44f, 0.015f, 0.0f, 0.0f }, { 0.47f, 0.0f, 0.0f, 0.0f } });
 	Shotgun.ActionBodyTurn = FRotator(6.0f, -15.0f, 22.0f);
 	Shotgun.ActionBodyOffsetCm = FVector(-8.0f, -3.0f, 2.0f);
-	Shotgun.ActionBody = MakeCycleCurve({ { 0.12f, 0.0f, 0.0f, 0.0f }, { 0.22f, 1.05f, 0.0f, 0.0f }, { 0.26f, 1.0f, 0.0f, 0.0f },
-		{ 0.36f, 1.0f, 0.0f, 0.0f }, { 0.48f, 0.0f, -12.0f, -1.5f }, { 0.51f, -0.04f, 0.0f, 0.0f }, { 0.56f, 0.0f, 0.0f, 0.0f } });
+	Shotgun.ActionBody = MakeCycleCurve({ { 0.12f, 0.0f, 0.0f, 0.0f }, { 0.135f, 1.0f, 0.0f, 0.0f }, { 0.36f, 1.0f, 0.0f, 0.0f },
+		{ 0.375f, 0.0f, 0.0f, 0.0f }, { 0.56f, 0.0f, 0.0f, 0.0f } });
 	FJamWeapon Sniper;
 	Sniper.Name = NSLOCTEXT("JamZeroG", "Sniper", "Снапа");
 	Sniper.Damage = 150.0f;
@@ -212,22 +213,29 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Sniper.ViewOffset = FTransform(FRotator::ZeroRotator, FVector(22.0f, 13.0f, -16.0f));
 	// The bolt at the rear of the receiver, turning about the bore at its handle
 	// (1.5 cm behind the trigger, 4.5 cm up), on the sound's clicks (up +0.35 s,
-	// back +0.63 s, home +0.87 s, down +1.09 s): lifted 60 deg into its stop with a
-	// 4% drop back, pulled 9 cm back into the stop with a 7% bounce, a beat, pushed
-	// home with a 3.5% knock, locked down with a 5% bounce. The rifle cants to
-	// show its right side meanwhile, back by 1.25 s.
+	// back +0.63 s, home +0.87 s, down +1.09 s), one arc: lifted 60 deg into its stop
+	// (5% drop back), drawing the bolt 4% back as it turns; pulled 9 cm back - starting
+	// while the lift still rocks, faster and faster - into the stop with an 8% bounce;
+	// a beat; slammed home with a double knock (4%, 1.2%); the lock-down starts early,
+	// cams the bolt 1.5% forward and bottoms with a double bounce (6%, 1.5%).
+	// The rifle cants to show its right side meanwhile: ActionBody, in at 0.2 s,
+	// out at 1.05 s, is where its pose springs pull.
 	Sniper.ActionMesh = Sv98Bolt.Object;
 	Sniper.ActionPivot = FVector(-1.5f, 0.0f, 4.5f);
 	Sniper.ActionTravelCm = -9.0f;
 	Sniper.ActionTurnDeg = 60.0f;
-	Sniper.ActionTurn = MakeCycleCurve({ { 0.25f, 0.0f, 0.0f, 2.0f }, { 0.35f, 1.0f, 12.0f, -2.0f }, { 0.38f, 0.96f, 0.0f, 0.0f },
-		{ 0.42f, 1.0f, 0.0f, 0.0f }, { 0.99f, 1.0f, 0.0f, 0.0f }, { 1.09f, 0.0f, -14.0f, 2.5f }, { 1.12f, 0.05f, 0.0f, 0.0f },
-		{ 1.18f, 0.0f, 0.0f, 0.0f } });
-	Sniper.ActionTravel = MakeCycleCurve({ { 0.42f, 0.0f, 0.0f, 0.0f }, { 0.63f, 1.0f, 11.0f, -3.0f }, { 0.665f, 0.93f, 0.0f, 0.0f },
-		{ 0.72f, 0.93f, 0.0f, 0.0f }, { 0.87f, 0.0f, -14.0f, 2.5f }, { 0.895f, 0.035f, 0.0f, 0.0f }, { 0.93f, 0.0f, 0.0f, 0.0f } });
+	Sniper.ActionTurn = MakeCycleCurve({ { 0.25f, 0.0f, 0.0f, 1.0f }, { 0.35f, 1.0f, 14.0f, -3.0f }, { 0.38f, 0.95f, 0.0f, 0.0f },
+		{ 0.42f, 1.0f, 0.0f, 0.0f }, { 0.95f, 1.0f, 0.0f, 0.0f }, { 1.09f, 0.0f, -16.0f, 3.0f },
+		{ 1.105f, 0.06f, 0.0f, 0.0f }, { 1.12f, 0.0f, -2.0f, 1.0f }, { 1.13f, 0.015f, 0.0f, 0.0f },
+		{ 1.17f, 0.0f, 0.0f, 0.0f } });
+	Sniper.ActionTravel = MakeCycleCurve({ { 0.25f, 0.0f, 0.0f, 0.0f }, { 0.35f, 0.04f, 0.6f, 0.0f }, { 0.38f, 0.04f, 0.0f, 0.0f },
+		{ 0.63f, 1.0f, 13.0f, -4.0f }, { 0.66f, 0.92f, 0.0f, 0.0f }, { 0.72f, 0.93f, 0.0f, 0.0f },
+		{ 0.87f, 0.0f, -16.0f, 3.0f }, { 0.89f, 0.04f, 0.0f, 0.0f }, { 0.905f, 0.0f, -1.0f, 1.0f },
+		{ 0.915f, 0.012f, 0.0f, 0.0f }, { 0.95f, 0.0f, 0.0f, 0.0f }, { 1.02f, -0.015f, 0.0f, 0.0f },
+		{ 1.09f, 0.0f, 0.0f, 0.0f } });
 	Sniper.ActionBodyTurn = FRotator(3.0f, -8.0f, -14.0f);
-	Sniper.ActionBody = MakeCycleCurve({ { 0.2f, 0.0f, 0.0f, 0.0f }, { 0.32f, 1.04f, 0.0f, 0.0f }, { 0.37f, 1.0f, 0.0f, 0.0f },
-		{ 1.05f, 1.0f, 0.0f, 0.0f }, { 1.17f, 0.0f, -12.0f, -1.5f }, { 1.2f, -0.03f, 0.0f, 0.0f }, { 1.25f, 0.0f, 0.0f, 0.0f } });
+	Sniper.ActionBody = MakeCycleCurve({ { 0.2f, 0.0f, 0.0f, 0.0f }, { 0.215f, 1.0f, 0.0f, 0.0f }, { 1.05f, 1.0f, 0.0f, 0.0f },
+		{ 1.065f, 0.0f, 0.0f, 0.0f }, { 1.25f, 0.0f, 0.0f, 0.0f } });
 	Weapons = { Pistol, Shotgun, Sniper };
 	SetupWeaponParts();
 
@@ -364,16 +372,10 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	{
 		return;
 	}
-	// A hull tool in hand (the strap, the welder) puts the gun away.
+	// A hull tool in hand (the strap, the welder) puts the gun away; a switch puts one away and
+	// draws the next (JamWeaponParts.cpp). The gun shown is the one on its way, not yet the current one.
 	const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>();
-	const FJamWeapon* Weapon = Tools && Tools->GetTool() != EJamHullTool::None ? nullptr : GetWeapon();
-	if (CurrentWeapon != ShownWeapon || !Weapon)
-	{
-		ShownWeapon = Weapon ? CurrentWeapon : INDEX_NONE;
-		ViewModel->SetStaticMesh(Weapon ? Weapon->ViewMesh.Get() : nullptr);
-		ActionInView->SetStaticMesh(Weapon ? Weapon->ActionMesh.Get() : nullptr);
-		SinceShotSeconds = 1000.0f;
-	}
+	const FJamWeapon* Weapon = UpdateSwitch(DeltaTime, Tools && Tools->GetTool() != EJamHullTool::None, PoseSwitch);
 	if (!Weapon)
 	{
 		UpdateParts(nullptr, 0.0f);
@@ -390,15 +392,14 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	float KickScale = 1.0f;
 	if (Scope)
 	{
-		Scope->AimPose(CurrentWeapon, Offset, KickScale);
+		Scope->AimPose(ShownWeapon, Offset, KickScale);
 	}
 	const float Kick = KickScale * FMath::Exp(-ViewKickReturnRate * Since);
 	const FQuat Rise = FRotator(Weapon->ViewKickRiseDeg * Kick, 0.0f, -0.3f * Weapon->ViewKickRiseDeg * Kick).Quaternion();
-	const float BodyShare = EvalCycle(Weapon->ActionBody, Since);
-	const float ReloadShare = GetReloadBodyShare(*Weapon);
-	Offset.SetRotation(Rise * (Weapon->ActionBodyTurn * BodyShare).Quaternion() * (Weapon->ReloadBodyTurn * ReloadShare).Quaternion()
-		* Offset.GetRotation());
-	Offset.AddToTranslation(Weapon->ActionBodyOffsetCm * BodyShare + Weapon->ReloadBodyOffsetCm * ReloadShare);
+	// The whole gun's pose in the cycle and the reload: a mass on springs (JamWeaponParts.cpp).
+	UpdatePose(*Weapon, DeltaTime);
+	Offset.SetRotation(Rise * FRotator(Pose.Turn.X, Pose.Turn.Y, Pose.Turn.Z).Quaternion() * Offset.GetRotation());
+	Offset.AddToTranslation(Pose.Place);
 	Offset.AddToTranslation(FVector(-Weapon->ViewKickBackCm * Kick, 0.0f, 0.0f));
 	ViewModel->SetRelativeTransform(Offset);
 	// The moving part runs its cycle along/about the gun's own X.
@@ -481,8 +482,58 @@ void UJamWeaponsComponent::UnlockWeapon(int32 Index)
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s unlocked"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString());
 }
 
+void UJamWeaponsComponent::Holster()
+{
+	if (bHolstered)
+	{
+		return;
+	}
+	bHolstered = true;
+	ReloadEndSeconds = 0.0; // as a switch: the reload and the last gun's cycle are abandoned
+	GetWorld()->GetTimerManager().ClearTimer(CycleTimer);
+	ClearView(); // gone this frame, no put-away (JamWeaponParts.cpp)
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: unarmed"), *GetNameSafe(GetOwner()));
+}
+
+void UJamWeaponsComponent::Rearm()
+{
+	if (!bHolstered || !IsWeaponUnlocked(CurrentWeapon))
+	{
+		return;
+	}
+	bHolstered = false;
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: rearmed - %s"), *GetNameSafe(GetOwner()), *Weapons[CurrentWeapon].Name.ToString());
+	Draw();
+}
+
+void UJamWeaponsComponent::Draw()
+{
+	// The draw (owner 19.10): with the gun wanted again, the switch (UJamWeaponsComponent::UpdateSwitch,
+	// JamWeaponParts.cpp) brings it in from away along its own path - the pistol from the right-hip
+	// holster, the shotgun over the right shoulder, the SV-98 over the left - on the pose springs;
+	// it fires once drawn and settled (IsDrawing).
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: draw %s"), *GetNameSafe(GetOwner()), Weapons.IsValidIndex(CurrentWeapon) ? *Weapons[CurrentWeapon].Name.ToString() : TEXT("-"));
+}
+
+bool UJamWeaponsComponent::IsDrawing() const
+{
+	return GetWeapon() && !IsWeaponReady();
+}
+
 void UJamWeaponsComponent::SelectWeapon(int32 Index)
 {
+	// Out of unarmed (the same gun or another): drawn. A plain switch is not a draw here - the anim
+	// thread's switching (put away, draw) owns that.
+	const bool bFromUnarmed = bHolstered && IsWeaponUnlocked(Index);
+	if (bFromUnarmed && Index == CurrentWeapon)
+	{
+		Rearm();
+		return;
+	}
+	if (bFromUnarmed)
+	{
+		bHolstered = false;
+	}
 	if (!Weapons.IsValidIndex(Index) || Index == CurrentWeapon || !Weapons[Index].bUnlocked)
 	{
 		return;
@@ -492,6 +543,10 @@ void UJamWeaponsComponent::SelectWeapon(int32 Index)
 	GetWorld()->GetTimerManager().ClearTimer(CycleTimer);
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s (%d/%d)"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString(),
 		Weapons[Index].Ammo, Weapons[Index].Reserve);
+	if (bFromUnarmed)
+	{
+		Draw();
+	}
 }
 
 float UJamWeaponsComponent::GetReloadRemaining() const
@@ -516,8 +571,8 @@ FString UJamWeaponsComponent::Describe() const
 
 void UJamWeaponsComponent::Reload()
 {
-	FJamWeapon* Weapon = IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
-	if (!Weapon || Weapon->Ammo >= Weapon->MagazineSize || Weapon->Reserve <= 0 || GetReloadRemaining() > 0.0f)
+	FJamWeapon* Weapon = !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
+	if (!Weapon || !IsWeaponReady() || Weapon->Ammo >= Weapon->MagazineSize || Weapon->Reserve <= 0 || GetReloadRemaining() > 0.0f)
 	{
 		return;
 	}
@@ -528,13 +583,14 @@ void UJamWeaponsComponent::Reload()
 bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, FVector& OutRecoil)
 {
 	OutRecoil = FVector::ZeroVector;
-	FJamWeapon* Weapon = IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
+	FJamWeapon* Weapon = !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
 	const double Now = GetWorld()->GetTimeSeconds();
 	if (Weapon && Weapon->ShellMesh && Weapon->Ammo > 0 && GetReloadRemaining() > 0.0f)
 	{
 		ReloadEndSeconds = 0.0; // round-by-round loading breaks off for a shot
 	}
-	if (!Weapon || Now < NextShotSeconds || GetReloadRemaining() > 0.0f)
+	// Not before the gun is drawn and has settled (IsDrawing).
+	if (!Weapon || Now < NextShotSeconds || GetReloadRemaining() > 0.0f || IsDrawing())
 	{
 		return false;
 	}

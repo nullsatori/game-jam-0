@@ -978,6 +978,7 @@ namespace
 	bool AimAndFire(AJamZeroGPawn* Pawn, int32 Weapon, const FVector& Target)
 	{
 		Pawn->Guns->UnlockWeapon(Weapon);
+		Pawn->Guns->FinishSwitch(); // no draw: the probe shoots at once
 		if (AController* Controller = Pawn->GetController())
 		{
 			Controller->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());

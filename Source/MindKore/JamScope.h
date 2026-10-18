@@ -39,16 +39,82 @@ struct FJamAimSpring
 };
 
 /**
+ * One gun's way to the eye (owner 18.10: aim on every gun, «настолько же проработанное, как у снайперки по
+ * анимации»): where its sight line is, how far behind it the eye sits, how the gun moves there and back.
+ * Aimed, the line from SightRearCm to SightFrontCm lies on the view axis with the rear point EyeCm ahead.
+ */
+USTRUCT(BlueprintType)
+struct FJamGunAim
+{
+	GENERATED_BODY()
+
+	/** The rear sight in the gun's ViewMesh space, cm: the SV-98's eyepiece, the USP's rear dots, the pump gun's receiver top. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim")
+	FVector SightRearCm = FVector::ZeroVector;
+
+	/** The front sight: the objective, the front dot, the bead. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim")
+	FVector SightFrontCm = FVector::ForwardVector;
+
+	/** Eye to the rear sight when aimed, cm: more than the 10 cm near clip plane, with room for the kick. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim", meta = (ClampMin = "10.0"))
+	float EyeCm = 20.0f;
+
+	/** The gun's own field of view when aimed (first-person primitives; the world keeps the bodycam's 134). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim", meta = (ClampMin = "10.0", ClampMax = "170.0"))
+	float GunFieldOfView = 90.0f;
+
+	/** The gun's kick in view (back and rise) when aimed, share of the hip kick. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float KickScale = 0.5f;
+
+	/**
+	 * Raising, per channel of the gun's pose in the camera's frame: X (toward the eye), Y (across), Z (up),
+	 * then pitch, yaw, roll. Staggered delays bend the path into an arc; under-damped springs float past
+	 * the aim and settle (low gravity). The turns head for the aimed turn plus the drag of the motion
+	 * (LagDegPerCmPerSec) on their own springs, so the muzzle comes round late.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim")
+	TArray<FJamAimSpring> In;
+
+	/** Lowering: the same channels. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim")
+	TArray<FJamAimSpring> Out;
+
+	/** The muzzle trails the motion, degrees per cm/s of the gun: X pitch per cm/s up (it dips while rising), Y yaw and Z roll per cm/s across. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim")
+	FVector LagDegPerCmPerSec = FVector(0.1f, 0.04f, 0.05f);
+
+	/** Anticipation: before it rises the gun dips this far (cm, down) for AnticipationSeconds - the arm gathering itself. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim", meta = (ClampMin = "0.0"))
+	float AnticipationCm = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim", meta = (ClampMin = "0.0"))
+	float AnticipationSeconds = 0.08f;
+
+	/** The gun lags the camera's turn: degrees of yaw/pitch per deg/s of the view (roll half the yaw), at most 4 deg. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim", meta = (ClampMin = "0.0"))
+	float LookLag = 0.015f;
+
+	/** Aimed, the gun breathes: a slow sway of this many degrees (pitch; yaw 0.6 of it) at ~0.23 / 0.15 Hz. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Aim", meta = (ClampMin = "0.0"))
+	float BreathDeg = 0.15f;
+};
+
+/**
  * The SV-98's telescopic sight, a true 3D one (owner 18.10: «сделай true 3d прицел»).
  *
  * Holding ScopeKey brings the rifle up to the eye as a mass on damped springs, one
- * per channel (AimIn / AimOut: a late start, an arc, a floaty overshoot, the muzzle
+ * per channel (Aims[2].In / Out: a late start, an arc, a floaty overshoot, the muzzle
  * swinging late; the body's velocity changes sway it): its eyepiece settles onto
- * the camera's axis EyeReliefCm in front of
+ * the camera's axis Aims[2].EyeCm in front of
  * the eye. The world keeps the bodycam's field of view and barrel lens (owner
  * 18.10: «за пределами прицела не должно быть подзума»); only the gun, drawn as
- * a first-person primitive, narrows its own field to AimGunFieldOfView, so the
+ * a first-person primitive, narrows its own field to Aims[2].GunFieldOfView, so the
  * eyepiece comes up large while the camera stays outside the 10 cm near plane.
+ * The pistol and the pump gun come to the eye the same way, on their own spring
+ * tables, without a scope: their sight line onto the view axis (Aims[0], Aims[1]).
+ * RMB aims too, through the pawn (SetAimHeld; AJamZeroGPawn::Use).
  *
  * The picture is a picture-in-picture: a scene capture on the gun's scope axis
  * (it moves with the gun - its kick, its cant in the bolt cycle) renders the
@@ -88,32 +154,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope")
 	int32 ScopedWeapon = 2;
 
+
 	/**
-	 * Raising to the eye, per channel of the gun's pose in the camera's frame: X (toward the eye), Y
-	 * (across), Z (up), then pitch, yaw, roll (owner 18.10: «хочу чтобы заход в прицел ощущался прикольно
-	 * физически, мы же все таки в лоу-гравити»). Z starts first and swings fastest, X last: the rifle
-	 * comes up before it comes in, an arc, not a straight line. The turns have no aimed angle of their
-	 * own: they follow the drag of the motion (PitchLag, YawLag, RollLag) on their own, slower springs, so
-	 * the muzzle swings late and wobbles after the grip has stopped.
+	 * How each gun comes to the eye, indexed like UJamWeaponsComponent::Weapons (0 pistol, 1 shotgun, 2 SV-98);
+	 * a gun without an entry has no aim.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion")
-	TArray<FJamAimSpring> AimIn;
+	TArray<FJamGunAim> Aims;
 
-	/** Lowering: the same channels, quicker and more damped. */
+	/** The stand-in draw (StartDraw) starts the gun this far from its rest pose, cm in the camera's frame (low and to the right); it rises on its Out springs. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion")
-	TArray<FJamAimSpring> AimOut;
+	FVector DrawFromCm = FVector(-6.0f, 4.0f, -26.0f);
 
-	/** The muzzle trails the motion: pitch, degrees per cm/s of the gun going up (it dips while rising). */
+	/** ...turned this much (pitch, yaw, roll, degrees): the muzzle low, canted. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion")
-	float PitchLag = 0.1f;
-
-	/** ...yaw, degrees per cm/s across (it points back the way it came). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion")
-	float YawLag = 0.04f;
-
-	/** ...roll, degrees per cm/s across (it cants into the swing). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion")
-	float RollLag = 0.05f;
+	FVector DrawFromTurn = FVector(-30.0f, 10.0f, 25.0f);
 
 	/** The body's velocity changes (thrust, recoil, landing) push the gun the other way: cm/s of the gun per cm/s of the body. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion", meta = (ClampMin = "0.0"))
@@ -135,25 +190,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope", meta = (ClampMin = "0.1"))
 	float LensRadiusCm = 2.15f;
 
-	/** Eye to eyepiece when aimed, cm. Above the 10 cm near clip plane with room for the kick. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope", meta = (ClampMin = "10.0"))
-	float EyeReliefCm = 14.0f;
 
 	/** The picture in the eyepiece is this many times larger than the world right next to it; mouse look slows as much. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope", meta = (ClampMin = "1.0"))
 	float Magnification = 3.0f;
 
-	/**
-	 * The gun's own field of view when aimed (first-person primitives; the world keeps the bodycam's 134).
-	 * 96: the eyepiece about 45% of the frame height, the rest of the frame the world
-	 * (owner 18.10: «прицел можно помельче, чтобы и оружие было видно нормально»; 52 filled 84%).
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope", meta = (ClampMin = "10.0", ClampMax = "170.0"))
-	float AimGunFieldOfView = 96.0f;
-
-	/** The gun's kick in view (back and rise) when aimed, share of the hip kick: shouldered, it keeps off the eye. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float AimKickScale = 0.25f;
 
 	/** The eye-relief shadow: how far the tube's bright disc moves per cm the eye is off the axis, in lens radii. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope", meta = (ClampMin = "0.0"))
@@ -220,8 +261,20 @@ public:
 	/** The capture's full field of view, degrees: the eyepiece's angle as drawn in the world's field / Magnification. */
 	float GetCaptureFieldOfView() const;
 
+	/** Stand-in for the draw (UJamWeaponsComponent::Draw): the gun in hand rises from DrawFromCm / DrawFromTurn on its Out springs. */
+	void StartDraw() { bPendingDraw = true; }
+
+	/** A StartDraw still on its way: until the gun is back within 3 mm and 1 deg of rest, nearly still. */
+	bool IsDrawing() const { return bPendingDraw || bDrawing; }
+
 	/** Held from code (probes); the key does the same. */
 	void SetHeld(bool bInHeld) { bHeld = bInHeld; }
+
+	/** The pawn's RMB while a gun is out (AJamZeroGPawn::Use): aim as with the key. */
+	void SetAimHeld(bool bInHeld) { bHeldByHands = bInHeld; }
+
+	/** The gun the springs are moving now (INDEX_NONE: none). */
+	int32 GetMotionWeapon() const { return bMoving ? MotionWeapon : INDEX_NONE; }
 
 	/** UJamWeaponsComponent: Weapon's rest pose in view moved toward the eye, and the share of its kick that stays. */
 	void AimPose(int32 Weapon, FTransform& Rest, float& KickScale) const;
@@ -240,6 +293,9 @@ private:
 	/** Step the springs by DeltaTime toward the hip (bAim false) or the eye. */
 	void StepMotion(float DeltaTime, bool bAim);
 
+	/** MotionWeapon's aimed pose: its place (cm) and its turn from the rest pose (pitch, yaw, roll, deg) in the camera's frame. */
+	void AimEnd(FVector& OutPlace, FVector& OutTurn) const;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UJamWeaponsComponent> Weapons = nullptr;
 
@@ -256,6 +312,11 @@ private:
 	TObjectPtr<UInputAction> AimAction = nullptr;
 
 	bool bHeld = false;
+	bool bHeldByHands = false;
+	bool bPendingDraw = false;
+	bool bDrawing = false;
+	/** The gun whose pose the springs hold. */
+	int32 MotionWeapon = INDEX_NONE;
 	float Alpha = 0.0f;
 	/** The springs' state: the gun's place (cm) and turn (pitch, yaw, roll, deg) in the camera's frame. */
 	FVector Place = FVector::ZeroVector;
@@ -267,6 +328,9 @@ private:
 	bool bAimTarget = false;
 	float SinceSwitch = 0.0f;
 	FVector LastBodyVelocity = FVector::ZeroVector;
+	/** The view's turn last tick, and the gun's lag behind it (pitch, yaw, roll, degrees) this tick. */
+	FQuat LastView = FQuat::Identity;
+	FVector LookLagTurn = FVector::ZeroVector;
 	/** The camera's (world's) field of view when the scope was built. */
 	float WorldFieldOfView = 134.0f;
 };

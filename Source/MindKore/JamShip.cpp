@@ -1293,6 +1293,7 @@ namespace
 			const bool bHull = Pawn->GetWorld()->LineTraceSingleByChannel(Hit, From, From - Out * 300.0f, ECC_Visibility, Params);
 			const bool bClung = bHull && Pawn->Cling(Hit.GetComponent());
 			Pawn->Guns->UnlockWeapon(2);
+			Pawn->Guns->FinishSwitch(); // no draw: the probe shoots at once
 			if (APlayerController* Controller = Cast<APlayerController>(Pawn->GetController()))
 			{
 				Controller->SetControlRotation((-Out).Rotation());
@@ -1403,6 +1404,7 @@ namespace
 	void ShotgunAt(AJamZeroGPawn* Pawn, const FVector& Target)
 	{
 		Pawn->Guns->UnlockWeapon(1);
+		Pawn->Guns->FinishSwitch();
 		Pawn->GetController()->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());
 		if (!Pawn->Fire())
 		{
