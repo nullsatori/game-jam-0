@@ -6,6 +6,7 @@
 #include "Engine/StaticMesh.h"
 #include "EnhancedInputComponent.h"
 #include "Engine/World.h"
+#include "JamHullTools.h"
 #include "JamLivingWall.h"
 #include "JamZeroGPawn.h"
 #include "GameFramework/Controller.h"
@@ -28,9 +29,11 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	// Guns as movement. Pistol: quick nudges (40 cm/s in zero-G); shotgun: a shove
 	// and a spray that scatters junk; sniper: one slow shot that throws you back 7 m/s.
 	// The rounds fly slow enough to be seen: the shotgun's pellets spread as a cloud.
-	// MindKore's own meshes (CREDITS.md): its enemies' USP, the hero's pump gun.
+	// MindKore's own meshes (CREDITS.md): its enemies' USP, the hero's pump gun;
+	// the SV-98 built the same way (Scripts/blender/jam_guns.py).
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Usp(TEXT("/Game/MindKore/Weapons/USP/SM_MK_USP_Soviet.SM_MK_USP_Soviet"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PumpGun(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_Shotgun.SM_Jam_Shotgun"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sv98(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_SV98.SM_Jam_SV98"));
 	FJamWeapon Pistol;
 	Pistol.Name = NSLOCTEXT("JamZeroG", "Pistol", "Пистолет");
 	Pistol.Damage = 25.0f;
@@ -88,6 +91,9 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Sniper.KickYawDeg = 1.0f;
 	Sniper.ViewKickBackCm = 9.0f;
 	Sniper.ViewKickRiseDeg = 18.0f;
+	// Low and to the right: its scope sits 11.5 cm over the trigger.
+	Sniper.ViewMesh = Sv98.Object;
+	Sniper.ViewOffset = FTransform(FRotator::ZeroRotator, FVector(22.0f, 13.0f, -16.0f));
 	Weapons = { Pistol, Shotgun, Sniper };
 
 	// MindKore's own content (CREDITS.md lists the sound donors).
@@ -224,7 +230,9 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	{
 		return;
 	}
-	const FJamWeapon* Weapon = GetWeapon();
+	// A hull tool in hand (the strap, the welder) puts the gun away.
+	const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>();
+	const FJamWeapon* Weapon = Tools && Tools->GetTool() != EJamHullTool::None ? nullptr : GetWeapon();
 	if (CurrentWeapon != ShownWeapon || !Weapon)
 	{
 		ShownWeapon = Weapon ? CurrentWeapon : INDEX_NONE;
@@ -541,6 +549,12 @@ namespace
 		{
 			const float At = 8.0f + Gun * 5.0f;
 			After(At, [Pawn, Hold, Gun]() { Pawn->Guns->UnlockWeapon(Gun); Hold(); });
+			if (Gun == 1)
+			{
+				// The SV-98 at rest only (its shot would throw the pawn 7 m/s).
+				After(At + 4.0f, [Pawn, Hold]() { Pawn->Guns->UnlockWeapon(2); Hold(); });
+				After(At + 4.8f, [Shot]() { Shot(TEXT("SV-98 at rest")); });
+			}
 			After(At + 1.5f, [Shot, Gun]() { Shot(Gun ? TEXT("shotgun at rest") : TEXT("pistol at rest")); });
 			After(At + 2.5f, [Pawn, Hold]() { Hold(); Pawn->Fire(); });
 			After(At + 2.55f, [Shot, Gun]() { Shot(Gun ? TEXT("shotgun +0.05 s") : TEXT("pistol +0.05 s")); });
@@ -550,6 +564,6 @@ namespace
 
 	FAutoConsoleCommandWithWorld GWeaponShots(
 		TEXT("jam.Weapons.Shots"),
-		TEXT("First-person stills of the pistol and the shotgun: at rest, +0.05 s after a shot, then +0.12 s (pistol) / +0.45 s (shotgun, the hole) (HighResShot; needs a real RHI)."),
+		TEXT("First-person stills of the pistol and the shotgun, then the SV-98 at rest: at rest, +0.05 s after a shot, then +0.12 s (pistol) / +0.45 s (shotgun, the hole) (HighResShot; needs a real RHI)."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunWeaponShots));
 }

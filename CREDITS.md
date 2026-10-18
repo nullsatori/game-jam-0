@@ -35,8 +35,12 @@ person.
 **The pump shotgun** (`/Game/JamArt/Meshes/Weapons/SM_Jam_Shotgun`) is
 MindKore's own: the 92 cm Soviet pump gun that MindKore's hero carries on his
 back (concept 01, built from primitives by MindKore's `gun_r17.py`), rebuilt
-in gun space by `Scripts/blender/jam_shotgun.py` and given plain colour
+in gun space by `Scripts/blender/jam_guns.py` and given plain colour
 materials (`/Game/JamArt/Materials/Weapons`). No third-party model.
+
+**The SV-98** (`/Game/JamArt/Meshes/Weapons/SM_Jam_SV98`) is built by the same
+script from the same primitives after the real rifle's silhouette (public
+descriptions of its proportions only); no third-party model.
 
 The tracer material `/Game/MindKore/Weapons/M_MK_Tracer` is MindKore's own.
 

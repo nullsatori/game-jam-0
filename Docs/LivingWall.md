@@ -271,17 +271,24 @@ Wall probe [control: fly at the whole wall]: passed no - deepest 48 cm in front 
 ```
 Wall probe [pistol 3 m]: round 1, open 0 cells, pawn sphere through the aim point blocked
 ... (раунды 2–8 так же: open 0 cells, blocked)
-Living wall JamLivingWall_1: tore 78 cells (8 hit(s), one blast, hits within 46 cm of their centre) around (2, 14), regrowth after 2.60 s, 3 rim jet(s)
-Wall probe [shotgun 5 m]: whole again at +4.68 s after the shot, most open 78 cells, passable (largest clear radius >= pawn radius) until +3.80 s, the sweep through the hole centre clear until +2.98 s
-Living wall JamLivingWall_1: tore 62 cells (5 hit(s), one blast, hits within 42 cm of their centre) around (15, 10), regrowth after 2.60 s, 3 rim jet(s)
-Wall probe [fly through the shotgun hole, torn +0.1 s]: passed yes - deepest 249 cm behind the wall plane, now 181 cm behind, HP 100 -> 91
-Wall probe [parked in the hole]: closed with the pawn 699 cm in front of the plane (clear of the weave: yes), HP 88
-Wall probe [control: fly at the whole wall]: passed no - deepest 48 cm in front of the wall plane, now 188 cm in front, HP 88 -> 80
+Wall probe [pistol 3 m]: +0.60 s after the last round, open 0 cells
+Living wall JamLivingWall_1: tore 78 cells (8 hit(s), one blast, hits within 51 cm of their centre) around (16, 6), regrowth after 2.60 s, 3 rim jet(s)
+Wall probe [shotgun 5 m]: whole again at +4.88 s after the shot, most open 78 cells, passable (largest clear radius >= pawn radius) until +3.42 s, the sweep through the hole centre clear until +3.02 s
+Living wall JamLivingWall_1: tore 34 cells (5 hit(s), one blast, hits within 25 cm of their centre) around (29, -6), regrowth after 2.60 s, 3 rim jet(s)
+Wall probe [fly through the shotgun hole, torn +0.1 s]: passed yes - deepest 249 cm behind the wall plane, now 204 cm behind, HP 100 -> 97
+Living wall JamLivingWall_1: tore 73 cells (7 hit(s), one blast, hits within 49 cm of their centre) around (18, 16), regrowth after 2.60 s, 3 rim jet(s)
+Wall probe [parked in the hole]: closed with the pawn 574 cm in front of the plane (clear of the weave: yes), HP 94
+Wall probe [control: fly at the whole wall]: passed no - deepest 48 cm in front of the wall plane, now 193 cm in front, HP 94 -> 86
 ```
 
-Во втором и третьем выстреле в стену попали 5 и 6 дробин из 8, отдельных
-поздних попаданий в логе нет; вероятно, остальные ушли в щели плетения
-(8 см на стыках клеток). С хитсканом это число не замерялось, сравнения нет.
+Не все дробины попадают в стену: часть проходит сквозь щели плетения и
+бьёт то, что за ней (в логе `-LogCmds="LogMindKore Verbose"` — строки
+`Jam shot: MKPhysicsProp_89` / `StaticMeshActor_37`). Это не от полёта:
+сравнение 18.10 с хитсканом (тот же код, `ProjectileSpeed = 0`; `t.MaxFPS`
+60 и 30; подсчитано 6 выстрелов) — хитскан 8, 7, 5, 3, 7, 5 из 8 (35/48), полёт
+(`t.MaxFPS 60`, 9 выстрелов) 6, 7, 4, 4, 6, 6, 6, 7, 6 из 8 (52/72); пистолет так же проходит 1–3 пули из 8
+и в хитскане. На проходимость дыры это не влияло ни разу: каждый выстрел
+дробовика — «one blast».
 
 Кокон на корабле: дробовик — проходимо до +4.16 с, модуль: `clear radius 90 cm
 (a 1 m face needs 71)`, `+3.1 s centre 595 cm in front of the plane ... - out`.

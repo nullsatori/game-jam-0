@@ -1,9 +1,9 @@
 """The guns' first-person meshes (editor Python, headless).
 
-  JAM_FBX_DIR=<dir with SM_Jam_Shotgun.fbx> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  JAM_FBX_DIR=<dir with SM_Jam_Shotgun.fbx, SM_Jam_SV98.fbx> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
       -ExecutePythonScript="<path>/Scripts/jam_weapons.py" -unattended -nop4 -nosplash -nullrhi
 
-Imports SM_Jam_Shotgun (from Scripts/blender/jam_shotgun.py) into
+Imports SM_Jam_Shotgun and SM_Jam_SV98 (from Scripts/blender/jam_guns.py) into
 /Game/JamArt/Meshes/Weapons, makes M_Jam_GunPart (Color, Metallic, Roughness) and its
 walnut / black oxide / rubber instances, and assigns them by slot. The pistol is
 MindKore's USP (/Game/MindKore/Weapons/USP, copied byte for byte): only read here,
@@ -56,7 +56,7 @@ def part(name, color, metallic, roughness):
     return mi
 
 
-def import_shotgun(fbx):
+def import_gun(fbx):
     ui = unreal.FbxImportUI()
     ui.set_editor_property("import_mesh", True)
     ui.set_editor_property("import_as_skeletal", False)
@@ -84,21 +84,22 @@ def import_shotgun(fbx):
     return unreal.load_asset(paths[0])
 
 
-fbx = os.path.join(os.environ.get("JAM_FBX_DIR", ""), "SM_Jam_Shotgun.fbx")
-gun = import_shotgun(fbx) if os.path.isfile(fbx) else unreal.load_asset(MESHES + "/SM_Jam_Shotgun")
 slots = {"Walnut": part("MI_Jam_Gun_Walnut", (0.16, 0.065, 0.028), 0.0, 0.55),
          "BlackOxide": part("MI_Jam_Gun_BlackOxide", (0.035, 0.036, 0.04), 1.0, 0.38),
          "Rubber": part("MI_Jam_Gun_Rubber", (0.015, 0.015, 0.015), 0.0, 0.9)}
-materials = gun.get_editor_property("static_materials")
-for index, slot in enumerate(materials):
-    name = str(slot.get_editor_property("material_slot_name"))
-    if name not in slots:
-        raise RuntimeError("unexpected slot " + name)
-    gun.set_material(index, slots[name])
-eal.save_asset(MESHES + "/SM_Jam_Shotgun", False)
-box = gun.get_bounding_box()
-log("SM_Jam_Shotgun: %d triangles, slots %s, bounds %s .. %s" % (
-    gun.get_num_triangles(0), [str(s.get_editor_property("material_slot_name")) for s in materials], box.min, box.max))
+for name in ("SM_Jam_Shotgun", "SM_Jam_SV98"):
+    fbx = os.path.join(os.environ.get("JAM_FBX_DIR", ""), name + ".fbx")
+    gun = import_gun(fbx) if os.path.isfile(fbx) else unreal.load_asset(MESHES + "/" + name)
+    materials = gun.get_editor_property("static_materials")
+    for index, slot in enumerate(materials):
+        slot_name = str(slot.get_editor_property("material_slot_name"))
+        if slot_name not in slots:
+            raise RuntimeError("unexpected slot " + slot_name)
+        gun.set_material(index, slots[slot_name])
+    eal.save_asset(MESHES + "/" + name, False)
+    box = gun.get_bounding_box()
+    log("%s: %d triangles, slots %s, bounds %s .. %s" % (
+        name, gun.get_num_triangles(0), [str(s.get_editor_property("material_slot_name")) for s in materials], box.min, box.max))
 
 usp = unreal.load_asset("/Game/MindKore/Weapons/USP/SM_MK_USP_Soviet")
 box = usp.get_bounding_box()
@@ -109,7 +110,7 @@ log("SM_MK_USP_Soviet: %d triangles, material %s, bounds %s .. %s, Muzzle %s" % 
 registry = unreal.AssetRegistryHelpers.get_asset_registry()
 options = unreal.AssetRegistryDependencyOptions(include_soft_package_references=True, include_hard_package_references=True)
 for package in ("/Game/MindKore/Weapons/USP/SM_MK_USP_Soviet", "/Game/MindKore/Weapons/USP/M_MK_USP_Soviet",
-                "/Game/MindKore/Weapons/M_MK_Tracer", MESHES + "/SM_Jam_Shotgun"):
+                "/Game/MindKore/Weapons/M_MK_Tracer", MESHES + "/SM_Jam_Shotgun", MESHES + "/SM_Jam_SV98"):
     deps = [str(d) for d in (registry.get_dependencies(package, options) or [])]
     missing = [d for d in deps if d.startswith("/Game/") and not eal.does_asset_exist(d)]
     log("%s depends on %s; missing %s" % (package, deps, missing or "none"))
