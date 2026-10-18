@@ -8,6 +8,11 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
+#include "AudioMixerBlueprintLibrary.h"
+#include "Containers/Ticker.h"
+#include "JamClipRecorder.h"
+#include "JamShip.h"
+#include "JamVisorBlood.h"
 #include "JamWeapons.h"
 #include "JamZeroGPawn.h"
 #include "Kismet/GameplayStatics.h"
@@ -15,7 +20,10 @@
 #include "MKVitals.h"
 #include "MindKore.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
-#include "Sound/SoundAttenuation.h"
+#include "Components/AudioComponent.h"
+#include "JamOxygen.h"
+#include "Sound/SoundMix.h"
+#include "Sound/SoundSubmix.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
@@ -120,7 +128,7 @@ AJamFlyer::AJamFlyer()
 	Body->SetCanEverAffectNavigation(false);
 	// A round in the body reads flesh, as one in the mesh parts does (their material's).
 	static ConstructorHelpers::FObjectFinder<UPhysicalMaterial> Flesh(TEXT("/Game/MindKore/Materials/Physical/PM_MK_Flesh.PM_MK_Flesh"));
-	Body->SetPhysMaterialOverride(Flesh.Object);
+	FleshMaterial = Flesh.Object; // set on the body in BeginPlay (not in a constructor: the CDO has no engine yet)
 
 	Visual = CreateDefaultSubobject<USceneComponent>(TEXT("Visual"));
 	Visual->SetupAttachment(Body);
@@ -136,11 +144,72 @@ AJamFlyer::AJamFlyer()
 	Tail = MakePart(this, TEXT("Tail"), TailMesh.Object, Torso, TailRootCm);
 	TailTip = MakePart(this, TEXT("TailTip"), TailTipMesh.Object, Tail, TailSplitCm);
 
-	// MindKore's recorded donors (CREDITS.md): the breath grunt pitched up as the screech, the gristle crunch as the bite.
-	static ConstructorHelpers::FObjectFinder<USoundBase> Grunt(TEXT("/Game/MindKore/Audio/Enemy/SC_MK_Enemy_Grunt.SC_MK_Enemy_Grunt"));
-	ScreechSound = Grunt.Object;
-	static ConstructorHelpers::FObjectFinder<USoundBase> Crunch(TEXT("/Game/MindKore/Audio/Impact/SC_MK_Hit_Limb.SC_MK_Hit_Limb"));
-	BiteSound = Crunch.Object;
+	// The stems of Scripts/jam_flyer_sounds.py (recorded CC0 donors, CREDITS.md): per event Attack,
+	// Body, Character, Sub and the suit's Tail (vacuum only); 0 dB plays the rendered mix.
+	const auto Stem = [](const TCHAR* EventName, const TCHAR* StemRole, float JitterDb, bool bVacuumOnly = false)
+	{
+		FJamSoundLayer Layer;
+		const FString Name = FString::Printf(TEXT("SW_Jam_Flyer_%s_%s"), EventName, StemRole);
+		const FString Path = FString::Printf(TEXT("/Game/JamArt/Audio/Flyer/%s.%s"), *Name, *Name);
+		ConstructorHelpers::FObjectFinder<USoundBase> Finder(*Path); // loads now (the optional finder keeps the pointer)
+		Layer.Sound = Finder.Object;
+		Layer.GainJitterDb = JitterDb;
+		Layer.bVacuumOnly = bVacuumOnly;
+		return Layer;
+	};
+	const auto Event = [&Stem](const TCHAR* Name, std::initializer_list<const TCHAR*> Roles, float Volume, FVector2D Pitch)
+	{
+		FJamSoundEvent Result;
+		for (const TCHAR* StemRole : Roles)
+		{
+			const bool bTail = FCString::Strcmp(StemRole, TEXT("Tail")) == 0;
+			const bool bAttack = FCString::Strcmp(StemRole, TEXT("Attack")) == 0;
+			Result.Layers.Add(Stem(Name, StemRole, bAttack || FCString::Strcmp(StemRole, TEXT("Character")) == 0 ? 2.0f : 1.0f, bTail));
+		}
+		Result.Volume = Volume;
+		Result.Pitch = Pitch;
+		return Result;
+	};
+	// Levels (Docs/Flyers.md, "the mix"): the stems are normalised per event; these keep a screech
+	// 5-7 dB under the player's own pistol at 10 m and every wing beat far under both.
+	AggroSound = Event(TEXT("Aggro"), { TEXT("Attack"), TEXT("Body"), TEXT("Character"), TEXT("Sub"), TEXT("Tail") }, 1.0f, FVector2D(0.94f, 1.06f));
+	DiveSound = Event(TEXT("Dive"), { TEXT("Attack"), TEXT("Body"), TEXT("Character"), TEXT("Sub"), TEXT("Tail") }, 1.0f, FVector2D(0.97f, 1.07f));
+	DeathSound = Event(TEXT("Death"), { TEXT("Attack"), TEXT("Body"), TEXT("Character"), TEXT("Sub"), TEXT("Tail") }, 0.8f, FVector2D(0.95f, 1.03f));
+	FlapSound = Event(TEXT("Flap"), { TEXT("Attack"), TEXT("Body"), TEXT("Sub"), TEXT("Tail") }, 1.0f, FVector2D(0.94f, 1.06f));
+	FlyBySound = Event(TEXT("FlyBy"), { TEXT("Body"), TEXT("Character"), TEXT("Sub"), TEXT("Tail") }, 0.9f, FVector2D(0.9f, 1.1f));
+	// A round into it, at 10 m about 3 dB under the player's own shot (jam.Flyer.MixCheck, Docs/Flyers.md).
+	HitSound = Event(TEXT("Hit"), { TEXT("Attack"), TEXT("Body"), TEXT("Character"), TEXT("Sub"), TEXT("Tail") }, 3.2f, FVector2D(0.88f, 1.12f));
+	BiteSound = Event(TEXT("Bite"), { TEXT("Attack"), TEXT("Body"), TEXT("Character"), TEXT("Sub"), TEXT("Tail") }, 1.0f, FVector2D(0.95f, 1.05f));
+	{
+		// MindKore's gristle crunch under the bite (recorded donors, CREDITS.md).
+		static ConstructorHelpers::FObjectFinder<USoundBase> Crunch(TEXT("/Game/MindKore/Audio/Impact/SC_MK_Hit_Limb.SC_MK_Hit_Limb"));
+		FJamSoundLayer Layer;
+		Layer.Sound = Crunch.Object;
+		Layer.GainDb = -6.0f;
+		Layer.GainJitterDb = 2.0f;
+		BiteSound.Layers.Add(Layer);
+	}
+	DiveSound.AirReverbSend = 0.2f;
+	FlapSound.AirReverbSend = 0.15f;
+	FlapSound.StartJitterSeconds = 0.01f;
+	static ConstructorHelpers::FObjectFinder<USoundBase> FlutterWave(TEXT("/Game/JamArt/Audio/Flyer/SW_Jam_Flyer_Flutter_Loop.SW_Jam_Flyer_Flutter_Loop"));
+	FlutterLoop = FlutterWave.Object;
+	static ConstructorHelpers::FObjectFinder<USoundMix> Duck(TEXT("/Game/JamArt/Audio/Mix/SMIX_Jam_FlyerDuck.SMIX_Jam_FlyerDuck"));
+	AggroDuck = Duck.Object;
+	static ConstructorHelpers::FObjectFinder<USoundSubmixBase> AirReverbSubmix(TEXT("/Game/JamArt/Audio/Mix/SM_Jam_AirReverb.SM_Jam_AirReverb"));
+	AirReverb = AirReverbSubmix.Object;
+	VoiceAttenuation = JamFlyerAttenuation(5000.0f, 800.0f);
+	// A call carries: full volume inside 6 m, -40 dB at 50 m (jam.Flyer.Clip takes, max momentary loudness
+	// over 0.6 s: with 2 m and -60 dB a dive shriek at 10-14 m sat 11-13 dB under the pistol shot, quieter
+	// than a bite; the aim is 5-7 dB under the player's own shot).
+	VoiceAttenuation.AttenuationShapeExtents = FVector(600.0f, 0.0f, 0.0f);
+	VoiceAttenuation.dBAttenuationAtMax = -40.0f;
+	WingsAttenuation = JamFlyerAttenuation(2500.0f, 400.0f);
+	ImpactAttenuation = JamFlyerAttenuation(3000.0f, 600.0f);
+	// A hit is heard where the round lands, usually 5-15 m out: full volume inside 8 m, then linear to 30 m
+	// (jam.Flyer.MixCheck: with the natural falloff a hit at 10 m sat 15 dB under its unattenuated level).
+	ImpactAttenuation.AttenuationShapeExtents = FVector(800.0f, 0.0f, 0.0f);
+	ImpactAttenuation.DistanceAlgorithm = EAttenuationDistanceModel::Linear; // natural falloff cost 15 dB at 10 m
 }
 
 void AJamFlyer::BeginPlay()
@@ -150,12 +219,26 @@ void AJamFlyer::BeginPlay()
 	Seed = FMath::FRandRange(0.0f, 100.0f);
 	HomeCentre = GetActorLocation();
 	Body->SetMassOverrideInKg(NAME_None, MassKg, true);
+	Body->SetPhysMaterialOverride(FleshMaterial);
 	Body->SetPhysicsLinearVelocity(FMath::VRand() * CruiseSpeedCm);
-	SoundAttenuation = NewObject<USoundAttenuation>(this);
-	SoundAttenuation->Attenuation.bAttenuate = true;
-	SoundAttenuation->Attenuation.bSpatialize = true;
-	SoundAttenuation->Attenuation.AttenuationShapeExtents = FVector(300.0f);
-	SoundAttenuation->Attenuation.FalloffDistance = SoundFalloffCm;
+	AllFlyers.Add(this);
+	if (FlutterLoop)
+	{
+		Flutter = NewObject<UAudioComponent>(this);
+		Flutter->bAutoActivate = false;
+		Flutter->bAllowSpatialization = true;
+		Flutter->bOverrideAttenuation = true;
+		Flutter->AttenuationOverrides = WingsAttenuation;
+		Flutter->SetSound(FlutterLoop);
+		Flutter->SetupAttachment(Torso);
+		Flutter->RegisterComponent();
+	}
+}
+
+void AJamFlyer::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	AllFlyers.Remove(this);
+	Super::EndPlay(EndPlayReason);
 }
 
 void AJamFlyer::SetHome(AJamFlyerHabitat* InHabitat)
@@ -217,12 +300,192 @@ FVector AJamFlyer::PickWanderPoint(const FVector& From, const FVector& Forward, 
 	return HomeCentre + Out * Distance;
 }
 
-void AJamFlyer::Screech(float PitchScale)
+namespace JamFlyerParts
 {
-	if (ScreechSound)
+	TAutoConsoleVariable<bool> CVarLogFlaps(TEXT("jam.Flyer.LogFlaps"), false, TEXT("Log every audible wing beat of every flyer (jam.Flyer.Probe turns it on)."));
+	/** The screeches playing now (their flyers), for Mix.MaxScreeches. */
+	TArray<TWeakObjectPtr<AJamFlyer>> Screamers;
+}
+
+TArray<TWeakObjectPtr<AJamFlyer>> AJamFlyer::AllFlyers;
+
+bool AJamFlyer::ListenerInAir() const
+{
+	const AJamZeroGPawn* Pawn = Cast<AJamZeroGPawn>(Player());
+	return Pawn && Pawn->Oxygen && Pawn->Oxygen->IsBreathable();
+}
+
+bool AJamFlyer::WingsHeard() const
+{
+	const APawn* Listener = Player();
+	if (!Listener || State == EJamFlyerState::Dead)
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, ScreechSound, HeadLocation(), 1.0f,
-			FMath::FRandRange(ScreechPitch.X, ScreechPitch.Y) * PitchScale, 0.0f, SoundAttenuation);
+		return false;
+	}
+	const float Mine = FVector::DistSquared(Listener->GetActorLocation(), GetActorLocation());
+	if (Mine > FMath::Square(WingsAttenuation.FalloffDistance + 200.0f))
+	{
+		return false;
+	}
+	int32 Nearer = 0;
+	for (const TWeakObjectPtr<AJamFlyer>& Weak : AllFlyers)
+	{
+		const AJamFlyer* Other = Weak.Get();
+		if (Other && Other != this && Other->GetWorld() == GetWorld() && Other->State != EJamFlyerState::Dead
+			&& FVector::DistSquared(Listener->GetActorLocation(), Other->GetActorLocation()) < Mine)
+		{
+			++Nearer;
+		}
+	}
+	return Nearer < Mix.MaxWingSets;
+}
+
+bool AJamFlyer::TakeScreechSlot(const TCHAR* Why)
+{
+	const APawn* Listener = Player();
+	const FVector Ear = Listener ? Listener->GetActorLocation() : GetActorLocation();
+	Screamers.RemoveAll([this](const TWeakObjectPtr<AJamFlyer>& Weak)
+	{
+		return !Weak.IsValid() || Weak.Get() == this || Weak->GetWorld() != GetWorld() || !Weak->VoicePlay.IsPlaying();
+	});
+	if (Screamers.Num() >= Mix.MaxScreeches)
+	{
+		// The quietest goes first: the farthest of the playing ones, if this one is nearer.
+		AJamFlyer* Farthest = nullptr;
+		for (const TWeakObjectPtr<AJamFlyer>& Weak : Screamers)
+		{
+			if (!Farthest || FVector::DistSquared(Weak->GetActorLocation(), Ear) > FVector::DistSquared(Farthest->GetActorLocation(), Ear))
+			{
+				Farthest = Weak.Get();
+			}
+		}
+		if (FVector::DistSquared(GetActorLocation(), Ear) >= FVector::DistSquared(Farthest->GetActorLocation(), Ear))
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Flyer %s: screech (%s) dropped - %d nearer screeches playing"), *GetName(), Why, Screamers.Num());
+			return false;
+		}
+		Farthest->VoicePlay.Stop(0.1f);
+		Screamers.Remove(Farthest);
+		UE_LOG(LogMindKore, Log, TEXT("Flyer %s: screech (%s) takes the place of %s's (%.1f m away, the farthest)"), *GetName(), Why,
+			*Farthest->GetName(), FVector::Dist(Farthest->GetActorLocation(), Ear) / 100.0f);
+	}
+	Screamers.Add(this);
+	return true;
+}
+
+void AJamFlyer::Screech(const TCHAR* Why, bool bDive)
+{
+	if (!TakeScreechSlot(Why))
+	{
+		return;
+	}
+	VoicePlay.Stop(0.05f);
+	const bool bAir = ListenerInAir();
+	VoicePlay = JamPlaySoundEvent(this, bDive ? DiveSound : AggroSound, FVector::ZeroVector, Torso, VoiceAttenuation, bAir, AirReverb);
+	bVoiceDoppler = bDive;
+	if (!bDive && AggroDuck)
+	{
+		UGameplayStatics::PushSoundMixModifier(this, AggroDuck);
+	}
+	UE_LOG(LogMindKore, Log, TEXT("Flyer %s: screech (%s) - %s, %s%s; %.1f m from the player"), *GetName(), Why, bDive ? TEXT("Dive") : TEXT("Aggro"),
+		*VoicePlay.Describe(), bDive ? TEXT(", Doppler") : TEXT(", ambience ducked"),
+		Player() ? FVector::Dist(Player()->GetActorLocation(), GetActorLocation()) / 100.0f : -1.0f);
+}
+
+float AJamFlyer::Doppler() const
+{
+	const APawn* Listener = Player();
+	if (!Listener || Mix.DopplerScale <= 0.0f)
+	{
+		return 1.0f;
+	}
+	// f' = f (c + v_listener) / (c - v_source), along the line between them; scaled in log pitch.
+	constexpr float SpeedOfSound = 34300.0f;
+	const FVector ToListener = (Listener->GetActorLocation() - GetActorLocation()).GetSafeNormal();
+	const float Source = FVector::DotProduct(GetVelocity(), ToListener);
+	const float Receiver = FVector::DotProduct(Listener->GetVelocity(), -ToListener);
+	const float Ratio = (SpeedOfSound + Receiver) / FMath::Max(SpeedOfSound - Source, 1000.0f);
+	return FMath::Clamp(FMath::Pow(Ratio, Mix.DopplerScale), 0.5f, 2.0f);
+}
+
+void AJamFlyer::PlayFlap(float Strength, float Rate)
+{
+	if (Strength < 0.35f || !WingsHeard())
+	{
+		return;
+	}
+	// A big beat is louder and opens up; a fast one is higher; a half-glide beat is soft and dark.
+	const float Size = FMath::Clamp(Strength, 0.0f, 1.2f);
+	const float Speed = FMath::Clamp((Rate - 0.8f) / 0.8f, 0.0f, 1.0f);
+	const FJamSoundPlay Play = JamPlaySoundEvent(this, FlapSound, FVector::ZeroVector, Torso, WingsAttenuation, ListenerInAir(), AirReverb,
+		FlapVolume * Size, FMath::Lerp(0.92f, 1.12f, Speed), FMath::Lerp(0.45f, 1.0f, FMath::Min(Size, 1.0f)));
+	if (CVarLogFlaps.GetValueOnGameThread())
+	{
+		UE_LOG(LogMindKore, Log, TEXT("Flyer %s: flap - size %.2f, rate %.1f: %s, %s, %.1f m from the player"), *GetName(), Size, Rate,
+			*Play.Describe(), StateName(State), Player() ? FVector::Dist(Player()->GetActorLocation(), GetActorLocation()) / 100.0f : -1.0f);
+	}
+}
+
+void AJamFlyer::UpdateSounds(float DeltaSeconds)
+{
+	const APawn* Listener = Player();
+	// Doppler on the dive shriek and the fly-by while they play (Pitch is the drawn pitch, without it).
+	if (bVoiceDoppler && VoicePlay.IsPlaying())
+	{
+		VoicePlay.SetPitch(VoicePlay.Pitch * Doppler());
+	}
+	if (FlyByPlay.IsPlaying())
+	{
+		FlyByPlay.SetPitch(FlyByPlay.Pitch * Doppler());
+	}
+	// Moving sounds keep checking the line to the player (rock and hull muffle them).
+	if (GetWorld()->GetTimeSeconds() >= NextOcclusionSeconds)
+	{
+		NextOcclusionSeconds = GetWorld()->GetTimeSeconds() + 0.15;
+		VoicePlay.UpdateOcclusion(this);
+		FlyByPlay.UpdateOcclusion(this);
+	}
+	if (!Listener)
+	{
+		return;
+	}
+	const double Now = GetWorld()->GetTimeSeconds();
+	// A close pass: the whoosh starts a quarter second before the closest approach.
+	const FVector Offset = Listener->GetActorLocation() - GetActorLocation();
+	const FVector Relative = GetVelocity() - Listener->GetVelocity();
+	const float RelativeSpeed = Relative.Size();
+	if (RelativeSpeed > FlyByMinSpeedCm && Now - LastFlyBySeconds > 1.5)
+	{
+		const float ToClosest = FVector::DotProduct(Offset, Relative) / FMath::Square(RelativeSpeed);
+		const float Miss = (Offset - Relative * ToClosest).Size();
+		if (ToClosest > 0.0f && ToClosest < 0.25f && Miss < FlyByDistanceCm)
+		{
+			LastFlyBySeconds = Now;
+			FlyByPlay = JamPlaySoundEvent(this, FlyBySound, FVector::ZeroVector, Torso, WingsAttenuation, ListenerInAir(), AirReverb,
+				FMath::Clamp(RelativeSpeed / 1800.0f, 0.6f, 1.2f));
+			UE_LOG(LogMindKore, Log, TEXT("Flyer %s: fly-by - %.1f m miss at %.0f cm/s, closest in %.2f s: %s"), *GetName(), Miss / 100.0f,
+				RelativeSpeed, ToClosest, *FlyByPlay.Describe());
+		}
+	}
+	// The cloth flutter between beats, with the speed; only for the wings that are heard.
+	if (Flutter)
+	{
+		const float Target = WingsHeard() ? FlutterVolume * FMath::Clamp(GetVelocity().Size() / 1200.0f, 0.3f, 1.2f) : 0.0f;
+		if (Target > 0.0f && !Flutter->IsPlaying())
+		{
+			Flutter->SetLowPassFilterEnabled(true);
+			Flutter->SetLowPassFilterFrequency(ListenerInAir() ? 9000.0f : 3500.0f);
+			Flutter->SetVolumeMultiplier(Target);
+			Flutter->Play(FMath::FRandRange(0.0f, 1.9f));
+		}
+		else if (Target <= 0.0f && Flutter->IsPlaying())
+		{
+			Flutter->FadeOut(0.3f, 0.0f);
+		}
+		else if (Target > 0.0f)
+		{
+			Flutter->SetVolumeMultiplier(Target);
+		}
 	}
 }
 
@@ -256,7 +519,7 @@ void AJamFlyer::Aggro(const TCHAR* Why)
 	}
 	LastSeenSeconds = GetWorld()->GetTimeSeconds(); // a woken flockmate gets LoseSightSeconds to find the player
 	SetState(EJamFlyerState::Circle, FString::Printf(TEXT("aggro: %s"), Why));
-	Screech(1.0f);
+	Screech(TEXT("aggro"), false);
 	if (const AJamFlyerHabitat* Home = Habitat.Get())
 	{
 		for (const TWeakObjectPtr<AJamFlyer>& Weak : Home->GetFlock())
@@ -339,7 +602,7 @@ void AJamFlyer::Think(const FVector& Location, const FVector& Velocity)
 		if (Now >= StateUntil && bSeesPlayer)
 		{
 			SetState(EJamFlyerState::Dive, FString::Printf(TEXT("dive from %.1f m"), Distance / 100.0f));
-			Screech(1.15f);
+			Screech(TEXT("dive"), true);
 		}
 		break;
 	case EJamFlyerState::Dive:
@@ -498,13 +761,19 @@ void AJamFlyer::Bite(APawn* Target)
 	const float OwnSpeed = Body->GetPhysicsLinearVelocity().Size();
 	const bool bDelivered = MKDeliverResolvedImpact(this, this, Resolved);
 	++BiteCount;
-	if (BiteSound)
+	const FJamSoundPlay BitePlay = JamPlaySoundEvent(this, BiteSound, Hit.ImpactPoint, nullptr, ImpactAttenuation, ListenerInAir(), AirReverb);
+	UE_LOG(LogMindKore, Log, TEXT("Flyer %s: bite sound - %s"), *GetName(), *BitePlay.Describe());
+	// On the player's side: the camera jolts and blood hits the visor.
+	if (AJamZeroGPawn* Pawn = Cast<AJamZeroGPawn>(Target))
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, BiteSound, Hit.ImpactPoint, 1.0f, FMath::FRandRange(0.7f, 0.85f), 0.0f, SoundAttenuation);
-	}
-	if (Feedback.ImpactSound)
-	{
-		UGameplayStatics::PlaySoundAtLocation(this, Feedback.ImpactSound, Hit.ImpactPoint, 1.0f, 1.0f, 0.0f, SoundAttenuation);
+		Pawn->KickCamera(BiteShakeCm);
+		FVector2D Blot(-1.0, -1.0);
+		if (BiteVisorBlood > 0.0f && Target->IsPlayerControlled())
+		{
+			Blot = UJamVisorBloodComponent::FindOrAdd(Pawn)->Splash(BiteVisorBlood);
+		}
+		UE_LOG(LogMindKore, Log, TEXT("Flyer %s: bite feedback - camera shake %.0f cm, visor blood %.2f at (%.2f, %.2f)"), *GetName(), BiteShakeCm,
+			Blot.X >= 0.0 ? BiteVisorBlood : 0.0f, Blot.X, Blot.Y);
 	}
 	// It bounces off what it bit and climbs away.
 	Body->SetPhysicsLinearVelocity(-Direction * 300.0f + Up(Location) * 500.0f);
@@ -518,6 +787,10 @@ void AJamFlyer::ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& Re
 	// The gun already pushes a simulated body it hits (UJamWeaponsComponent::FireRay): only a hit on a mesh part needs it here.
 	const UPrimitiveComponent* HitComponent = ResolvedImpact.Hit.GetComponent();
 	const bool bPushHere = !Push.IsNearlyZero() && !(HitComponent && HitComponent->IsSimulatingPhysics());
+	// The thwack of a round into it, at the hit, louder with the damage.
+	const FJamSoundPlay HitPlay = JamPlaySoundEvent(this, HitSound, ResolvedImpact.Hit.ImpactPoint, nullptr, ImpactAttenuation, ListenerInAir(),
+		AirReverb, FMath::Clamp(ResolvedImpact.DamageAmount / 25.0f, 0.6f, 1.2f));
+	UE_LOG(LogMindKore, Log, TEXT("Flyer %s: hit sound - %s"), *GetName(), *HitPlay.Describe());
 	if (State == EJamFlyerState::Dead)
 	{
 		if (bPushHere)
@@ -551,7 +824,15 @@ void AJamFlyer::ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& Re
 void AJamFlyer::Die(const FVector& Push)
 {
 	SetState(EJamFlyerState::Dead, FString::Printf(TEXT("killed, drifting at %.0f cm/s"), Body->GetPhysicsLinearVelocity().Size()));
-	Screech(0.55f);
+	DiedSeconds = GetWorld()->GetTimeSeconds();
+	VoicePlay.Stop(0.05f);
+	if (Flutter)
+	{
+		Flutter->FadeOut(0.2f, 0.0f);
+	}
+	VoicePlay = JamPlaySoundEvent(this, DeathSound, FVector::ZeroVector, Torso, VoiceAttenuation, ListenerInAir(), AirReverb);
+	bVoiceDoppler = false;
+	UE_LOG(LogMindKore, Log, TEXT("Flyer %s: death cry - %s"), *GetName(), *VoicePlay.Describe());
 	// A corpse: free to tumble, solid to the player, limp.
 	Body->BodyInstance.SetDOFLock(EDOFMode::None);
 	Body->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
@@ -599,7 +880,13 @@ void AJamFlyer::Animate(float DeltaSeconds, const FVector& Velocity, const FVect
 	default:
 		break;
 	}
+	const float LastPhase = FlapPhase;
 	FlapPhase = FMath::Fmod(FlapPhase + DeltaSeconds * UE_TWO_PI * FlapHz * Rate, UE_TWO_PI);
+	// The beat is heard mid-downstroke (the wing passes level going down: phase pi).
+	if (LastPhase < UE_PI && FlapPhase >= UE_PI)
+	{
+		PlayFlap(Amplitude / FMath::Max(FlapAmplitudeDeg, 1.0f), Rate);
+	}
 	const float Flap = Dihedral + Amplitude * FMath::Sin(FlapPhase);
 	WingR->SetRelativeRotation(WingTurn(1.0f, Flap, Sweep));
 	WingL->SetRelativeRotation(WingTurn(-1.0f, Flap, Sweep));
@@ -612,12 +899,45 @@ void AJamFlyer::Animate(float DeltaSeconds, const FVector& Velocity, const FVect
 	TailTip->SetRelativeRotation(FRotator(8.0f * FMath::Sin(Now * 1.1f - 0.8f + Seed), 18.0f * FMath::Sin(Now * 1.7f - 1.1f + Seed) - 10.0f * Turn, 0.0f));
 }
 
+void AJamFlyer::FallAsCorpse(float DeltaSeconds)
+{
+	// Gravity zones pull only the pawn (AJamShipGameMode); a corpse inside one falls the same way.
+	const AJamShipGameMode* Mode = GetWorld()->GetAuthGameMode<AJamShipGameMode>();
+	const FVector Location = Body->GetComponentLocation();
+	const AJamGravityZone* Zone = Mode ? Mode->GravityZoneAt(Location) : nullptr;
+	if (!Zone)
+	{
+		return; // zero-G: it drifts
+	}
+	const FVector Down = Zone->GravityAt(Location);
+	Body->AddForce(Down * Zone->GravityCm, NAME_None, /*bAccelChange=*/true);
+	// The body is a sphere: without losses it rolls down the planetoid's slopes for ever. A carcass drags.
+	if (Body->GetAngularDamping() < CorpseAngularDamping)
+	{
+		Body->SetLinearDamping(CorpseLinearDamping);
+		Body->SetAngularDamping(CorpseAngularDamping);
+	}
+	// Once, for the probe and the log: at rest on the ground.
+	if (!bLanded && GetWorld()->GetTimeSeconds() - DiedSeconds > 0.5 && Body->GetPhysicsLinearVelocity().Size() < 30.0f)
+	{
+		FHitResult Ground;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(JamFlyerGround), false, this);
+		if (GetWorld()->LineTraceSingleByChannel(Ground, Location, Location + Down * 150.0f, ECC_Visibility, Params))
+		{
+			bLanded = true;
+			UE_LOG(LogMindKore, Log, TEXT("Flyer %s: corpse landed on %s in %s, %.1f s after death, %.0f cm above the ground"), *GetName(),
+				*GetNameSafe(Ground.GetActor()), *GetNameSafe(Zone), float(GetWorld()->GetTimeSeconds() - DiedSeconds), Ground.Distance);
+		}
+	}
+}
+
 void AJamFlyer::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	if (State == EJamFlyerState::Dead)
 	{
-		return; // the corpse is physics alone
+		FallAsCorpse(DeltaSeconds);
+		return;
 	}
 	const double Now = GetWorld()->GetTimeSeconds();
 	if (Now >= NextSenseSeconds)
@@ -637,6 +957,7 @@ void AJamFlyer::Tick(float DeltaSeconds)
 	const FVector Accel = ((Desired - Velocity) / 0.35f).GetClampedToMaxSize(MaxAccel);
 	Body->AddForce(Accel, NAME_None, /*bAccelChange=*/true);
 	Animate(DeltaSeconds, Velocity, Accel);
+	UpdateSounds(DeltaSeconds);
 }
 
 // --- console probes ------------------------------------------------------------------------------
@@ -723,64 +1044,100 @@ namespace JamFlyerProbe
 				Other->SetActorTickEnabled(true);
 			}
 		}
+		JamFlyerParts::CVarLogFlaps->Set(false, ECVF_SetByCode);
 		UE_LOG(LogMindKore, Log, TEXT("Flyer probe: done"));
+	}
+
+	/** Pistol shots every 0.3 s at where the flyer is now, until it dies (20 at most); then the corpse. */
+	void ProbeShoot(UWorld* World, TSharedRef<FProbe> P)
+	{
+		for (int32 Shot = 0; Shot < 20; ++Shot)
+		{
+			After(World, 0.01f + Shot * 0.3f, [World, P, Shot]() // a timer of 0 s never fires
+			{
+				AJamZeroGPawn* Now = ProbePawn(World);
+				AJamFlyer* Target = P->Flyer.Get();
+				if (!Now || !Target || Target->GetState() == EJamFlyerState::Dead)
+				{
+					return;
+				}
+				Now->GetController()->SetControlRotation((Target->GetActorLocation() - Now->Camera->GetComponentLocation()).Rotation());
+				const bool bFired = Now->Fire();
+				UE_LOG(LogMindKore, Log, TEXT("Flyer probe [shoot]: shot %d %s at %.1f m, flyer %s, health %.0f"), Shot + 1, bFired ? TEXT("fired") : TEXT("not fired"),
+					FVector::Dist(Target->GetActorLocation(), Now->GetActorLocation()) / 100.0f, AJamFlyer::StateName(Target->GetState()), Target->GetHealth());
+			});
+		}
+		Poll(World, 0.3f, 8.0f, [P]() { return !P->Flyer.IsValid() || P->Flyer->GetState() == EJamFlyerState::Dead; }, [World, P](bool bDead)
+		{
+			if (!bDead)
+			{
+				UE_LOG(LogMindKore, Warning, TEXT("Flyer probe [shoot]: still alive after the shots"));
+				ProbeEnd(World, P);
+				return;
+			}
+			// Around a planetoid the corpse falls to it (its "landed" line is the flyer's own); elsewhere it drifts.
+			const bool bShell = P->Home.IsValid() && P->Home->InnerRadiusCm > 0.0f;
+			const int32 Seconds = bShell ? 15 : 4;
+			for (int32 Step = 0; Step <= Seconds; ++Step)
+			{
+				After(World, Step * 1.0f, [P, Step]() { LogFlyer(*FString::Printf(TEXT("corpse +%d s"), Step), P->Flyer.Get(), P->Home.Get()); });
+			}
+			After(World, Seconds + 0.5f, [World, P]() { ProbeEnd(World, P); });
+		});
 	}
 
 	void ProbeKill(UWorld* World, TSharedRef<FProbe> P)
 	{
+		AJamZeroGPawn* Pawn = ProbePawn(World);
+		if (!Pawn || !P->Flyer.IsValid() || !P->Home.IsValid())
+		{
+			return;
+		}
+		if (!Pawn->Guns->IsWeaponUnlocked(0))
+		{
+			Pawn->Guns->UnlockWeapon(0);
+		}
+		Pawn->Guns->SelectWeapon(0);
+		const AJamFlyerHabitat* Home = P->Home.Get();
+		if (Home->InnerRadiusCm > 0.0f)
+		{
+			// Around a planetoid: the player on the ground under it, so it dies diving low, inside the planetoid's gravity.
+			const FVector Centre = Home->GetActorLocation();
+			const FVector Spot = Centre + (P->Flyer->GetActorLocation() - Centre).GetSafeNormal() * (Home->InnerRadiusCm - 200.0f);
+			Teleport(Pawn, Spot);
+			P->Flyer->Aggro(TEXT("probe: the player on the ground below"));
+			UE_LOG(LogMindKore, Log, TEXT("Flyer probe [shoot]: the player dropped on the planetoid under %s, %.1f m from the centre, %s"),
+				*P->Flyer->GetName(), FVector::Dist(Spot, Centre) / 100.0f, *Pawn->Guns->Describe());
+			Poll(World, 0.05f, 15.0f, [World, P]()
+			{
+				const AJamZeroGPawn* Now = ProbePawn(World);
+				return !P->Flyer.IsValid() || !Now
+					|| (P->Flyer->GetState() == EJamFlyerState::Dive && FVector::Dist(P->Flyer->GetActorLocation(), Now->GetActorLocation()) < 900.0f);
+			}, [World, P](bool bDiving)
+			{
+				LogFlyer(bDiving ? TEXT("shoot: it dives at the player") : TEXT("shoot: no dive in 15 s, shooting anyway"), P->Flyer.Get(), P->Home.Get());
+				ProbeShoot(World, P);
+			});
+			return;
+		}
 		Poll(World, 0.2f, 10.0f, [P]()
 		{
 			FVector Spot;
 			return P->Flyer.IsValid() && P->Home.IsValid() && InFront(P->Flyer.Get(), P->Home.Get(), 1200.0f, Spot);
 		}, [World, P](bool bOk)
 		{
-			AJamZeroGPawn* Pawn = ProbePawn(World);
+			AJamZeroGPawn* Now = ProbePawn(World);
 			AJamFlyer* Flyer = P->Flyer.Get();
-			if (!Pawn || !Flyer)
+			if (!Now || !Flyer)
 			{
 				return;
 			}
 			FVector Spot;
 			InFront(Flyer, P->Home.Get(), 1200.0f, Spot);
-			Teleport(Pawn, Spot);
-			if (!Pawn->Guns->IsWeaponUnlocked(0))
-			{
-				Pawn->Guns->UnlockWeapon(0);
-			}
-			Pawn->Guns->SelectWeapon(0);
+			Teleport(Now, Spot);
 			UE_LOG(LogMindKore, Log, TEXT("Flyer probe [shoot]: the player 12 m ahead of %s (%s), the pistol out: %s"), *Flyer->GetName(),
-				bOk ? TEXT("it flew inward") : TEXT("placed anyway after 10 s"), *Pawn->Guns->Describe());
-			// A shot every 0.3 s at where it is now, until it dies or 20 shots.
-			for (int32 Shot = 0; Shot < 20; ++Shot)
-			{
-				After(World, 0.3f + Shot * 0.3f, [World, P, Shot]()
-				{
-					AJamZeroGPawn* Now = ProbePawn(World);
-					AJamFlyer* Target = P->Flyer.Get();
-					if (!Now || !Target || Target->GetState() == EJamFlyerState::Dead)
-					{
-						return;
-					}
-					Now->GetController()->SetControlRotation((Target->GetActorLocation() - Now->Camera->GetComponentLocation()).Rotation());
-					const bool bFired = Now->Fire();
-					UE_LOG(LogMindKore, Log, TEXT("Flyer probe [shoot]: shot %d %s at %.1f m, flyer %s, health %.0f"), Shot + 1, bFired ? TEXT("fired") : TEXT("not fired"),
-						FVector::Dist(Target->GetActorLocation(), Now->GetActorLocation()) / 100.0f, AJamFlyer::StateName(Target->GetState()), Target->GetHealth());
-				});
-			}
-			Poll(World, 0.3f, 8.0f, [P]() { return !P->Flyer.IsValid() || P->Flyer->GetState() == EJamFlyerState::Dead; }, [World, P](bool bDead)
-			{
-				if (!bDead)
-				{
-					UE_LOG(LogMindKore, Warning, TEXT("Flyer probe [shoot]: still alive after the shots"));
-					ProbeEnd(World, P);
-					return;
-				}
-				for (int32 Step = 0; Step <= 4; ++Step)
-				{
-					After(World, Step * 1.0f, [P, Step]() { LogFlyer(*FString::Printf(TEXT("corpse +%d s"), Step), P->Flyer.Get(), P->Home.Get()); });
-				}
-				After(World, 4.5f, [World, P]() { ProbeEnd(World, P); });
-			});
+				bOk ? TEXT("it flew inward") : TEXT("placed anyway after 10 s"), *Now->Guns->Describe());
+			After(World, 0.3f, [World, P]() { ProbeShoot(World, P); });
 		});
 	}
 
@@ -870,6 +1227,7 @@ namespace JamFlyerProbe
 			UE_LOG(LogMindKore, Warning, TEXT("Flyer probe: needs the zero-G pawn and a habitat with flyers"));
 			return;
 		}
+		JamFlyerParts::CVarLogFlaps->Set(true, ECVF_SetByCode); // every audible beat in the log while the probe runs
 		TSharedRef<FProbe> P = MakeShared<FProbe>();
 		P->Home = Home;
 		P->Flyer = Home->GetFlock()[0];
@@ -928,6 +1286,409 @@ namespace JamFlyerProbe
 		TEXT("jam.Flyer.Probe"),
 		TEXT("jam.Flyer.Probe [all] [Habitat]: one flyer of the first (or the named) habitat - wander, sight, aggro, bites, the player hides and leaves (de-aggro), shot dead, the corpse drifts. 'all' lets its flockmates fly too."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunFlyerProbe));
+
+	/**
+	 * jam.Flyer.BiteShot: rendered stills of a bite (needs a real RHI). The first
+	 * habitat's first flyer gets the player 10 m ahead (the rest stop noticing);
+	 * the view follows it until it bites, then "Shot" at +0.2, +1.2 and +2.5 s:
+	 * the visor blood landing, running and fading.
+	 */
+	void RunFlyerBiteShot(UWorld* World)
+	{
+		AJamFlyerHabitat* Home = nullptr;
+		for (TActorIterator<AJamFlyerHabitat> It(World); It && !Home; ++It)
+		{
+			Home = *It;
+		}
+		AJamZeroGPawn* Pawn = ProbePawn(World);
+		if (!Home || Home->GetFlock().IsEmpty() || !Home->GetFlock()[0].IsValid() || !Pawn)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Flyer bite shot: needs the zero-G pawn and a habitat with flyers"));
+			return;
+		}
+		TSharedRef<FProbe> P = MakeShared<FProbe>();
+		P->Home = Home;
+		P->Flyer = Home->GetFlock()[0];
+		for (int32 Index = 1; Index < Home->GetFlock().Num(); ++Index)
+		{
+			if (AJamFlyer* Other = Home->GetFlock()[Index].Get())
+			{
+				Other->SightRangeCm = 0.0f;
+			}
+		}
+		Poll(World, 0.2f, 10.0f, [P]()
+		{
+			FVector Spot;
+			return P->Flyer.IsValid() && InFront(P->Flyer.Get(), P->Home.Get(), 1000.0f, Spot);
+		}, [World, P](bool)
+		{
+			AJamZeroGPawn* Now = ProbePawn(World);
+			if (!Now || !P->Flyer.IsValid())
+			{
+				return;
+			}
+			FVector Spot;
+			InFront(P->Flyer.Get(), P->Home.Get(), 1000.0f, Spot);
+			Teleport(Now, Spot);
+			const int32 Before = P->Flyer->GetBiteCount();
+			Poll(World, 0.01f, 15.0f, [World, P, Before]()
+			{
+				AJamZeroGPawn* Watcher = ProbePawn(World);
+				if (!Watcher || !P->Flyer.IsValid())
+				{
+					return true;
+				}
+				Watcher->GetController()->SetControlRotation((P->Flyer->GetActorLocation() - Watcher->Camera->GetComponentLocation()).Rotation());
+				return P->Flyer->GetBiteCount() > Before;
+			}, [World](bool bBitten)
+			{
+				UE_LOG(LogMindKore, Log, TEXT("Flyer bite shot: %s"), bBitten ? TEXT("bitten") : TEXT("no bite in 15 s"));
+				for (const float Delay : { 0.2f, 1.2f, 2.5f })
+				{
+					After(World, Delay, [World, Delay]()
+					{
+						const AJamZeroGPawn* Watcher = ProbePawn(World);
+						const UJamVisorBloodComponent* Blood = Watcher ? Watcher->FindComponentByClass<UJamVisorBloodComponent>() : nullptr;
+						UE_LOG(LogMindKore, Log, TEXT("Flyer bite shot: +%.1f s, %d blot(s) on the visor"), Delay, Blood ? Blood->GetBlotCount() : 0);
+						World->GetFirstPlayerController()->ConsoleCommand(TEXT("Shot"));
+					});
+				}
+			});
+		});
+	}
+
+	FAutoConsoleCommandWithWorld GFlyerBiteShot(
+		TEXT("jam.Flyer.BiteShot"),
+		TEXT("Rendered stills of a flyer bite: the visor blood at +0.2, +1.2, +2.5 s (Shot; needs a real RHI)."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunFlyerBiteShot));
+
+	/**
+	 * jam.Flyer.CorpseShot: a still of a dead flyer on the planetoid (needs a real
+	 * RHI and a shell habitat). The first shell habitat's first flyer is put 6 m
+	 * over the surface under where it flies and killed by a round there; 7 s later
+	 * the player stands 4 m from the corpse, looks at it and "Shot".
+	 */
+	void RunFlyerCorpseShot(UWorld* World)
+	{
+		AJamFlyerHabitat* Home = nullptr;
+		for (TActorIterator<AJamFlyerHabitat> It(World); It && !Home; ++It)
+		{
+			Home = It->InnerRadiusCm > 0.0f ? *It : nullptr;
+		}
+		if (!Home || Home->GetFlock().IsEmpty() || !Home->GetFlock()[0].IsValid() || !ProbePawn(World))
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Flyer corpse shot: needs the zero-G pawn and a habitat round a planetoid"));
+			return;
+		}
+		AJamFlyer* Flyer = Home->GetFlock()[0].Get();
+		const FVector Centre = Home->GetActorLocation();
+		const FVector Out = (Flyer->GetActorLocation() - Centre).GetSafeNormal();
+		// The ground under it: a line down from the habitat's inner radius.
+		FHitResult Ground;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(JamFlyerCorpseShot), false, Flyer);
+		const FVector Top = Centre + Out * Home->InnerRadiusCm;
+		const FVector Surface = World->LineTraceSingleByChannel(Ground, Top, Centre, ECC_Visibility, Params) ? FVector(Ground.ImpactPoint) : Top;
+		Teleport(Flyer, Surface + Out * 600.0f);
+		// A round from above: the flyer's own receiver (damage, push, death) as a gun delivers it.
+		FMKResolvedImpact Kill;
+		Kill.ShotId = FGuid::NewGuid();
+		Kill.Kind = EMKImpactKind::Round;
+		Kill.DamageAmount = 1000.0f;
+		Kill.Hit = FHitResult(Flyer, Flyer->Body, Flyer->GetActorLocation(), Out);
+		Kill.ImpulseNewtonSeconds = -Out * 30.0f;
+		Kill.bHasPhysicsImpulse = true;
+		Kill.SourceActor = ProbePawn(World);
+		MKDeliverResolvedImpact(World, ProbePawn(World), Kill);
+		UE_LOG(LogMindKore, Log, TEXT("Flyer corpse shot: %s killed 6 m over the surface, %.1f m from the centre"), *Flyer->GetName(),
+			FVector::Dist(Flyer->GetActorLocation(), Centre) / 100.0f);
+		TWeakObjectPtr<AJamFlyer> Weak = Flyer;
+		After(World, 7.0f, [World, Weak, Centre]()
+		{
+			AJamZeroGPawn* Pawn = ProbePawn(World);
+			const AJamFlyer* Corpse = Weak.Get();
+			if (!Pawn || !Corpse)
+			{
+				return;
+			}
+			const FVector Up = (Corpse->GetActorLocation() - Centre).GetSafeNormal();
+			const FVector Side = FVector::CrossProduct(Up, FVector::UpVector).GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
+			Teleport(Pawn, Corpse->GetActorLocation() + Side * 400.0f + Up * 150.0f);
+		});
+		for (const float Delay : { 7.6f, 8.4f })
+		{
+			After(World, Delay, [World, Weak, Centre, Delay]()
+			{
+				AJamZeroGPawn* Pawn = ProbePawn(World);
+				const AJamFlyer* Corpse = Weak.Get();
+				if (!Pawn || !Corpse)
+				{
+					return;
+				}
+				Pawn->GetController()->SetControlRotation((Corpse->GetActorLocation() - Pawn->Camera->GetComponentLocation()).Rotation());
+				if (Delay > 8.0f)
+				{
+					UE_LOG(LogMindKore, Log, TEXT("Flyer corpse shot: corpse %.1f m from the centre, %.0f cm/s; the player %.1f m from it"),
+						FVector::Dist(Corpse->GetActorLocation(), Centre) / 100.0f, Corpse->GetVelocity().Size(),
+						FVector::Dist(Corpse->GetActorLocation(), Pawn->GetActorLocation()) / 100.0f);
+					World->GetFirstPlayerController()->ConsoleCommand(TEXT("Shot"));
+				}
+			});
+		}
+	}
+
+	FAutoConsoleCommandWithWorld GFlyerCorpseShot(
+		TEXT("jam.Flyer.CorpseShot"),
+		TEXT("A rendered still of a flyer killed over the planetoid, lying where it fell (Shot; needs a real RHI)."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunFlyerCorpseShot));
+
+	/**
+	 * jam.Flyer.Clip [Seconds] [Ffmpeg]: a recorded take of a fly-by attack with its sound (needs a
+	 * real RHI and a window): the player 14 m ahead of the first habitat's first flyer, the view
+	 * following it, the flock free; after 60 % of the take the pistol until it dies. The player's
+	 * health is topped up (the take is about the flyers). Video: Saved/Clips/FlyerClip.mp4 (60 fps
+	 * nominal), sound: Saved/Clips/FlyerClip.wav (the master submix); the log gives the real seconds
+	 * and the frame count for the mux (Docs/Flyers.md).
+	 */
+	struct FClip
+	{
+		TUniquePtr<FJamClipRecorder> Recorder;
+		TWeakObjectPtr<AJamFlyer> Subject;
+		FTSTicker::FDelegateHandle Ticker;
+		float Seconds = 26.0f;
+		double Started = 0.0;
+		bool bShooting = false;
+		bool bStopped = false;
+		double NextShot = 0.0;
+		FRotator View = FRotator::ZeroRotator;
+	};
+
+	TSharedPtr<FClip> GClip;
+
+	FString FindFfmpeg()
+	{
+		FString Path = FPlatformMisc::GetEnvironmentVariable(TEXT("PATH"));
+		TArray<FString> Dirs;
+		Path.ParseIntoArray(Dirs, TEXT(";"));
+		for (const FString& Dir : Dirs)
+		{
+			const FString Candidate = FPaths::Combine(Dir, TEXT("ffmpeg.exe"));
+			if (FPaths::FileExists(Candidate))
+			{
+				return Candidate;
+			}
+		}
+		return TEXT("ffmpeg.exe");
+	}
+
+	bool ClipTick(UWorld* World, float DeltaSeconds)
+	{
+		TSharedPtr<FClip> Clip = GClip;
+		if (!Clip.IsValid() || !Clip->Recorder)
+		{
+			return false;
+		}
+		Clip->Recorder->Tick();
+		const double Now = World->GetTimeSeconds();
+		AJamZeroGPawn* Pawn = ProbePawn(World);
+		AJamFlyer* Flyer = Clip->Subject.Get();
+		if (Pawn && Flyer && !Clip->bStopped)
+		{
+			// The view follows the flyer (eased, as a person turning to it).
+			const FRotator Want = (Flyer->GetActorLocation() - Pawn->Camera->GetComponentLocation()).Rotation();
+			Clip->View = FMath::RInterpTo(Clip->View, Want, DeltaSeconds, 5.0f);
+			Pawn->GetController()->SetControlRotation(Clip->View);
+			// The player brakes after every shove (the stabiliser, X), so the fight stays in the habitat.
+			Pawn->ProbeThrust(FVector::ZeroVector, /*bStabilise=*/true);
+			if (Pawn->Vitals->Health < 60.0f)
+			{
+				Pawn->Vitals->Restore(100.0f, 0.0f);
+			}
+			if (!Clip->bShooting && Now - Clip->Started > Clip->Seconds * 0.6f)
+			{
+				Clip->bShooting = true;
+				UE_LOG(LogMindKore, Log, TEXT("Flyer clip: +%.1f s, the pistol"), Now - Clip->Started);
+			}
+			if (Clip->bShooting && Flyer->GetState() != EJamFlyerState::Dead && Now >= Clip->NextShot
+				&& FVector::Dist(Flyer->GetActorLocation(), Pawn->GetActorLocation()) < 4000.0f)
+			{
+				Clip->NextShot = Now + 0.35;
+				// Rounds fly (ProjectileSpeed): lead it by their travel time.
+				const FJamWeapon* Gun = Pawn->Guns->GetWeapon();
+				const float Travel = FVector::Dist(Flyer->GetActorLocation(), Pawn->Camera->GetComponentLocation()) / FMath::Max(Gun ? Gun->ProjectileSpeed : 9000.0f, 100.0f);
+				const FVector Aim = Flyer->GetActorLocation() + (Flyer->GetVelocity() - Pawn->GetBodyVelocity()) * Travel;
+				Clip->View = (Aim - Pawn->Camera->GetComponentLocation()).Rotation();
+				Pawn->GetController()->SetControlRotation(Clip->View);
+				Pawn->Fire();
+			}
+		}
+		if (!Clip->bStopped && Now - Clip->Started >= Clip->Seconds)
+		{
+			Clip->bStopped = true;
+			const FString Dir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Clips"));
+			Clip->Recorder->Stop(World, TEXT("FlyerClip"), Dir);
+			UE_LOG(LogMindKore, Log, TEXT("Flyer clip: stopped after %.2f s real, %d frames so far; sound %s/FlyerClip.wav"),
+				Clip->Recorder->GetSeconds(), Clip->Recorder->GetFrames(), *Dir);
+		}
+		if (Clip->bStopped && Clip->Recorder->IsFinished())
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Flyer clip: done - %d frames over %.3f s real (%.2f fps); video Saved/Clips/FlyerClip.mp4 at a nominal 60 fps"),
+				Clip->Recorder->GetFrames(), Clip->Recorder->GetSeconds(), Clip->Recorder->GetFrames() / FMath::Max(Clip->Recorder->GetSeconds(), 0.001));
+			GClip.Reset();
+			return false;
+		}
+		return true;
+	}
+
+	void RunFlyerClip(const TArray<FString>& Args, UWorld* World)
+	{
+		AJamFlyerHabitat* Home = nullptr;
+		for (TActorIterator<AJamFlyerHabitat> It(World); It && !Home; ++It)
+		{
+			Home = *It;
+		}
+		AJamZeroGPawn* Pawn = ProbePawn(World);
+		if (!Home || Home->GetFlock().IsEmpty() || !Home->GetFlock()[0].IsValid() || !Pawn || GClip.IsValid())
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Flyer clip: needs the zero-G pawn and a habitat with flyers (and no clip running)"));
+			return;
+		}
+		// A silent master submix switches off and the recording skips it (MindKore, 12.10).
+		if (IConsoleVariable* Never = IConsoleManager::Get().FindConsoleVariable(TEXT("au.NeverDisableSubmixes")))
+		{
+			Never->Set(1, ECVF_SetByCode);
+		}
+		JamFlyerParts::CVarLogFlaps->Set(true, ECVF_SetByCode);
+		TSharedPtr<FClip> Clip = MakeShared<FClip>();
+		Clip->Seconds = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 26.0f;
+		Clip->Subject = Home->GetFlock()[0];
+		FVector Spot;
+		InFront(Clip->Subject.Get(), Home, 1400.0f, Spot);
+		Teleport(Pawn, Spot);
+		Clip->View = (Clip->Subject->GetActorLocation() - Spot).Rotation();
+		Clip->Recorder = MakeUnique<FJamClipRecorder>();
+		FString Error;
+		const FString Video = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Clips/FlyerClip.mp4"));
+		if (!Clip->Recorder->Start(World, Args.Num() > 1 ? Args[1] : FindFfmpeg(), Video, 1280, Error))
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Flyer clip: %s"), *Error);
+			return;
+		}
+		Clip->Started = World->GetTimeSeconds();
+		GClip = Clip;
+		TWeakObjectPtr<UWorld> WeakWorld = World;
+		Clip->Ticker = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakWorld](float DeltaSeconds)
+		{
+			return WeakWorld.IsValid() && ClipTick(WeakWorld.Get(), DeltaSeconds);
+		}));
+		// A second of it flying, then it notices (the take is about the attack, not the search).
+		TWeakObjectPtr<AJamFlyer> Subject = Clip->Subject;
+		After(World, 1.0f, [Subject]()
+		{
+			if (AJamFlyer* Flyer = Subject.Get())
+			{
+				Flyer->Aggro(TEXT("clip: the player in front"));
+			}
+		});
+		UE_LOG(LogMindKore, Log, TEXT("Flyer clip: %.0f s take, the player 14 m ahead of %s"), Clip->Seconds, *Clip->Subject->GetName());
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GFlyerClip(
+		TEXT("jam.Flyer.Clip"),
+		TEXT("jam.Flyer.Clip [Seconds] [Ffmpeg]: a recorded take (video and sound) of a fly-by attack; Saved/Clips (needs a real RHI and a window)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunFlyerClip));
+
+	/**
+	 * jam.Flyer.MixCheck [DistanceCm]: the hit against the player's own shot, apart (needs sound).
+	 * The first habitat's first flyer is held still DistanceCm (1000) ahead of the player; the
+	 * master submix is recorded for 5 s: at 0.5 s the player's pistol fires into empty space, at
+	 * 2.5 s a 25-damage round is delivered into the flyer (its hit sound alone, no gun). Sound:
+	 * Saved/Clips/FlyerMixCheck.wav; the log gives the moments.
+	 */
+	void RunFlyerMixCheck(const TArray<FString>& Args, UWorld* World)
+	{
+		AJamFlyerHabitat* Home = nullptr;
+		for (TActorIterator<AJamFlyerHabitat> It(World); It && !Home; ++It)
+		{
+			Home = *It;
+		}
+		AJamZeroGPawn* Pawn = ProbePawn(World);
+		if (!Home || Home->GetFlock().IsEmpty() || !Home->GetFlock()[0].IsValid() || !Pawn)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Flyer mix check: needs the zero-G pawn and a habitat with flyers"));
+			return;
+		}
+		const float Distance = Args.Num() > 0 && FCString::Atof(*Args[0]) > 0.0f ? FCString::Atof(*Args[0]) : 1000.0f;
+		for (const TWeakObjectPtr<AJamFlyer>& Weak : Home->GetFlock())
+		{
+			if (AJamFlyer* Other = Weak.Get())
+			{
+				Other->SetActorTickEnabled(false); // no wings, no voices: the hit alone
+				Other->Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+			}
+		}
+		AJamFlyer* Flyer = Home->GetFlock()[0].Get();
+		// The round makes it angry: its screeches would sound with the hit, so they are silenced here.
+		Flyer->AggroSound.Layers.Reset();
+		Flyer->DiveSound.Layers.Reset();
+		// Diagnostics: "noatt" turns the attenuation off (the raw level, panned).
+		if (Args.Contains(TEXT("noatt")))
+		{
+			Flyer->ImpactAttenuation.bAttenuate = false;
+			Flyer->ImpactAttenuation.bAttenuateWithLPF = false;
+		}
+		// The same place every run, the line between them checked: occlusion would muffle the hit.
+		const FVector FlyerAt(1000.0f, 600.0f, 1800.0f);
+		Teleport(Flyer, FlyerAt);
+		Teleport(Pawn, FlyerAt - FVector::ForwardVector * Distance);
+		FCollisionQueryParams Line(SCENE_QUERY_STAT(JamFlyerMixCheck), false, Flyer);
+		Line.AddIgnoredActor(Pawn);
+		FHitResult Blocker;
+		const bool bOccluded = World->LineTraceSingleByChannel(Blocker, Pawn->GetActorLocation(), FlyerAt, ECC_Visibility, Line);
+		UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: the line to the flyer is %s%s"), bOccluded ? TEXT("blocked by ") : TEXT("clear"),
+			bOccluded ? *GetNameSafe(Blocker.GetActor()) : TEXT(""));
+		if (IConsoleVariable* Never = IConsoleManager::Get().FindConsoleVariable(TEXT("au.NeverDisableSubmixes")))
+		{
+			Never->Set(1, ECVF_SetByCode);
+		}
+		UAudioMixerBlueprintLibrary::StartRecordingOutput(World, 10.0f);
+		UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: recording; %s held %.0f m ahead"), *Flyer->GetName(), Distance / 100.0f);
+		After(World, 0.5f, [World]()
+		{
+			if (AJamZeroGPawn* Now = ProbePawn(World))
+			{
+				Now->GetController()->SetControlRotation(FRotator(0.0f, 180.0f, 0.0f)); // away from the flyer: nothing hit
+				UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: +0.5 s the pistol, %s"), Now->Fire() ? TEXT("fired") : TEXT("NOT fired"));
+			}
+		});
+		TWeakObjectPtr<AJamFlyer> Weak = Flyer;
+		After(World, 2.5f, [World, Weak]()
+		{
+			AJamFlyer* Target = Weak.Get();
+			if (!Target)
+			{
+				return;
+			}
+			FMKResolvedImpact Round;
+			Round.ShotId = FGuid::NewGuid();
+			Round.Kind = EMKImpactKind::Round;
+			Round.DamageAmount = 25.0f;
+			Round.Hit = FHitResult(Target, Target->Body, Target->GetActorLocation(), FVector::BackwardVector);
+			Round.SourceActor = ProbePawn(World);
+			MKDeliverResolvedImpact(World, ProbePawn(World), Round);
+			UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: +2.5 s a round into %s"), *Target->GetName());
+		});
+		After(World, 5.0f, [World]()
+		{
+			const FString Dir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Clips"));
+			UAudioMixerBlueprintLibrary::StopRecordingOutput(World, EAudioRecordingExportType::WavFile, TEXT("FlyerMixCheck"), Dir);
+			UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: done - %s/FlyerMixCheck.wav"), *Dir);
+		});
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GFlyerMixCheck(
+		TEXT("jam.Flyer.MixCheck"),
+		TEXT("jam.Flyer.MixCheck [DistanceCm] [noatt]: record the player's pistol shot and, apart, a round into a flyer held that far ahead (Saved/Clips/FlyerMixCheck.wav; needs sound)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunFlyerMixCheck));
 
 	/**
 	 * jam.Flyer.Shots: rendered stills (needs a real RHI). The flyers stop noticing

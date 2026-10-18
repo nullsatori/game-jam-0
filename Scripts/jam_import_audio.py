@@ -4,14 +4,14 @@
       -ExecutePythonScript="<path>/Scripts/jam_import_audio.py" -unattended -nop4 -nosplash -nullrhi
 
 Every SW_Jam_*.wav in JAM_WAV_DIR becomes a SoundWave in /Game/JamArt/Audio/Weapons
-(replacing the one there), saved; each is logged with its duration and channels.
+(or JAM_AUDIO_DEST; replacing the one there), saved; each is logged with its duration and channels.
 """
 import glob
 import os
 
 import unreal
 
-DEST = "/Game/JamArt/Audio/Weapons"
+DEST = os.environ.get("JAM_AUDIO_DEST", "/Game/JamArt/Audio/Weapons")  # the flyer: /Game/JamArt/Audio/Flyer
 wav_dir = os.environ["JAM_WAV_DIR"]
 tasks = []
 for path in sorted(glob.glob(os.path.join(wav_dir, "SW_Jam_*.wav"))):

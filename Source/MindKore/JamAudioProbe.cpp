@@ -1,4 +1,4 @@
-// jam.Audio.LimiterProbe: proof that the master limiter (SM_Jam_Master, Docs/RecoilWeapons.md "Звук") runs.
+// jam.Audio.LimiterProbe: proof that the master limiter (since 19.10 the JamBrickwall on SM_Jam_Master, Docs/RecoilWeapons.md "Звук") runs.
 
 #include "AudioDevice.h"
 #include "AudioMixerBlueprintLibrary.h"

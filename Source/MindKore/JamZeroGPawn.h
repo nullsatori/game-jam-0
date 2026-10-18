@@ -416,6 +416,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
 	bool Fire();
 
+	/** Shake the camera (the crash shake: a fading random offset), cm; a stronger shake in progress is kept. A flyer's bite uses it. */
+	void KickCamera(float AmplitudeCm);
+
 	/** Join Target to the body at Point (world). False when something is held, Target does not simulate or is absurdly heavy. */
 	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG")
 	bool Grab(UPrimitiveComponent* Target, FVector Point);
