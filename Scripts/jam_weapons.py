@@ -17,6 +17,8 @@ SM_Jam_SV98_Mag, SM_Jam_USP_Mag, SM_Jam_USP_Hammer (the USP's material), and
 the cases SM_Jam_Case_9mm, SM_Jam_Case_762x54R, SM_Jam_Shell_12ga. Brass is
 MindKore's own MI_MK_Post_Brass (copied byte for byte with its parent
 M_CRTV03_Solid from MindKore's Admin art); the shell's hull is MI_Jam_Shell_Hull.
+The SV-98 magazine is worn parkerized steel: MI_Jam_Gun_ParkerizedWorn on M_Jam_GunPartWorn,
+which lerps to bare steel by the vertex colour jam_guns.py paints on its edges (no textures).
 Each gun's parts together are checked against the whole gun's bounds.
 Without JAM_FBX_DIR the import is skipped and only the materials and sockets are (re)made.
 """
@@ -66,6 +68,38 @@ def part(name, color, metallic, roughness):
     return mi
 
 
+def worn_part(name, color, worn, metallic, roughness):
+    """M_Jam_GunPartWorn: the plain part's three values, lerped to a worn set by vertex colour R (0 finish, 1 bare)."""
+    path = MATS + "/M_Jam_GunPartWorn"
+    if eal.does_asset_exist(path):
+        m = unreal.load_asset(path)
+    else:
+        m = tools.create_asset("M_Jam_GunPartWorn", MATS, unreal.Material, unreal.MaterialFactoryNew())
+        wear = mel.create_material_expression(m, unreal.MaterialExpressionVertexColor, -900, 200)
+        for i, (prop, kind, a, b) in enumerate(((unreal.MaterialProperty.MP_BASE_COLOR, "vector", "Color", "WornColor"),
+                                                  (unreal.MaterialProperty.MP_METALLIC, "scalar", "Metallic", "WornMetallic"),
+                                                  (unreal.MaterialProperty.MP_ROUGHNESS, "scalar", "Roughness", "WornRoughness"))):
+            lerp = mel.create_material_expression(m, unreal.MaterialExpressionLinearInterpolate, -300, i * 260)
+            for j, (name_, pin) in enumerate(((a, "A"), (b, "B"))):
+                cls = unreal.MaterialExpressionVectorParameter if kind == "vector" else unreal.MaterialExpressionScalarParameter
+                param = mel.create_material_expression(m, cls, -650, i * 260 + j * 110)
+                param.set_editor_property("parameter_name", name_)
+                mel.connect_material_expressions(param, "", lerp, pin)
+            mel.connect_material_expressions(wear, "R", lerp, "Alpha")
+            mel.connect_material_property(lerp, "", prop)
+        mel.recompile_material(m)
+        eal.save_asset(path, False)
+    path = MATS + "/" + name
+    mi = unreal.load_asset(path) if eal.does_asset_exist(path) else         tools.create_asset(name, MATS, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
+    mel.set_material_instance_parent(mi, m)
+    mel.set_material_instance_vector_parameter_value(mi, "Color", unreal.LinearColor(*color, 1.0))
+    mel.set_material_instance_vector_parameter_value(mi, "WornColor", unreal.LinearColor(*worn, 1.0))
+    for key, value in zip(("Metallic", "WornMetallic", "Roughness", "WornRoughness"), metallic + roughness):
+        mel.set_material_instance_scalar_parameter_value(mi, key, value)
+    eal.save_asset(path, False)
+    return mi
+
+
 def import_gun(fbx):
     ui = unreal.FbxImportUI()
     ui.set_editor_property("import_mesh", True)
@@ -79,6 +113,8 @@ def import_gun(fbx):
     data.set_editor_property("generate_lightmap_u_vs", False)
     data.set_editor_property("auto_generate_collision", False)
     data.set_editor_property("build_nanite", False)
+    if "SV98_Mag" in fbx:
+        data.set_editor_property("vertex_color_import_option", unreal.VertexColorImportOption.REPLACE)  # the wear
     data.set_editor_property("normal_import_method", unreal.FBXNormalImportMethod.FBXNIM_IMPORT_NORMALS_AND_TANGENTS
                              if "USP" in fbx else unreal.FBXNormalImportMethod.FBXNIM_IMPORT_NORMALS)
     task = unreal.AssetImportTask()
@@ -126,13 +162,22 @@ slots = {"Walnut": part("MI_Jam_Gun_Walnut", (0.16, 0.065, 0.028), 0.0, 0.55),
          "BlackOxide": part("MI_Jam_Gun_BlackOxide", (0.035, 0.036, 0.04), 1.0, 0.38),
          "Rubber": part("MI_Jam_Gun_Rubber", (0.015, 0.015, 0.015), 0.0, 0.9),
          "Hull": part("MI_Jam_Shell_Hull", (0.11, 0.018, 0.012), 0.0, 0.6),
-         "Brass": unreal.load_asset("/Game/MindKore/Art/Admin/Post/MI_MK_Post_Brass")}
+         "Brass": unreal.load_asset("/Game/MindKore/Art/Admin/Post/MI_MK_Post_Brass"),
+         # Worn parkerized steel: grey phosphate on the flats, bright bare steel where the vertex colour says worn.
+         "Parkerized": worn_part("MI_Jam_Gun_ParkerizedWorn", (0.075, 0.08, 0.075), (0.55, 0.55, 0.57), (0.5, 1.0), (0.7, 0.28))}
 if not slots["Brass"]:
     raise RuntimeError("MI_MK_Post_Brass missing: copy it and M_CRTV03_Solid from MindKore's Content/MindKore/Art/Admin")
 for name in ("SM_Jam_Shotgun", "SM_Jam_Shotgun_Pump", "SM_Jam_SV98", "SM_Jam_SV98_Bolt", "SM_Jam_SV98_Mag", "SM_Jam_USP_Mag",
              "SM_Jam_Case_9mm", "SM_Jam_Case_762x54R", "SM_Jam_Shell_12ga"):
     gun = get_gun(name)
     materials = gun.get_editor_property("static_materials")
+    if name == "SM_Jam_SV98_Mag" and str(materials[0].get_editor_property("material_slot_name")) != "Parkerized":
+        # A reimport keeps the old slot name (BlackOxide before 18.10's worn finish).
+        slot = materials[0]
+        slot.set_editor_property("material_slot_name", "Parkerized")
+        materials[0] = slot
+        gun.set_editor_property("static_materials", materials)
+        materials = gun.get_editor_property("static_materials")
     for index, slot in enumerate(materials):
         slot_name = str(slot.get_editor_property("material_slot_name"))
         if slot_name not in slots:

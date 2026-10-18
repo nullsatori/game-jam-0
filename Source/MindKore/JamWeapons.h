@@ -232,6 +232,17 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
 	float MagEjectSpinDeg = 0.0f;
 
+	/** The point the magazine turns about (MagTurn), ViewMesh space, cm: its top, on the well's axis. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
+	FVector MagPivot = FVector::ZeroVector;
+
+	/**
+	 * How far out along MagTravelCm the magazine is clear of its well, cm. Nearer in, it only
+	 * slides along the well's axis: MagArc and MagTurn fade to nothing over the last 2 cm before.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload", meta = (ClampMin = "0.0"))
+	float MagClearCm = 0.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload", meta = (ClampMin = "0.0"))
 	float MagEjectSeconds = 0.0f;
 
@@ -461,6 +472,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Pose")
 	FVector PoseTurnLag = FVector(0.12f, 0.06f, 0.1f);
 
+	/** Pitch and roll damping (at least) while the gun swings back out of a reload: it floats past by half as much there. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Pose", meta = (ClampMin = "0.05", ClampMax = "2.0"))
+	float PoseExitTurnDamping = 0.63f;
+
 	/** The pose springs now: place cm and turn degrees (pitch, yaw, roll), camera frame. */
 	FVector GetPosePlace() const { return Pose.Place; }
 	FVector GetPoseTurn() const { return Pose.Turn; }
@@ -560,6 +575,10 @@ private:
 	float GetReloadTime() const;
 	/** Pose the parts for this frame; null: hide them. */
 	void UpdateParts(const FJamWeapon* Weapon, float SinceShot);
+public:
+	/** The magazine on ViewMesh at Time into a reload (the one path its place and turn take). */
+	static FTransform GetMagPose(const FJamWeapon& Weapon, float Time);
+private:
 	/** Events crossed since the last tick: the case out, the magazine let go, a round counted, the sounds. */
 	void UpdatePartEvents(float DeltaTime);
 	void SpawnDebris(UStaticMesh* Mesh, const FTransform& Where, const FVector& Velocity, const FVector& SpinDegPerSec, float MassKg);
@@ -579,6 +598,8 @@ private:
 		/** Pitch, yaw, roll. */
 		FVector Turn = FVector::ZeroVector;
 		FVector TurnVelocity = FVector::ZeroVector;
+		/** Swinging back out of a reload (its last 0.1 s on, until the turns settle). */
+		bool bExit = false;
 	};
 	/** Step the pose springs over shot time Since0..Since1 and reload time Reload0..Reload1 (< 0: none). */
 	void StepPose(const FJamWeapon& Weapon, FPoseState& State, float Since0, float Since1, float Reload0, float Reload1,

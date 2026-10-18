@@ -164,7 +164,23 @@ BOLT = {"BlackOxide": [
 
 
 # The box magazine (moving part): drops out down -Z, a fresh one goes back up.
-SV98_MAG = {"BlackOxide": [loft([section(44.5, -4.0, -10.5, 1.3), section(51.5, -4.0, -10.0, 1.3)])]}
+# Worn parkerized steel (slot Parkerized; M_Jam_GunPartWorn reads vertex colour R as wear),
+# in many sections so the wear can sit on its edges: bare steel on the corners, the ends
+# and the scuffed floorplate, grey phosphate on the flats.
+MAG_X0, MAG_X1, MAG_HW = 44.5, 51.5, 1.3
+SV98_MAG = {"Parkerized": [loft([section(x, -4.0, -10.5 + 0.5 * (x - MAG_X0) / (MAG_X1 - MAG_X0), MAG_HW, 24)
+                                 for x in np.linspace(MAG_X0, MAG_X1, 21)])]}
+
+
+def mag_wear(v):
+    x, y, z = v
+    bottom = -10.5 + 0.5 * (x - MAG_X0) / (MAG_X1 - MAG_X0)
+    centre, half = (-4.0 + bottom) / 2, (-4.0 - bottom) / 2
+    corner = min(1.0, (abs(y) / MAG_HW * abs(z - centre) / half / 0.586) ** 3)  # 0.586: a 45-degree corner of the section
+    end = 0.85 if min(abs(x - MAG_X0), abs(x - MAG_X1)) < 0.01 else 0.0
+    floor = 0.35 * max(0.0, 1.0 - (z - bottom) / 1.5)
+    scuff = 0.3 * max(0.0, math.sin(2.3 * x + 7.1 * y + 3.7 * z))
+    return min(1.0, max(corner, end) + floor + scuff)
 
 
 # --- spent cases and the shotgun shell (cm, base at the origin, mouth along +X) ---
@@ -179,13 +195,15 @@ SHELL_12GA = {"Brass": [turned([(0.0, 1.13), (0.15, 1.13), (0.15, 1.03), (1.6, 1
               "Hull": [turned([(1.6, 1.0), (6.6, 1.0), (6.9, 0.9)])]}
 
 
-def export_gun(name, parts, origin):
-    """One mesh, slot per material, verts in metres around origin (cm), written as <name>.fbx."""
+def export_gun(name, parts, origin, wear=None):
+    """One mesh, slot per material, verts in metres around origin (cm), written as <name>.fbx;
+    wear(v in cm) -> 0..1 goes into the vertex colour (linear, all channels)."""
     bpy.ops.wm.read_factory_settings(use_empty=True)
     me = bpy.data.meshes.new(name)
-    verts, faces, mats = [], [], []
+    verts, faces, mats, worn = [], [], [], []
     for slot, (material, group) in enumerate(parts.items()):
         V, F = merge(group)
+        worn += [wear(v) for v in V] if wear else []
         off = len(verts)
         verts += [tuple((v - origin) * 0.01) for v in V]
         faces += [tuple(i + off for i in f) for f in F]
@@ -193,6 +211,9 @@ def export_gun(name, parts, origin):
         me.materials.append(bpy.data.materials.new(material))
     me.from_pydata(verts, [], faces)
     me.polygons.foreach_set("material_index", mats)
+    if worn:
+        colour = me.color_attributes.new("Wear", "FLOAT_COLOR", "POINT")
+        colour.data.foreach_set("color", [c for w in worn for c in (w, w, w, 1.0)])
     me.update()
     me.shade_smooth()
     me.set_sharp_from_angle(angle=math.radians(40.0))
@@ -203,7 +224,7 @@ def export_gun(name, parts, origin):
     os.makedirs(OUT, exist_ok=True)
     path = os.path.join(OUT, name + ".fbx")
     bpy.ops.export_scene.fbx(filepath=path, use_selection=True, mesh_smooth_type="FACE", use_triangles=True,
-                             add_leaf_bones=False, bake_anim=False, axis_forward="-Z", axis_up="Y")
+                             add_leaf_bones=False, bake_anim=False, axis_forward="-Z", axis_up="Y", colors_type="LINEAR")
     lo, hi = np.min(verts, 0), np.max(verts, 0)
     print("JAMGUN: %s, %d verts, %d faces, bounds %s .. %s m" % (path, len(verts), len(faces), lo.round(3), hi.round(3)))
 
@@ -213,7 +234,7 @@ export_gun("SM_Jam_Shotgun", PARTS, SHOTGUN_ORIGIN)
 export_gun("SM_Jam_Shotgun_Pump", PUMP_PART, SHOTGUN_ORIGIN)
 export_gun("SM_Jam_SV98", SV98, SV98_ORIGIN)
 export_gun("SM_Jam_SV98_Bolt", BOLT, BOLT_PIVOT)
-export_gun("SM_Jam_SV98_Mag", SV98_MAG, SV98_ORIGIN)
+export_gun("SM_Jam_SV98_Mag", SV98_MAG, SV98_ORIGIN, mag_wear)
 for name, parts in (("SM_Jam_Case_9mm", CASE_9MM), ("SM_Jam_Case_762x54R", CASE_762R), ("SM_Jam_Shell_12ga", SHELL_12GA)):
     export_gun(name, parts, np.zeros(3))
 # UJamWeaponsComponent's FJamWeapon::ActionPivot for the bolt (UE cm; Y 0, so no handedness flip).
