@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "EnhancedInputComponent.h"
+#include "GameFramework/HUD.h"
 #include "GameFramework/PlayerController.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
@@ -349,7 +350,31 @@ namespace
 		After(18.0f, [PoseAt]() { if (PoseAt) { PoseAt->Set(0.035f, ECVF_SetByCode); } });
 		After(18.3f, [Hold, Shot, Centre]() { Hold(Centre); Shot(TEXT("11_pistol_slide_back")); });
 		After(18.6f, [PoseAt]() { if (PoseAt) { PoseAt->Set(-1.0f, ECVF_SetByCode); } });
-		After(19.0f, [Scope]() { UE_LOG(LogMindKore, Log, TEXT("Scope shots: done - %s"), *Scope->Describe()); });
+		// Straight down the sight line: the pistol posed so the line through the rear dots' middle and the
+		// front dot runs along the view, the rear sight 20 cm ahead - the front post must sit centred in the
+		// notch. The rest pose comes back after the still.
+		TSharedRef<FTransform> Rest = MakeShared<FTransform>();
+		After(19.0f, [Pawn, Scope, Hold, Centre, Rest]()
+		{
+			Hold(Centre);
+			FJamWeapon& Pistol = Pawn->Guns->Weapons[Scope->SightDotWeapon];
+			*Rest = Pistol.ViewOffset;
+			const TArray<FVector>& Dots = Scope->SightDotsCm;
+			const FVector Rear = (Dots[0] + Dots[1]) * 0.5f;
+			// Turned round first (the USP's muzzle is its -X), then the small tilt onto the line - one
+			// rotation straight from -X to +X would pick an arbitrary axis and could roll it upside down.
+			const FQuat Round = FRotator(0.0f, 180.0f, 0.0f).Quaternion();
+			const FQuat Turn = FQuat::FindBetweenNormals(Round.RotateVector((Dots[2] - Rear).GetSafeNormal()), FVector::ForwardVector) * Round;
+			Pistol.ViewOffset = FTransform(Turn, FVector(20.0f, 0.0f, 0.0f) - Turn.RotateVector(Rear));
+			UE_LOG(LogMindKore, Log, TEXT("Scope shots: sight line - rear dots %s / %s, front %s, notch centre y -1.431, front post centre y -1.453 (SM_Jam_USP_Slide)"),
+				*Dots[0].ToCompactString(), *Dots[1].ToCompactString(), *Dots[2].ToCompactString());
+		});
+		// The HUD off for it: its centre dot sits exactly on the front sight dot.
+		After(19.3f, [Controller]() { if (Controller->MyHUD) { Controller->MyHUD->bShowHUD = false; } });
+		After(19.4f, [Controller]() { Controller->ConsoleCommand(TEXT("HighResShot 2 filename=JamScope_12_pistol_sightline_x2")); });
+		After(19.7f, [Controller]() { if (Controller->MyHUD) { Controller->MyHUD->bShowHUD = true; } });
+		After(19.8f, [Pawn, Scope, Rest]() { Pawn->Guns->Weapons[Scope->SightDotWeapon].ViewOffset = *Rest; });
+		After(20.2f, [Scope]() { UE_LOG(LogMindKore, Log, TEXT("Scope shots: done - %s"), *Scope->Describe()); });
 	}
 
 	FAutoConsoleCommandWithWorld GScopeShots(
