@@ -19,6 +19,8 @@ import unreal
 FOLDERS = {"SM_Jam_Planet": "/Game/JamArt/Meshes/Planet", "SM_Jam_PlanetEye": "/Game/JamArt/Meshes/Planet",
            "SM_Jam_Tentacle": "/Game/JamArt/Meshes/Planet",
            "SM_Jam_LivingWall_Square": "/Game/JamArt/Meshes/LivingWall", "SM_Jam_LivingWall_Round": "/Game/JamArt/Meshes/LivingWall"}
+# The flyer's parts (Scripts/blender/jam_flyer.py; Scripts/jam_flyer_art.py gives them their material).
+FOLDERS.update({n: "/Game/JamArt/Meshes/Flyer" for n in ("SM_Jam_Flyer_Body", "SM_Jam_Flyer_Wing", "SM_Jam_Flyer_Tail", "SM_Jam_Flyer_TailTip")})
 SCRIPTS = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else \
     os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts")
 

@@ -654,6 +654,10 @@ for j, loc in enumerate(cargo_spots):
     zero_damping(c.get_editor_property("body"))
     c.set_editor_property("tags", ["Cargo", "Jam.NoDrift"])
 
+# --- flyers: their habitats (Scripts/jam_flyers.py, Docs/Flyers.md) ---
+import jam_flyers  # noqa: E402
+jam_flyers.place(MAP, log)
+
 # --- save -------------------------------------------------------------------------------------------------
 assert ues.get_editor_world().get_outer().get_path_name() == MAP
 if not les.save_current_level():

@@ -327,6 +327,10 @@ front_light.set_editor_property("light_color", unreal.Color(r=255, g=210, b=180,
 label_text("LIVING WALL", V(X_MOUTH + 10, y0, z0 + OPEN_W / 2 + 70), 0, 50)
 log("living wall at the alcove mouth x %.0f, y %.0f, z %.0f" % (X_MOUTH - 10, y0, z0))
 
+# --- flyers: their habitats (Scripts/jam_flyers.py, Docs/Flyers.md) ---
+import jam_flyers  # noqa: E402
+jam_flyers.place(MAP, log)
+
 # --- save -------------------------------------------------------------------------------
 assert ues.get_editor_world().get_outer().get_path_name() == MAP
 if not les.save_current_level():
