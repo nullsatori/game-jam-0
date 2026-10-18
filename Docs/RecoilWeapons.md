@@ -307,6 +307,9 @@ ZeroG probe [after sniper]: ... pawn velocity (-1040, 1, -4) = 1040 cm/s ... vie
 ZeroG probe [tether end]: ... view R(P=2.76, Y=-0.39, R=0.02)
 ```
 
+Повторён 18.10 на `jam-weapons-anim` после слияния со звуком (механизмы,
+темп по циклу): 340 / 1040 см/с, взгляд P=5.51 → 2.76° — те же числа.
+
 `jam.Wall.Probe` — пистолет стену не открывает, дробовик рвёт проходимую
 дыру; лог в [LivingWall](LivingWall.md).
 
