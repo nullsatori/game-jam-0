@@ -228,7 +228,7 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Map(LiftAction, EKeys::SpaceBar, false, false);
 	Map(LiftAction, EKeys::LeftControl, false, true);
 	Map(StabiliseAction, EKeys::X, false, false);
-	// Owner 17.10: RMB uses/grabs/lets go, F pushes, Q/E roll, V bullet time, Alt the grapple.
+	// Owner 17.10/18.10: RMB grabs/lets go/holds on, F interacts (else pushes), Q/E roll, V bullet time, Alt the grapple.
 	Map(UseAction, EKeys::RightMouseButton, false, false);
 	Map(PrimaryAction, EKeys::LeftMouseButton, false, false);
 	Map(PushAction, EKeys::F, false, false);
@@ -319,9 +319,8 @@ void AJamZeroGPawn::Lift(const FInputActionValue& Value)
 
 void AJamZeroGPawn::Use()
 {
-	// Holding: RMB lets go. Otherwise what the object offers (a canister, a door)
-	// comes first; a loose body that offers nothing is grabbed; a fixed one in
-	// reach (the hull) is held on to.
+	// RMB is the hands only (owner 18.10; interaction is F): holding - let go;
+	// a loose body in reach is grabbed; a fixed one (the hull) is held on to.
 	if (GrabbedBody.IsValid())
 	{
 		Release();
@@ -330,11 +329,6 @@ void AJamZeroGPawn::Use()
 	if (ClingConstraint)
 	{
 		LetGoCling();
-		return;
-	}
-	if (Interaction->CurrentOffer.IsOffered())
-	{
-		Interaction->Interact();
 		return;
 	}
 	if (UPrimitiveComponent* Candidate = GrabCandidate.Get())
@@ -401,6 +395,12 @@ void AJamZeroGPawn::PrimaryPressed()
 
 void AJamZeroGPawn::PushPressed()
 {
+	// F is the interaction first (a pickup, a door, a canister: owner 18.10); with nothing offered it pushes.
+	if (Interaction->CurrentOffer.IsOffered())
+	{
+		Interaction->Interact();
+		return;
+	}
 	// Holding something, F pushes off whatever else is in reach and the held
 	// body comes along (the grab couples the masses). With nothing else in
 	// reach the push goes into the held body itself: it is let go, and it and
