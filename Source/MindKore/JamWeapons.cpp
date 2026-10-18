@@ -532,14 +532,16 @@ bool UJamWeaponsComponent::IsDrawing() const
 
 void UJamWeaponsComponent::SelectWeapon(int32 Index)
 {
-	if (bHolstered && IsWeaponUnlocked(Index))
+	// Out of unarmed (the same gun or another): drawn. A plain switch is not a draw here - the anim
+	// thread's switching (put away, draw) owns that.
+	const bool bFromUnarmed = bHolstered && IsWeaponUnlocked(Index);
+	if (bFromUnarmed && Index == CurrentWeapon)
 	{
-		// Out of unarmed: the same gun or another, drawn.
-		if (Index == CurrentWeapon)
-		{
-			Rearm();
-			return;
-		}
+		Rearm();
+		return;
+	}
+	if (bFromUnarmed)
+	{
 		bHolstered = false;
 	}
 	if (!Weapons.IsValidIndex(Index) || Index == CurrentWeapon || !Weapons[Index].bUnlocked)
@@ -551,7 +553,10 @@ void UJamWeaponsComponent::SelectWeapon(int32 Index)
 	GetWorld()->GetTimerManager().ClearTimer(CycleTimer);
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s (%d/%d)"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString(),
 		Weapons[Index].Ammo, Weapons[Index].Reserve);
-	Draw();
+	if (bFromUnarmed)
+	{
+		Draw();
+	}
 }
 
 float UJamWeaponsComponent::GetReloadRemaining() const

@@ -548,7 +548,7 @@ public:
 	void Rearm();
 
 	/**
-	 * HOOK - a gun coming into hand (Rearm, a switch). Stand-in now: UJamScopeComponent::StartDraw raises
+	 * HOOK - a gun coming back into hand out of unarmed (Rearm, a selection). Stand-in now: UJamScopeComponent::StartDraw raises
 	 * it from low right; the anim thread's per-gun draw replaces this body. Fire waits for IsDrawing.
 	 */
 	void Draw();
