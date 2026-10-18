@@ -1307,6 +1307,12 @@ float AJamZeroGPawn::GetPushCooldownRemaining() const
 
 // --- shot ----------------------------------------------------------------------
 
+void AJamZeroGPawn::KickCamera(float AmplitudeCm)
+{
+	ShakeAmplitude = ShakeRemaining > 0.0f ? FMath::Max(ShakeAmplitude, AmplitudeCm) : AmplitudeCm;
+	ShakeRemaining = ShakeSeconds;
+}
+
 bool AJamZeroGPawn::Fire()
 {
 	FVector Recoil;

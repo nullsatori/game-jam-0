@@ -134,7 +134,11 @@ events, played 10–14 semitones down, band-limited, shortened.
 [Freesound](https://freesound.org/people/nox_sound/sounds/554907/).
 Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 Donor of `SW_MK_Enemy_Grunt_*` (the living wall's groan, `SC_MK_Enemy_Grunt`
-played pitched down).
+played pitched down) and of the flyer's voice and wings
+(`Content/JamArt/Audio/Flyer/SW_Jam_Flyer_*`, `Scripts/jam_flyer_sounds.py`: breaths
+cut out, pitched and glided, filtered, driven, through the suit reverb; the
+death cry also takes a Gushy Impacts splat an octave down, the flaps one two
+octaves down).
 
 **Clean Revolver Reload** — by **Dredile**, via
 [Freesound](https://freesound.org/people/Dredile/sounds/177863/).

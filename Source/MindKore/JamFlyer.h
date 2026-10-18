@@ -7,6 +7,7 @@
 
 class AJamFlyer;
 class USceneComponent;
+class UPhysicalMaterial;
 class USoundAttenuation;
 class USoundBase;
 class USphereComponent;
@@ -211,6 +212,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Hunt", meta = (ClampMin = "1.0"))
 	float MaxHealth = 60.0f;
 
+	/** A corpse in a gravity zone (the planetoid) drags so it comes to rest instead of rolling; in zero-G it keeps drifting. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Hunt", meta = (ClampMin = "0.0"))
+	float CorpseLinearDamping = 0.4f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Hunt", meta = (ClampMin = "0.0"))
+	float CorpseAngularDamping = 6.0f;
+
 	// --- presentation ------------------------------------------------------------
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look", meta = (ClampMin = "0.0"))
@@ -219,12 +227,28 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look", meta = (ClampMin = "0.0"))
 	float FlapAmplitudeDeg = 38.0f;
 
-	/** On a hunt start, a dive and death; pitched up (a dying one down). */
+	/** On a hunt start and a dive, one at random (Scripts/jam_flyer_sounds.py). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
-	TObjectPtr<USoundBase> ScreechSound = nullptr;
+	TArray<TObjectPtr<USoundBase>> ScreechSounds;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
-	FVector2D ScreechPitch = FVector2D(1.6f, 2.0f);
+	FVector2D ScreechPitch = FVector2D(0.92f, 1.08f);
+
+	/** The death cry. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
+	TObjectPtr<USoundBase> DeathSound = nullptr;
+
+	/** One per downstroke (mid-beat), one at random; glides are silent. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
+	TArray<TObjectPtr<USoundBase>> FlapSounds;
+
+	/** A full beat's volume; a smaller beat is quieter, under ~1/3 of FlapAmplitudeDeg none. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look", meta = (ClampMin = "0.0"))
+	float FlapVolume = 0.8f;
+
+	/** Flaps fade out over this, cm (closer than the screech: a beat is heard only near). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look", meta = (ClampMin = "100.0"))
+	float FlapFalloffCm = 2500.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look")
 	TObjectPtr<USoundBase> BiteSound = nullptr;
@@ -232,6 +256,14 @@ public:
 	/** Screeches fade out over this, cm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Look", meta = (ClampMin = "100.0"))
 	float SoundFalloffCm = 5000.0f;
+
+	/** A bite shakes the player's camera this much, cm (the pawn's crash shake: a hard crash ~5). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Hunt", meta = (ClampMin = "0.0"))
+	float BiteShakeCm = 8.0f;
+
+	/** A bite throws blood on the visor: blot size 0..1 (UJamVisorBloodComponent). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Hunt", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BiteVisorBlood = 0.9f;
 
 	// --- state -----------------------------------------------------------------------
 
@@ -273,7 +305,7 @@ private:
 	void Bite(APawn* Player);
 	void Die(const FVector& Push);
 	void Animate(float DeltaSeconds, const FVector& Velocity, const FVector& Accel);
-	void Screech(float PitchScale);
+	void Screech(const TCHAR* Why);
 	FVector HeadLocation() const;
 	APawn* Player() const;
 	/** "Up" for banking and circling: away from the centre around a planetoid (an inner radius), world up in a plain ball. */
@@ -314,4 +346,16 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<USoundAttenuation> SoundAttenuation = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USoundAttenuation> FlapAttenuation = nullptr;
+
+	void PlayFlap(float Strength);
+	/** The corpse falls in a gravity zone (the planetoid's radial pull), drifts elsewhere. */
+	void FallAsCorpse(float DeltaSeconds);
+	bool bLanded = false;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UPhysicalMaterial> FleshMaterial = nullptr;
+	double DiedSeconds = 0.0;
 };
