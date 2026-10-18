@@ -303,7 +303,7 @@ void AJamZeroGPawn::PawnClientRestart()
 void AJamZeroGPawn::Look(const FInputActionValue& Value)
 {
 	// Slower through the scope, as much as it magnifies (UJamScopeComponent::GetLookScale).
-	const FVector2D Axis = Value.Get<FVector2D>() * (Guns->Scope ? Guns->Scope->GetLookScale() : 1.0f);
+	const FVector2D Axis = Value.Get<FVector2D>() * LookSensitivity * (Guns->Scope ? Guns->Scope->GetLookScale() : 1.0f);
 	AddControllerYawInput(Axis.X);
 	AddControllerPitchInput(-Axis.Y);
 }
