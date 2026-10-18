@@ -4,7 +4,9 @@
 #include "Components/ActorComponent.h"
 #include "JamMuzzleFx.generated.h"
 
+class UHeterogeneousVolumeComponent;
 class UInstancedStaticMeshComponent;
+class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UPointLightComponent;
 class UStaticMesh;
@@ -99,6 +101,29 @@ struct FJamMuzzleFx
 	/** 0: a whole puff; 1: torn into rags and holes. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float SmokeTear = 0.2f;
+
+	/** Volumetric cloud (jam.Fx.VolumetricSmoke 1): its box, cm, and voxels along each side. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "10.0"))
+	float CloudCm = 60.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "8", ClampMax = "64"))
+	int32 CloudVoxels = 32;
+
+	/** The gas's speed out along the bore at the shot, cm/s; it dies within a second down to SmokeDriftCm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	float CloudThrowCm = 60.0f;
+
+	/** Extinction of the densest band, 1/cm: thin smoke stays low. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	float CloudExtinction = 0.04f;
+
+	/** A round through an older cloud bores a tunnel this wide (radius, cm) and sheds a vortex ring. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	float TunnelCm = 3.0f;
+
+	/** This gun's blast shoves the older clouds ahead along the shot, cm/s (the shotgun). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	float ShoveCm = 0.0f;
 };
 
 /**
@@ -140,6 +165,30 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx")
 	TSoftObjectPtr<UMaterialInterface> SmokeMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/FX/M_Jam_MuzzleSmoke.M_Jam_MuzzleSmoke")));
+
+	/** Clouds alive at once (volumetric smoke); the oldest is reused. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "1"))
+	int32 MaxClouds = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume")
+	TSoftObjectPtr<UMaterialInterface> CloudMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/FX/M_Jam_MuzzleSmokeVolume.M_Jam_MuzzleSmokeVolume")));
+
+	/** A cloud's life, s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.5"))
+	float CloudSeconds = 7.0f;
+
+	/** Voxels this close to the eye fade out (cm): flying through a cloud never fills the lens. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	float EyeClearCm = 30.0f;
+
+	/** Clouds alive now (tests). */
+	int32 GetCloudCount() const;
+
+	/** The living clouds, in view space (log lines of the stills). */
+	FString DescribeClouds() const;
+
+	/** Remove every cloud (stills). */
+	void ClearClouds();
 
 	/** Oldest puffs go first past this. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "1"))
@@ -202,6 +251,46 @@ private:
 		float Speed = 0.0f;
 		float Life = 0.1f;
 	};
+
+	/** A wake through a cloud: a round's tunnel (with its vortex ring), the pawn's or a flyer's passage. Cloud space. */
+	struct FWake
+	{
+		FVector Origin = FVector::ZeroVector;
+		FVector Direction = FVector::ForwardVector;
+		float RadiusCm = 0.0f;
+		float Age = 0.0f;
+		/** Ring speed along the wake, cm/s (0: no ring). */
+		float RingSpeed = 0.0f;
+	};
+
+	/** One volumetric smoke cloud in the world: a heterogeneous volume voxelising M_Jam_MuzzleSmokeVolume. */
+	struct FCloud
+	{
+		TObjectPtr<UHeterogeneousVolumeComponent> Volume = nullptr;
+		TObjectPtr<UMaterialInstanceDynamic> Material = nullptr;
+		int32 Gun = 0;
+		FVector Centre = FVector::ZeroVector;
+		FVector Velocity = FVector::ZeroVector;
+		FVector DriftVelocity = FVector::ZeroVector;
+		/** The view at the shot: the cloud's axes (X along the bore). */
+		FQuat Basis = FQuat::Identity;
+		float Age = -1.0f;
+		float Seed = 0.0f;
+		/** Puffs: direction and reach from the centre, cloud space. */
+		TArray<FVector4f> PuffThrow;
+		TArray<FWake> Wakes;
+	};
+
+	void SpawnCloud(int32 Weapon, const FVector& Muzzle);
+	void TickClouds(float DeltaTime);
+	/** A wake along Origin + t Direction (world) through every living cloud it crosses but Except. */
+	void AddWake(const FVector& Origin, const FVector& Direction, float RadiusCm, float RingSpeed, const FCloud* Except);
+
+	TArray<FCloud> Clouds;
+	/** Keeps the clouds' components and materials alive (FCloud is not reflected). */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UObject>> CloudObjects;
+	FVector LastEye = FVector::ZeroVector;
 
 	TArray<FPuff> Puffs;
 	TArray<FFlashBit> FlashBits;

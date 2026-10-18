@@ -1,6 +1,7 @@
 #include "JamMuzzleFx.h"
 
 #include "Camera/CameraComponent.h"
+#include "Components/HeterogeneousVolumeComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Components/SphereComponent.h"
@@ -8,14 +9,24 @@
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
+#include "JamFlyer.h"
 #include "JamLivingWall.h"
 #include "JamWeapons.h"
 #include "JamZeroGPawn.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "MindKore.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Algo/MaxElement.h"
+
+namespace
+{
+	TAutoConsoleVariable<int32> CVarVolumetricSmoke(
+		TEXT("jam.Fx.VolumetricSmoke"), 1,
+		TEXT("1: muzzle smoke as volumetric voxel clouds in the world (heterogeneous volumes); 0: the camera-space card smoke."));
+}
 
 UJamMuzzleFxComponent::UJamMuzzleFxComponent()
 {
@@ -92,6 +103,24 @@ UJamMuzzleFxComponent::UJamMuzzleFxComponent()
 	Sniper.SmokeRing = 0.8f;
 	Sniper.SmokeStretch = 2.0f;
 	Sniper.SmokeTear = 0.3f;
+	// Volumetric clouds: a thin pistol puff, a big torn shotgun cloud that shoves the
+	// older ones, the SV-98's brake ring.
+	Pistol.CloudCm = 70.0f;
+	Pistol.CloudVoxels = 24;
+	Pistol.CloudThrowCm = 200.0f;
+	Pistol.CloudExtinction = 0.045f;
+	Pistol.TunnelCm = 6.0f;
+	Shotgun.CloudCm = 130.0f;
+	Shotgun.CloudVoxels = 40;
+	Shotgun.CloudThrowCm = 220.0f;
+	Shotgun.CloudExtinction = 0.06f;
+	Shotgun.TunnelCm = 12.0f;
+	Shotgun.ShoveCm = 90.0f;
+	Sniper.CloudCm = 120.0f;
+	Sniper.CloudVoxels = 36;
+	Sniper.CloudThrowCm = 250.0f;
+	Sniper.CloudExtinction = 0.06f;
+	Sniper.TunnelCm = 8.0f;
 	Guns = { Pistol, Shotgun, Sniper };
 }
 
@@ -196,6 +225,27 @@ void UJamMuzzleFxComponent::Shot(int32 Weapon, const FVector& Muzzle, const USce
 		Spark.Life = FMath::FRandRange(0.08f, 0.22f);
 		Spark.Seed = FMath::FRand();
 	}
+	if (CVarVolumetricSmoke.GetValueOnGameThread() != 0 && CloudMaterial.LoadSynchronous())
+	{
+		// The round leaves from the eye along the view: through every older cloud in its
+		// way it bores a tunnel and sheds a vortex ring; a shotgun blast shoves them on.
+		const FVector Eye = Smoke->GetComponentLocation();
+		const FVector Ahead = Smoke->GetForwardVector();
+		AddWake(Eye, Ahead, Gun.TunnelCm, 90.0f, nullptr);
+		if (Gun.ShoveCm > 0.0f)
+		{
+			for (FCloud& Cloud : Clouds)
+			{
+				const float Distance = FVector::Dist(Cloud.Centre, Eye);
+				if (Cloud.Age >= 0.0f && Distance < 400.0f && ((Cloud.Centre - Eye) | Ahead) > 0.0f)
+				{
+					Cloud.Velocity += Ahead * Gun.ShoveCm * (1.0f - Distance / 400.0f);
+				}
+			}
+		}
+		SpawnCloud(Weapon, Muzzle);
+		return;
+	}
 	for (int32 Index = 0; Index < Gun.SmokePuffs; ++Index)
 	{
 		FPuff& Puff = Puffs.AddDefaulted_GetRef();
@@ -237,6 +287,220 @@ FTransform UJamMuzzleFxComponent::Sprite(const FVector& Location, const FVector&
 	return FTransform(FRotationMatrix::MakeFromZX(-Location, Along).ToQuat(), Location, FVector(LengthCm / 100.0f, WidthCm / 100.0f, 1.0f));
 }
 
+void UJamMuzzleFxComponent::ClearClouds()
+{
+	for (FCloud& Cloud : Clouds)
+	{
+		Cloud.Age = -1.0f;
+		Cloud.Volume->SetVisibility(false);
+	}
+}
+
+FString UJamMuzzleFxComponent::DescribeClouds() const
+{
+	FString Line;
+	for (const FCloud& Cloud : Clouds)
+	{
+		if (Cloud.Age >= 0.0f)
+		{
+			const FVector Local = Smoke->GetComponentTransform().InverseTransformPosition(Cloud.Centre);
+			Line += FString::Printf(TEXT(" [gun %d age %.2f at %s in view, %d wake(s)]"), Cloud.Gun, Cloud.Age, *Local.ToCompactString(), Cloud.Wakes.Num());
+		}
+	}
+	return Line;
+}
+
+int32 UJamMuzzleFxComponent::GetCloudCount() const
+{
+	int32 Count = 0;
+	for (const FCloud& Cloud : Clouds)
+	{
+		Count += Cloud.Age >= 0.0f ? 1 : 0;
+	}
+	return Count;
+}
+
+void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FVector& Muzzle)
+{
+	const FJamMuzzleFx& Gun = Guns[Weapon];
+	// A free slot, a new one while under MaxClouds, else the oldest cloud.
+	FCloud* Cloud = Clouds.FindByPredicate([](const FCloud& Each) { return Each.Age < 0.0f; });
+	if (!Cloud && Clouds.Num() < MaxClouds)
+	{
+		Cloud = &Clouds.AddDefaulted_GetRef();
+		UHeterogeneousVolumeComponent* Volume = NewObject<UHeterogeneousVolumeComponent>(GetOwner());
+		Volume->SetUsingAbsoluteLocation(true);
+		Volume->SetUsingAbsoluteRotation(true);
+		Volume->SetUsingAbsoluteScale(true);
+		Volume->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		// The box about its centre (by default it grows from a corner: a cloud cut to one octant).
+		Volume->bPivotAtCentroid = true;
+		Volume->RegisterComponent();
+		UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(CloudMaterial.Get(), this);
+		Volume->SetMaterial(0, Material);
+		Cloud->Volume = Volume;
+		Cloud->Material = Material;
+		CloudObjects.Add(Volume);
+		CloudObjects.Add(Material);
+	}
+	if (!Cloud)
+	{
+		Cloud = Algo::MaxElementBy(Clouds, [](const FCloud& Each) { return Each.Age; });
+	}
+	const FQuat View = Smoke->GetComponentQuat();
+	Cloud->Gun = Weapon;
+	Cloud->Centre = Muzzle;
+	Cloud->Basis = View;
+	// The gas leaves along the bore and dies down to a slow inertial drift: no air, no buoyancy.
+	// The shooter is thrown back by the recoil, so the cloud ends up hanging ahead of the sight.
+	// Thrown towards the sight line 1.2 m ahead: the cloud hangs where the next round passes.
+	const FVector Eye = Smoke->GetComponentLocation();
+	Cloud->Velocity = (Eye + View.GetForwardVector() * 120.0f - Muzzle).GetSafeNormal() * Gun.CloudThrowCm;
+	Cloud->DriftVelocity = View.RotateVector(FVector(1.0f, FMath::FRandRange(-0.3f, 0.3f), FMath::FRandRange(-0.3f, 0.3f))) * Gun.SmokeDriftCm;
+	Cloud->Age = 0.0f;
+	Cloud->Seed = FMath::FRand();
+	Cloud->Wakes.Reset();
+	Cloud->PuffThrow.Reset();
+	const int32 Count = FMath::Min(Gun.SmokePuffs, 8);
+	const int32 Ring = FMath::RoundToInt(Count * Gun.SmokeRing);
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		// As the cards: a ring about the bore leaning forward (a brake), or every way.
+		const float Around = Ring > 0 ? UE_TWO_PI * (Index + FMath::FRandRange(-0.25f, 0.25f)) / Ring : 0.0f;
+		const FVector Direction = Index < Ring ? FVector(0.35f, FMath::Cos(Around), FMath::Sin(Around)).GetSafeNormal() : FMath::VRand();
+		const FVector Reach = Direction * Gun.SmokeSpreadCm * FMath::FRandRange(0.4f, 1.0f);
+		// A voxel cloud hangs a metre or two off: puffs a little fuller than the cards by the gun.
+		Cloud->PuffThrow.Emplace(float(Reach.X), float(Reach.Y), float(Reach.Z), Gun.SmokeEndCm * 0.75f * FMath::FRandRange(0.7f, 1.0f));
+	}
+	Cloud->Volume->SetVolumeResolution(FIntVector(Gun.CloudVoxels));
+	Cloud->Volume->SetVisibility(true);
+}
+
+void UJamMuzzleFxComponent::AddWake(const FVector& Origin, const FVector& Direction, float RadiusCm, float RingSpeed, const FCloud* Except)
+{
+	for (FCloud& Cloud : Clouds)
+	{
+		if (Cloud.Age < 0.0f || &Cloud == Except)
+		{
+			continue;
+		}
+		// In cloud space; the line counts if it comes within half the box of the centre.
+		const FVector Local = Cloud.Basis.UnrotateVector(Origin - Cloud.Centre);
+		const FVector Along = Cloud.Basis.UnrotateVector(Direction).GetSafeNormal();
+		const FVector Nearest = Local - Along * (Local | Along);
+		if (Nearest.Size() > Guns[Cloud.Gun].CloudCm * 0.5f)
+		{
+			continue;
+		}
+		if (Cloud.Wakes.Num() >= 3)
+		{
+			Cloud.Wakes.RemoveAt(0);
+		}
+		FWake& Wake = Cloud.Wakes.AddDefaulted_GetRef();
+		// Anchored where the line passes the centre, so a ring starts in the heart of the cloud.
+		Wake.Origin = Nearest;
+		Wake.Direction = Along;
+		Wake.RadiusCm = RadiusCm;
+		Wake.RingSpeed = RingSpeed;
+	}
+}
+
+void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
+{
+	const FVector Eye = Smoke->GetComponentLocation();
+	const FVector EyeStep = Eye - LastEye;
+	LastEye = Eye;
+	for (FCloud& Cloud : Clouds)
+	{
+		if (Cloud.Age < 0.0f)
+		{
+			continue;
+		}
+		Cloud.Age += DeltaTime;
+		if (Cloud.Age >= CloudSeconds)
+		{
+			Cloud.Age = -1.0f;
+			Cloud.Volume->SetVisibility(false);
+			continue;
+		}
+		const FJamMuzzleFx& Gun = Guns[Cloud.Gun];
+		Cloud.Velocity = Cloud.DriftVelocity + (Cloud.Velocity - Cloud.DriftVelocity) * FMath::Exp(-DeltaTime / 0.4f);
+		Cloud.Centre += Cloud.Velocity * DeltaTime;
+		// Staged for the player, not physics: for its first 1.5 s the cloud trails the
+		// recoiling pawn at 85 % (fading out by 2.5 s), so it hangs 1-3 m ahead when the
+		// next round comes (an SV-98 kick would leave it 8 m behind by its bolt cycle).
+		// Only the pawn moving away is followed: flying into the cloud still reaches it.
+		const FVector Away = (Eye - Cloud.Centre).GetSafeNormal();
+		if (EyeStep.Size() < 200.0f && (EyeStep | Away) > 0.0f)
+		{
+			Cloud.Centre += Away * (EyeStep | Away) * 0.85f * FMath::Clamp(2.5f - Cloud.Age, 0.0f, 1.0f);
+		}
+		const float Half = Gun.CloudCm * 0.5f;
+		// The pawn flying through parts it: a wake along its path (and the voxels by the eye fade).
+		const FVector EyeLocal = Cloud.Basis.UnrotateVector(Eye - Cloud.Centre);
+		if (EyeLocal.GetAbsMax() < Half && EyeStep.Size() > 1.0f && EyeStep.Size() < 200.0f
+			&& (Cloud.Wakes.IsEmpty() || Cloud.Wakes.Last().Age > 0.15f))
+		{
+			AddWake(Eye, EyeStep.GetSafeNormal(), 18.0f, 0.0f, nullptr);
+		}
+		for (FWake& Wake : Cloud.Wakes)
+		{
+			Wake.Age += DeltaTime;
+		}
+		Cloud.Wakes.RemoveAll([](const FWake& Wake) { return Wake.Age > 2.5f; });
+
+		const float Throw = 1.0f - FMath::Exp(-Cloud.Age / 0.12f);
+		const float Grow = 1.0f - FMath::Exp(-Cloud.Age / 0.15f);
+		const float X = Cloud.Age / CloudSeconds;
+		const float Fade = FMath::Min(Cloud.Age / 0.05f, 1.0f) * (X < 0.6f ? 1.0f : FMath::Square((1.0f - X) / 0.4f));
+		UMaterialInstanceDynamic* Material = Cloud.Material;
+		Material->SetVectorParameterValue(TEXT("CloudCentre"), FLinearColor(FVector3f(Cloud.Centre)));
+		Material->SetVectorParameterValue(TEXT("CloudX"), FLinearColor(FVector3f(Cloud.Basis.GetAxisX())));
+		Material->SetVectorParameterValue(TEXT("CloudY"), FLinearColor(FVector3f(Cloud.Basis.GetAxisY())));
+		Material->SetVectorParameterValue(TEXT("CloudZ"), FLinearColor(FVector3f(Cloud.Basis.GetAxisZ())));
+		Material->SetScalarParameterValue(TEXT("VoxelCm"), Gun.CloudCm / Gun.CloudVoxels);
+		Material->SetScalarParameterValue(TEXT("HalfCm"), Half);
+		Material->SetScalarParameterValue(TEXT("Fade"), Fade);
+		Material->SetScalarParameterValue(TEXT("Seed"), Cloud.Seed);
+		Material->SetScalarParameterValue(TEXT("Tear"), Gun.SmokeTear);
+		Material->SetScalarParameterValue(TEXT("Extinction"), Gun.CloudExtinction);
+		Material->SetVectorParameterValue(TEXT("Eye"), FLinearColor(EyeLocal.X, EyeLocal.Y, EyeLocal.Z, EyeClearCm));
+		for (int32 Index = 0; Index < 8; ++Index)
+		{
+			FLinearColor Puff(0.0f, 0.0f, 0.0f, 0.0f);
+			if (Cloud.PuffThrow.IsValidIndex(Index))
+			{
+				const FVector4f& P = Cloud.PuffThrow[Index];
+				Puff = FLinearColor(P.X * Throw, P.Y * Throw, P.Z * Throw, FMath::Lerp(Gun.SmokeStartCm * 0.5f, P.W, Grow));
+			}
+			Material->SetVectorParameterValue(*FString::Printf(TEXT("Puff%d"), Index), Puff);
+		}
+		for (int32 Index = 0; Index < 3; ++Index)
+		{
+			const FWake* Wake = Cloud.Wakes.IsValidIndex(Index) ? &Cloud.Wakes[Index] : nullptr;
+			Material->SetVectorParameterValue(*FString::Printf(TEXT("WakeA%d"), Index),
+				Wake ? FLinearColor(Wake->Origin.X, Wake->Origin.Y, Wake->Origin.Z, Wake->RadiusCm) : FLinearColor(0.0f, 0.0f, 0.0f, 0.0f));
+			Material->SetVectorParameterValue(*FString::Printf(TEXT("WakeB%d"), Index),
+				Wake ? FLinearColor(Wake->Direction.X, Wake->Direction.Y, Wake->Direction.Z, Wake->Age) : FLinearColor(1.0f, 0.0f, 0.0f, 0.0f));
+			Material->SetScalarParameterValue(*FString::Printf(TEXT("WakeRing%d"), Index), Wake ? Wake->RingSpeed : 0.0f);
+		}
+		// The volume box: CloudVoxels units a side, scaled to CloudCm.
+		Cloud.Volume->SetWorldTransform(FTransform(Cloud.Basis, Cloud.Centre, FVector(Gun.CloudCm / Gun.CloudVoxels)));
+	}
+	// A flyer diving through drags a wake with a ring after it: the swirl of its wings.
+	if (GetCloudCount() > 0)
+	{
+		for (TActorIterator<AJamFlyer> Flyer(GetWorld()); Flyer; ++Flyer)
+		{
+			const FVector Velocity = Flyer->GetVelocity();
+			if (Velocity.SizeSquared() > 100.0f && FMath::FRand() < DeltaTime * 6.0f)
+			{
+				AddWake(Flyer->GetActorLocation(), Velocity.GetSafeNormal(), 25.0f, 40.0f, nullptr);
+			}
+		}
+	}
+}
+
 namespace
 {
 	/** A smoke texel's size per cm from the eye: ~6 px of 1920 at the bodycam's FOV 134 (2 tan 67 deg = 4.71 view widths per distance). */
@@ -250,6 +514,7 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	{
 		return;
 	}
+	TickClouds(DeltaTime);
 
 	// The flash: white-hot for its peak, a fast fall, then a dim cooling glow.
 	if (Flash->GetInstanceCount() > 0)
@@ -439,6 +704,125 @@ namespace
 			}
 		}
 	}
+
+	/**
+	 * jam.Weapons.Smoke [space]: the volumetric smoke's moments from the player's view
+	 * (HighResShot; needs a real RHI), on the jam.Weapons.Fx stand. Per gun (pistol,
+	 * shotgun, SV-98): a shot with the recoil left to act (the pawn drifts back, the cloud
+	 * hangs ahead), stills at +0.3 and +1.2 s; a second shot through that cloud at +1.4 s
+	 * (after the SV-98 bolt), time dilation 0.05, caught at 60 fps frames 0, 2, 4, 8, 15, 30, 45 (the tunnel
+	 * and the vortex ring); then the pawn sent into the cloud at 250 cm/s, a still
+	 * every 0.15 s (flying through). Last: three shotgun shots, then ProfileGPU with
+	 * three clouds alive (the log has the GPU tree). "space": turned into the black.
+	 */
+	void RunSmokeMoments(const TArray<FString>& Args, UWorld* World)
+	{
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AJamZeroGPawn* Pawn = Controller ? Cast<AJamZeroGPawn>(Controller->GetPawn()) : nullptr;
+		if (!Pawn)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Smoke moments: needs the AJamZeroGPawn"));
+			return;
+		}
+		FVector Target = Pawn->GetActorLocation() + FVector(600.0f, 0.0f, 0.0f);
+		FVector Stand = Pawn->GetActorLocation();
+		if (TActorIterator<AJamLivingWall> Wall(World); Wall)
+		{
+			Target = Wall->GetActorLocation();
+			Stand = Target + Wall->GetFrontNormal() * 600.0f;
+			if (Args.Contains(TEXT("space")))
+			{
+				Target = Stand - Wall->GetFrontNormal().RotateAngleAxis(45.0f, FVector::UpVector) * 600.0f;
+			}
+		}
+		const FRotator Look = (Target - Stand).Rotation();
+		// Back on the stand, still, looking at the target.
+		const auto Reset = [Pawn, Controller, Stand, Look]()
+		{
+			Pawn->Body->SetWorldLocation(Stand, false, nullptr, ETeleportType::TeleportPhysics);
+			Pawn->Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+			Controller->SetControlRotation(Look);
+		};
+		// Only the view is held: the recoil keeps carrying the pawn.
+		UJamMuzzleFxComponent* Fx = Pawn->FindComponentByClass<UJamMuzzleFxComponent>();
+		const auto Shot = [Controller, Look, Fx](const FString& Name)
+		{
+			Controller->SetControlRotation(Look);
+			UE_LOG(LogMindKore, Log, TEXT("Smoke moments: %s -%s"), *Name, *Fx->DescribeClouds());
+			Controller->ConsoleCommand(TEXT("HighResShot 1"));
+		};
+		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
+		{
+			FTimerHandle Handle;
+			Pawn->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(Pawn, MoveTemp(Step)), Seconds, false);
+		};
+		Reset();
+		const int32 GunIndex[3] = { 0, 1, 2 };
+		const TCHAR* Names[3] = { TEXT("pistol"), TEXT("shotgun"), TEXT("SV-98") };
+		for (int32 Pass = 0; Pass < 3; ++Pass)
+		{
+			// Long first wait: shaders may still compile.
+			const float At = 8.0f + Pass * 12.0f;
+			const int32 Gun = GunIndex[Pass];
+			const FString Name = Names[Pass];
+			After(At, [Pawn, Reset, Gun]() { Pawn->Guns->UnlockWeapon(Gun); Reset(); });
+			// A warm-up shot for the shaders, its cloud gone before the real one.
+			After(At + 0.5f, [Pawn, Reset]() { Reset(); Pawn->Fire(); });
+			After(At + 3.0f, [Pawn, Reset, Controller]() { Reset(); Controller->ConsoleCommand(TEXT("jam.Fx.ClearSmoke")); });
+			After(At + 3.5f, [Pawn, Reset]() { Reset(); Pawn->Fire(); });
+			After(At + 3.8f, [Shot, Name]() { Shot(Name + TEXT(" cloud +0.3 s")); });
+			After(At + 4.7f, [Shot, Name]() { Shot(Name + TEXT(" cloud +1.2 s")); });
+			After(At + 4.9f, [Pawn, World, Controller, Look]()
+			{
+				Controller->SetControlRotation(Look);
+				UGameplayStatics::SetGlobalTimeDilation(World, 0.05f);
+				Pawn->Fire();
+			});
+			for (const int32 Frame : { 0, 2, 4, 8, 15, 30, 45 })
+			{
+				After(At + 4.9f + 0.008f + Frame / 60.0f, [Shot, Name, Frame]() { Shot(FString::Printf(TEXT("%s second shot frame %d"), *Name, Frame)); });
+			}
+			After(At + 4.9f + 0.78f, [World]() { UGameplayStatics::SetGlobalTimeDilation(World, 1.0f); });
+			// Flying through: towards the first cloud, which hangs on the sight line ahead.
+			After(At + 5.9f, [Pawn, Look]() { Pawn->Body->SetPhysicsLinearVelocity(Look.Vector() * 250.0f); });
+			for (int32 Step = 0; Step < 10; ++Step)
+			{
+				After(At + 5.95f + Step * 0.15f, [Shot, Name, Step]() { Shot(FString::Printf(TEXT("%s fly-through %.2f s"), *Name, Step * 0.15f)); });
+			}
+		}
+		// The budget: three shotgun clouds (the biggest) alive in view, then the GPU profile into the log.
+		After(45.0f, [Pawn, Reset]() { Pawn->Guns->UnlockWeapon(1); Reset(); });
+		for (int32 Index = 0; Index < 3; ++Index)
+		{
+			After(45.5f + Index * 0.9f, [Pawn, Reset]() { Reset(); Pawn->Fire(); });
+		}
+		After(48.0f, [Pawn, Controller, Reset]()
+		{
+			Reset();
+			UE_LOG(LogMindKore, Log, TEXT("Smoke moments: ProfileGPU with %d cloud(s) alive"), Pawn->FindComponentByClass<UJamMuzzleFxComponent>()->GetCloudCount());
+			Controller->ConsoleCommand(TEXT("ProfileGPU"));
+		});
+		After(48.5f, [Shot]() { Shot(TEXT("budget, three shotgun clouds")); });
+		After(49.5f, []() { UE_LOG(LogMindKore, Log, TEXT("Smoke moments: done")); });
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GSmokeMoments(
+		TEXT("jam.Weapons.Smoke"),
+		TEXT("Stills of the volumetric smoke's moments: the cloud hanging ahead after the recoil, a second shot through it (tunnel, vortex ring), flying through it; then ProfileGPU with three clouds. 'space': look into the black."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunSmokeMoments));
+
+	FAutoConsoleCommandWithWorld GClearSmoke(
+		TEXT("jam.Fx.ClearSmoke"),
+		TEXT("Remove every muzzle smoke cloud of the player (stills)."),
+		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+		{
+			APlayerController* Controller = World->GetFirstPlayerController();
+			APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+			if (UJamMuzzleFxComponent* Fx = Pawn ? Pawn->FindComponentByClass<UJamMuzzleFxComponent>() : nullptr)
+			{
+				Fx->ClearClouds();
+			}
+		}));
 
 	FAutoConsoleCommandWithWorldAndArgs GMuzzleFxShots(
 		TEXT("jam.Weapons.Fx"),
