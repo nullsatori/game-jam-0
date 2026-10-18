@@ -116,7 +116,9 @@ AnthonyChan0, 370345 «Mosin Nagant Bolt Action Cycle» by Zott820.
 [Freesound](https://freesound.org/people/u1769092/sounds/423301/).
 Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 Donor of the blow in every hit on a body and of the close-range layer
-(`SW_MK_Hit_*`).
+(`SW_MK_Hit_*`). Its peak is also the bullet's crack in the flyer's hit
+(`SW_Jam_Flyer_Hit_Attack`), whose body is MindKore's own `SW_MK_Hit_Torso_A` and
+`SW_MK_Hit_Limb_A` pitched down (`Scripts/jam_flyer_sounds.py`).
 
 **Gushy Impacts (Blood)** — by **TILE_SFX**, via
 [Freesound](https://freesound.org/people/tile_sfx/sounds/866651/).

@@ -75,8 +75,12 @@ struct FJamSoundPlay
 	float LowPassHz = 0.0f;
 	float StartSeconds = 0.0f;
 	bool bAir = false;
+	/** Rock or hull between it and the player (JamSoundOccluded): 900 Hz and x0.35 while so. */
+	bool bOccluded = false;
 
 	bool IsPlaying() const;
+	/** For a sound that moves (attached): re-check the line to the player, ease into or out of occlusion. */
+	void UpdateOcclusion(const AActor* Source);
 	void SetPitch(float NewPitch);
 	void Stop(float FadeSeconds);
 	FString Describe() const;
@@ -110,6 +114,12 @@ struct FJamFlyerMix
 FJamSoundPlay JamPlaySoundEvent(AActor* Owner, const FJamSoundEvent& Event, const FVector& Location, USceneComponent* AttachTo,
 	const FSoundAttenuationSettings& Attenuation, bool bAir, USoundSubmixBase* AirReverb, float VolumeScale = 1.0f,
 	float PitchScale = 1.0f, float LowPassScale = 1.0f);
+
+/**
+ * Is the line from the player's ear to Source blocked (Visibility)? The player's own body and what it
+ * carries are ignored - the engine's occlusion trace starts inside them and muffled every flyer sound.
+ */
+bool JamSoundOccluded(const UWorld* World, const FVector& Source, const AActor* SourceActor);
 
 /** The attenuation every flyer sound starts from: FalloffCm of natural falloff, air absorption, occlusion, close passes wide. */
 FSoundAttenuationSettings JamFlyerAttenuation(float FalloffCm, float AbsorptionStartCm);

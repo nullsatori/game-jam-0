@@ -32,7 +32,9 @@ Donors (all CC0, CREDITS.md), found by file name under the donor dirs:
   352719_6513636-hq.mp3   Dalesome, Woosh (stick swung in the air) (Freesound 352719)
   554907__nox_sound__male_breath_fast_loop_stereo.wav  Nox_Sound (Freesound 554907) - the rasp
   866651__tile_sfx__gushy-impacts-blood.m4a            TILE_SFX (Freesound 866651) - wet impacts
-(the previews: Saved/Donors/<id>/; the last two in MindKore's SFX/ folder).
+  SW_MK_Hit_Torso_A.wav, SW_MK_Hit_Limb_A.wav  MindKore's own flesh hits (its SFX/wav), the donors of SC_MK_Hit_Torso/_Limb
+  423301__u1769092__visceralbulletimpacts.wav   u1769092, VisceralBulletImpacts (Freesound 423301) - the bullet's crack
+(the previews: Saved/Donors/<id>/; the rest in MindKore's SFX/ folder).
 """
 import os
 import subprocess
@@ -56,6 +58,11 @@ FILES = {
     "stick": "352719_6513636-hq.mp3",
     "breath": "554907__nox_sound__male_breath_fast_loop_stereo.wav",
     "gushy": "866651__tile_sfx__gushy-impacts-blood.m4a",
+    # MindKore's flesh hits (its SFX/wav renders, the waves behind SC_MK_Hit_Torso / SC_MK_Hit_Limb)
+    # and their CC0 donor of the blow.
+    "torso": "SW_MK_Hit_Torso_A.wav",
+    "limb": "SW_MK_Hit_Limb_A.wav",
+    "visceral": "423301__u1769092__visceralbulletimpacts.wav",
 }
 
 
@@ -147,13 +154,16 @@ EVENTS = {
         Body=[glide("staff", 0.0, 0.31, -7, -9, f"{HP(60)},{LP(3500)}", 1.3, 0, send=-8)],
         Character=[glide("stick", 0.05, 0.50, -9, -11, f"{HP(80)},{LP(3000)}", 1.2, -4, send=-8, at=0.04)],
         Sub=[sub(55, 35, 0.35, -14, at=0.05)])),
-    # A round into it: a wet splat on the front, the membrane's slap (the coat far down) and a chunk of
-    # wing beat, a thump.
-    "Hit": dict(lufs=-18.0, reverb=(0.3, -12), tail=0.2, gr=5.0, send_lp=1500, stems=dict(
-        Attack=[glide("gushy", 2.50, 2.62, -3, -4, f"{HP(150)},{LP(5000)}", 2.0, 0, send=-12)],
-        Body=[glide("coat", 0.12, 0.40, -9, -10, f"{HP(60)},{LP(2500)}", 1.5, -4, send=-10),
-              glide("wings", 3.75, 3.95, -8, -9, f"{HP(60)},{LP(2000)}", 1.5, -6, send=-10)],
-        Sub=[sub(85, 40, 0.12, -8)])),
+    # A round into it (owner 19.10 of the first take: «звук хита странный»): a living body, not a punch
+    # or a slap - the bullet's crack (the visceral impact's peak), a dense wet body of 80-150 ms
+    # (MindKore's torso hit 5 semitones down, its limb hit's gristle under it), a short low thump and a
+    # tiny gurgle; under 0.4 s, saturated.
+    "Hit": dict(lufs=-18.0, reverb=(0.25, -14), tail=0.12, gr=5.0, send_lp=1500, stems=dict(
+        Attack=[glide("visceral", 0.175, 0.25, -2, -2, f"{HP(400)},{LP(8000)}", 2.0, 0, send=-14)],
+        Body=[glide("torso", 0.0, 0.18, -5, -6, f"{HP(90)},{LP(3000)}", 2.5, 0, send=-10, at=0.005),
+              glide("limb", 0.0, 0.15, -7, -8, f"{HP(120)},{LP(3500)}", 2.0, -7, send=-12, at=0.01)],
+        Character=[glide("gushy", 1.75, 1.95, -10, -12, f"{HP(100)},{LP(1800)}", 1.5, -13, send=-12, at=0.1)],
+        Sub=[sub(75, 38, 0.10, -11, at=0.005)])),
     # The bite: the beak snapping shut twice, a wet tear, a thump (MindKore's gristle crunch is
     # played with it in game).
     "Bite": dict(lufs=-15.0, reverb=(0.4, -10), tail=0.25, gr=5.0, send_lp=1500, stems=dict(

@@ -1,7 +1,10 @@
 #include "JamFlyerAudio.h"
 
 #include "Components/AudioComponent.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Sound/SoundBase.h"
 #include "Sound/SoundSubmix.h"
 
@@ -41,8 +44,61 @@ void FJamSoundPlay::Stop(float FadeSeconds)
 
 FString FJamSoundPlay::Describe() const
 {
-	return FString::Printf(TEXT("%d layer(s), pitch %.2f, low-pass %.0f Hz, start +%.3f s, %s"), Components.Num(), Pitch, LowPassHz,
-		StartSeconds, bAir ? TEXT("air (reverb send, no suit tail)") : TEXT("vacuum (suit tail)"));
+	return FString::Printf(TEXT("%d layer(s), pitch %.2f, low-pass %.0f Hz, start +%.3f s, %s%s"), Components.Num(), Pitch, LowPassHz,
+		StartSeconds, bAir ? TEXT("air (reverb send, no suit tail)") : TEXT("vacuum (suit tail)"), bOccluded ? TEXT(", occluded") : TEXT(""));
+}
+
+namespace
+{
+	constexpr float OccludedLowPassHz = 900.0f;
+	constexpr float OccludedVolume = 0.35f;
+
+	void ApplyOcclusion(UAudioComponent& Component, bool bOccluded, float OpenLowPassHz, float Seconds)
+	{
+		Component.SetLowPassFilterFrequency(bOccluded ? FMath::Min(OpenLowPassHz, OccludedLowPassHz) : OpenLowPassHz);
+		Component.AdjustVolume(Seconds, bOccluded ? OccludedVolume : 1.0f);
+	}
+}
+
+bool JamSoundOccluded(const UWorld* World, const FVector& Source, const AActor* SourceActor)
+{
+	const APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
+	if (!Controller)
+	{
+		return false;
+	}
+	FVector Ear, Front, Right;
+	Controller->GetAudioListenerPosition(Ear, Front, Right);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamSoundOcclusion), /*bTraceComplex=*/false, SourceActor);
+	if (APawn* Pawn = Controller->GetPawn())
+	{
+		Params.AddIgnoredActor(Pawn);
+		TArray<AActor*> Carried;
+		Pawn->GetAttachedActors(Carried, true, true);
+		Params.AddIgnoredActors(Carried);
+	}
+	return World->LineTraceTestByChannel(Ear, Source, ECC_Visibility, Params);
+}
+
+void FJamSoundPlay::UpdateOcclusion(const AActor* Source)
+{
+	if (!Source || !IsPlaying())
+	{
+		return;
+	}
+	const bool bNow = JamSoundOccluded(Source->GetWorld(), Source->GetActorLocation(), Source);
+	if (bNow == bOccluded)
+	{
+		return;
+	}
+	bOccluded = bNow;
+	for (const TWeakObjectPtr<UAudioComponent>& Each : Components)
+	{
+		if (Each.IsValid())
+		{
+			ApplyOcclusion(*Each, bOccluded, LowPassHz, 0.15f);
+		}
+	}
 }
 
 FJamSoundPlay JamPlaySoundEvent(AActor* Owner, const FJamSoundEvent& Event, const FVector& Location, USceneComponent* AttachTo,
@@ -59,6 +115,7 @@ FJamSoundPlay JamPlaySoundEvent(AActor* Owner, const FJamSoundEvent& Event, cons
 	Play.StartSeconds = FMath::FRandRange(0.0f, Event.StartJitterSeconds);
 	const FVector2D Range = bAir ? Event.LowPassAirHz : Event.LowPassVacuumHz;
 	Play.LowPassHz = FMath::Clamp(FMath::FRandRange(Range.X, Range.Y) * LowPassScale, 200.0f, 20000.0f);
+	Play.bOccluded = JamSoundOccluded(Owner->GetWorld(), AttachTo ? AttachTo->GetComponentLocation() : Location, Owner);
 	for (const FJamSoundLayer& Layer : Event.Layers)
 	{
 		if (!Layer.Sound || (Layer.bVacuumOnly && bAir))
@@ -92,6 +149,10 @@ FJamSoundPlay JamPlaySoundEvent(AActor* Owner, const FJamSoundEvent& Event, cons
 			Component->SetSubmixSend(AirReverb, Event.AirReverbSend);
 		}
 		Component->Play(Play.StartSeconds);
+		if (Play.bOccluded)
+		{
+			ApplyOcclusion(*Component, true, Play.LowPassHz, 0.0f);
+		}
 		Play.Components.Add(Component);
 	}
 	return Play;
@@ -118,11 +179,9 @@ FSoundAttenuationSettings JamFlyerAttenuation(float FalloffCm, float AbsorptionS
 	S.NonSpatializedRadiusStart = 400.0f;
 	S.NonSpatializedRadiusEnd = 150.0f;
 	S.NonSpatializedRadiusMode = ENonSpatializedRadiusSpeakerMapMode::OmniDirectional;
-	// Behind the planetoid or the hull: dull and quieter.
-	S.bEnableOcclusion = true;
-	S.OcclusionTraceChannel = ECC_Visibility;
-	S.OcclusionLowPassFilterFrequency = 900.0f;
-	S.OcclusionVolumeAttenuation = 0.35f;
-	S.OcclusionInterpolationTime = 0.15f;
+	// Occlusion is JamSoundOccluded's, not the engine's: its trace starts at the listener, inside the
+	// player's own body and gun, and muffled every flyer sound with a clear line (jam.Flyer.MixCheck:
+	// -12 dB at 10 m, on the Visibility and on the Camera channel alike).
+	S.bEnableOcclusion = false;
 	return S;
 }

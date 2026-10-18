@@ -394,6 +394,7 @@ private:
 	bool bVoiceDoppler = false;
 	FJamSoundPlay FlyByPlay;
 	double LastFlyBySeconds = -100.0;
+	double NextOcclusionSeconds = 0.0;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UAudioComponent> Flutter = nullptr;

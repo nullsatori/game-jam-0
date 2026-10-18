@@ -8,6 +8,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
+#include "AudioMixerBlueprintLibrary.h"
 #include "Containers/Ticker.h"
 #include "JamClipRecorder.h"
 #include "JamShip.h"
@@ -176,7 +177,8 @@ AJamFlyer::AJamFlyer()
 	DeathSound = Event(TEXT("Death"), { TEXT("Attack"), TEXT("Body"), TEXT("Character"), TEXT("Sub"), TEXT("Tail") }, 0.8f, FVector2D(0.95f, 1.03f));
 	FlapSound = Event(TEXT("Flap"), { TEXT("Attack"), TEXT("Body"), TEXT("Sub"), TEXT("Tail") }, 1.0f, FVector2D(0.94f, 1.06f));
 	FlyBySound = Event(TEXT("FlyBy"), { TEXT("Body"), TEXT("Character"), TEXT("Sub"), TEXT("Tail") }, 0.9f, FVector2D(0.9f, 1.1f));
-	HitSound = Event(TEXT("Hit"), { TEXT("Attack"), TEXT("Body"), TEXT("Sub"), TEXT("Tail") }, 0.9f, FVector2D(0.9f, 1.1f));
+	// A round into it, at 10 m about 3 dB under the player's own shot (jam.Flyer.MixCheck, Docs/Flyers.md).
+	HitSound = Event(TEXT("Hit"), { TEXT("Attack"), TEXT("Body"), TEXT("Character"), TEXT("Sub"), TEXT("Tail") }, 3.2f, FVector2D(0.88f, 1.12f));
 	BiteSound = Event(TEXT("Bite"), { TEXT("Attack"), TEXT("Body"), TEXT("Character"), TEXT("Sub"), TEXT("Tail") }, 1.0f, FVector2D(0.95f, 1.05f));
 	{
 		// MindKore's gristle crunch under the bite (recorded donors, CREDITS.md).
@@ -204,6 +206,10 @@ AJamFlyer::AJamFlyer()
 	VoiceAttenuation.dBAttenuationAtMax = -40.0f;
 	WingsAttenuation = JamFlyerAttenuation(2500.0f, 400.0f);
 	ImpactAttenuation = JamFlyerAttenuation(3000.0f, 600.0f);
+	// A hit is heard where the round lands, usually 5-15 m out: full volume inside 8 m, then linear to 30 m
+	// (jam.Flyer.MixCheck: with the natural falloff a hit at 10 m sat 15 dB under its unattenuated level).
+	ImpactAttenuation.AttenuationShapeExtents = FVector(800.0f, 0.0f, 0.0f);
+	ImpactAttenuation.DistanceAlgorithm = EAttenuationDistanceModel::Linear; // natural falloff cost 15 dB at 10 m
 }
 
 void AJamFlyer::BeginPlay()
@@ -431,6 +437,13 @@ void AJamFlyer::UpdateSounds(float DeltaSeconds)
 	if (FlyByPlay.IsPlaying())
 	{
 		FlyByPlay.SetPitch(FlyByPlay.Pitch * Doppler());
+	}
+	// Moving sounds keep checking the line to the player (rock and hull muffle them).
+	if (GetWorld()->GetTimeSeconds() >= NextOcclusionSeconds)
+	{
+		NextOcclusionSeconds = GetWorld()->GetTimeSeconds() + 0.15;
+		VoicePlay.UpdateOcclusion(this);
+		FlyByPlay.UpdateOcclusion(this);
 	}
 	if (!Listener)
 	{
@@ -1583,6 +1596,99 @@ namespace JamFlyerProbe
 		TEXT("jam.Flyer.Clip"),
 		TEXT("jam.Flyer.Clip [Seconds] [Ffmpeg]: a recorded take (video and sound) of a fly-by attack; Saved/Clips (needs a real RHI and a window)."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunFlyerClip));
+
+	/**
+	 * jam.Flyer.MixCheck [DistanceCm]: the hit against the player's own shot, apart (needs sound).
+	 * The first habitat's first flyer is held still DistanceCm (1000) ahead of the player; the
+	 * master submix is recorded for 5 s: at 0.5 s the player's pistol fires into empty space, at
+	 * 2.5 s a 25-damage round is delivered into the flyer (its hit sound alone, no gun). Sound:
+	 * Saved/Clips/FlyerMixCheck.wav; the log gives the moments.
+	 */
+	void RunFlyerMixCheck(const TArray<FString>& Args, UWorld* World)
+	{
+		AJamFlyerHabitat* Home = nullptr;
+		for (TActorIterator<AJamFlyerHabitat> It(World); It && !Home; ++It)
+		{
+			Home = *It;
+		}
+		AJamZeroGPawn* Pawn = ProbePawn(World);
+		if (!Home || Home->GetFlock().IsEmpty() || !Home->GetFlock()[0].IsValid() || !Pawn)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Flyer mix check: needs the zero-G pawn and a habitat with flyers"));
+			return;
+		}
+		const float Distance = Args.Num() > 0 && FCString::Atof(*Args[0]) > 0.0f ? FCString::Atof(*Args[0]) : 1000.0f;
+		for (const TWeakObjectPtr<AJamFlyer>& Weak : Home->GetFlock())
+		{
+			if (AJamFlyer* Other = Weak.Get())
+			{
+				Other->SetActorTickEnabled(false); // no wings, no voices: the hit alone
+				Other->Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+			}
+		}
+		AJamFlyer* Flyer = Home->GetFlock()[0].Get();
+		// The round makes it angry: its screeches would sound with the hit, so they are silenced here.
+		Flyer->AggroSound.Layers.Reset();
+		Flyer->DiveSound.Layers.Reset();
+		// Diagnostics: "noatt" turns the attenuation off (the raw level, panned).
+		if (Args.Contains(TEXT("noatt")))
+		{
+			Flyer->ImpactAttenuation.bAttenuate = false;
+			Flyer->ImpactAttenuation.bAttenuateWithLPF = false;
+		}
+		// The same place every run, the line between them checked: occlusion would muffle the hit.
+		const FVector FlyerAt(1000.0f, 600.0f, 1800.0f);
+		Teleport(Flyer, FlyerAt);
+		Teleport(Pawn, FlyerAt - FVector::ForwardVector * Distance);
+		FCollisionQueryParams Line(SCENE_QUERY_STAT(JamFlyerMixCheck), false, Flyer);
+		Line.AddIgnoredActor(Pawn);
+		FHitResult Blocker;
+		const bool bOccluded = World->LineTraceSingleByChannel(Blocker, Pawn->GetActorLocation(), FlyerAt, ECC_Visibility, Line);
+		UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: the line to the flyer is %s%s"), bOccluded ? TEXT("blocked by ") : TEXT("clear"),
+			bOccluded ? *GetNameSafe(Blocker.GetActor()) : TEXT(""));
+		if (IConsoleVariable* Never = IConsoleManager::Get().FindConsoleVariable(TEXT("au.NeverDisableSubmixes")))
+		{
+			Never->Set(1, ECVF_SetByCode);
+		}
+		UAudioMixerBlueprintLibrary::StartRecordingOutput(World, 10.0f);
+		UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: recording; %s held %.0f m ahead"), *Flyer->GetName(), Distance / 100.0f);
+		After(World, 0.5f, [World]()
+		{
+			if (AJamZeroGPawn* Now = ProbePawn(World))
+			{
+				Now->GetController()->SetControlRotation(FRotator(0.0f, 180.0f, 0.0f)); // away from the flyer: nothing hit
+				UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: +0.5 s the pistol, %s"), Now->Fire() ? TEXT("fired") : TEXT("NOT fired"));
+			}
+		});
+		TWeakObjectPtr<AJamFlyer> Weak = Flyer;
+		After(World, 2.5f, [World, Weak]()
+		{
+			AJamFlyer* Target = Weak.Get();
+			if (!Target)
+			{
+				return;
+			}
+			FMKResolvedImpact Round;
+			Round.ShotId = FGuid::NewGuid();
+			Round.Kind = EMKImpactKind::Round;
+			Round.DamageAmount = 25.0f;
+			Round.Hit = FHitResult(Target, Target->Body, Target->GetActorLocation(), FVector::BackwardVector);
+			Round.SourceActor = ProbePawn(World);
+			MKDeliverResolvedImpact(World, ProbePawn(World), Round);
+			UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: +2.5 s a round into %s"), *Target->GetName());
+		});
+		After(World, 5.0f, [World]()
+		{
+			const FString Dir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Clips"));
+			UAudioMixerBlueprintLibrary::StopRecordingOutput(World, EAudioRecordingExportType::WavFile, TEXT("FlyerMixCheck"), Dir);
+			UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: done - %s/FlyerMixCheck.wav"), *Dir);
+		});
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GFlyerMixCheck(
+		TEXT("jam.Flyer.MixCheck"),
+		TEXT("jam.Flyer.MixCheck [DistanceCm] [noatt]: record the player's pistol shot and, apart, a round into a flyer held that far ahead (Saved/Clips/FlyerMixCheck.wav; needs sound)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunFlyerMixCheck));
 
 	/**
 	 * jam.Flyer.Shots: rendered stills (needs a real RHI). The flyers stop noticing
