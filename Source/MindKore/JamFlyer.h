@@ -251,9 +251,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
 	FJamSoundEvent FlyBySound;
 
-	/** A round into it (alive or dead), at the hit. */
+	/** A round into it (alive or dead), at the hit; one per source and HitWindowSeconds. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
 	FJamSoundEvent HitSound;
+
+	/**
+	 * Hits from one source within this after the first are one hit sound, its volume from
+	 * their summed damage: a shotgun's pellets land milliseconds apart, not in one frame
+	 * (as AJamLivingWall::BlastWindowSeconds). Under the fastest gun's FireInterval (the
+	 * pistol's 0.15 s). 0: every round its own sound.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound", meta = (ClampMin = "0.0"))
+	float HitWindowSeconds = 0.06f;
 
 	/** The bite, at the player: the beak, the wet tear and MindKore's gristle crunch. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Sound")
@@ -406,6 +415,16 @@ private:
 	/** A screech may start: under Mix.MaxScreeches, or it takes the farthest one's place. */
 	bool TakeScreechSlot(const TCHAR* Why);
 	void UpdateSounds(float DeltaSeconds);
+	/** The rounds of one source inside HitWindowSeconds, waiting to be one hit sound. */
+	struct FPendingHit
+	{
+		TWeakObjectPtr<AActor> Source;
+		FVector Point = FVector::ZeroVector;
+		float Damage = 0.0f;
+		int32 Rounds = 0;
+	};
+	TArray<FPendingHit> PendingHits;
+	void PlayHit(TWeakObjectPtr<AActor> Source);
 	float Doppler() const;
 	void PlayFlap(float Strength, float Rate);
 	/** The corpse falls in a gravity zone (the planetoid's radial pull), drifts elsewhere. */
