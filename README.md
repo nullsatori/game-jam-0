@@ -169,6 +169,48 @@ UnrealEditor-Cmd.exe <путь>\MKJamStarter.uproject -ExecutePythonScript="<п�
 Модуль называется `MindKore`: так перенесённый код работает без правок.
 Новый код — файлы `Jam*.h/.cpp` в `Source/MindKore`.
 
+## Как собрать сдачу
+
+Win64 Development: в ней работают консоль `jam.*` и линии `DrawDebug` (см.
+пробелы). Из PowerShell, при закрытом редакторе этого checkout, после сборки
+редактора из раздела «Открыть и собрать» (cook работает через него):
+
+```powershell
+$p = "<путь>\MKJamStarter.uproject"
+& "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" MKJamStarter Win64 Development "-Project=$p" -WaitMutex -NoHotReloadFromIDE
+& "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun "-project=$p" -noP4 -platform=Win64 -clientconfig=Development -skipbuild -nocompileeditor -cook -stage -pak -nodebuginfo -map=Lvl_Jam_Ship+Lvl_Jam_Range+Lvl_Jam_ZeroG+Lvl_Jam_TestRoom "-stagingdirectory=<папка вне репозитория>" -unattended -utf8output
+```
+
+Сдаётся папка `<папка>\Windows` целиком, запуск — `MKJamStarter.exe`
+(стартовая карта `Lvl_Jam_Ship`). Упаковку в репозиторий не класть.
+
+Замер 19.10 на машине разработки: `Build.bat` — ~55 с, `BuildCookRun` — 27 с
+(полный cook 1135 пакетов за 9 с: шейдеры уже в DDC). Первый cook на этой машине,
+с компиляцией шейдеров, шёл 1 мин 32 с; на машине без DDC дольше. Размер —
+694 МБ (exe 324 МБ, контент 258 МБ); без `-nodebuginfo` ещё 374 МБ PDB.
+Shipping — ~500 МБ без PDB.
+
+Проверено в упакованной Development: все четыре карты грузятся без
+`SkipPackage` и `Failed to find object`; `jam.Ship.Probe` и `jam.Hull.Probe`
+проходят те же шаги, что в редакторе; проектор скафандра (light function)
+рисует надписи; объёмный дым (Heterogeneous Volumes) рисуется.
+
+Известные пробелы:
+
+- **Shipping** стартует и 60 с работает без падения (что карта загружена, видно
+  лишь косвенно, по памяти процесса), но лога в нём нет, а
+  кадры `jam.Hull.Stills` через `-ExecCmds` не появились: пробы в Shipping не
+  проверить. В Shipping нет `DrawDebug*` (`UE_ENABLE_DEBUG_DRAWING`): пропадают
+  трос сцепки, линия крюка и просчёт траектории по Shift. Поэтому сдавать
+  Development, пока эти линии не сделаны мешами (как линии стяжки).
+- Материалы, которые C++ грузит по мягкому пути (`TSoftObjectPtr`, `LoadObject`),
+  попадают в cook только через `DirectoriesToAlwaysCook` в
+  `Config/DefaultGame.ini`. Новый такой путь — добавить туда его папку, иначе в
+  упаковке `SkipPackage ... does not exist`, хотя в редакторе всё работает.
+  Ассеты из `ConstructorHelpers::FObjectFinder` записи не требуют.
+- `jam.Flyer.Probe <Habitat>` в упаковке находит стаю только по имени актора:
+  метки (label) есть лишь в редакторе.
+
 ## MCP-плагины
 
 Для работы ИИ-ассистента с редактором (Claude Code, Codex, Cursor) нужны два
