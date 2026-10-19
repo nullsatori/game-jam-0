@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "JamGameMode.h"
+#include "JamGravity.h"
 #include "JamShip.generated.h"
 
 class UBoxComponent;
@@ -62,10 +63,12 @@ private:
 
 /**
  * A place with gravity and/or air. With bWalk the player's pawn walks inside
- * (AJamZeroGPawn::SetGravity) and floats outside; without it the zone only
- * gives air. A box (the cabin and airlock) or, with SphereRadiusCm > 0, a
- * sphere around the actor (the planetoid: a thin walking shell inside a
- * wider breathable one). bRadial pulls toward the actor's centre.
+ * (AJamZeroGPawn::SetGravity) and every loose body falls (JamPullBodies);
+ * outside they float. Without bWalk the zone only gives air. A box (the cabin
+ * and airlock) or, with SphereRadiusCm > 0, a sphere around the actor (the
+ * planetoid: a walking ball inside a wider breathable one). bRadial pulls
+ * toward the actor's centre. Where zones overlap, JamGravityAt / JamAirZoneAt
+ * (JamGravity.h) pick the higher Priority, then the smaller zone.
  */
 UCLASS()
 class MINDKORE_API AJamGravityZone : public AActor
@@ -113,6 +116,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
 	bool bRadial = false;
 
+	/** Not radial: pull along the actor's own down axis (a tilted room) instead of world down. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
+	bool bPullAlongActorDown = false;
+
+	/** Where zones overlap, the higher Priority gives the gravity and the air; on a tie, the smaller zone. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
+	int32 Priority = 0;
+
 	/** Breathing restores oxygen here. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship")
 	bool bBreathable = true;
@@ -130,6 +141,12 @@ public:
 
 	/** Gravity direction (unit) at Location. */
 	FVector GravityAt(const FVector& Location) const;
+
+	/** What bounds the zone for overlap queries: its sphere, or the world box around its box, oval or boundary volume. */
+	FCollisionShape GetQueryShape(FVector& OutCentre) const;
+
+	/** The size that breaks priority ties, cm^3: of the query shape. */
+	double GetVolumeCm3() const;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FJamLaunchAttempt);
@@ -137,7 +154,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FJamLaunchAttempt);
 /**
  * The ship level's mode («Почини и улети»): one physics pawn (AJamZeroGPawn)
  * for the whole run - every tick it gets the gravity of the AJamGravityZone it
- * is in (walking) or none (zero-G), and the air of the zone. Shows toasts,
+ * is in (walking) or none (zero-G), and the air of the zone; every loose body
+ * in a walking zone gets the same gravity (JamPullBodies). Shows toasts,
  * counts cargo, and ends the run when the launch lever is pulled
  * (AJamShipPanel): it broadcasts OnLaunchAttempt (the hook for the planetoid
  * boss, not built yet), then shows «Улетел» and restarts. The guns start
@@ -181,11 +199,8 @@ public:
 	void Toast(const FText& Text);
 	FText GetToast() const;
 
-	/** The zone the pawn is in now, or null (for the HUD). */
+	/** The zone the pawn is in now (JamAirZoneAt), or null (for the HUD). */
 	const AJamGravityZone* ZoneOf(const APawn* Pawn) const;
-
-	/** The first walking (gravity) zone containing Location, or null. */
-	const AJamGravityZone* GravityZoneAt(const FVector& Location) const { return ZoneAt(Location, 0.0f); }
 
 	/** The launch lever: the run is won. */
 	void EndGame();
@@ -211,9 +226,6 @@ public:
 private:
 	/** The vitals hit zero: the body goes limp and lets go of everything, the input stops; RespawnDelaySeconds later, RespawnInCabin. */
 	void HandleDeath(TWeakObjectPtr<AJamZeroGPawn> Pawn);
-
-	/** The first zone containing Location: walking zones only, or any zone. */
-	const AJamGravityZone* ZoneAt(const FVector& Location, float InsetCm, bool bWalkOnly = true) const;
 
 	FText ToastText;
 	double ToastUntil = 0.0;

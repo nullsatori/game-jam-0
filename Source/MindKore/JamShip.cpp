@@ -282,7 +282,36 @@ bool AJamGravityZone::Contains(const FVector& Location, float InsetCm) const
 
 FVector AJamGravityZone::GravityAt(const FVector& Location) const
 {
-	return bRadial ? (GetActorLocation() - Location).GetSafeNormal(UE_SMALL_NUMBER, FVector::DownVector) : FVector::DownVector;
+	if (bRadial)
+	{
+		return (GetActorLocation() - Location).GetSafeNormal(UE_SMALL_NUMBER, FVector::DownVector);
+	}
+	return bPullAlongActorDown ? -GetActorUpVector() : FVector::DownVector;
+}
+
+FCollisionShape AJamGravityZone::GetQueryShape(FVector& OutCentre) const
+{
+	// The same precedence as Contains: the boundary volume, the sphere, the box (or oval).
+	if (!IsValid(BoundaryVolume) && SphereRadiusCm > 0.0f)
+	{
+		OutCentre = GetActorLocation();
+		return FCollisionShape::MakeSphere(SphereRadiusCm);
+	}
+	const FBox Box = IsValid(BoundaryVolume) ? BoundaryVolume->GetComponentsBoundingBox(/*bNonColliding=*/true) : Zone->Bounds.GetBox();
+	OutCentre = Box.GetCenter();
+	return FCollisionShape::MakeBox(Box.GetExtent());
+}
+
+double AJamGravityZone::GetVolumeCm3() const
+{
+	FVector Centre;
+	const FCollisionShape Shape = GetQueryShape(Centre);
+	if (Shape.IsSphere())
+	{
+		return 4.0 / 3.0 * UE_DOUBLE_PI * FMath::Pow(double(Shape.GetSphereRadius()), 3.0);
+	}
+	const FVector Extent = Shape.GetExtent();
+	return 8.0 * Extent.X * Extent.Y * Extent.Z;
 }
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -382,26 +411,16 @@ FText AJamShipGameMode::GetToast() const
 	return GetWorld()->GetTimeSeconds() < ToastUntil ? ToastText : FText::GetEmpty();
 }
 
-const AJamGravityZone* AJamShipGameMode::ZoneAt(const FVector& Location, float InsetCm, bool bWalkOnly) const
-{
-	for (TActorIterator<AJamGravityZone> It(GetWorld()); It; ++It)
-	{
-		if ((It->bWalk || !bWalkOnly) && It->Contains(Location, InsetCm))
-		{
-			return *It;
-		}
-	}
-	return nullptr;
-}
-
 const AJamGravityZone* AJamShipGameMode::ZoneOf(const APawn* Pawn) const
 {
-	return Pawn ? ZoneAt(Pawn->GetActorLocation(), 0.0f, /*bWalkOnly=*/false) : nullptr;
+	return Pawn ? JamAirZoneAt(GetWorld(), Pawn->GetActorLocation()) : nullptr;
 }
 
 void AJamShipGameMode::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	// Before physics (the mode ticks in PrePhysics): every loose body in a walking zone falls as the pawn does.
+	JamPullBodies(GetWorld());
 	APlayerController* PlayerController = GetWorld()->GetFirstPlayerController();
 	APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
 	if (!Pawn || bEnded)
@@ -409,8 +428,8 @@ void AJamShipGameMode::Tick(float DeltaSeconds)
 		return;
 	}
 	const FVector Location = Pawn->GetActorLocation();
-	// Air: any breathable zone (the planetoid's air shell is wider than its walking shell).
-	const AJamGravityZone* Air = ZoneAt(Location, 0.0f, /*bWalkOnly=*/false);
+	// Air: the winning zone of any kind (the planetoid's air shell is wider than its walking shell).
+	const AJamGravityZone* Air = JamAirZoneAt(GetWorld(), Location);
 	if (UJamOxygenComponent* Oxygen = Pawn->FindComponentByClass<UJamOxygenComponent>())
 	{
 		Oxygen->SetBreathable(Air && Air->bBreathable, Air ? Air->RefillPerSecond : 0.0f);
@@ -418,7 +437,7 @@ void AJamShipGameMode::Tick(float DeltaSeconds)
 	// Gravity: the walking zone's, or none (zero-G).
 	if (AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(Pawn))
 	{
-		const AJamGravityZone* Zone = ZoneAt(Location, 0.0f);
+		const AJamGravityZone* Zone = JamGravityAt(GetWorld(), Location).Zone;
 		Floater->SetGravity(Zone ? Zone->GravityAt(Location) : FVector::ZeroVector, Zone ? Zone->GravityCm : 0.0f, Zone && Zone->bRadial);
 	}
 }

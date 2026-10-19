@@ -156,8 +156,8 @@ struct FJamMoveRules
  *
  * LMB and RMB act on press (the pistol fires while LMB is held). Holding
  * Left Shift aims: the pawn draws where a push and the current gun's recoil
- * would send it, or where a throw sends the held prop - a dotted line, the
- * first contact marked, one bounce after it.
+ * would send it, or where a throw sends the held prop - a dotted line (an
+ * arc under a zone's gravity), the first contact marked, one bounce after it.
  *
  * Only the mouse turns the view; the body's rotation is locked, so hits, the
  * grab and the rope move it but never turn it.
