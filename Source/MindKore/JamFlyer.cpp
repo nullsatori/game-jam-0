@@ -8,7 +8,9 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
+#include "AudioDevice.h"
 #include "AudioMixerBlueprintLibrary.h"
+#include "AudioThread.h"
 #include "Containers/Ticker.h"
 #include "JamClipRecorder.h"
 #include "JamShip.h"
@@ -787,10 +789,26 @@ void AJamFlyer::ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& Re
 	// The gun already pushes a simulated body it hits (UJamWeaponsComponent::FireRay): only a hit on a mesh part needs it here.
 	const UPrimitiveComponent* HitComponent = ResolvedImpact.Hit.GetComponent();
 	const bool bPushHere = !Push.IsNearlyZero() && !(HitComponent && HitComponent->IsSimulatingPhysics());
-	// The thwack of a round into it, at the hit, louder with the damage.
-	const FJamSoundPlay HitPlay = JamPlaySoundEvent(this, HitSound, ResolvedImpact.Hit.ImpactPoint, nullptr, ImpactAttenuation, ListenerInAir(),
-		AirReverb, FMath::Clamp(ResolvedImpact.DamageAmount / 25.0f, 0.6f, 1.2f));
-	UE_LOG(LogMindKore, Log, TEXT("Flyer %s: hit sound - %s"), *GetName(), *HitPlay.Describe());
+	// The thwack: one per source and HitWindowSeconds (a blast's pellets, before and after the death), at the first round.
+	const TWeakObjectPtr<AActor> Source = ResolvedImpact.SourceActor;
+	if (FPendingHit* Pending = PendingHits.FindByPredicate([&Source](const FPendingHit& Each) { return Each.Source == Source; }))
+	{
+		Pending->Damage += ResolvedImpact.DamageAmount;
+		++Pending->Rounds;
+	}
+	else
+	{
+		PendingHits.Add({ Source, FVector(ResolvedImpact.Hit.ImpactPoint), ResolvedImpact.DamageAmount, 1 });
+		if (HitWindowSeconds > 0.0f)
+		{
+			FTimerHandle Handle;
+			GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateUObject(this, &AJamFlyer::PlayHit, Source), HitWindowSeconds, false);
+		}
+		else
+		{
+			PlayHit(Source);
+		}
+	}
 	if (State == EJamFlyerState::Dead)
 	{
 		if (bPushHere)
@@ -821,10 +839,29 @@ void AJamFlyer::ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& Re
 	}
 }
 
+void AJamFlyer::PlayHit(TWeakObjectPtr<AActor> Source)
+{
+	const int32 Index = PendingHits.IndexOfByPredicate([&Source](const FPendingHit& Each) { return Each.Source == Source; });
+	if (Index == INDEX_NONE)
+	{
+		return;
+	}
+	const FPendingHit Hit = PendingHits[Index];
+	PendingHits.RemoveAt(Index);
+	// Louder with the damage: a pistol round (25) at 1, a blast's 8 pellets (96) at the cap.
+	const FJamSoundPlay HitPlay = JamPlaySoundEvent(this, HitSound, Hit.Point, nullptr, ImpactAttenuation, ListenerInAir(), AirReverb,
+		FMath::Clamp(Hit.Damage / 25.0f, 0.6f, 1.6f));
+	UE_LOG(LogMindKore, Log, TEXT("Flyer %s: hit sound - %d round(s), %.0f damage from %s within %.0f ms: %s"), *GetName(), Hit.Rounds, Hit.Damage,
+		*GetNameSafe(Source.Get()), HitWindowSeconds * 1000.0f, *HitPlay.Describe());
+}
+
 void AJamFlyer::Die(const FVector& Push)
 {
 	SetState(EJamFlyerState::Dead, FString::Printf(TEXT("killed, drifting at %.0f cm/s"), Body->GetPhysicsLinearVelocity().Size()));
 	DiedSeconds = GetWorld()->GetTimeSeconds();
+	// The death cry plays in VoicePlay but is no screech: it leaves its slot (TakeScreechSlot counts
+	// a playing voice as a screech and would keep it, or cut the death cry for a farther screech).
+	Screamers.RemoveAll([this](const TWeakObjectPtr<AJamFlyer>& Weak) { return Weak.Get() == this; });
 	VoicePlay.Stop(0.05f);
 	if (Flutter)
 	{
@@ -1442,12 +1479,13 @@ namespace JamFlyerProbe
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunFlyerCorpseShot));
 
 	/**
-	 * jam.Flyer.Clip [Seconds] [Ffmpeg]: a recorded take of a fly-by attack with its sound (needs a
-	 * real RHI and a window): the player 14 m ahead of the first habitat's first flyer, the view
-	 * following it, the flock free; after 60 % of the take the pistol until it dies. The player's
-	 * health is topped up (the take is about the flyers). Video: Saved/Clips/FlyerClip.mp4 (60 fps
-	 * nominal), sound: Saved/Clips/FlyerClip.wav (the master submix); the log gives the real seconds
-	 * and the frame count for the mux (Docs/Flyers.md).
+	 * jam.Flyer.Clip [Seconds] [Ffmpeg] [shotgun] [stat]: a recorded take of a fly-by attack with its
+	 * sound (needs a real RHI and a window): the player 14 m ahead of the first habitat's first flyer,
+	 * the view following it, the flock free; after 60 % of the take the pistol (or the shotgun, inside
+	 * 12 m) until it dies. The player's health is topped up (the take is about the flyers). Video:
+	 * Saved/Clips/FlyerClip.mp4 (60 fps nominal), sound: Saved/Clips/FlyerClip.wav (the master
+	 * submix); the log gives the real seconds and the frame count for the mux (Docs/Flyers.md), and
+	 * the voices every 0.5 s ("Flyer clip voices").
 	 */
 	struct FClip
 	{
@@ -1457,10 +1495,55 @@ namespace JamFlyerProbe
 		float Seconds = 26.0f;
 		double Started = 0.0;
 		bool bShooting = false;
+		bool bShotgun = false;
 		bool bStopped = false;
 		double NextShot = 0.0;
 		FRotator View = FRotator::ZeroRotator;
+		double NextVoiceLog = 0.0;
 	};
+
+	/**
+	 * The voices during a take, sampled on the audio thread once per game frame: the wave
+	 * instances the device sorted in its last update (one per playing layer) against its
+	 * channel limit; the ones over the limit, the lowest priorities, are culled (stat audio:
+	 * "Audible Wave Instances Dropped"). Peaks per log interval and for the whole take.
+	 */
+	struct FVoiceStats
+	{
+		std::atomic<int32> Channels{ 0 };
+		std::atomic<int32> PeakWaves{ 0 };
+		std::atomic<int32> PeakSounds{ 0 };
+		std::atomic<int32> TakePeakWaves{ 0 };
+		std::atomic<int32> Samples{ 0 };
+		std::atomic<int32> OverSamples{ 0 };
+		std::atomic<int64> OverWaves{ 0 };
+	};
+
+	void SampleVoices(UWorld* World, TSharedRef<FVoiceStats, ESPMode::ThreadSafe> Stats)
+	{
+		FAudioDevice* Device = World->GetAudioDeviceRaw();
+		if (!Device)
+		{
+			return;
+		}
+		FAudioThread::RunCommandOnAudioThread([Device, Stats]()
+		{
+			const int32 Waves = Device->GetActiveWaveInstances().Num();
+			const int32 Channels = Device->GetMaxChannels();
+			Stats->Channels = Channels;
+			Stats->PeakWaves = FMath::Max(Stats->PeakWaves.load(), Waves);
+			Stats->PeakSounds = FMath::Max(Stats->PeakSounds.load(), Device->GetActiveSounds().Num());
+			Stats->TakePeakWaves = FMath::Max(Stats->TakePeakWaves.load(), Waves);
+			++Stats->Samples;
+			if (Waves > Channels)
+			{
+				++Stats->OverSamples;
+				Stats->OverWaves += Waves - Channels;
+			}
+		});
+	}
+
+	TSharedRef<FVoiceStats, ESPMode::ThreadSafe> GVoices = MakeShared<FVoiceStats, ESPMode::ThreadSafe>();
 
 	TSharedPtr<FClip> GClip;
 
@@ -1489,6 +1572,18 @@ namespace JamFlyerProbe
 		}
 		Clip->Recorder->Tick();
 		const double Now = World->GetTimeSeconds();
+		if (!Clip->bStopped)
+		{
+			SampleVoices(World, GVoices);
+			if (Now >= Clip->NextVoiceLog)
+			{
+				Clip->NextVoiceLog = Now + 0.5;
+				UE_LOG(LogMindKore, Log, TEXT("Flyer clip voices: +%.1f s, up to %d wave instances (%d active sounds) of %d channels"),
+					Now - Clip->Started, GVoices->PeakWaves.load(), GVoices->PeakSounds.load(), GVoices->Channels.load());
+				GVoices->PeakWaves = 0;
+				GVoices->PeakSounds = 0;
+			}
+		}
 		AJamZeroGPawn* Pawn = ProbePawn(World);
 		AJamFlyer* Flyer = Clip->Subject.Get();
 		if (Pawn && Flyer && !Clip->bStopped)
@@ -1506,12 +1601,13 @@ namespace JamFlyerProbe
 			if (!Clip->bShooting && Now - Clip->Started > Clip->Seconds * 0.6f)
 			{
 				Clip->bShooting = true;
-				UE_LOG(LogMindKore, Log, TEXT("Flyer clip: +%.1f s, the pistol"), Now - Clip->Started);
+				UE_LOG(LogMindKore, Log, TEXT("Flyer clip: +%.1f s, the %s"), Now - Clip->Started, Clip->bShotgun ? TEXT("shotgun") : TEXT("pistol"));
 			}
+			// The shotgun's pellets spread 6 degrees: it waits for the flyer inside 12 m.
 			if (Clip->bShooting && Flyer->GetState() != EJamFlyerState::Dead && Now >= Clip->NextShot
-				&& FVector::Dist(Flyer->GetActorLocation(), Pawn->GetActorLocation()) < 4000.0f)
+				&& FVector::Dist(Flyer->GetActorLocation(), Pawn->GetActorLocation()) < (Clip->bShotgun ? 1200.0f : 4000.0f))
 			{
-				Clip->NextShot = Now + 0.35;
+				Clip->NextShot = Now + (Clip->bShotgun ? 0.6 : 0.35);
 				// Rounds fly (ProjectileSpeed): lead it by their travel time.
 				const FJamWeapon* Gun = Pawn->Guns->GetWeapon();
 				const float Travel = FVector::Dist(Flyer->GetActorLocation(), Pawn->Camera->GetComponentLocation()) / FMath::Max(Gun ? Gun->ProjectileSpeed : 9000.0f, 100.0f);
@@ -1528,6 +1624,8 @@ namespace JamFlyerProbe
 			Clip->Recorder->Stop(World, TEXT("FlyerClip"), Dir);
 			UE_LOG(LogMindKore, Log, TEXT("Flyer clip: stopped after %.2f s real, %d frames so far; sound %s/FlyerClip.wav"),
 				Clip->Recorder->GetSeconds(), Clip->Recorder->GetFrames(), *Dir);
+			UE_LOG(LogMindKore, Log, TEXT("Flyer clip voices: the take peaked at %d wave instances of %d channels; over the limit in %d of %d samples, %lld culled wave-frames"),
+				GVoices->TakePeakWaves.load(), GVoices->Channels.load(), GVoices->OverSamples.load(), GVoices->Samples.load(), GVoices->OverWaves.load());
 		}
 		if (Clip->bStopped && Clip->Recorder->IsFinished())
 		{
@@ -1559,8 +1657,22 @@ namespace JamFlyerProbe
 		}
 		JamFlyerParts::CVarLogFlaps->Set(true, ECVF_SetByCode);
 		TSharedPtr<FClip> Clip = MakeShared<FClip>();
-		Clip->Seconds = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 26.0f;
+		// "shotgun" anywhere: the shotgun instead of the pistol; "stat": the engine's voice counters
+		// on screen (stat audio: Max Channels, Wave Instances, ... Dropped - in the video too);
+		// the rest are Seconds and Ffmpeg.
+		TArray<FString> Rest = Args;
+		Clip->bShotgun = Rest.Remove(TEXT("shotgun")) > 0;
+		const bool bStat = Rest.Remove(TEXT("stat")) > 0;
+		Clip->Seconds = Rest.Num() > 0 ? FCString::Atof(*Rest[0]) : 26.0f;
 		Clip->Subject = Home->GetFlock()[0];
+		// The gun drawn from the start (the pawn begins with none in hand).
+		Pawn->Guns->UnlockWeapon(Clip->bShotgun ? 1 : 0);
+		Pawn->Guns->SelectWeapon(Clip->bShotgun ? 1 : 0);
+		GVoices = MakeShared<FVoiceStats, ESPMode::ThreadSafe>();
+		if (bStat)
+		{
+			World->GetFirstPlayerController()->ConsoleCommand(TEXT("stat audio"));
+		}
 		FVector Spot;
 		InFront(Clip->Subject.Get(), Home, 1400.0f, Spot);
 		Teleport(Pawn, Spot);
@@ -1568,7 +1680,7 @@ namespace JamFlyerProbe
 		Clip->Recorder = MakeUnique<FJamClipRecorder>();
 		FString Error;
 		const FString Video = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Clips/FlyerClip.mp4"));
-		if (!Clip->Recorder->Start(World, Args.Num() > 1 ? Args[1] : FindFfmpeg(), Video, 1280, Error))
+		if (!Clip->Recorder->Start(World, Rest.Num() > 1 ? Rest[1] : FindFfmpeg(), Video, 1280, Error))
 		{
 			UE_LOG(LogMindKore, Warning, TEXT("Flyer clip: %s"), *Error);
 			return;
@@ -1594,15 +1706,16 @@ namespace JamFlyerProbe
 
 	FAutoConsoleCommandWithWorldAndArgs GFlyerClip(
 		TEXT("jam.Flyer.Clip"),
-		TEXT("jam.Flyer.Clip [Seconds] [Ffmpeg]: a recorded take (video and sound) of a fly-by attack; Saved/Clips (needs a real RHI and a window)."),
+		TEXT("jam.Flyer.Clip [Seconds] [Ffmpeg] [shotgun] [stat]: a recorded take (video and sound) of a fly-by attack, the voices in the log; Saved/Clips (needs a real RHI and a window)."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunFlyerClip));
 
 	/**
-	 * jam.Flyer.MixCheck [DistanceCm]: the hit against the player's own shot, apart (needs sound).
-	 * The first habitat's first flyer is held still DistanceCm (1000) ahead of the player; the
-	 * master submix is recorded for 5 s: at 0.5 s the player's pistol fires into empty space, at
-	 * 2.5 s a 25-damage round is delivered into the flyer (its hit sound alone, no gun). Sound:
-	 * Saved/Clips/FlyerMixCheck.wav; the log gives the moments.
+	 * jam.Flyer.MixCheck [DistanceCm] [noatt] [shotgun]: the hit against the player's own shot, apart
+	 * (needs sound). The first habitat's first flyer is held still DistanceCm (1000) ahead of the
+	 * player; the master submix is recorded for 6.5 s: the pistol is drawn, at 2.0 s it fires into
+	 * empty space, at 4.0 s a 25-damage round is delivered into the flyer (its hit sound alone, no
+	 * gun). "shotgun": the shotgun's shot, then one blast's 8 pellets of 12 over three frames.
+	 * Sound: Saved/Clips/FlyerMixCheck.wav; the log gives the moments.
 	 */
 	void RunFlyerMixCheck(const TArray<FString>& Args, UWorld* World)
 	{
@@ -1618,6 +1731,12 @@ namespace JamFlyerProbe
 			return;
 		}
 		const float Distance = Args.Num() > 0 && FCString::Atof(*Args[0]) > 0.0f ? FCString::Atof(*Args[0]) : 1000.0f;
+		// "shotgun": its shot into empty space, then one blast's pellets into the flyer. The pawn starts
+		// with no gun in hand: the draw takes the first second, so everything runs 1.5 s later.
+		const bool bShotgun = Args.Contains(TEXT("shotgun"));
+		const float Later = 1.5f;
+		Pawn->Guns->UnlockWeapon(bShotgun ? 1 : 0);
+		Pawn->Guns->SelectWeapon(bShotgun ? 1 : 0);
 		for (const TWeakObjectPtr<AJamFlyer>& Weak : Home->GetFlock())
 		{
 			if (AJamFlyer* Other = Weak.Get())
@@ -1630,6 +1749,7 @@ namespace JamFlyerProbe
 		// The round makes it angry: its screeches would sound with the hit, so they are silenced here.
 		Flyer->AggroSound.Layers.Reset();
 		Flyer->DiveSound.Layers.Reset();
+		Flyer->DeathSound.Layers.Reset(); // a blast kills it
 		// Diagnostics: "noatt" turns the attenuation off (the raw level, panned).
 		if (Args.Contains(TEXT("noatt")))
 		{
@@ -1652,32 +1772,37 @@ namespace JamFlyerProbe
 		}
 		UAudioMixerBlueprintLibrary::StartRecordingOutput(World, 10.0f);
 		UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: recording; %s held %.0f m ahead"), *Flyer->GetName(), Distance / 100.0f);
-		After(World, 0.5f, [World]()
+		After(World, 0.5f + Later, [World, Later]()
 		{
 			if (AJamZeroGPawn* Now = ProbePawn(World))
 			{
 				Now->GetController()->SetControlRotation(FRotator(0.0f, 180.0f, 0.0f)); // away from the flyer: nothing hit
-				UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: +0.5 s the pistol, %s"), Now->Fire() ? TEXT("fired") : TEXT("NOT fired"));
+				UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: +%.1f s the %s, %s"), 0.5f + Later, *Now->Guns->Describe(), Now->Fire() ? TEXT("fired") : TEXT("NOT fired"));
 			}
 		});
 		TWeakObjectPtr<AJamFlyer> Weak = Flyer;
-		After(World, 2.5f, [World, Weak]()
+		// The pistol: one 25-damage round. The shotgun: its 8 pellets of 12, landing over three frames as flying pellets do.
+		const int32 Rounds = bShotgun ? 8 : 1;
+		for (int32 Index = 0; Index < Rounds; ++Index)
 		{
-			AJamFlyer* Target = Weak.Get();
-			if (!Target)
+			After(World, 2.5f + Later + (Index % 3) * 0.017f, [World, Weak, bShotgun, Index]()
 			{
-				return;
-			}
-			FMKResolvedImpact Round;
-			Round.ShotId = FGuid::NewGuid();
-			Round.Kind = EMKImpactKind::Round;
-			Round.DamageAmount = 25.0f;
-			Round.Hit = FHitResult(Target, Target->Body, Target->GetActorLocation(), FVector::BackwardVector);
-			Round.SourceActor = ProbePawn(World);
-			MKDeliverResolvedImpact(World, ProbePawn(World), Round);
-			UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: +2.5 s a round into %s"), *Target->GetName());
-		});
-		After(World, 5.0f, [World]()
+				AJamFlyer* Target = Weak.Get();
+				if (!Target)
+				{
+					return;
+				}
+				FMKResolvedImpact Round;
+				Round.ShotId = FGuid::NewGuid();
+				Round.Kind = EMKImpactKind::Round;
+				Round.DamageAmount = bShotgun ? 12.0f : 25.0f;
+				Round.Hit = FHitResult(Target, Target->Body, Target->GetActorLocation(), FVector::BackwardVector);
+				Round.SourceActor = ProbePawn(World);
+				MKDeliverResolvedImpact(World, ProbePawn(World), Round);
+				UE_LOG(LogMindKore, Log, TEXT("Flyer mix check: round %d (%.0f damage) into %s"), Index + 1, Round.DamageAmount, *Target->GetName());
+			});
+		}
+		After(World, 5.0f + Later, [World]()
 		{
 			const FString Dir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Clips"));
 			UAudioMixerBlueprintLibrary::StopRecordingOutput(World, EAudioRecordingExportType::WavFile, TEXT("FlyerMixCheck"), Dir);
@@ -1687,7 +1812,7 @@ namespace JamFlyerProbe
 
 	FAutoConsoleCommandWithWorldAndArgs GFlyerMixCheck(
 		TEXT("jam.Flyer.MixCheck"),
-		TEXT("jam.Flyer.MixCheck [DistanceCm] [noatt]: record the player's pistol shot and, apart, a round into a flyer held that far ahead (Saved/Clips/FlyerMixCheck.wav; needs sound)."),
+		TEXT("jam.Flyer.MixCheck [DistanceCm] [noatt] [shotgun]: record the player's shot and, apart, a round (or a blast's pellets) into a flyer held that far ahead (Saved/Clips/FlyerMixCheck.wav; needs sound)."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunFlyerMixCheck));
 
 	/**
