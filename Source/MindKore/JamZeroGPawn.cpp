@@ -557,7 +557,8 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 	}
 
 	const FVector Impulse = Change * Mu;
-	AddBodyImpulse(Impulse);
+	// Every tick, not a single kick: past AddBodyImpulse's launch rule, which would read a frame's share.
+	Body->AddImpulse(Impulse, NAME_None, /*bVelChange=*/false);
 	if (bMoving)
 	{
 		Target->AddImpulseAtLocation(-Impulse, Hand);
@@ -760,6 +761,24 @@ FVector AJamZeroGPawn::GetBodyVelocity() const
 void AJamZeroGPawn::AddBodyImpulse(const FVector& Impulse)
 {
 	Body->AddImpulse(Impulse, NAME_None, /*bVelChange=*/false);
+	// Walking, a kick up past the threshold leaves the ground as a jump does: Walk would
+	// otherwise see the floor within GroundProbeCm next frame and clip the upward speed
+	// (an SV-98 shot at the feet lifted the body only below ~70 FPS).
+	const float Up = MoveMode == EJamMoveMode::Walk ? float(FVector::DotProduct(Impulse, -GravityDirection)) / Body->GetMass() : 0.0f;
+	if (Up > LaunchThresholdCm)
+	{
+		LastJumpSeconds = GetWorld()->GetTimeSeconds();
+		bGrounded = false;
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: launched off the ground at %.0f cm/s"), *GetName(), Up);
+	}
+}
+
+bool AJamZeroGPawn::IsStrapPulling() const
+{
+	return HullTools->GetLines().ContainsByPredicate([this](const FJamStrapLine& Line)
+	{
+		return Line.Tension > 0.0f && (Line.A.Get() == Body || Line.B.Get() == Body);
+	});
 }
 
 bool AJamZeroGPawn::Push()
@@ -1241,7 +1260,14 @@ void AJamZeroGPawn::Walk(float DeltaSeconds)
 	const FVector Velocity = GetBodyVelocity();
 	float Normal = FVector::DotProduct(Velocity, Up);
 	FVector Tangent = Velocity - Up * Normal;
-	if (bGrounded)
+	// Pulled from outside (the hook, a taut strap line): the ground neither brakes the body nor
+	// holds it down, as in the air - the hook's 1500 cm/s^2 never beat the 4000 brake and the snap.
+	const bool bPulled = GrappleTarget.IsValid() || IsStrapPulling();
+	if (bGrounded && bPulled)
+	{
+		LastGroundedSeconds = GetWorld()->GetTimeSeconds();
+	}
+	if (bGrounded && !bPulled)
 	{
 		// On the ground the walk runs in the ground's plane: up a slope the wish
 		// climbs along it (in the gravity plane the climb was cancelled every
@@ -1703,8 +1729,8 @@ void AJamZeroGPawn::ReceiveResolvedImpact_Implementation(const FMKResolvedImpact
 	Vitals->ApplyIncoming(ResolvedImpact.DamageAmount, ResolvedImpact.Kind, /*bBlocked=*/false, ResolvedImpact.ShotId);
 	if (ResolvedImpact.bHasPhysicsImpulse)
 	{
-		// N s to kg cm/s, as MKPhysicsBridge::ApplyPointImpulse converts.
-		Body->AddImpulseAtLocation(ResolvedImpact.ImpulseNewtonSeconds * 100.0, ResolvedImpact.Hit.ImpactPoint);
+		// N s to kg cm/s, as MKPhysicsBridge::ApplyPointImpulse converts; at the body's centre (its rotation is locked).
+		AddBodyImpulse(ResolvedImpact.ImpulseNewtonSeconds * 100.0);
 	}
 }
 

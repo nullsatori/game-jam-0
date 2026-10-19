@@ -436,6 +436,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
 	float AirAccelCm = 400.0f;
 
+	/** Walking, a single kick (a shot, a push, a hit) that changes the speed along -gravity by more than this leaves the ground as a jump does, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
+	float LaunchThresholdCm = 150.0f;
+
 	/** Space on the ground: speed along -gravity, cm/s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
 	float JumpSpeedCm = 420.0f;
@@ -629,7 +633,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-	/** The body takes an impulse in kg cm/s (velocity change = Impulse / mass). */
+	/** The body takes a single kick in kg cm/s (velocity change = Impulse / mass); walking, one up past LaunchThresholdCm leaves the ground. */
 	void AddBodyImpulse(const FVector& Impulse);
 
 	/** Where the view aims from: the eye (ShoulderLocation), without the camera shake. */
@@ -699,6 +703,8 @@ private:
 	EJamMoveMode FreeMode() const { return IsInGravity() ? EJamMoveMode::Walk : EJamMoveMode::Float; }
 	/** Leaves the current mode (its exit) and enters NewMode (its enter). */
 	void SetMode(EJamMoveMode NewMode);
+	/** A strap line tied to the body is taut (it pulled in its last tick). */
+	bool IsStrapPulling() const;
 	void ApplyThrusters(float DeltaSeconds);
 	void Walk(float DeltaSeconds);
 	void ClimbLadder(float DeltaSeconds);
