@@ -131,7 +131,10 @@ Unreal Engine 5.8, C++.
 ## Открыть и собрать
 
 1. Установить UE 5.8, Visual Studio с C++ и [Git LFS](https://git-lfs.com).
-   Выполнить `git lfs install`, затем клонировать репозиторий.
+   Выполнить `git lfs install`, затем клонировать репозиторий и в его корне
+   выполнить `git config lfs.setlockablereadonly false`. Без этого LFS выдаёт
+   блокируемые `.uasset`/`.umap` только для чтения: редактор их не сохранит,
+   а скрипты упадут на `jam_build.save`.
 2. Открыть `MKJamStarter.uproject`. Редактор предложит собрать модуль —
    согласиться. Можно собрать и из PowerShell:
 
@@ -169,7 +172,7 @@ UnrealEditor-Cmd.exe <путь>\MKJamStarter.uproject -ExecutePythonScript="<п�
 ## MCP-плагины
 
 Для работы ИИ-ассистента с редактором (Claude Code, Codex, Cursor) нужны два
-Editor-плагина. В git их нет (`Plugins/` в `.gitignore`), в `.uproject` они
+Editor-плагина. В git их нет (обе папки в `.gitignore`; другие плагины в `Plugins/` git видит), в `.uproject` они
 помечены `Optional`: без них проект открывается и собирается как обычно.
 Каждый ставит их сам, ровно этих версий:
 
