@@ -21,8 +21,7 @@ ZEROG = "/Game/Jam/Maps/Lvl_Jam_ZeroG"
 SHIP = "/Game/Jam/Maps/Lvl_Jam_Ship"
 TAG = "Jam.Flyers"
 
-# The roosts cling to these actors (Nick's USD imports, by object name): the player's ship and the wreck.
-SHIP_HULL = "root_3"      # MindKore_Ship_R3_Blockout, x 3220..7220, the airlock on its -Y side at x 5560
+# The roost clings to this actor (Nick's USD import, by object name): the wreck. The player's ship (root_3) has none.
 WRECK_HULL = "root_0"     # MindKore_Ship_02_Blockout, the abandoned ship by the debris belt (no way in yet)
 
 HABITATS = {
@@ -33,24 +32,18 @@ HABITATS = {
         ("Flyers_Planetoid", (0.0, 16000.0, -1000.0), 12000.0, 9000.0, 4, {}),
         # Among the debris belt (y -4500) and over the fuel tanks (y -6000..-6200).
         ("Flyers_Belt", (150.0, -6100.0, 100.0), 2500.0, 0.0, 3, {}),
-        # The ship's roost: most cling to the hull head out, densest on the lit roof strip aft of the airlock - the
-        # first thing seen out of the door, a file of spikes leading the eye aft to the star that rims them - the
-        # rest down the flank and hanging under the belly (the dark side); a few patrol (stills 19.10, third take). The first EVA is unarmed: the
-        # roost spares an unarmed player (menace, no bite) until the first gun; armed, only coming within 4.5 m of a
-        # clinging one wakes it (the door stays 5.5 m clear: stepping out is not a provocation).
-        ("Flyers_ShipRoost", (5220.0, 0.0, 780.0), 2700.0, 0.0, 26, dict(
-            roost_on=[SHIP_HULL], roost_share=0.8, roost_spacing_cm=180.0,
-            roost_focus=(6500.0, -500.0, 990.0), roost_focus_falloff_cm=600.0,
-            roost_wake_radius_cm=450.0, roost_clear_of_doors_cm=550.0,
-            roost_seed=int(os.environ.get("JAM_SHIP_ROOST_SEED", "19")),
-            spare_unarmed=True, leash_cm=2500.0, aggro_margin_cm=300.0)),
-        # The wreck's roost: the flock the flesh wall calls (the encounter). Densest aft, over the engines, away from
-        # the open bow the player comes in by; it wakes only from close (4 m) - the wall's pain call is the trigger -
-        # and chases far (the way home).
-        ("Flyers_WreckRoost", (3405.0, -6933.0, 1344.0), 3800.0, 0.0, 10, dict(
-            roost_on=[WRECK_HULL], roost_share=0.7, roost_spacing_cm=260.0,
-            roost_focus=(4200.0, -8250.0, 2400.0), roost_focus_falloff_cm=2500.0, roost_wake_radius_cm=400.0,
-            spare_unarmed=False, leash_cm=9000.0, aggro_margin_cm=500.0)),
+        # The roost (moved off the player's ship onto the wreck 19.10, owner: "the flock goes to the other ship"): one
+        # flock - the old ship roost's and the wreck's - clinging head out on the wreck's hull, densest along the top ridge
+        # of its aft half, the edge the player sees as he crosses from the airlock: a file of spikes against the star that
+        # rims them, leading the eye aft (stills 19.10, takes 1-3: focus further aft hid them on the far side; falloff 7 m
+        # thinned the ridge); a few patrol around it. The first EVA is unarmed: it spares an unarmed player (menace, no bite) until the first gun;
+        # armed, only coming within 4 m of a clinging one wakes it, and no one clings within 5.5 m of the flesh wall, so
+        # the wall's pain call is the trigger. It chases far (the leash reaches the player's ship: the way home).
+        ("Flyers_WreckRoost", (3405.0, -6933.0, 1344.0), 3800.0, 0.0, 30, dict(
+            roost_on=[WRECK_HULL], roost_share=0.8, roost_spacing_cm=200.0,
+            roost_focus=(3900.0, -6900.0, 2100.0), roost_focus_falloff_cm=900.0, roost_wake_radius_cm=400.0, roost_clear_of_doors_cm=550.0,
+            roost_seed=int(os.environ.get("JAM_WRECK_ROOST_SEED", "19")),
+            spare_unarmed=True, leash_cm=9000.0, aggro_margin_cm=500.0)),
     ],
 }
 
