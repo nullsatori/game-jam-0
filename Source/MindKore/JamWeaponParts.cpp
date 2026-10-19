@@ -658,7 +658,6 @@ void UJamWeaponsComponent::ClearView()
 
 void UJamWeaponsComponent::FinishSwitch()
 {
-	bHolstered = false;
 	SwitchStage = ESwitch::Drawn;
 	SwitchTime = 0.0f;
 	ShownWeapon = IsWeaponUnlocked(CurrentWeapon) ? CurrentWeapon : INDEX_NONE;
@@ -674,7 +673,7 @@ void UJamWeaponsComponent::FinishSwitch()
 
 bool UJamWeaponsComponent::IsWeaponReady() const
 {
-	if (!IsWeaponUnlocked(CurrentWeapon) || ShownWeapon != CurrentWeapon || bHolstered)
+	if (!IsWeaponUnlocked(CurrentWeapon) || ShownWeapon != CurrentWeapon || !IsInHand())
 	{
 		return false;
 	}
@@ -683,7 +682,7 @@ bool UJamWeaponsComponent::IsWeaponReady() const
 
 const FJamWeapon* UJamWeaponsComponent::UpdateSwitch(float DeltaTime, bool bHandsBusy, FSwitchSpan& OutSpan)
 {
-	const int32 Wanted = bHandsBusy || bHolstered || !IsWeaponUnlocked(CurrentWeapon) ? INDEX_NONE : CurrentWeapon;
+	const int32 Wanted = bHandsBusy || !IsWeaponUnlocked(CurrentWeapon) ? INDEX_NONE : CurrentWeapon;
 	const float Before = SwitchTime;
 	SwitchTime += DeltaTime;
 	const auto Show = [this](int32 Index)
@@ -1507,8 +1506,8 @@ namespace
 		After(1.6f, [Guns]() { Guns->SelectWeapon(1); });    // during the SV-98's draw: away again, the shotgun
 		After(2.0f, [Pawn, Guns]() { UE_LOG(LogMindKore, Log, TEXT("Switch probe: fire at 2.0 s (%s): %s"), *Guns->Describe(), Pawn->Fire() ? TEXT("fired") : TEXT("refused")); });
 		After(3.2f, [Pawn, Guns]() { UE_LOG(LogMindKore, Log, TEXT("Switch probe: fire at 3.2 s (%s): %s"), *Guns->Describe(), Pawn->Fire() ? TEXT("fired") : TEXT("refused")); });
-		After(3.6f, [Guns]() { Guns->Holster(); });
-		After(4.2f, [Guns]() { Guns->Rearm(); });
+		After(3.6f, [Pawn]() { Pawn->SetHands(EJamHands::Held); });
+		After(4.2f, [Pawn]() { Pawn->SetHands(EJamHands::Gun); });
 		After(5.1f, [Pawn, Guns, Probe]()
 		{
 			UE_LOG(LogMindKore, Log, TEXT("Switch probe: done - %d frames, largest frame-to-frame jump %.2f cm, %.2f deg; fire after the draw: %s"),
@@ -1531,8 +1530,8 @@ namespace
 		}
 		for (int32 Round = 0; Round < 3; ++Round)
 		{
-			After(At += 1.0f, [Guns]() { Guns->Holster(); });
-			After(At += 0.8f, [Guns]() { Guns->Rearm(); });
+			After(At += 1.0f, [Pawn]() { Pawn->SetHands(EJamHands::Held); });
+			After(At += 0.8f, [Pawn]() { Pawn->SetHands(EJamHands::Gun); });
 			Switches += 2;
 		}
 		After(At += 1.5f, [Guns, Probe, Switches]()
@@ -1655,7 +1654,7 @@ namespace
 		{
 			const APlayerController* Controller = Cast<APlayerController>(Pawn->GetController());
 			UEnhancedInputLocalPlayerSubsystem* Input = Controller ? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(Controller->GetLocalPlayer()) : nullptr;
-			UInputAction* Action = FindObject<UInputAction>(Guns, TEXT("IA_Jam_Wheel"));
+			UInputAction* Action = FindObject<UInputAction>(Pawn, TEXT("IA_ZG_Wheel"));
 			if (Input && Action)
 			{
 				Input->InjectInputForAction(Action, FInputActionValue(1.0f), {}, {});
@@ -1664,7 +1663,7 @@ namespace
 		};
 		After(At += 2.0f, [Pawn, Guns, Probe, Wheel]()
 		{
-			Pawn->HullTools->SelectTool(EJamHullTool::Strap);
+			Pawn->SetHands(EJamHands::Tool, EJamHullTool::Strap);
 			Probe->Ammo = Guns->CurrentWeapon;
 			UE_LOG(LogMindKore, Log, TEXT("Switch probe: the strap in hand, the wheel turned (%s)"), Wheel() ? TEXT("injected") : TEXT("NO INPUT"));
 		});
@@ -1672,7 +1671,7 @@ namespace
 		{
 			UE_LOG(LogMindKore, Log, TEXT("Switch probe: wheel with the strap - gun %d -> %d (expected unchanged): %s"), Probe->Ammo, Guns->CurrentWeapon,
 				Guns->CurrentWeapon == Probe->Ammo ? TEXT("PASS") : TEXT("FAIL"));
-			Pawn->HullTools->SelectTool(EJamHullTool::None);
+			Pawn->SetHands(EJamHands::Gun);
 			Wheel();
 		});
 		After(At += 0.3f, [Guns, Probe]()

@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
 #include "JamCollisionImpact.h"
+#include "JamHullTools.h"
 #include "JamWeapons.h"
 #include "MKImpactReceiver.h"
 #include "JamZeroGPawn.generated.h"
@@ -58,6 +59,62 @@ enum class EJamMoveMode : uint8
 	Ladder,
 	/** Holding on to a fixed thing (Cling): the keys are the arm; gravity still pulls, nothing walks. */
 	Hang,
+};
+
+/**
+ * What the hands hold (AJamZeroGPawn::SetHands, the one writer). The guns
+ * (UJamWeaponsComponent) and the hull tools (UJamHullToolsComponent) read it;
+ * what each key does with it is one table, AJamZeroGPawn::Route.
+ */
+UENUM(BlueprintType)
+enum class EJamHands : uint8
+{
+	/** The current gun (Guns->CurrentWeapon), drawn or being drawn. */
+	Gun,
+	/** A hull tool (HullTools->GetTool); the gun is put away. */
+	Tool,
+	/** Both hands on a loose body (Grab), or unarmed at once with nothing in them (probes). */
+	Held,
+	/** Free and no gun picked up yet: read only - GetHands reports Gun this way until a gun is unlocked. */
+	Empty,
+};
+
+/** A key the hands answer (AJamZeroGPawn::Press): a column of AJamZeroGPawn::Route's table. */
+enum class EJamHandKey : uint8
+{
+	/** LMB pressed. */
+	Primary,
+	/** LMB down, every frame (an automatic gun). */
+	PrimaryHeld,
+	/** RMB pressed. */
+	Secondary,
+	/** The mouse wheel, a notch. */
+	Wheel,
+	/** R. */
+	Reload,
+};
+
+/** What a key does now (AJamZeroGPawn::Route). */
+enum class EJamHandAction : uint8
+{
+	None,
+	/** The gun fires (Fire). */
+	Fire,
+	/** The gun fires while LMB is held, if it is automatic. */
+	AutoFire,
+	Reload,
+	/** The next gun the wheel's way (holding a body: let go, that gun drawn). */
+	NextGun,
+	/** RMB with a gun: aim, or take a loose body in reach (Use). */
+	Aim,
+	/** RMB otherwise: take a loose body, hold on to the hull, let go (Use). */
+	Hands,
+	/** LMB holding a body: throw it (ThrowHeld). */
+	Throw,
+	ToolPrimary,
+	ToolSecondary,
+	/** The wheel with the strap: reel the last line. */
+	Reel,
 };
 
 /** What a movement mode allows (AJamZeroGPawn::Allows). */
@@ -558,6 +615,36 @@ public:
 	/** What RMB would do now: aim with a gun out, grab a loose body in reach, let go, or hold on. */
 	EJamRmbAction GetRmbAction() const;
 
+	/** The HUD's quiet RMB line: a loose body in reach is taken ("with a gun out, the gun goes away"); empty otherwise. */
+	FString GetRmbPrompt() const;
+
+	/** What the hands hold now (Empty: free, no gun picked up yet). */
+	UFUNCTION(BlueprintPure, Category = "Jam|Hands")
+	EJamHands GetHands() const;
+
+	/**
+	 * The hands' one writer: leave what they hold (its exit), take NewHands (its enter).
+	 * Gun -> Tool: the gun is put away on its path and its reload abandoned. Gun -> Held:
+	 * gone at once (a grab). Held -> what was in hand before the hold (a gun with the draw).
+	 * Leaving Held lets the body go. Tool: NewTool, or None for the last one. Empty means Gun.
+	 */
+	void SetHands(EJamHands NewHands, EJamHullTool NewTool = EJamHullTool::None);
+
+	/** A tool's key: take it; its key again puts it away (back to the gun). */
+	void TakeTool(EJamHullTool Tool);
+
+	/** The hands' table: what Key does with what they hold, in this move mode (the counterpart to Allows). */
+	EJamHandAction Route(EJamHandKey Key) const;
+
+	/** One key through the table (the input bindings and the probes). Value: the wheel's direction. */
+	void Press(EJamHandKey Key, float Value = 0.0f);
+
+	/** A digit key: slots 0..N-1 the guns in Guns->Weapons order, then the strap and the welder (GetToolSlot). */
+	void PressSlot(int32 Slot);
+
+	/** The slot of a hull tool: right after the guns (3 guns: the strap 3, key 4; the welder 4, key 5). */
+	int32 GetToolSlot(EJamHullTool Tool) const { return Guns->Weapons.Num() + int32(Tool) - 1; }
+
 	/** RMB pressed (IA_ZG_Use): aim, grab, let go or hold on - GetRmbAction. Public for jam.Guns.RmbProbe. */
 	void Use();
 
@@ -675,8 +762,11 @@ private:
 	void Look(const FInputActionValue& Value);
 	void Thrust(const FInputActionValue& Value);
 	void Lift(const FInputActionValue& Value);
-	void PrimaryPressed();
 	void PushPressed();
+	/** Stored: Gun, Tool or Held (GetHands reads a Gun with none unlocked as Empty). */
+	EJamHands Hands = EJamHands::Gun;
+	/** What the hands go back to when a held body is let go: Gun or Tool. */
+	EJamHands HandsBeforeHeld = EJamHands::Gun;
 	void Roll(const FInputActionValue& Value);
 	void UpdateGrapple();
 	/** Under AJamShipGameMode only after the AJamToolPickup with MKJamGrappleTool was taken; under another mode always. */

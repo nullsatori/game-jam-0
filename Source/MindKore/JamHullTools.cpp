@@ -44,12 +44,28 @@ bool UJamHullToolsComponent::TraceView(float Reach, FHitResult& OutHit) const
 	return GetWorld()->LineTraceSingleByChannel(OutHit, From, To, ECC_Visibility, Params) && OutHit.GetComponent();
 }
 
-void UJamHullToolsComponent::SelectTool(EJamHullTool NewTool)
+EJamHullTool UJamHullToolsComponent::GetTool() const
 {
-	Tool = Tool == NewTool ? EJamHullTool::None : NewTool;
+	const AJamZeroGPawn* Pawn = Cast<AJamZeroGPawn>(GetOwner());
+	return Pawn && Pawn->GetHands() == EJamHands::Tool ? Tool : EJamHullTool::None;
+}
+
+void UJamHullToolsComponent::TakeOut(EJamHullTool NewTool)
+{
+	if (NewTool != EJamHullTool::None)
+	{
+		Tool = NewTool;
+	}
 	bTorchOn = false;
 	WeldStatus = FText::GetEmpty();
-	UE_LOG(LogMindKore, Log, TEXT("Hull tools: %s in hand"), Tool == EJamHullTool::Strap ? TEXT("the strap") : Tool == EJamHullTool::Welder ? TEXT("the welder") : TEXT("nothing"));
+	UE_LOG(LogMindKore, Log, TEXT("Hull tools: %s in hand"), Tool == EJamHullTool::Strap ? TEXT("the strap") : TEXT("the welder"));
+}
+
+void UJamHullToolsComponent::PutAway()
+{
+	bTorchOn = false;
+	WeldStatus = FText::GetEmpty();
+	UE_LOG(LogMindKore, Log, TEXT("Hull tools: nothing in hand"));
 }
 
 // --- strap -------------------------------------------------------------------------
@@ -97,12 +113,12 @@ void UJamHullToolsComponent::CutAll()
 
 void UJamHullToolsComponent::PrimaryPressed()
 {
-	if (Tool == EJamHullTool::Welder)
+	if (GetTool() == EJamHullTool::Welder)
 	{
 		bTorchOn = true;
 		return;
 	}
-	if (Tool != EJamHullTool::Strap)
+	if (GetTool() != EJamHullTool::Strap)
 	{
 		return;
 	}
@@ -144,7 +160,7 @@ void UJamHullToolsComponent::PrimaryPressed()
 
 void UJamHullToolsComponent::Reel(int32 Step)
 {
-	if (Tool != EJamHullTool::Strap || Lines.IsEmpty())
+	if (GetTool() != EJamHullTool::Strap || Lines.IsEmpty())
 	{
 		return;
 	}
@@ -155,13 +171,13 @@ void UJamHullToolsComponent::Reel(int32 Step)
 
 void UJamHullToolsComponent::SecondaryPressed()
 {
-	if (Tool == EJamHullTool::Welder)
+	if (GetTool() == EJamHullTool::Welder)
 	{
 		bCutting = !bCutting;
 		UE_LOG(LogMindKore, Log, TEXT("Welder: %s"), bCutting ? TEXT("cut") : TEXT("weld"));
 		return;
 	}
-	if (Tool != EJamHullTool::Strap || Lines.IsEmpty())
+	if (GetTool() != EJamHullTool::Strap || Lines.IsEmpty())
 	{
 		return;
 	}
@@ -289,7 +305,7 @@ void UJamHullToolsComponent::DrawLines()
 
 void UJamHullToolsComponent::PrimaryHeld(float DeltaSeconds)
 {
-	if (Tool != EJamHullTool::Welder || !bTorchOn)
+	if (GetTool() != EJamHullTool::Welder || !bTorchOn)
 	{
 		return;
 	}

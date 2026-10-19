@@ -517,12 +517,14 @@ void AJamShipHUD::DrawHUD()
 			const UJamHullToolsComponent* Tools = Player->HullTools;
 			if (Tools->GetTool() == EJamHullTool::Strap)
 			{
-				DrawText(FString::Printf(TEXT("[4] Стяжка: линий %d/%d   ЛКМ — зацепить, колесо — подмотка, R — срезать"), Tools->GetLines().Num(), Tools->MaxLines), Tool, 24.0f, Line, Font);
+				DrawText(FString::Printf(TEXT("[%d] Стяжка: линий %d/%d   ЛКМ — зацепить, колесо — подмотка, R — срезать"), Player->GetToolSlot(EJamHullTool::Strap) + 1,
+					Tools->GetLines().Num(), Tools->MaxLines), Tool, 24.0f, Line, Font);
 				Line -= 20.0f;
 			}
 			else if (Tools->GetTool() == EJamHullTool::Welder)
 			{
-				DrawText(FString::Printf(TEXT("[5] Сварка: %s   ЛКМ — горелка, R — варить/резать   %s"), Tools->IsCutting() ? TEXT("режу") : TEXT("варю"),
+				DrawText(FString::Printf(TEXT("[%d] Сварка: %s   ЛКМ — горелка, R — варить/резать   %s"), Player->GetToolSlot(EJamHullTool::Welder) + 1,
+					Tools->IsCutting() ? TEXT("режу") : TEXT("варю"),
 					*Tools->GetWeldStatus().ToString()), Tool, 24.0f, Line, Font);
 				Line -= 20.0f;
 			}
@@ -1397,7 +1399,7 @@ namespace
 				Pawn->HullTools->AddLine(Hit.GetComponent(), Hit.ImpactPoint, PlateBody, PlateBody->GetComponentLocation());
 				Pawn->HullTools->AddLine(Hit.GetComponent(), Hit.ImpactPoint, Pawn->Body, Pawn->Body->GetComponentLocation(), /*bBelt=*/true);
 			}
-			Pawn->HullTools->SelectTool(EJamHullTool::Welder);
+			Pawn->SetHands(EJamHands::Tool, EJamHullTool::Welder);
 			Pawn->HullTools->PrimaryPressed();
 			Mode->Tools.AddUnique(MKJamGrappleTool());
 			Pawn->ToggleGrapple();

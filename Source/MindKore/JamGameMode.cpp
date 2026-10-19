@@ -174,9 +174,8 @@ void AJamZeroGHUD::DrawHUD()
 			CenterX - Width * 0.5f, CenterY + 24.0f, Font);
 	}
 	// RMB's other job, quietly: a loose body in reach is taken (with a gun out, the gun goes away).
-	if (Pawn->GetRmbAction() == EJamRmbAction::Grab)
+	if (const FString Line = Pawn->GetRmbPrompt(); !Line.IsEmpty())
 	{
-		const FString Line = Pawn->Guns->GetWeapon() ? TEXT("[ПКМ] взять (оружие убрать)") : TEXT("[ПКМ] взять");
 		float Width = 0.0f;
 		float Height = 0.0f;
 		GetTextSize(Line, Width, Height, Font);

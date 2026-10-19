@@ -37,9 +37,11 @@ struct FJamStrapLine
 };
 
 /**
- * The hull-repair tools in hand (owner, 17-18.10; Docs/HullRepair.md): slot 4
- * the strap, slot 5 the welder. LMB is the tool's action, R its second action,
- * the mouse wheel reels the strap.
+ * The hull-repair tools in hand (owner, 17-18.10; Docs/HullRepair.md): the
+ * strap and the welder, on the keys after the guns' (4 and 5 with three guns).
+ * LMB is the tool's action, R its second action, the mouse wheel reels the
+ * strap. The owner's hands decide whether a tool is in hand and route the keys
+ * here (AJamZeroGPawn::SetHands, AJamZeroGPawn::Route).
  *
  * Strap: LMB on a body hooks end A and the line runs to the belt (towing).
  * LMB on another body moves the belt end there: a line A-B, the hands free.
@@ -102,11 +104,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Strap", meta = (ClampMin = "0.1"))
 	float ThreadRadiusCm = 0.6f;
 
+	/** The tool in hand: the last one taken while the owner's hands hold a tool (AJamZeroGPawn::GetHands), else None. */
 	UFUNCTION(BlueprintPure, Category = "Jam")
-	EJamHullTool GetTool() const { return Tool; }
+	EJamHullTool GetTool() const;
 
-	/** 4 / 5: take the tool (again: put it away). */
-	void SelectTool(EJamHullTool NewTool);
+	/** The last tool taken, in hand or not: the one the hands take back after letting a body go. */
+	EJamHullTool GetLastTool() const { return Tool; }
+
+	/** The hands take NewTool (None: the last one again). Only AJamZeroGPawn::SetHands calls these two. */
+	void TakeOut(EJamHullTool NewTool);
+	/** The hands leave the tool: the torch goes out. */
+	void PutAway();
 
 	/** LMB press. */
 	void PrimaryPressed();
@@ -132,6 +140,7 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
+	/** The last tool taken; whether it is in hand is the owner's (GetTool). */
 	EJamHullTool Tool = EJamHullTool::None;
 	TArray<FJamStrapLine> Lines;
 	bool bCutting = false;

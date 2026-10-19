@@ -163,7 +163,28 @@ void AJamCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Started, this, &AJamCharacter::BulletTimePressed);
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &AJamCharacter::BulletTimeReleased);
 	Input->BindAction(CrowbarAction, ETriggerEvent::Started, this, &AJamCharacter::ToggleCrowbar);
-	Guns->BindInput(*Input, *Mapping);
+	// The guns' keys, bound by each pawn (the zero-G pawn routes its own, AJamZeroGPawn::Route): R reload, 1..N select,
+	// the wheel steps through the unlocked guns, MMB aims. The mapping holds the actions.
+	const auto Bind = [this, Input](const FString& Name, EInputActionValueType Type, const FKey& Key, ETriggerEvent Event, TFunction<void(const FInputActionValue&)> Do)
+	{
+		UInputAction* Action = NewObject<UInputAction>(this, *Name);
+		Action->ValueType = Type;
+		Mapping->MapKey(Action, Key);
+		Input->BindActionValueLambda(Action, Event, MoveTemp(Do));
+		return Action;
+	};
+	Bind(TEXT("IA_Reload"), EInputActionValueType::Boolean, EKeys::R, ETriggerEvent::Started, [this](const FInputActionValue&) { Guns->Reload(); });
+	Bind(TEXT("IA_Wheel"), EInputActionValueType::Axis1D, EKeys::MouseWheelAxis, ETriggerEvent::Started,
+		[this](const FInputActionValue& Value) { Guns->SelectStep(Value.Get<float>() > 0.0f ? 1 : -1); });
+	static const FKey Digits[] = { EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine };
+	for (int32 Index = 0; Index < FMath::Min(Guns->Weapons.Num(), int32(UE_ARRAY_COUNT(Digits))); ++Index)
+	{
+		Bind(FString::Printf(TEXT("IA_Weapon%d"), Index + 1), EInputActionValueType::Boolean, Digits[Index], ETriggerEvent::Started,
+			[this, Index](const FInputActionValue&) { Guns->SelectWeapon(Index); });
+	}
+	UInputAction* Aim = Bind(TEXT("IA_Scope"), EInputActionValueType::Boolean, EKeys::MiddleMouseButton, ETriggerEvent::Started,
+		[this](const FInputActionValue&) { Guns->Scope->SetHeld(true); });
+	Input->BindActionValueLambda(Aim, ETriggerEvent::Completed, [this](const FInputActionValue&) { Guns->Scope->SetHeld(false); });
 }
 
 void AJamCharacter::PawnClientRestart()
