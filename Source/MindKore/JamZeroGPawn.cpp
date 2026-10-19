@@ -3,6 +3,7 @@
 #include "JamLens.h"
 
 #include "Camera/CameraComponent.h"
+#include "Components/BoxComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SphereComponent.h"
 #include "Engine/StaticMesh.h"
@@ -1143,11 +1144,42 @@ void AJamZeroGPawn::BeginLadderClimb(AJamLadder* Ladder)
 	Body->SetSphereRadius(FMath::Min(LadderOriginalRadiusCm, 34.0f));
 	Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
 	bGrounded = false;
+	bLadderMounting = false;
+	LadderTravelCm = 0;
+	// Source keeps the climber against the ladder: the face is where the body, swept into it, meets
+	// the rungs (or the wall behind). Grabbed further out, the climb would hang under a hatch's lip.
+	const FTransform& Frame = Ladder->GetActorTransform();
+	const FVector From = GetActorLocation();
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(LadderFace), false, this);
+	FCollisionResponseParams Response;
+	Body->InitSweepCollisionParams(Params, Response);
+	FHitResult Face;
+	const bool bFace = GetWorld()->SweepSingleByChannel(Face, From, From + Frame.GetUnitAxis(EAxis::Y) * Ladder->Target->GetUnscaledBoxExtent().Y * 2.0f,
+		FQuat::Identity, Body->GetCollisionObjectType(), FCollisionShape::MakeSphere(Body->GetScaledSphereRadius()), Params, Response);
+	LadderFaceY = Frame.InverseTransformPosition(bFace && !Face.bStartPenetrating ? Face.Location : From).Y - (bFace ? 1.0f : 0.0f);
+	PlayRung(Ladder->RungVolume * 1.5f); // the grab
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: on %s, face at local Y %.0f (%s)"), *GetName(), *Ladder->GetName(), LadderFaceY,
+		bFace ? *GetNameSafe(Face.GetComponent()) : TEXT("nothing in reach"));
+}
+
+void AJamZeroGPawn::PlayRung(float Volume)
+{
+	if (ActiveLadder && ActiveLadder->RungSound)
+	{
+		UE_LOG(LogMindKore, Verbose, TEXT("ZeroG pawn %s: rung, volume %.2f"), *GetName(), Volume);
+		UGameplayStatics::PlaySoundAtLocation(this, ActiveLadder->RungSound, GetActorLocation(), Volume,
+			FMath::FRandRange(ActiveLadder->RungPitchRange.X, ActiveLadder->RungPitchRange.Y));
+	}
 }
 
 void AJamZeroGPawn::EndLadderClimb()
 {
+	if (ActiveLadder)
+	{
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: off %s"), *GetName(), *ActiveLadder->GetName());
+	}
 	ActiveLadder = nullptr;
+	bLadderMounting = false;
 	LadderCooldownUntil = GetWorld()->GetTimeSeconds() + 0.3;
 	RestoreLadderBodyRadius();
 }
@@ -1188,31 +1220,107 @@ void AJamZeroGPawn::ClimbLadder(float DeltaSeconds)
 {
 	const FVector Input = ThrustInput;
 	ThrustInput = FVector::ZeroVector;
-	if (!IsValid(ActiveLadder))
+	// Zero-G: the ladder is ignored (ApplyThrusters takes over; RMB clings to the rungs as to any fixed surface).
+	if (!IsValid(ActiveLadder) || !IsInGravity())
 	{
 		EndLadderClimb();
 		return;
 	}
-	const FVector Wish = (ViewDirection() * Input.X + Camera->GetRightVector() * Input.Y).GetClampedToMaxSize(1.0f);
-	const FVector Velocity = Wish * ActiveLadder->ClimbSpeedCm;
-	const FVector Delta = Velocity * DeltaSeconds;
-	FHitResult Hit;
-	SetActorLocation(GetActorLocation() + Delta, true, &Hit, ETeleportType::TeleportPhysics);
-	if (Hit.bBlockingHit && !Hit.bStartPenetrating)
+	// No gravity on the rungs and no sliding: the body moves by sweeps only, its velocity stays zero.
+	Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	if (DeltaSeconds <= 0.0f)
 	{
-		// Slide along rungs while preserving the vertical part of the input.
-		const FVector Slide = FVector::VectorPlaneProject(Delta * (1.0f - Hit.Time), Hit.Normal);
-		SetActorLocation(GetActorLocation() + Slide, true, nullptr, ETeleportType::TeleportPhysics);
+		return;
 	}
-	const FVector LocalWish = ActiveLadder->GetActorTransform().InverseTransformVectorNoScale(Wish);
-	if (!ActiveLadder->IsInReach(GetActorLocation()) || LocalWish.Y < -0.1f)
+	const FTransform& Frame = ActiveLadder->GetActorTransform();
+	const FVector Landing = Frame.TransformPosition(ActiveLadder->Top);
+	const FVector Start = GetActorLocation();
+	const float Speed = ActiveLadder->ClimbSpeedCm;
+	float Climb = 0.0f;
+	FVector Velocity;
+	if (bLadderMounting)
 	{
-		EndLadderClimb();
-		Body->SetPhysicsLinearVelocity(Velocity);
+		// Over the lip onto the landing at the climb speed, whatever the keys do: no hanging on the edge.
+		Velocity = (Landing - Start).GetSafeNormal() * Speed;
 	}
 	else
 	{
-		Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		// Source (CS:GO/CS2): W climbs where the view pitches, up within the dead zone, S the reverse;
+		// A/D along the rungs. The push of the view into the ladder is not motion: no drift off its face.
+		Climb = Input.X * ActiveLadder->ClimbSign(ViewDirection());
+		const float Side = Input.Y * FMath::Sign(FVector::DotProduct(Camera->GetRightVector(), Frame.GetUnitAxis(EAxis::X)));
+		Velocity = Frame.TransformVectorNoScale(FVector(Side, 0.0f, Climb).GetClampedToMaxSize(1.0f)) * Speed;
+	}
+	FVector Delta = bLadderMounting ? (Landing - Start).GetClampedToMaxSize(Speed * DeltaSeconds) : Velocity * DeltaSeconds;
+	if (!bLadderMounting && !Velocity.IsNearlyZero())
+	{
+		// Moving, the body closes on the ladder's face (at most the climb speed): no drift while still.
+		const FVector From = Frame.InverseTransformPosition(Start);
+		Delta += Frame.GetUnitAxis(EAxis::Y) * FMath::Clamp(LadderFaceY - float(From.Y), -Speed * DeltaSeconds, Speed * DeltaSeconds);
+		// No higher than Top.Z, where the mount takes over (a long frame would overshoot and drop back).
+		const float Rise = FVector::DotProduct(Delta, Frame.GetUnitAxis(EAxis::Z));
+		Delta -= Frame.GetUnitAxis(EAxis::Z) * FMath::Max(0.0f, Rise - FMath::Max(0.0f, ActiveLadder->Top.Z - float(From.Z)));
+	}
+	FHitResult Hit;
+	SetActorLocation(Start + Delta, true, &Hit, ETeleportType::TeleportPhysics);
+	if (Hit.bBlockingHit)
+	{
+		UE_LOG(LogMindKore, VeryVerbose, TEXT("ZeroG pawn %s: ladder move blocked by %s at %s, normal %s%s"), *GetName(), *GetNameSafe(Hit.GetComponent()),
+			*Frame.InverseTransformPosition(Hit.ImpactPoint).ToCompactString(), *Frame.InverseTransformVectorNoScale(Hit.ImpactNormal).ToCompactString(),
+			Hit.bStartPenetrating ? TEXT(", starting inside") : TEXT(""));
+	}
+	if (Hit.bBlockingHit && !Hit.bStartPenetrating)
+	{
+		const FVector Here = Frame.InverseTransformPosition(GetActorLocation());
+		if (FVector::DotProduct(Hit.Normal, Frame.GetUnitAxis(EAxis::Y)) < -0.5f)
+		{
+			// Against the rungs: the face is no deeper than here (a grab at the top finds the rails, behind them), 1 cm clear.
+			LadderFaceY = FMath::Min(LadderFaceY, float(Here.Y) - 1.0f);
+		}
+		FVector Rest = Delta * (1.0f - Hit.Time);
+		if (FVector::DotProduct(Hit.Normal, Frame.GetUnitAxis(EAxis::Z)) < -0.3f)
+		{
+			// A lip overhead (the hatch narrower than the shaft below): the rest of the step goes toward the
+			// ladder's axis at its face, where the hatch is open, instead of into the lip.
+			const FVector ToAxis = Frame.TransformVectorNoScale(FVector(-Here.X, LadderFaceY - Here.Y, 0.0f));
+			Rest = ToAxis.GetClampedToMaxSize(Rest.Size());
+		}
+		// Slide along rungs while preserving the vertical part of the input.
+		const FVector Slide = FVector::VectorPlaneProject(Rest, Hit.Normal);
+		SetActorLocation(GetActorLocation() + Slide, true, nullptr, ETeleportType::TeleportPhysics);
+	}
+	const float Moved = FVector::Dist(GetActorLocation(), Start);
+	LadderTravelCm += Moved;
+	if (LadderTravelCm >= ActiveLadder->RungStepCm)
+	{
+		PlayRung(ActiveLadder->RungVolume);
+		LadderTravelCm = 0.0f;
+	}
+	if (bLadderMounting)
+	{
+		// On the landing, or held by something on the way (less than a fifth of the step made): walking resumes.
+		if (FVector::Dist(GetActorLocation(), Landing) < 1.0f || Moved < 0.2f * Delta.Size())
+		{
+			EndLadderClimb();
+		}
+		return;
+	}
+	const FVector Local = Frame.InverseTransformPosition(GetActorLocation());
+	if (Climb > 0.0f && Local.Z >= ActiveLadder->Top.Z - 1.0f)
+	{
+		bLadderMounting = true;
+		return;
+	}
+	// Down (or not climbing up) at the foot with a floor under the body: off, standing. A floor, not a
+	// rung's 45-degree bevel (walkable to ProbeGround): off it the body would creep down the rung.
+	FHitResult Ground;
+	const bool bAtFoot = Climb <= 0.0f && Local.Z <= ActiveLadder->Bottom.Z + 30.0f && ProbeGround(Ground)
+		&& FVector::DotProduct(Ground.ImpactNormal, -GravityDirection) > 0.9f;
+	if (bAtFoot || !ActiveLadder->IsInReach(GetActorLocation()))
+	{
+		EndLadderClimb();
+		// Off the side keeps the strafe; on the floor the walk takes over from rest.
+		Body->SetPhysicsLinearVelocity(bAtFoot ? FVector::ZeroVector : Velocity);
 	}
 }
 
@@ -1224,7 +1332,8 @@ void AJamZeroGPawn::JumpPressed()
 		const FVector Up = IsInGravity() ? -GravityDirection : FVector::UpVector;
 		JumpedFromLadder = ActiveLadder;
 		EndLadderClimb();
-		Body->SetPhysicsLinearVelocity(Away * JumpSpeedCm * 0.65f + ViewDirection() * JumpSpeedCm * 0.45f + Up * JumpSpeedCm * 0.55f);
+		// Source pushes off along the ladder's face normal; a modest push here (~250 cm/s out, ~150 up), the view does not add.
+		Body->SetPhysicsLinearVelocity(Away * JumpSpeedCm * 0.6f + Up * JumpSpeedCm * 0.35f);
 		LastJumpSeconds = GetWorld()->GetTimeSeconds();
 		return;
 	}
@@ -1281,7 +1390,7 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 	}
 	UpdateHoldTarget();
 	UpdateDust();
-	if (!IsClimbingLadder() && !ClingConstraint && GetWorld()->GetTimeSeconds() >= LadderCooldownUntil
+	if (!IsClimbingLadder() && IsInGravity() && !ClingConstraint && GetWorld()->GetTimeSeconds() >= LadderCooldownUntil
 		&& !GrabbedBody.IsValid() && !TetheredBody.IsValid() && !GrappleTarget.IsValid())
 	{
 		FVector Move = ViewDirection() * ThrustInput.X + Camera->GetRightVector() * ThrustInput.Y;
@@ -1299,7 +1408,7 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 				}
 				JumpedFromLadder.Reset();
 			}
-			if (It->CanEnter(GetActorLocation(), Move))
+			if (It->CanEnter(GetActorLocation(), Move, bGrounded))
 			{
 				BeginLadderClimb(*It);
 				break;

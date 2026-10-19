@@ -46,6 +46,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `jam.Ship.Caves [Crater] [Plug]` | `Lvl_Jam_Ship` | мембрана кратера и пробка пещеры под дробовиком |
 | `jam.Ship.Lap`, `jam.Ship.JetExit`, `jam.Ship.Land` | `Lvl_Jam_Ship` | ходьба вокруг планетоида, реактивный выход из его гравитации, посадка |
 | `jam.Ship.Where [Tag]` | любая | где акторы с тегом (по умолчанию `Junk.Foreign`) |
+| `jam.Ladder.Probe` | `Lvl_Jam_Ship` | лестница (`Docs/Ladder.md`): захват, лаз по взгляду 350 см/с, остановка, S, мёртвая зона, A/D, сход наверх и на пол, прыжок (−252 / +147 см/с), сход вбок. Конец — `Ladder probe: done`, `TIMEOUT` в строке шага — провал |
 
 ## Кадры и звук (нужен рендер)
 
@@ -60,6 +61,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `jam.Wall.Shots [Name]` | живая стена до и после дробовика |
 | `jam.Flyer.Shots`, `jam.Flyer.BiteShot`, `jam.Flyer.CorpseShot` | летун, кровь на визоре, труп на планетоиде |
 | `jam.Ship.Shots`, `jam.Ship.PlanetShots`, `jam.Ship.CaveShots` | корабль, планетоид, кратеры и пещеры |
+| `jam.Ladder.Probe shots` | лестница корабля: спуск, вид на люк, переход через край, верхняя площадка, проём (тайминги шагов под рендером плывут — логика по NullRHI) |
 | `jam.Flyer.Clip [Seconds]` | ролик атаки со звуком (видео + мастер), `Saved/Clips` |
 | `jam.Flyer.MixCheck` | выстрел и попадание по летуну отдельно, для сравнения громкости |
 | `jam.Audio.LimiterProbe [Gain]` | цепочка мастер-сабмикса и запись выхода под очередь выстрелов |
@@ -73,6 +75,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 
 Только те, которые правка может сломать: смена оружия — `SwitchProbe` и
 `RmbProbe`; отдача и движение — `ZeroG.Probe`; стены — `Wall.Probe`; корабль и
-обшивка — `Ship.Probe` и `Hull.Probe`. Для правок только арта хватит кадров.
+обшивка — `Ship.Probe` и `Hull.Probe`; лестница — `Ladder.Probe` и
+`Ship.Probe`. Для правок только арта хватит кадров.
 Шаг «сварено снова» в `jam.Hull.Probe` плавает от прогона к прогону: стяжка
 иногда прижимает лист неровно (Z 20.13 вместо 20).

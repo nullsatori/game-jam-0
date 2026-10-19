@@ -586,6 +586,13 @@ private:
 	bool bRestoreLadderRadius = false;
 	float LadderOriginalRadiusCm = 40;
 	double LadderCooldownUntil = 0;
+	/** Over the top: carried onto the ladder's Top landing whatever the keys do. */
+	bool bLadderMounting = false;
+	/** Climbed since the last rung sound, cm. */
+	float LadderTravelCm = 0;
+	/** The depth (ladder's local Y) flush with the rungs, found on the grab and narrowed on touching them; climbing eases the body to it. */
+	float LadderFaceY = 0;
+	void PlayRung(float Volume);
 	/** Walkable ground under the body; the hit (normal, surface) in OutHit. */
 	bool ProbeGround(FHitResult& OutHit) const;
 	void PlayFleshStep(const FHitResult& Ground, float Volume);
