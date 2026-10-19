@@ -26,12 +26,12 @@ namespace
 	}
 
 	/** jam.Hang.Probe shots: HighResShot frames at the marked moments (needs a real RHI). */
-	bool bShots = false;
+	bool bHangShots = false;
 
 	/** A frame every Period for Seconds from now, when shots were asked for. */
 	void Frames(AJamZeroGPawn* Pawn, const TCHAR* Stage, float Period, float Seconds)
 	{
-		if (!bShots)
+		if (!bHangShots)
 		{
 			return;
 		}
@@ -310,8 +310,8 @@ namespace
 
 	void RunHangProbe(const TArray<FString>& Args, UWorld* World)
 	{
-		bShots = Args.Contains(TEXT("shots"));
-		if (bShots && !Args.Contains(TEXT("now")))
+		bHangShots = Args.Contains(TEXT("shots"));
+		if (bHangShots && !Args.Contains(TEXT("now")))
 		{
 			// Frames: let the renderer warm up, then a quarter of the speed so each HighResShot lands on its own moment.
 			FTimerHandle Later;
