@@ -218,10 +218,12 @@ namespace JamHandsProbe
 		int32 Failed = 0;
 	};
 
-	/** The loose body Distance in front of the eye, at rest. */
+	/** The loose body Distance in front of the eye, at rest. It must stay there: the zones' body gravity
+	 *  (JamPullBodies) skips bodies with gravity off, so the cabin's pull does not drop it out of reach. */
 	void PlaceLoose(const FStand& Stand, float Distance)
 	{
 		const AJamZeroGPawn* Pawn = Stand.Pawn;
+		Stand.Loose->SetEnableGravity(false);
 		Stand.Loose->SetWorldLocation(Pawn->ShoulderLocation() + Pawn->GetControlRotation().Vector() * Distance, false, nullptr, ETeleportType::TeleportPhysics);
 		Stand.Loose->SetPhysicsLinearVelocity(FVector::ZeroVector);
 		Stand.Loose->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
