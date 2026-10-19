@@ -17,7 +17,9 @@ hammer (the loose part behind the slide, HAMMER_BOX) is its own part, its
 origin moved to its pin (HAMMER_PIN) so it can turn there. Writes
 SM_Jam_USP_Frame.fbx, SM_Jam_USP_Slide.fbx and SM_Jam_USP_Hammer.fbx into
 out_dir with MindKore's own export settings, so all land in SM_MK_USP_Soviet's
-frame (muzzle -X, grip at the origin) and keep its UVs and material.
+frame (muzzle -X, grip at the origin) and keep its UVs and material. The frame,
+slide and hammer carry every face both ways (both_sides): MindKore's mesh is open
+where its hand covered the grip.
 
 SM_Jam_USP_Mag.fbx is new: a plain magazine (no UVs; slots BlackOxide body,
 Rubber floorplate) laid along the grip's well (MAG_TOP, MAG_AXIS, measured
@@ -106,11 +108,46 @@ def keep_only(node, keep):
     return part
 
 
+def both_sides(part):
+    """Every face again, wound the other way, its corner normals negated. The game mesh is open and partly
+    wound inward where MindKore's hand covered the grip; one-sided, the grip shows the background through
+    slits from behind. A two-sided material does not help: on a first-person primitive (JamScope.cpp) the
+    back faces still drop out (UE 5.8, stills 19.10), so the faces themselves go both ways."""
+    me = part.data
+    normals = [c.vector.copy() for c in me.corner_normals]
+    pbm = bmesh.new(); pbm.from_mesh(me)
+    axes = [pbm.loops.layers.float.new(a) for a in ("jam_nx", "jam_ny", "jam_nz")]
+    flipped = pbm.faces.layers.int.new("jam_back")  # every layer before the copy: a new one drops the Python refs
+    for face in pbm.faces:
+        for loop in face.loops:
+            for axis, value in zip(axes, normals[loop.index]):
+                loop[axis] = value
+    back = [g for g in bmesh.ops.duplicate(pbm, geom=pbm.verts[:] + pbm.edges[:] + pbm.faces[:])["geom"]
+            if isinstance(g, bmesh.types.BMFace)]
+    for face in back:
+        face[flipped] = 1
+    bmesh.ops.reverse_faces(pbm, faces=back)  # the corners keep their data
+    pbm.to_mesh(me); pbm.free()
+    back_face = me.attributes["jam_back"].data
+    loop_face = [0] * len(me.loops)
+    for p in me.polygons:
+        for i in p.loop_indices:
+            loop_face[i] = p.index
+    comps = [me.attributes[a].data for a in ("jam_nx", "jam_ny", "jam_nz")]
+    me.normals_split_custom_set([tuple((-1.0 if back_face[loop_face[i]].value else 1.0) * c[i].value for c in comps)
+                                 for i in range(len(me.loops))])
+    for a in ("jam_nx", "jam_ny", "jam_nz", "jam_back"):
+        me.attributes.remove(me.attributes[a])
+    against = sum(1 for i, c in enumerate(me.corner_normals) if c.vector.dot(me.polygons[loop_face[i]].normal) < 0)
+    print("JAMUSP: %s both ways, %d faces, %d corner normals against their face" % (part.name, len(me.polygons), against))
+    return part
+
+
 hammer = keep_only("PistolHammer", lambda i: i in hammer_verts)
 hammer.data.transform(Matrix.Translation(-HAMMER_PIN))
-for name, part in (("SM_Jam_USP_Frame", keep_only("PistolFrame", lambda i: i not in slide_verts and i not in hammer_verts)),
-                   ("SM_Jam_USP_Slide", keep_only("PistolSlide", lambda i: i in slide_verts)),
-                   ("SM_Jam_USP_Hammer", hammer), ("SM_Jam_USP_Mag", magazine())):
+for name, part in (("SM_Jam_USP_Frame", both_sides(keep_only("PistolFrame", lambda i: i not in slide_verts and i not in hammer_verts))),
+                   ("SM_Jam_USP_Slide", both_sides(keep_only("PistolSlide", lambda i: i in slide_verts))),
+                   ("SM_Jam_USP_Hammer", both_sides(hammer)), ("SM_Jam_USP_Mag", magazine())):
     bpy.ops.object.select_all(action="DESELECT")
     part.select_set(True); bpy.context.view_layer.objects.active = part
     # SM_MK_USP_Soviet's export (MindKore bake_export_usp.py); node names without "USP_" (an FBX collision token).
