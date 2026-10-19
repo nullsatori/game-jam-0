@@ -494,7 +494,7 @@ void AJamShipHUD::DrawHUD()
 			}
 			if (Player->IsClinging())
 			{
-				DrawText(TEXT("Держусь за корпус (ПКМ — отпустить)"), Tool, 24.0f, Line, Font);
+				DrawText(TEXT("Держусь (ПКМ — отпустить; WASD, Space/Ctrl — подтянуться, раскачаться)"), Tool, 24.0f, Line, Font);
 				Line -= 20.0f;
 			}
 			const AJamPlateSocket* Near = nullptr;
@@ -1291,7 +1291,7 @@ namespace
 			FCollisionQueryParams Params(SCENE_QUERY_STAT(JamHullProbe), false, Pawn);
 			const FVector From = Pawn->Body->GetComponentLocation();
 			const bool bHull = Pawn->GetWorld()->LineTraceSingleByChannel(Hit, From, From - Out * 300.0f, ECC_Visibility, Params);
-			const bool bClung = bHull && Pawn->Cling(Hit.GetComponent());
+			const bool bClung = bHull && Pawn->Cling(Hit.GetComponent(), Hit.ImpactPoint);
 			Pawn->Guns->UnlockWeapon(2);
 			Pawn->Guns->FinishSwitch(); // no draw: the probe shoots at once
 			if (APlayerController* Controller = Cast<APlayerController>(Pawn->GetController()))
