@@ -16,7 +16,7 @@
 | Выстрелы, затворы, помпа, курок, магазины | `Scripts/jam_space_shots.py`: слои transient / mid / body / sub / rumble / tail, тёмный ревер, компрессор, лимитер −1 dBFS; в игре вариант C | [RecoilWeapons — Звук](RecoilWeapons.md) |
 | Летуны: визг аггро и пике, взмахи, шелест, пролёт, попадание, укус, смерть | `Scripts/jam_flyer_sounds.py`: моно-стемы по ролям (Attack, Body, Character, Sub, Tail), вариация на каждом проигрывании в `UJamFlyerAudio` | [Flyers — Звук](Flyers.md) |
 | Шаги и падения на мясе (планетоид, живые стены) | доноры MindKore `SC_MK_Hit_Torso` / `SC_MK_Hit_Limb` на пешке: шаг каждые 130 см, высота ×0.4–0.55, громкость 0.35 | `AJamZeroGPawn` (`FleshStepSound`, `FleshCrashSound`) |
-| Смена оружия (кобура, ремень) | эскизы MindKore `SW_MK_Holster_*`, `SW_MK_Crowbar_*` — временно, ждут записанных доноров | [RecoilWeapons — Смена оружия](RecoilWeapons.md) |
+| Смена оружия (кобура, ремень) | `Scripts/jam_switch_foley.py`: записанные доноры (кожа кобуры, ремень, антабка, стук приклада), тот же тракт «через скафандр», что у механизмов; `SW_Jam_Stow_*` / `SW_Jam_Draw_*`, разброс громкости и высоты на каждом проигрывании | [RecoilWeapons — Смена оружия](RecoilWeapons.md) |
 
 WAV импортирует `Scripts/jam_import_audio.py` (папка назначения —
 переменная `JAM_AUDIO_DEST`).

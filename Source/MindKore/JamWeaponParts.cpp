@@ -77,11 +77,13 @@ void UJamWeaponsComponent::SetupWeaponParts()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Case9(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_Case_9mm.SM_Jam_Case_9mm"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Case762(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_Case_762x54R.SM_Jam_Case_762x54R"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Shell12(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_Shell_12ga.SM_Jam_Shell_12ga"));
-	// MindKore's own sketch Foley for its tool swap (synthesised, no donor: MindKore Docs/CREDITS.md).
-	static ConstructorHelpers::FObjectFinder<USoundBase> HolsterSeat(TEXT("/Game/MindKore/Audio/SW_MK_Holster_Seat.SW_MK_Holster_Seat"));
-	static ConstructorHelpers::FObjectFinder<USoundBase> HolsterDraw(TEXT("/Game/MindKore/Audio/SW_MK_Holster_Draw.SW_MK_Holster_Draw"));
-	static ConstructorHelpers::FObjectFinder<USoundBase> SlingStow(TEXT("/Game/MindKore/Audio/SW_MK_Crowbar_Stow.SW_MK_Crowbar_Stow"));
-	static ConstructorHelpers::FObjectFinder<USoundBase> SlingDraw(TEXT("/Game/MindKore/Audio/SW_MK_Crowbar_Draw.SW_MK_Crowbar_Draw"));
+	// Holster and sling Foley from recorded CC0 donors, heard through the suit (Scripts/jam_switch_foley.py).
+	static ConstructorHelpers::FObjectFinder<USoundBase> StowPistol(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Stow_Pistol.SW_Jam_Stow_Pistol"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> DrawPistol(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Draw_Pistol.SW_Jam_Draw_Pistol"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> StowShotgun(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Stow_Shotgun.SW_Jam_Stow_Shotgun"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> DrawShotgun(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Draw_Shotgun.SW_Jam_Draw_Shotgun"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> StowSV98(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Stow_SV98.SW_Jam_Stow_SV98"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> DrawSV98(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Draw_SV98.SW_Jam_Draw_SV98"));
 
 	// --- USP ---
 	FJamWeapon& Pistol = Weapons[0];
@@ -162,9 +164,10 @@ void UJamWeaponsComponent::SetupWeaponParts()
 		{ 0.38f, 0.0f, 0.0f, 0.0f } });
 	Pistol.DrawReadySeconds = 0.3f;
 	Pistol.DrawKicks = { { 0.22f, FVector(0.0f, 0.0f, 40.0f), FRotator(-60.0f, 0.0f, 20.0f) } };
-	Pistol.StowSound = HolsterSeat.Object;
-	Pistol.StowSoundSeconds = 0.3f;
-	Pistol.DrawSound = HolsterDraw.Object;
+	// The stows lead into their knock: the leather slide first, the seat at 0.3 s (0.14 + 0.16 into the wave).
+	Pistol.StowSound = StowPistol.Object;
+	Pistol.StowSoundSeconds = 0.14f;
+	Pistol.DrawSound = DrawPistol.Object;
 	Pistol.DrawSoundSeconds = 0.02f;
 
 	// --- pump gun ---
@@ -192,9 +195,10 @@ void UJamWeaponsComponent::SetupWeaponParts()
 	Shotgun.StowViewNudgeSeconds = 0.4f;
 	Shotgun.DrawViewNudge = FRotator(-0.6f, 0.3f, 0.0f);
 	Shotgun.DrawViewNudgeSeconds = 0.1f;
-	Shotgun.StowSound = SlingStow.Object;
-	Shotgun.StowSoundSeconds = 0.4f;
-	Shotgun.DrawSound = SlingDraw.Object;
+	// Webbing first, the stock on the back at 0.4 s (0.2 + 0.2); the draw's catch lands on the 0.45 s kick.
+	Shotgun.StowSound = StowShotgun.Object;
+	Shotgun.StowSoundSeconds = 0.2f;
+	Shotgun.DrawSound = DrawShotgun.Object;
 	Shotgun.DrawSoundSeconds = 0.05f;
 	// The spent hull flies out as the fore-end hits the back stop.
 	Shotgun.CaseMesh = Shell12.Object;
@@ -260,9 +264,10 @@ void UJamWeaponsComponent::SetupWeaponParts()
 	Sniper.StowViewNudgeSeconds = 0.45f;
 	Sniper.DrawViewNudge = FRotator(-0.8f, -0.4f, 0.0f);
 	Sniper.DrawViewNudgeSeconds = 0.12f;
-	Sniper.StowSound = SlingStow.Object;
-	Sniper.StowSoundSeconds = 0.45f;
-	Sniper.DrawSound = SlingDraw.Object;
+	// The stock on the back at 0.45 s (0.2 + 0.25); the draw's catch lands on the 0.6 s kick.
+	Sniper.StowSound = StowSV98.Object;
+	Sniper.StowSoundSeconds = 0.2f;
+	Sniper.DrawSound = DrawSV98.Object;
 	Sniper.DrawSoundSeconds = 0.06f;
 	// The case is thrown out as the bolt hits its back stop.
 	Sniper.CaseMesh = Case762.Object;
@@ -693,7 +698,15 @@ const FJamWeapon* UJamWeaponsComponent::UpdateSwitch(float DeltaTime, bool bHand
 		ActionInView->SetStaticMesh(Gun ? Gun->ActionMesh.Get() : nullptr);
 		SinceKickSeconds = 1000.0f; // a gun coming into view shows no kick (its cycle keeps its own clock)
 	};
-	const auto Play = [this](USoundBase* Sound) { if (Sound) { UGameplayStatics::PlaySound2D(this, Sound); } };
+	// Per-play volume and pitch so repeated switches do not sound identical.
+	const auto Play = [this](USoundBase* Sound)
+	{
+		if (Sound)
+		{
+			UGameplayStatics::PlaySound2D(this, Sound, FMath::FRandRange(0.85f, 1.0f), FMath::FRandRange(0.95f, 1.05f));
+			UE_LOG(LogMindKore, Log, TEXT("Weapon %s: switch sound %s"), *GetNameSafe(GetOwner()), *Sound->GetName());
+		}
+	};
 	// The shoulder taking the gun: a nudge of the view that comes all the way back.
 	const auto Nudge = [this](const FRotator& By)
 	{
