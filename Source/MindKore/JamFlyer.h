@@ -832,6 +832,10 @@ public:
 	/** Bites landed so far (the probe reads it). */
 	int32 GetBiteCount() const { return BiteCount; }
 
+	/** Screeches begun so far (the probe reads them): calls (aggro, warning) and dives. */
+	int32 GetCallScreeches() const { return CallScreeches; }
+	int32 GetDiveScreeches() const { return DiveScreeches; }
+
 	/** Last time the player was in sight (game seconds; negative when never). */
 	double GetLastSeenSeconds() const { return LastSeenSeconds; }
 
@@ -907,6 +911,8 @@ private:
 	bool bSeesPlayer = false;
 	float AimedSeconds = 0.0f;
 	int32 BiteCount = 0;
+	int32 CallScreeches = 0;
+	int32 DiveScreeches = 0;
 	FVector DiveDirection = FVector::ForwardVector;
 
 	// The ladder, the feint, the stagger.
