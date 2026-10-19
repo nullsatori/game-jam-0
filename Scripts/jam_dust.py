@@ -11,7 +11,13 @@ in the world (they show the body's motion in zero-G); the material draws a soft
 round core inside each cube - the distance of the view ray from the cube's centre,
 in the cube's own space - so the cube's edges never show.
 """
+import os
+import sys
+
 import unreal
+
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 
 PATH = "/Game/Jam/Materials/M_Jam_Dust"
 eal = unreal.EditorAssetLibrary
@@ -93,7 +99,7 @@ def material(log=unreal.log):
                    {"T": time, "R": rand, "Amp": scalar("DriftCm", 6.0)})
     mel.connect_material_property(drift, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
     mel.recompile_material(m)
-    eal.save_asset(PATH, False)
+    jam_build.save(PATH)
     log("dust material: " + PATH)
 
 

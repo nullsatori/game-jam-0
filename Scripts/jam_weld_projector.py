@@ -39,7 +39,13 @@ rare motes, anchored along the thread.
 
 No texture: shapes are maths, nothing third-party.
 """
+import os
+import sys
+
 import unreal
+
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 
 FOLDER = "/Game/JamArt/Materials/Hull"
 eal = unreal.EditorAssetLibrary
@@ -187,7 +193,7 @@ def build_projection():
     emissive = mel.connect_material_property(out, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     assert front or emissive
     mel.recompile_material(m)
-    eal.save_asset(path, False)
+    jam_build.save(path)
     unreal.log("JAMWELD: built %s front %s emissive %s" % (path, front, emissive))
 
 
@@ -216,7 +222,7 @@ def build_strap():
     })
     assert mel.connect_material_property(thread, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.recompile_material(m)
-    eal.save_asset(path, False)
+    jam_build.save(path)
     unreal.log("JAMWELD: built %s" % path)
 
 

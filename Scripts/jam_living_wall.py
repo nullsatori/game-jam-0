@@ -10,7 +10,13 @@ per-cell colour variation (custom data 2), a glow on thin spots (custom data 0),
 a faint breathing swell (world position offset along the normal). Physical
 material PM_MK_Flesh; used with instanced static meshes.
 """
+import os
+import sys
+
 import unreal
+
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 
 MATS = "/Game/Jam/Materials"
 BASE = MATS + "/M_Jam_LivingWall"
@@ -154,7 +160,7 @@ def material(log, rebuild=False):
     swell = op(mul, op(mul, node(unreal.MaterialExpressionVertexNormalWS), breath), scalar("PulseCm"))
     mel.connect_material_property(swell, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
     mel.recompile_material(m)
-    eal.save_asset(BASE, False)
+    jam_build.save(BASE)
     log("built " + BASE)
     if eal.does_asset_exist(INSTANCE):
         mi = unreal.load_asset(INSTANCE)
@@ -165,5 +171,5 @@ def material(log, rebuild=False):
         mel.set_material_instance_vector_parameter_value(mi, name, unreal.LinearColor(r, g, b, 1.0))
     for name, value in SCALARS.items():
         mel.set_material_instance_scalar_parameter_value(mi, name, value)
-    eal.save_asset(INSTANCE, False)
+    jam_build.save(INSTANCE)
     return mi

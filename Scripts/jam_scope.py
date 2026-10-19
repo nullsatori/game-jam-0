@@ -46,7 +46,13 @@ it, a slow shimmer and a rare dip.
 
 No texture: shapes are maths, nothing third-party.
 """
+import os
+import sys
+
 import unreal
+
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 
 FOLDER = "/Game/JamArt/Materials/Weapons"
 NAME = "M_Jam_ScopeLens"
@@ -232,7 +238,7 @@ def build_dot():
             raise RuntimeError("dot link failed: " + pin)
     mel.connect_material_property(custom, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.recompile_material(m)
-    eal.save_asset(path, False)
+    jam_build.save(path)
     unreal.log("JAMSCOPE: built %s" % path)
 
 
@@ -277,7 +283,7 @@ def build():
     mel.connect_material_property(lens, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.connect_material_property(mask, "", unreal.MaterialProperty.MP_OPACITY_MASK)
     mel.recompile_material(m)
-    eal.save_asset(path, False)
+    jam_build.save(path)
     unreal.log("JAMSCOPE: built %s" % path)
 
 
@@ -290,7 +296,7 @@ def build_reticle():
     laser = custom(RETICLE_HLSL, "ScopeReticle", unreal.CustomMaterialOutputType.CMOT_FLOAT3, inputs)
     mel.connect_material_property(laser, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.recompile_material(m)
-    eal.save_asset(path, False)
+    jam_build.save(path)
     unreal.log("JAMSCOPE: built %s" % path)
 
 

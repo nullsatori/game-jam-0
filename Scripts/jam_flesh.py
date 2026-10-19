@@ -27,8 +27,12 @@ mask (wet = glossy), emissive = colour x SelfLight. Static switches:
 The membrane instances override the blend mode to translucent, two-sided.
 """
 import os
+import sys
 
 import unreal
+
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 
 TEX = "/Game/JamArt/Textures/Flesh"
 MATS = "/Game/JamArt/Materials/Flesh"
@@ -92,7 +96,7 @@ def import_textures(src_dir, normals_dir, log, normals_only=False):
         for path in task.get_editor_property("imported_object_paths"):
             texture = unreal.load_asset(path)
             _settings(texture, kind)
-            eal.save_asset(path.split(".")[0], False)
+            jam_build.save(path.split(".")[0])
             log("imported %s (%s) %dx%d" % (path, kind, texture.blueprint_get_size_x(), texture.blueprint_get_size_y()))
 
 
@@ -376,7 +380,7 @@ def _master(log):
     mel.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY_MASK)
     mel.connect_material_property(offset, "", unreal.MaterialProperty.MP_WORLD_POSITION_OFFSET)
     mel.recompile_material(m)
-    eal.save_asset(BASE, False)
+    jam_build.save(BASE)
     log("built " + BASE)
 
 
@@ -409,7 +413,7 @@ def _instance(name, parent, scalars=None, vectors=None, textures=None, switches=
         o.set_editor_property("two_sided", True)
         mi.set_editor_property("base_property_overrides", o)
     mel.update_material_instance(mi)
-    eal.save_asset(path, False)
+    jam_build.save(path)
     return mi
 
 

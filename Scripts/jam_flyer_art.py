@@ -17,6 +17,7 @@ import unreal
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else
                 os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 import jam_flesh  # noqa: E402
 
 TEX = "/Game/JamArt/Textures/Flyer"
@@ -42,7 +43,7 @@ unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
 texture_path = list(task.get_editor_property("imported_object_paths"))[0]
 texture = unreal.load_asset(texture_path)
 jam_flesh._settings(texture, "colour")
-eal.save_asset(texture_path.split(".")[0], False)
+jam_build.save(texture_path.split(".")[0])
 log("imported %s %dx%d" % (texture_path, texture.blueprint_get_size_x(), texture.blueprint_get_size_y()))
 
 # The painted atlas carries the look: no vessel web, no macro layer, a light leathery normal;
@@ -55,6 +56,6 @@ mi = jam_flesh._instance("MI_Jam_Flyer", unreal.load_asset(jam_flesh.BASE),
 for name in ("SM_Jam_Flyer_Body", "SM_Jam_Flyer_Wing", "SM_Jam_Flyer_Tail", "SM_Jam_Flyer_TailTip"):
     mesh = unreal.load_asset(MESHES + "/" + name)
     mesh.set_material(0, mi)
-    eal.save_asset(MESHES + "/" + name, False)
+    jam_build.save(MESHES + "/" + name)
     box = mesh.get_bounding_box()
     log("%s: %d triangles, MI_Jam_Flyer, bounds %s .. %s" % (name, mesh.get_num_triangles(0), box.min, box.max))

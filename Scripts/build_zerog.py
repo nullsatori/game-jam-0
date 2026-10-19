@@ -29,6 +29,7 @@ import unreal
 
 # The shared living wall material (Scripts/jam_living_wall.py), found next to this script.
 sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 import jam_dust  # noqa: E402
 import jam_flesh  # noqa: E402
 import jam_living_wall  # noqa: E402
@@ -92,7 +93,7 @@ def tint(name, rgb):
     mi = tools.create_asset(name, MATS, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
     mel.set_material_instance_parent(mi, unreal.load_asset("/Engine/BasicShapes/BasicShapeMaterial"))
     mel.set_material_instance_vector_parameter_value(mi, "Color", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
-    eal.save_asset(path, False)
+    jam_build.save(path)
     log("made " + path)
     return mi
 

@@ -11,7 +11,13 @@ no longer in the chain: an envelope follower, it let sums of shots through to 0 
 Config/DefaultEngine.ini [/Script/Engine.AudioSettings] MasterSubmix points at the
 submix, so every sound in the game passes the limiter last (owner 18.10: «ставь лимитер»).
 """
+import os
+import sys
+
 import unreal
+
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 
 PATH = "/Game/JamArt/Audio/Mix"
 tools = unreal.AssetToolsHelpers.get_asset_tools()
@@ -42,7 +48,7 @@ s.set_editor_property("output_gain_db", 0.0)
 s.set_editor_property("analog_mode", False)
 s.set_editor_property("bypass", False)
 preset.set_editor_property("settings", s)
-eal.save_loaded_asset(preset)
+jam_build.save(preset, only_if_dirty=True)
 
 factory = unreal.SoundSubmixEffectFactory()
 factory.set_editor_property("sound_effect_submix_preset_class", unreal.JamBrickwallPreset)
@@ -52,11 +58,11 @@ w.set_editor_property("ceiling_db", -1.0)
 w.set_editor_property("lookahead_msec", 5.0)
 w.set_editor_property("release_msec", 80.0)
 wall.set_editor_property("settings", w)
-eal.save_loaded_asset(wall, False)
+jam_build.save(wall)
 
 submix = asset("SM_Jam_Master", unreal.SoundSubmix, unreal.SoundSubmixFactory())
 submix.set_editor_property("submix_effect_chain", [wall])
-eal.save_loaded_asset(submix, False)  # the chain change does not mark it dirty
+jam_build.save(submix)  # the chain change does not mark it dirty
 
 try:  # no makeup after it: the submix's own output volume (1.0 = 0 dB)
     out_volume = submix.get_editor_property("output_volume_modulation").get_editor_property("value")

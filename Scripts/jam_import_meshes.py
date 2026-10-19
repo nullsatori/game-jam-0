@@ -13,8 +13,12 @@ within 1.2 m (the FBX round trip mirrors Y; jam_planet.py pre-mirrors).
 """
 import json
 import os
+import sys
 
 import unreal
+
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 
 FOLDERS = {"SM_Jam_Planet": "/Game/JamArt/Meshes/Planet", "SM_Jam_PlanetEye": "/Game/JamArt/Meshes/Planet",
            "SM_Jam_Tentacle": "/Game/JamArt/Meshes/Planet",
@@ -57,7 +61,7 @@ def import_fbx(path, folder):
     mesh = unreal.load_asset(paths[0])
     body = mesh.get_editor_property("body_setup")
     body.set_editor_property("collision_trace_flag", unreal.CollisionTraceFlag.CTF_USE_COMPLEX_AS_SIMPLE)
-    unreal.EditorAssetLibrary.save_asset(paths[0].split(".")[0], False)
+    jam_build.save(paths[0].split(".")[0])
     box = mesh.get_bounding_box()
     log("imported %s: %d triangles, %d material slots, bounds %s .. %s" % (
         paths[0], mesh.get_num_triangles(0), len(mesh.get_editor_property("static_materials")), box.min, box.max))

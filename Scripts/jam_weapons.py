@@ -23,8 +23,12 @@ Each gun's parts together are checked against the whole gun's bounds.
 Without JAM_FBX_DIR the import is skipped and only the materials and sockets are (re)made.
 """
 import os
+import sys
 
 import unreal
+
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 
 MESHES = "/Game/JamArt/Meshes/Weapons"
 MATS = "/Game/JamArt/Materials/Weapons"
@@ -52,7 +56,7 @@ def base_material():
         scalar.set_editor_property("default_value", value)
         mel.connect_material_property(scalar, "", prop)
     mel.recompile_material(m)
-    eal.save_asset(path, False)
+    jam_build.save(path)
     return m
 
 
@@ -64,7 +68,7 @@ def part(name, color, metallic, roughness):
     mel.set_material_instance_vector_parameter_value(mi, "Color", unreal.LinearColor(*color, 1.0))
     mel.set_material_instance_scalar_parameter_value(mi, "Metallic", metallic)
     mel.set_material_instance_scalar_parameter_value(mi, "Roughness", roughness)
-    eal.save_asset(path, False)
+    jam_build.save(path)
     return mi
 
 
@@ -88,7 +92,7 @@ def worn_part(name, color, worn, metallic, roughness):
             mel.connect_material_expressions(wear, "R", lerp, "Alpha")
             mel.connect_material_property(lerp, "", prop)
         mel.recompile_material(m)
-        eal.save_asset(path, False)
+        jam_build.save(path)
     path = MATS + "/" + name
     mi = unreal.load_asset(path) if eal.does_asset_exist(path) else         tools.create_asset(name, MATS, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
     mel.set_material_instance_parent(mi, m)
@@ -96,7 +100,7 @@ def worn_part(name, color, worn, metallic, roughness):
     mel.set_material_instance_vector_parameter_value(mi, "WornColor", unreal.LinearColor(*worn, 1.0))
     for key, value in zip(("Metallic", "WornMetallic", "Roughness", "WornRoughness"), metallic + roughness):
         mel.set_material_instance_scalar_parameter_value(mi, key, value)
-    eal.save_asset(path, False)
+    jam_build.save(path)
     return mi
 
 
@@ -191,7 +195,7 @@ for name in ("SM_Jam_Shotgun", "SM_Jam_Shotgun_Pump", "SM_Jam_SV98", "SM_Jam_SV9
     if "_" not in name[len("SM_Jam_"):]:
         # On the bore (Z 4.5 over the trigger origin), at the very front.
         set_muzzle(gun, unreal.Vector(gun.get_bounding_box().max.x, 0.0, 4.5), unreal.Rotator(0.0, 0.0, 0.0))
-    eal.save_asset(MESHES + "/" + name, False)
+    jam_build.save(MESHES + "/" + name)
     muzzle = gun.find_socket("Muzzle")
     log("%s: %d triangles, slots %s, bounds %s, Muzzle %s" % (
         name, gun.get_num_triangles(0), [str(s.get_editor_property("material_slot_name")) for s in materials], bounds(gun),
@@ -209,7 +213,7 @@ for name in ("SM_Jam_USP_Frame", "SM_Jam_USP_Slide", "SM_Jam_USP_Hammer"):
         mesh.set_material(index, usp.get_material(0))
     if name.endswith("Frame"):
         set_muzzle(mesh, usp_muzzle.get_editor_property("relative_location"), usp_muzzle.get_editor_property("relative_rotation"))
-    eal.save_asset(MESHES + "/" + name, False)
+    jam_build.save(MESHES + "/" + name)
     if not name.endswith("Hammer"):  # the hammer sits on its pin, not in the gun's frame
         usp_parts.append(mesh)
     log("%s: %d triangles, bounds %s" % (name, mesh.get_num_triangles(0), bounds(mesh)))

@@ -17,7 +17,13 @@ The dome that shows it (Sky_Stars, build_ship.py) is hidden from reflection
 and sky-light captures: the SkyLight keeps capturing the old dark-violet dome
 behind it, so the scene light does not change (owner: «освещение не трогаем»).
 """
+import os
+import sys
+
 import unreal
+
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 
 TEX = "/Game/JamArt/Textures/Sky"
 STARMAP = TEX + "/T_Jam_Starmap_Gal"
@@ -49,7 +55,7 @@ def import_starmap(path, log):
     texture.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_SKYBOX)
     texture.set_editor_property("address_x", unreal.TextureAddress.TA_WRAP)
     texture.set_editor_property("address_y", unreal.TextureAddress.TA_CLAMP)
-    eal.save_asset(STARMAP, False)
+    jam_build.save(STARMAP)
     log("imported %s %dx%d" % (STARMAP, texture.blueprint_get_size_x(), texture.blueprint_get_size_y()))
 
 
@@ -118,7 +124,7 @@ def material(log):
     emissive = op(add, tint, op(mul, power, scalar("Brightness")))
     mel.connect_material_property(emissive, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.recompile_material(m)
-    eal.save_asset(BASE, False)
+    jam_build.save(BASE)
     if eal.does_asset_exist(INSTANCE):
         mi = unreal.load_asset(INSTANCE)
     else:
@@ -128,6 +134,6 @@ def material(log):
     for k, v in SCALARS.items():
         mel.set_material_instance_scalar_parameter_value(mi, k, v)
     mel.set_material_instance_vector_parameter_value(mi, "Tint", unreal.LinearColor(*TINT, 1.0))
-    eal.save_asset(INSTANCE, False)
+    jam_build.save(INSTANCE)
     log("built %s, %s" % (BASE, INSTANCE))
     return mi

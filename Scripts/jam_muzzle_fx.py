@@ -24,7 +24,13 @@ custom data:
 
 No texture: the shapes are maths, nothing third-party.
 """
+import os
+import sys
+
 import unreal
+
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 
 FOLDER = "/Game/JamArt/FX"
 eal = unreal.EditorAssetLibrary
@@ -163,7 +169,7 @@ def _material(name, blend, build):
 
     build(m, node, custom, data, scalar, colour, mul)
     mel.recompile_material(m)
-    eal.save_asset(path, False)
+    jam_build.save(path)
     unreal.log("muzzle fx material: " + path)
 
 

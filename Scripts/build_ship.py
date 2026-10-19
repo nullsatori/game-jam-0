@@ -28,6 +28,7 @@ if os.environ.get("JAM_REBUILD_SHIP_WIPES_HAND_EDITS") != "1":
 # The shared living wall material (Scripts/jam_living_wall.py), found next to this script.
 SCRIPTS = os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts")
 sys.path.insert(0, SCRIPTS)
+import jam_build  # noqa: E402
 import jam_flesh  # noqa: E402
 import jam_living_wall  # noqa: E402
 import jam_sky  # noqa: E402
@@ -100,7 +101,7 @@ def tint(name, rgb):
         mi = tools.create_asset(name, MATS, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
         mel.set_material_instance_parent(mi, unreal.load_asset("/Engine/BasicShapes/BasicShapeMaterial"))
     mel.set_material_instance_vector_parameter_value(mi, "Color", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
-    eal.save_asset(path, False)
+    jam_build.save(path)
     log("made " + path)
     return mi
 
@@ -124,7 +125,7 @@ def emissive_base(name, two_sided):
     mel.connect_material_expressions(strength, "", times, "B")
     mel.connect_material_property(times, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.recompile_material(m)
-    eal.save_asset(path, False)
+    jam_build.save(path)
     log("made " + path)
     return m
 
@@ -139,7 +140,7 @@ def glow(name, base, rgb, intensity):
         mel.set_material_instance_parent(mi, base)
     mel.set_material_instance_vector_parameter_value(mi, "Color", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
     mel.set_material_instance_scalar_parameter_value(mi, "Intensity", intensity)
-    eal.save_asset(path, False)
+    jam_build.save(path)
     log("made " + path)
     return mi
 

@@ -13,8 +13,12 @@
 """
 import glob
 import os
+import sys
 
 import unreal
+
+sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
+import jam_build  # noqa: E402
 
 DEST = "/Game/JamArt/Audio/Flyer"
 MIX = "/Game/JamArt/Audio/Mix"
@@ -36,8 +40,8 @@ def asset(path, name, cls, factory):
 # --- the mix ---
 flyer_class = asset(MIX, "SC_Jam_Flyer", unreal.SoundClass, unreal.SoundClassFactory())
 ambience_class = asset(MIX, "SC_Jam_Ambience", unreal.SoundClass, unreal.SoundClassFactory())
-eal.save_loaded_asset(flyer_class)
-eal.save_loaded_asset(ambience_class)
+jam_build.save(flyer_class, only_if_dirty=True)
+jam_build.save(ambience_class, only_if_dirty=True)
 duck = asset(MIX, "SMIX_Jam_FlyerDuck", unreal.SoundMix, unreal.SoundMixFactory())
 adjuster = unreal.SoundClassAdjuster()
 adjuster.set_editor_property("sound_class_object", ambience_class)
@@ -46,7 +50,7 @@ duck.set_editor_property("sound_class_effects", [adjuster])
 duck.set_editor_property("fade_in_time", 0.05)
 duck.set_editor_property("duration", 0.8)
 duck.set_editor_property("fade_out_time", 0.6)
-eal.save_loaded_asset(duck)
+jam_build.save(duck, only_if_dirty=True)
 
 factory = unreal.SoundSubmixEffectFactory()
 factory.set_editor_property("sound_effect_submix_preset_class", unreal.SubmixEffectReverbPreset)
@@ -61,10 +65,10 @@ for key, value in (("decay_time", 1.1), ("decay_hf_ratio", 0.6), ("density", 0.8
     except Exception as error:  # noqa: BLE001 - log what this engine version lacks, keep the rest
         log(f"reverb setting {key} not set: {error}")
 reverb.set_editor_property("settings", settings)
-eal.save_loaded_asset(reverb)
+jam_build.save(reverb, only_if_dirty=True)
 air = asset(MIX, "SM_Jam_AirReverb", unreal.SoundSubmix, unreal.SoundSubmixFactory())
 air.set_editor_property("submix_effect_chain", [reverb])
-eal.save_loaded_asset(air)
+jam_build.save(air, only_if_dirty=True)
 log(f"mix: {flyer_class.get_name()}, {ambience_class.get_name()}, {duck.get_name()} (ambience x0.5 for 0.8 s), "
     f"{air.get_name()} <- {reverb.get_name()}")
 
@@ -90,7 +94,7 @@ for task in tasks:
             k in name for k in ("_Hit_", "_Bite_")) else 0.9
         wave.set_editor_property("priority", priority)
         wave.set_editor_property("looping", "_Flutter_" in name)
-        eal.save_loaded_asset(wave)
+        jam_build.save(wave, only_if_dirty=True)
         count += 1
         log(f"{name}: {wave.get_editor_property('duration'):.2f} s, {wave.get_editor_property('num_channels')} ch, "
             f"priority {priority}{', looping' if '_Flutter_' in name else ''}")
