@@ -11,6 +11,7 @@
 #include "JamLivingWall.h"
 #include "JamMuzzleFx.h"
 #include "JamScope.h"
+#include "JamShip.h"
 #include "JamZeroGPawn.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
@@ -344,8 +345,16 @@ void UJamWeaponsComponent::TurnView(float PitchDeg, float YawDeg) const
 		return;
 	}
 	// In degrees, as MindKore's AddRecoilRotationDegrees (AddControllerPitchInput
-	// would scale them by the input settings), and in the view's own frame: a
-	// rolled zero-G view kicks toward its own up.
+	// would scale them by the input settings). The ship's controller takes it as
+	// its own turn in its next UpdateRotation: a SetControlRotation behind its back
+	// read as a foreign write in gravity and rebuilt the view from the shown one,
+	// the roll left from zero-G included.
+	if (AJamShipController* Ship = Cast<AJamShipController>(Controller))
+	{
+		Ship->AddViewKick(FRotator(PitchDeg, YawDeg, 0.0f));
+		return;
+	}
+	// Another controller: at once, in the view's own frame (a rolled view kicks toward its own up).
 	const FQuat Kick = FRotator(PitchDeg, YawDeg, 0.0f).Quaternion();
 	Controller->SetControlRotation((Controller->GetControlRotation().Quaternion() * Kick).Rotator());
 }
