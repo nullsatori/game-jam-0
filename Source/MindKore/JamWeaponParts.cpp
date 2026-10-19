@@ -938,6 +938,9 @@ void UJamWeaponsComponent::SpawnDebris(UStaticMesh* Mesh, const FTransform& Wher
 	Body->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
 	Body->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 	Body->SetCollisionResponseToChannel(ECC_GameTraceChannel2, ECR_Ignore); // Shot
+	// Not on Visibility either: the pawn's look traces (RMB grab, F push, the grapple, the hull tools) see
+	// through it, so RMB aims instead of taking a case or a dropped magazine.
+	Body->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
 	Body->SetCastShadow(false);
 	Body->BodyInstance.bUseCCD = true;
 	Body->SetSimulatePhysics(true);
