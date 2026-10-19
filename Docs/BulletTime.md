@@ -2,7 +2,7 @@
 
 ## Что получает игрок
 
-Держишь Q — мир замедляется до 0.2 за 0.1 с, в кадре пост-эффект, звук входа
+Держишь V ([клавиши](../README.md#управление)) — мир замедляется до 0.2 за 0.1 с, в кадре пост-эффект, звук входа
 и выхода. Запас — 3 реальные секунды на всю сессию (без перезарядки);
 отпустил — время возвращается за 0.08 с.
 
@@ -12,7 +12,7 @@
 |---|---|
 | `MKTimeDomainState.h` | `FMKTimeDomainState` — чистая машина состояний, тратит только реальное время |
 | `MKTimeDomainSubsystem.h/.cpp` | `UMKTimeDomainSubsystem` — единственный, кто пишет `TimeDilation` |
-| `JamCharacter.cpp` (`UpdateBulletTimePresentation`) | порт ~40 строк из `MKCameraBulletTime.cpp`: звук входа/выхода, MID |
+| `JamZeroGPawn.cpp` (`UpdateBulletTimePresentation`, `BulletTimePressed/Released`) | порт ~40 строк из `MKCameraBulletTime.cpp`: звук входа/выхода, MID (копия того же кода в legacy `JamCharacter.cpp`) |
 
 ## Как пользоваться
 
@@ -22,7 +22,7 @@
   досрочный выход по решающему попаданию владельца (в стартере не вызывается).
 - Пост-эффект: `M_MK_BulletTime`, скалярные параметры `Amount` (= альфа
   замедления), `EntryAge`, `ArcVisible` (всегда 0), `Aspect`. В
-  `AJamCharacter` MID лежит в `Camera->PostProcessSettings.WeightedBlendables`,
+  `AJamZeroGPawn` MID лежит в `Camera->PostProcessSettings.WeightedBlendables`,
   вес 1 пока альфа > 0.
 
 ## Зависимости и конфиг

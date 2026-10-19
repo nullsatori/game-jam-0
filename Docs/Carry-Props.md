@@ -2,16 +2,24 @@
 
 ## Что получает игрок
 
-Предмет берётся E и держится перед камерой как настоящее тело: стукается о
-стены, отстаёт, если упёрся, и сам выпадает, если долго зажат. ЛКМ —
-бросок (скорость падает с массой), ПКМ/F — положить. Тяжёлое (> 35 кг)
-не поднять, на чём стоишь — не поднять. На предмет можно встать.
+В игре — физические тела (`AMKPhysicsProp`, `AMKCart`): масса, удары, шум;
+на предмет можно встать. Берёт их игровая пешка `AJamZeroGPawn` своим хватом
+(ПКМ), а не этим модулем: `UMKCarryComponent` у неё нет, поэтому
+`AMKPhysicsProp` на F ничего не предлагает (`QueryInteraction` без
+`UMKCarryComponent` → `None()`, `MKPhysicsProp.cpp:38`). Хват — в
+[ZeroG.md](ZeroG.md) («Хват»).
+
+Перенос `UMKCarryComponent` висит только на legacy-пешке `AJamCharacter`
+([JamCharacter.md](JamCharacter.md)): предмет берётся E и держится перед
+камерой как настоящее тело — стукается о стены, отстаёт, если упёрся, сам
+выпадает, если долго зажат. ЛКМ — бросок (скорость падает с массой), ПКМ/F —
+положить. Тяжёлое (> 35 кг) не поднять, на чём стоишь — не поднять.
 
 ## Классы и файлы
 
 | Файл | Что |
 |---|---|
-| `MKCarryComponent.h/.cpp` | `UMKCarryComponent` — единственный владелец «предмет в руках» (`UPhysicsHandleComponent`) |
+| `MKCarryComponent.h/.cpp` | `UMKCarryComponent` — «предмет в руках» (`UPhysicsHandleComponent`); стоит только на legacy `AJamCharacter` |
 | `MKPhysicsPropComponent.h/.cpp` | `UMKPhysicsPropComponent` — контракт предмета: состояние, удары, шум |
 | `MKPhysicsProp.h/.cpp` | `AMKPhysicsProp` — простой предмет: один симулируемый меш + `MassKg` |
 | `MKCart.h/.cpp` | `AMKCart` — тележка с тормозом (толкается, не поднимается) |
@@ -43,8 +51,10 @@ Engine, PhysicsCore. Профиль `PhysicsActor`.
 - `bHandsBusy` никто не пишет (владелец рук MindKore не перенесён).
 - `MKPhysicsBridge::AngularDrive` вырезан — требовал плагин PhysicsControl
   (`MKPhysicsBridge.h:4`, `.cpp:4`).
-- Пуля предметы не толкает (решение MindKore: `AMKPhysicsProp` принимает
-  только Blunt-удар).
+- `AMKPhysicsProp` как получатель удара принимает только Blunt (решение
+  MindKore), но пуля оружия стартера всё равно толкает любое симулируемое
+  тело в точке попадания: `AddImpulseAtLocation(Direction * HitImpulse)` в
+  `JamWeapons.cpp:765`.
 
 ## Лицензия
 

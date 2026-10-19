@@ -37,7 +37,7 @@
 
 | Файл | Что |
 |---|---|
-| `JamLivingWall.h/.cpp` | `AJamLivingWall`, приёмник `IMKImpactReceiver`; консольные `jam.Wall.Probe`, `jam.Wall.Shots`, `jam.Wall.Seal` |
+| `JamLivingWall.h/.cpp` | `AJamLivingWall`, приёмник `IMKImpactReceiver`; консольные `jam.Wall.Probe`, `jam.Wall.Shots`, `jam.Wall.Seal`, `jam.Wall.HitLag`, `jam.Wall.BlastFrames` (последние две — [Probes](Probes.md)) |
 | `Scripts/blender/jam_living_wall_mesh.py` | меши `SM_Jam_LivingWall_Square` (4 × 4 м, 69k треугольников) и `SM_Jam_LivingWall_Round` (Ø 4.9 м с губой, 69k) в Blender, процедурно, с сидом |
 | `Scripts/jam_import_meshes.py` | импорт FBX в `/Game/JamArt/Meshes/...` |
 | `Scripts/jam_flesh.py` | текстуры `T_Jam_Gritty_*`, мастер `M_Jam_Gritty` и экземпляры (`MI_Jam_Wall_*` — ткань стены), `skin_wall()` — вид меша для стены в скриптах сборки |
@@ -189,13 +189,8 @@ radio 0.60, venting 6.0 s; 1 linked flock(s)`.
 
 ### Как поставить встречу
 
-1. Стена в проёме (или на корпусе) — как обычно.
-2. Насест летунов рядом: `AJamFlyerHabitat` с `RoostOn` (акторы корпуса) —
-   [Flyers](Flyers.md), «Насест».
-3. На стене: `Nerves` → `Linked Habitats` → `+` → `Habitat` = эта зона,
-   `Arrival Delay Seconds` ≈ время пути игрока от стены до места драки.
-4. `jam.Flyer.EncounterProbe` — проход от шлюза к стене, залп, обратный путь,
-   где стая догнала.
+Стена + связанный насест + задержка, по шагам — в
+[Flyers, «Как собрать встречу»](Flyers.md#как-собрать-встречу).
 
 ## Числа (все UPROPERTY, `Jam|LivingWall|*`)
 
@@ -204,7 +199,7 @@ radio 0.60, venting 6.0 s; 1 linked flock(s)`.
 | `CellSizeCm` / `StrandThicknessCm` / `StrandOverlapCm` / `WeaveDepthCm` | 20 / 12 / 6 / 3 | — | — |
 | `BundleThicknessRange` / `BundleLeanDeg` / `ThreadThicknessRange` | 0.7–1.15 / 10° / 3–6 см | — | — |
 | `TearRadiusCm` | 15 | — | — |
-| `BurstMinHits` / `BurstMarginCm` / `BurstMaxRadiusCm` | 3 / 30 / 80 | — / **80** / **110** | — / **70** / **110** · — / **100** / **150** |
+| `BurstMinHits` / `BurstMarginCm` / `BurstMaxRadiusCm` | 3 / 30 / 80 | — / **80** / **110** | — / **70** / **110** · — / **110** / **170** |
 | `RegrowDelaySeconds` | 0.2 | — | — |
 | `StunSecondsPerCell` / `StunFreeCells` / `MaxStunSeconds` | 0.1 / 4 / 2.4 | — / — / **3.0** | — / — / **3.0** |
 | `StrandGrowSeconds` / `ThreadStage` / `WobbleCm` / `TwitchCm` | 0.3 / 0.5 / 3 / 1.5 | — | — |
@@ -268,7 +263,12 @@ Masked, `MI_Jam_Wall_Membrane` — прозрачная двусторонняя
 - `Lvl_Jam_Ship`: кокон из 5 стен 2.6 м (меш, уменьшенный) вокруг модуля
   навигации на планетоиде; 4 круглые мембраны 4 м на дне кратеров
   (`Jam.Crater`) и 2 круглые пробки 4 м в горловинах пещеры
-  (`Jam.CavePlug`). См. [Ship-Blockout](Ship-Blockout.md).
+  (`Jam.CavePlug`). См. [Ship-Blockout](Ship-Blockout.md). Ещё стена 4 м
+  `Flesh_WreckDoor` у обломков, связанная со стаей `Flyers_WreckRoost`
+  (задержка 8 с; ставит `Scripts/jam_flyers.py`, см. [Flyers](Flyers.md)).
+- `Lvl_Jam_Range` (`Scripts/build_range.py`): квадратные стены 4 м на 8 м
+  (`Jam.WallProbe`) и 14 м, круглая на 20 м, за каждой ящик; за концом зала в
+  невесомости — ещё квадратная стена и блоки, за которые держаться.
 
 ## Проверка
 
@@ -344,7 +344,7 @@ Wall probe [control: fly at the whole wall]: passed no - deepest 48 cm in front 
    пропускается, если дыра вышла уже шара: телепорт в пучки решатель
    выстреливает со скоростью 71 м/с и уроном 325.
 5. Контроль: тот же полёт в целую стену. Ожидаемый ответ — «не прошла».
-6. Если за стеной ближе 2.5 м лежит `Ship.Nav`: выстрел с 4 м, и модуль
+6. Если ближе 4 м от стены лежит `Ship.Nav`: выстрел с 4 м, и модуль
    толкают в дыру со скоростью 250 см/с.
 
 `Lvl_Jam_ZeroG`:
@@ -381,9 +381,10 @@ Wall probe [module out]: +3.1 s centre 595 cm in front of the plane, wall open 7
 сжимала пучки до 0.001 вместо 0: дыра выглядела свободной, а пешка
 отскакивала от невидимых тел.
 
-`jam.Wall.Shots` (окно `-game -windowed`, не NullRHI) снимает три кадра
-`HighResShot` с 3.5 м: целая стена; +0.35 с после выстрела из дробовика;
-середина зарастания (когда четверть дыры уже заросла).
+`jam.Wall.Shots [Имя|Тег]` (окно `-game -windowed`, не NullRHI) снимает четыре
+кадра `HighResShot` с 3.5 м: целая стена; +0.35 с после выстрела из дробовика;
+середина зарастания (когда четверть дыры уже заросла); +0.35 с после второго
+выстрела.
 
 ## Ограничения
 

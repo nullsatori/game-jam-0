@@ -26,7 +26,8 @@
   `MKResolveImpactFromHit`; заполнить `ShotId` (новый `FGuid` на выстрел),
   `Kind`, `SourceActor`, `DamageAmount = база × DamageMultiplier`,
   `ImpulseNewtonSeconds`, `bHasPhysicsImpulse`; отдать
-  `MKDeliverResolvedImpact`. Пример — `AJamCharacter::Fire`.
+  `MKDeliverResolvedImpact`. Пример — `UJamWeaponsComponent::TraceShot`
+  (`JamWeapons.cpp:702`).
 - Свой приёмник: реализовать `IMKImpactReceiver` (можно в Blueprint).
   Не вызывать `Execute_ReceiveResolvedImpact` напрямую.
 - Таблица отклика — `DA_Impact_Default` (звуки попаданий по телу, кровь,
@@ -54,9 +55,9 @@
   (`MKVitals.h:5`), `MKMeleeDefence.h` вырезан, однострочное
   `MKBlockAppliesTo` скопировано (`MKVitals.cpp:5, 14`).
 - `MKHitZoneRig` (зоны на скелете) не перенесён — нужен только врагам.
-- **Отличие от MindKore** (`JamCharacter.cpp:283`): у `AMKImpactDummy` нет
+- **Отличие от MindKore** (`JamWeapons.cpp:729`): у `AMKImpactDummy` нет
   ничего, что блокирует `Shot`, поэтому по правилу MindKore выстрел уходил в
-  стену за ним. В джем-пешке ближайшая зона в таком случае считается
+  стену за ним. В `TraceShot` ближайшая зона в таком случае считается
   блокирующим попаданием.
 - Попадания по стенам из движковых кубов — поверхность Default (у кубов нет
   `PM_MK_*`), звука удара о твёрдое нет: в MindKore нет чистого CC0-звука для
