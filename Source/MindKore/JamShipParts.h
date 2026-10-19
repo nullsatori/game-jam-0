@@ -155,7 +155,7 @@ private:
 /**
  * The cabin's control panel and launch lever. Three lamps - hull (all
  * HullSockets filled), fuel (FuelDock complete), navigation (NavDock
- * complete) - red until done, green after. The lever (E on the panel) lists
+ * complete) - red until done, green after. The lever (F on the panel) lists
  * what is missing; with all three done it ends the run (AJamShipGameMode).
  */
 UCLASS()

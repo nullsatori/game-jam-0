@@ -12,7 +12,7 @@ class UStaticMeshComponent;
 inline FName MKJamGrappleTool() { return FName(TEXT("Grapple")); }
 
 /**
- * A static thing that gives something once on E (a locker with a gun, a tool,
+ * A static thing that gives something once on F (a locker with a gun, a tool,
  * a suit). Subclasses say what (Give); after a successful give the pickup
  * offers nothing more and, when bHideWhenTaken, disappears. Blockout: an
  * engine cube until art replaces the mesh.
@@ -98,7 +98,7 @@ protected:
 	virtual bool Give(AActor* Hand) override;
 };
 
-/** Valuable cargo (tag Cargo): a small loose prop; E takes it and counts it in AJamShipGameMode. */
+/** Valuable cargo (tag Cargo): a small loose prop; F takes it and counts it in AJamShipGameMode. */
 UCLASS()
 class MINDKORE_API AJamCargo : public AMKPhysicsProp
 {

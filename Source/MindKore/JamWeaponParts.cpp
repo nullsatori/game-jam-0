@@ -245,7 +245,7 @@ void UJamWeaponsComponent::SetupWeaponParts()
 	// grip from the first frame - one continuous turn, fastest mid-way (owner 19.10: «угол
 	// менялся на протяжении анимации»), easing into level with the springs' overshoot (0.6 s)
 	// - never toward the eye; the put-away is the reverse.
-	// Heavier and slower than the shotgun; fires once 0.55 s in and settled.
+	// Heavier and slower than the shotgun; fires once 0.6 s in and settled.
 	Sniper.StowOffsetCm = FVector(3.0f, -38.0f, 90.0f);
 	Sniper.StowMidCm = FVector(3.0f, -38.0f, -4.0f);
 	Sniper.StowMidShare = 0.5f;

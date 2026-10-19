@@ -5,7 +5,7 @@
 #include "GameFramework/HUD.h"
 #include "JamGameMode.generated.h"
 
-/** The starter's game mode: AJamCharacter and AJamHUD. Config: GlobalDefaultGameMode. */
+/** The starter's old walker mode (AJamCharacter and AJamHUD); no map uses it - every map runs AJamShipGameMode (Docs/ShipMode.md). */
 UCLASS()
 class MINDKORE_API AJamGameMode : public AGameModeBase
 {

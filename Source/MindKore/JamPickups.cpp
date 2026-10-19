@@ -66,7 +66,7 @@ AJamWeaponPickup::AJamWeaponPickup()
 FText AJamWeaponPickup::RefusalFor(const AActor* Hand) const
 {
 	// Any pawn with guns: the zero-G pawn and the walkers.
-	return Hand->FindComponentByClass<UJamWeaponsComponent>() ? FText::GetEmpty() : LOCTEXT("NeedSuitHands", "только в скафандре");
+	return Hand->FindComponentByClass<UJamWeaponsComponent>() ? FText::GetEmpty() : LOCTEXT("NeedSuitHands", "нечем взять");
 }
 
 bool AJamWeaponPickup::Give(AActor* Hand)

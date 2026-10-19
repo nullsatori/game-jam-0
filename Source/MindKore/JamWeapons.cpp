@@ -86,7 +86,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 
 	// Guns as movement. Pistol: quick nudges (40 cm/s in zero-G); shotgun: a shove
 	// and a spray that scatters junk; sniper: one slow shot that throws you back 7 m/s.
-	// The rounds fly slow enough to be seen: the shotgun's pellets spread as a cloud.
+	// The rounds fly near real speeds (350 / 400 / 800 m/s); a tracer streaks the whole step each frame so they stay visible.
 	// MindKore's own meshes (CREDITS.md): its enemies' USP, the hero's pump gun;
 	// the SV-98 built the same way (Scripts/blender/jam_guns.py).
 	// Each in two parts, the frame and what moves (Scripts/blender/jam_usp_split.py, jam_guns.py).
@@ -96,7 +96,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Pump(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_Shotgun_Pump.SM_Jam_Shotgun_Pump"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sv98(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_SV98.SM_Jam_SV98"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Sv98Bolt(TEXT("/Game/JamArt/Meshes/Weapons/SM_Jam_SV98_Bolt.SM_Jam_SV98_Bolt"));
-	// Recorded CC0 donors heard through the suit (CREDITS.md, Docs/RecoilWeapons.md "Звук").
+	// Recorded CC0 donors heard through the suit (CREDITS.md, Docs/RecoilWeapons-Sound.md).
 	static ConstructorHelpers::FObjectFinder<USoundBase> PistolShot(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Shot_Pistol.SW_Jam_Shot_Pistol"));
 	static ConstructorHelpers::FObjectFinder<USoundBase> ShotgunShot(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Shot_Shotgun.SW_Jam_Shot_Shotgun"));
 	static ConstructorHelpers::FObjectFinder<USoundBase> ShotgunPump(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Pump_Shotgun.SW_Jam_Pump_Shotgun"));
