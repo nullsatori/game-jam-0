@@ -26,7 +26,7 @@ UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/S
 | 3 пробоины 250 × 250 | сегмент 2 сверху (x −375), сегмент 5 по +Y (x 375), сегмент 7 снизу-сзади по −Y (x 875) | в каждой `AJamPlateSocket` (`Socket_Breach0..2`; рамка: X вдоль корпуса, Z наружу) |
 | Нос | крышка-диск на x 2010 | |
 | Кормовой кусок | 10 м, центр (−3500, 1500, 800), yaw 25 pitch 12, открыт к разлому, «двигатель» на дальнем конце | `RearChunk_*` |
-| Крюк-кошка | за двигателем кормового куска | `AJamToolPickup` `Pickup_Grapple`, `ToolId` Grapple |
+| Крюк-кошка | за двигателем кормового куска | `AJamToolPickup` `Pickup_Grapple`, `ToolId` = `MKJamGrappleTool()` (Grapple) |
 | Каюта (сейф-зона, гравитация) | x 1400…2000, y ±250, z −150…150 (6 × 5 × 3 м) | `AJamGravityZone` `Gravity_Cabin`, воздух +20/с |
 | Пульт и рычаг | у передней стены, x 1950 | `AJamShipPanel` `Panel`: лампы Корпус/Топливо/Навигация |
 | Шкаф со скафандром | x 1500, y 215 | `AJamSuitLocker` (ключ `Jam.Suit` на кейринг) |

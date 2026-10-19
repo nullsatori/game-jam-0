@@ -93,7 +93,7 @@ bool AJamToolPickup::Give(AActor* Hand)
 	{
 		Mode->Tools.AddUnique(ToolId);
 	}
-	JamToast(this, FText::Format(LOCTEXT("ToolUnlocked", "Получено: {0} (пока без механики)"), ToolName));
+	JamToast(this, FText::Format(LOCTEXT("ToolUnlocked", "Получено: {0}"), ToolName));
 	return true;
 }
 

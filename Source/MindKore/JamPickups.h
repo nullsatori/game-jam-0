@@ -8,6 +8,9 @@
 
 class UStaticMeshComponent;
 
+/** The tool id of the grapple (AJamToolPickup::ToolId, AJamShipGameMode::Tools). */
+inline FName MKJamGrappleTool() { return FName(TEXT("Grapple")); }
+
 /**
  * A static thing that gives something once on E (a locker with a gun, a tool,
  * a suit). Subclasses say what (Give); after a successful give the pickup
@@ -62,7 +65,7 @@ protected:
 	virtual bool Give(AActor* Hand) override;
 };
 
-/** Unlocks a tool by name (a flag in AJamShipGameMode's progress; no mechanic yet). */
+/** Unlocks a tool by name (a flag in AJamShipGameMode::Tools): MKJamGrappleTool lets Left Alt hook (AJamZeroGPawn). */
 UCLASS()
 class MINDKORE_API AJamToolPickup : public AJamPickupBase
 {
@@ -72,7 +75,7 @@ public:
 	AJamToolPickup();
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup")
-	FName ToolId = TEXT("Grapple");
+	FName ToolId = MKJamGrappleTool();
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup")
 	FText ToolName;

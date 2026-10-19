@@ -21,6 +21,7 @@
 #include "JamDockZone.h"
 #include "JamHullTools.h"
 #include "JamOxygen.h"
+#include "JamPickups.h"
 #include "JamShip.h"
 #include "JamScope.h"
 #include "JamLadder.h"
@@ -588,7 +589,7 @@ void AJamZeroGPawn::Roll(const FInputActionValue& Value)
 bool AJamZeroGPawn::HasGrapple() const
 {
 	const AJamShipGameMode* Mode = GetWorld()->GetAuthGameMode<AJamShipGameMode>();
-	return !Mode || Mode->Tools.Contains(FName(TEXT("Grapple")));
+	return !Mode || Mode->Tools.Contains(MKJamGrappleTool());
 }
 
 void AJamZeroGPawn::ToggleGrapple()

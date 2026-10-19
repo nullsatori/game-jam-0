@@ -633,7 +633,7 @@ private:
 	void PushPressed();
 	void Roll(const FInputActionValue& Value);
 	void UpdateGrapple();
-	/** On the ship map only after AJamToolPickup "Grapple" was taken; elsewhere always. */
+	/** Under AJamShipGameMode only after the AJamToolPickup with MKJamGrappleTool was taken; under another mode always. */
 	bool HasGrapple() const;
 	UFUNCTION()
 	void HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp,

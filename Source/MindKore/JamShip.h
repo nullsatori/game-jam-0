@@ -157,7 +157,7 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Ship")
 	int32 Cargo = 0;
 
-	/** Tools taken this run (AJamToolPickup; no mechanic yet). */
+	/** Tools taken this run (AJamToolPickup): MKJamGrappleTool lets Left Alt hook. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Ship")
 	TArray<FName> Tools;
 

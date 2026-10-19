@@ -1381,7 +1381,7 @@ namespace
 			}
 			Pawn->HullTools->SelectTool(EJamHullTool::Welder);
 			Pawn->HullTools->PrimaryPressed();
-			Mode->Tools.AddUnique(FName(TEXT("Grapple")));
+			Mode->Tools.AddUnique(MKJamGrappleTool());
 			Pawn->ToggleGrapple();
 		});
 		const auto Kept = [Pawn]()
