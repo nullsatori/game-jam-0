@@ -19,9 +19,17 @@ struct FJamGravity
 /**
  * The one gravity rule, for the pawn, loose bodies, corpses and the prediction:
  * of the walking zones (bWalk) containing Location, the higher Priority wins,
- * on a tie the smaller zone.
+ * on a tie the smaller zone. The acceleration is the zone's GravityCm times
+ * the global scale (JamSetGravityScale).
  */
 MINDKORE_API FJamGravity JamGravityAt(const UWorld* World, const FVector& Location);
+
+/**
+ * The debug menu's global multiplier on every zone's gravity (World.GravityScale,
+ * Docs/DebugMenu.md): 1 as built, 0 zero-G everywhere. Written by UJamDebugSubsystem only.
+ */
+MINDKORE_API void JamSetGravityScale(float Scale);
+MINDKORE_API float JamGetGravityScale();
 
 /** The same rule over every zone, walking or air-only: whose air is breathed at Location (null: none). */
 MINDKORE_API const AJamGravityZone* JamAirZoneAt(const UWorld* World, const FVector& Location);

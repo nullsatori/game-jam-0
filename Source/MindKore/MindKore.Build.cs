@@ -39,6 +39,13 @@ public class MindKore : ModuleRules
 			"AIModule",
 			"GameplayTasks",
 			"NavigationSystem",
+			// The debug menu (JamDebug.cpp, JamDebugMenu.cpp): Slate panel, JSON configs, the clipboard,
+			// the preset assets' listing.
+			"Slate",
+			"SlateCore",
+			"ApplicationCore",
+			"Json",
+			"AssetRegistry",
 		});
 	}
 }
