@@ -41,6 +41,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `jam.Weapons.MagTrace` | `Lvl_Jam_ZeroG` | поза магазинов каждые 1/60 с через перезарядку |
 | `jam.Wall.Probe [Name]` | `Lvl_Jam_ZeroG`, `Lvl_Jam_Range` | живая стена: пистолет не открывает, дробовик открывает проход, время закрытия, пролёт пешки |
 | `jam.Wall.Seal` | любая со стенами | целые стены не пропускают ни пешку, ни сферу 15 см |
+| `jam.Wall.HitLag` | `Lvl_Jam_ZeroG` | от выстрела до раны стены: каждый ствол с 5 / 10 / 20 м — первая и последняя дробина на стене, рана (мс мира; запускать с `-UseFixedTimeStep -FPS=60`), конец — `Hit lag: done` |
 | `jam.Flyer.Probe [all] [Habitat]` | `Lvl_Jam_ZeroG`, `Lvl_Jam_Ship` (`Planetoid`) | летун: блуждание, зрение, аггро, укусы, деаггро, смерть, труп |
 | `jam.Ship.Probe` | `Lvl_Jam_Ship` | каюта, скафандр, шлюз, невесомость, планетоид, лист обшивки, детали |
 | `jam.Hull.Probe [Index]` | `Lvl_Jam_Ship` | ремонт обшивки: стяжка, мусор, сварка, прихватка, шов, резка, держаться; смерть (горелка, крюк, линия на поясе — сняты, ввод выключен) и возрождение той же пешки в каюте (скафандр, запертые стволы, линия стяжки, шов на месте) |
@@ -58,6 +59,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `jam.Weapons.Shots`, `jam.Weapons.Cycles`, `jam.Weapons.Reloads`, `jam.Weapons.Frames` | стволы: покой, выстрел, механизмы, перезарядки, кадры через 33 мс |
 | `jam.Weapons.MagFrames` | сброс и вставка магазинов USP и СВ-98 на 60 к/с |
 | `jam.Weapons.SwitchFrames` | убрать и достать каждый ствол, кадры через 33 мс |
+| `jam.Wall.BlastFrames [См]` | выстрел дробовика в стену с 10 м, кадр каждый кадр 0.5 с (`JamBlast_<кадр>_<мс>.png`; с `-UseFixedTimeStep -FPS=60`) |
 | `jam.Weapons.Fx [space]` | вспышка покадрово и дым за 3 с |
 | `jam.Weapons.Smoke [space]` | объёмный дым: облако, второй выстрел сквозь него, пролёт; затем `ProfileGPU` |
 | `jam.Scope.Shots`, `jam.Scope.AimFrames`, `jam.Scope.AimStills` | оптика СВ-98, подъём к глазу всех стволов, подбор глаза и поля зрения |

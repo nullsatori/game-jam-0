@@ -98,7 +98,7 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon")
 	bool bAutomatic = false;
 
-	/** Round speed, cm/s: each pellet flies as a round with a tracer and hits on arrival. 0: hitscan. */
+	/** Round speed, cm/s (near real: 35000 / 40000 / 80000): each pellet flies as a round with a tracer and hits on arrival. 0: hitscan. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
 	float ProjectileSpeed = 9000.0f;
 
@@ -704,11 +704,15 @@ private:
 		/** Muzzle minus eye at the shot: the tracer's offset, fading over TracerConvergeCm. */
 		FVector MuzzleOffset = FVector::ZeroVector;
 		float TravelledCm = 0.0f;
+		/** Hit this frame: its streak ends at the impact for one frame, then it goes. */
+		bool bLanded = false;
 		TWeakObjectPtr<UStaticMeshComponent> Tracer;
 	};
 
-	/** Trace Start..End for a round of Weapon; deliver the hit. True when something stopped it. */
-	bool TraceShot(const FJamWeapon& Weapon, const FVector& Start, const FVector& End, const FVector& Direction);
+	/** Trace Start..End for a round of Weapon; deliver the hit. True when something stopped it (where: OutImpact). */
+	bool TraceShot(const FJamWeapon& Weapon, const FVector& Start, const FVector& End, const FVector& Direction, FVector* OutImpact = nullptr);
+	/** Where a round's tracer streak ends in front. */
+	FVector TracerHead(const FRound& Round) const;
 	void UpdateRounds(float DeltaTime);
 	void UpdateRecoil(float DeltaTime);
 	void UpdateViewModel(float DeltaTime);
