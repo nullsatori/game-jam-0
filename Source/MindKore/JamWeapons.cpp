@@ -623,6 +623,7 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 		GetWorld()->GetTimerManager().SetTimer(CycleTimer, FTimerDelegate::CreateWeakLambda(this, [this, Cycle]()
 		{
 			UGameplayStatics::PlaySound2D(this, Cycle);
+			++CycleSoundsPlayed;
 			UE_LOG(LogMindKore, Log, TEXT("Weapon %s: cycle %s"), *GetNameSafe(GetOwner()), *Cycle->GetName());
 		}), FMath::Max(Weapon->CycleDelaySeconds, KINDA_SMALL_NUMBER), false);
 	}

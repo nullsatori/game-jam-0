@@ -1389,7 +1389,8 @@ namespace
 	 * largest frame-to-frame jump of the pose (a pop would show as one). Pistol -> shotgun,
 	 * back to the pistol during the put-away (0.2 s), the SV-98 (0.8 s), the shotgun during
 	 * the SV-98's draw (1.6 s); a try to fire during a draw and after it; holster at once and
-	 * draw (3.6 s, 4.2 s). Runs headless too.
+	 * draw (3.6 s, 4.2 s). Then the cases and the cycle sounds over switches (PASS / FAIL lines), the magazine
+	 * counted at its seat, R waiting for the bolt; the last line "Switch probe: all done". Runs headless too.
 	 */
 	void RunSwitchProbe(UWorld* World)
 	{
@@ -1416,6 +1417,9 @@ namespace
 			int32 Frames = 0;
 			int32 Cases = 0;
 			int32 Ammo = 0;
+			int32 Sounds = 0;
+			int32 Reserve = 0;
+			double ShotAt = 0.0;
 		};
 		TSharedRef<FProbe> Probe = MakeShared<FProbe>();
 		Probe->Start = World->GetTimeSeconds();
@@ -1509,6 +1513,90 @@ namespace
 			UE_LOG(LogMindKore, Log, TEXT("Switch probe: a whole pump after a shot - %d case(s) (expected 1): %s"), Thrown, Thrown == 1 ? TEXT("PASS") : TEXT("FAIL"));
 			UE_LOG(LogMindKore, Log, TEXT("Switch probe: cases done"));
 		});
+		// A change of mind mid-pump (review 19.10): the shotgun fired, the pistol picked 0.1 s later, the shotgun
+		// back 0.1 s / 0.3 s after that. The pump, its sound and its case come as one: one of each.
+		for (const float Back : { 0.1f, 0.3f })
+		{
+			After(At += 0.6f, [Pawn, Guns, Probe, Back]()
+			{
+				Probe->Cases = Guns->GetCasesThrown();
+				Probe->Sounds = Guns->GetCycleSounds();
+				UE_LOG(LogMindKore, Log, TEXT("Switch probe: shotgun shot, the pistol at +0.1 s, back %.1f s later (%s): %s"), Back, *Guns->Describe(),
+					Pawn->Fire() ? TEXT("fired") : TEXT("refused"));
+			});
+			After(At + 0.1f, [Guns]() { Guns->SelectWeapon(0); });
+			After(At + 0.1f + Back, [Guns]() { Guns->SelectWeapon(1); });
+			After(At += 1.6f, [Guns, Probe, Back]()
+			{
+				const int32 Cases = Guns->GetCasesThrown() - Probe->Cases;
+				const int32 Sounds = Guns->GetCycleSounds() - Probe->Sounds;
+				UE_LOG(LogMindKore, Log, TEXT("Switch probe: return after %.1f s - %d case(s), %d pump sound(s) (expected 1, 1): %s"), Back, Cases, Sounds,
+					Cases == 1 && Sounds == 1 ? TEXT("PASS") : TEXT("FAIL"));
+			});
+		}
+		// The magazine counts when it seats (review 19.10): the SV-98 reloaded from 1 round, the pistol picked 1.4 s in -
+		// after the seat (1.25 s), before the reload's end (1.7 s) - and the rifle back: a full magazine from the reserve.
+		After(At += 0.5f, [Guns]() { Guns->SelectWeapon(2); });
+		After(At += 1.5f, [Guns, Probe]()
+		{
+			FJamWeapon& Rifle = Guns->Weapons[2];
+			Rifle.Ammo = 1;
+			Probe->Reserve = Rifle.Reserve;
+			Guns->Reload();
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: SV-98 reload from %s"), *Guns->Describe());
+		});
+		After(At += 1.4f, [Guns]() { Guns->SelectWeapon(0); });
+		After(At += 0.8f, [Guns]() { Guns->SelectWeapon(2); });
+		After(At += 1.5f, [Guns, Probe]()
+		{
+			const FJamWeapon& Rifle = Guns->Weapons[2];
+			const bool bPass = Rifle.Ammo == Rifle.MagazineSize && Rifle.Reserve == Probe->Reserve - Rifle.MagazineSize;
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: switched after the seat, before the end - %d/%d (expected %d/%d): %s"), Rifle.Ammo, Rifle.Reserve,
+				Rifle.MagazineSize, Probe->Reserve - Rifle.MagazineSize, bPass ? TEXT("PASS") : TEXT("FAIL"));
+		});
+		// ...and switched after the old magazine dropped (0.5 s), before the new one seats: its rounds left with it.
+		After(At += 0.2f, [Guns, Probe]()
+		{
+			FJamWeapon& Rifle = Guns->Weapons[2];
+			Rifle.Ammo = 2;
+			Probe->Reserve = Rifle.Reserve;
+			Guns->Reload();
+		});
+		After(At += 0.8f, [Guns]() { UE_LOG(LogMindKore, Log, TEXT("Switch probe: 0.8 s into the reload, the old magazine out: %s"), *Guns->Describe()); Guns->SelectWeapon(0); });
+		After(At += 0.8f, [Guns]() { Guns->SelectWeapon(2); });
+		After(At += 1.5f, [Guns, Probe]()
+		{
+			const FJamWeapon& Rifle = Guns->Weapons[2];
+			const bool bPass = Rifle.Ammo == 0 && Rifle.Reserve == Probe->Reserve;
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: switched between the drop and the seat - %d/%d (expected 0/%d): %s"), Rifle.Ammo, Rifle.Reserve,
+				Probe->Reserve, bPass ? TEXT("PASS") : TEXT("FAIL"));
+		});
+		// R right after a shot waits for the bolt (review 19.10): fired, R at 0.1 s - the reload starts when the cycle ends (1.25 s).
+		After(At += 0.2f, [Pawn, Guns, Probe]()
+		{
+			Guns->Weapons[2].Ammo = 2;
+			Probe->ShotAt = Pawn->GetWorld()->GetTimeSeconds();
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: SV-98 shot (%s): %s"), *Guns->Describe(), Pawn->Fire() ? TEXT("fired") : TEXT("refused"));
+			Pawn->Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		});
+		After(At + 0.1f, [Guns]() { Guns->Reload(); });
+		After(At + 0.2f, [Guns]()
+		{
+			const float Left = Guns->GetReloadRemaining();
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: 0.2 s after the shot, R at 0.1 s - reload %s (expected waiting): %s"),
+				Left > 0.0f ? TEXT("running") : TEXT("waiting"), Left > 0.0f ? TEXT("FAIL") : TEXT("PASS"));
+		});
+		After(At += 1.4f, [Pawn, Guns, Probe]()
+		{
+			const FJamWeapon& Rifle = Guns->Weapons[2];
+			const float Left = Guns->GetReloadRemaining();
+			const double Now = Pawn->GetWorld()->GetTimeSeconds();
+			const float Started = Left > 0.0f ? float(Now - (Rifle.ReloadSeconds - Left) - Probe->ShotAt) : -1.0f;
+			const float Cycle = Rifle.GetActionCycleSeconds();
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: the reload started %.3f s after the shot (cycle %.2f s; expected at its end): %s"), Started, Cycle,
+				Started >= Cycle - 0.001f && Started <= Cycle + 0.1f ? TEXT("PASS") : TEXT("FAIL"));
+		});
+		After(At += 2.0f, []() { UE_LOG(LogMindKore, Log, TEXT("Switch probe: all done")); });
 	}
 
 	FAutoConsoleCommandWithWorld GSwitchProbe(

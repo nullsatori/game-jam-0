@@ -661,6 +661,9 @@ public:
 	/** Spent cases thrown since play began (probes: a switch throws none). */
 	int32 GetCasesThrown() const { return CasesThrown; }
 
+	/** Cycle sounds (pump, bolt) played since play began (probes). */
+	int32 GetCycleSounds() const { return CycleSoundsPlayed; }
+
 
 	/** Seconds left of a reload; 0 when not reloading. */
 	float GetReloadRemaining() const;
@@ -722,6 +725,7 @@ private:
 	int32 ShellsPlanned = 0;
 	float PrevSinceShot = 1000.0f;
 	int32 CasesThrown = 0;
+	int32 CycleSoundsPlayed = 0;
 	float PrevReloadTime = -1.0f;
 
 	struct FPoseState
