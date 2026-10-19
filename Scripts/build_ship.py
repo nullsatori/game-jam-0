@@ -1,5 +1,9 @@
 """Builds /Game/Jam/Maps/Lvl_Jam_Ship, the grey blockout of «Почини и улети» (editor Python, headless).
 
+RETIRED since 18.10: the map is edited by hand in the editor, and this script
+destroys every actor before building - it would wipe that work. It refuses to
+run unless JAM_REBUILD_SHIP_WIPES_HAND_EDITS=1 is set (Docs/LevelPipeline.md).
+
 Run (an existing map is rebuilt in place; the editor stays open after
 a plain -ExecutePythonScript, so wrap it in a script that ends with
 unreal.SystemLibrary.quit_editor()):
@@ -16,6 +20,10 @@ import random
 import sys
 
 import unreal
+
+if os.environ.get("JAM_REBUILD_SHIP_WIPES_HAND_EDITS") != "1":
+    raise SystemExit("build_ship.py: Lvl_Jam_Ship is edited by hand since 18.10 and this script deletes every actor."
+                     " Not run. Set JAM_REBUILD_SHIP_WIPES_HAND_EDITS=1 only to throw the hand edits away (Docs/LevelPipeline.md).")
 
 # The shared living wall material (Scripts/jam_living_wall.py), found next to this script.
 SCRIPTS = os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts")
