@@ -37,7 +37,8 @@ bool UJamHullToolsComponent::TraceView(float Reach, FHitResult& OutHit) const
 	{
 		return false;
 	}
-	const FVector From = Pawn->Camera->GetComponentLocation();
+	// From the eye without the camera shake, like the pawn's own aim (a shot or a bite must not move the torch).
+	const FVector From = Pawn->ShoulderLocation();
 	const FVector To = From + Pawn->GetControlRotation().Vector() * Reach;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamHullTool), /*bTraceComplex=*/false, Pawn);
 	return GetWorld()->LineTraceSingleByChannel(OutHit, From, To, ECC_Visibility, Params) && OutHit.GetComponent();
@@ -166,7 +167,7 @@ void UJamHullToolsComponent::SecondaryPressed()
 	}
 	// The line nearest the crosshair ray; none close to it - the last one.
 	const AJamZeroGPawn* Pawn = Cast<AJamZeroGPawn>(GetOwner());
-	const FVector From = Pawn->Camera->GetComponentLocation();
+	const FVector From = Pawn->ShoulderLocation();
 	const FVector Direction = Pawn->GetControlRotation().Vector();
 	int32 Nearest = Lines.Num() - 1;
 	float Best = 60.0f;

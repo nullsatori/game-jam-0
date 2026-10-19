@@ -786,7 +786,7 @@ void AJamFlyer::Bite(APawn* Target)
 void AJamFlyer::ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& ResolvedImpact)
 {
 	const FVector Push = ResolvedImpact.bHasPhysicsImpulse ? ResolvedImpact.ImpulseNewtonSeconds * 100.0 : FVector::ZeroVector;
-	// The gun already pushes a simulated body it hits (UJamWeaponsComponent::FireRay): only a hit on a mesh part needs it here.
+	// The gun already pushes a simulated body it hits (UJamWeaponsComponent::TraceShot): only a hit on a mesh part needs it here.
 	const UPrimitiveComponent* HitComponent = ResolvedImpact.Hit.GetComponent();
 	const bool bPushHere = !Push.IsNearlyZero() && !(HitComponent && HitComponent->IsSimulatingPhysics());
 	// The thwack: one per source and HitWindowSeconds (a blast's pellets, before and after the death), at the first round.
