@@ -661,7 +661,7 @@ namespace
 		return nullptr;
 	}
 
-	/** (c) Every part into place, then the lever. */
+	/** (c) Every part into place; one tank out again (the fuel lamp and the lever must go), back in, then the lever. */
 	void ProbeFinish(AJamShipGameMode* Mode)
 	{
 		UWorld* World = Mode->GetWorld();
@@ -696,11 +696,31 @@ namespace
 				Teleport(Nav, Panel->NavDock->GetActorLocation());
 			}
 		}
-		After(Mode, 2.0f, [Mode, Panel]()
+		After(Mode, 2.0f, [Mode, Panel, Fuel]()
 		{
 			LogPanel(Mode->GetWorld(), TEXT("all parts in"));
-			Panel->CompleteInteraction(PlayerPawn(Mode->GetWorld()));
-			UE_LOG(LogMindKore, Log, TEXT("Ship probe [end]: ended %s"), Mode->bEnded ? TEXT("yes") : TEXT("no"));
+			if (Fuel.IsEmpty())
+			{
+				Panel->CompleteInteraction(PlayerPawn(Mode->GetWorld()));
+				UE_LOG(LogMindKore, Log, TEXT("Ship probe [end]: ended %s"), Mode->bEnded ? TEXT("yes") : TEXT("no"));
+				return;
+			}
+			// The goals are live: a tank pushed back out takes the fuel lamp and the lever with it.
+			const FVector Docked = Fuel[0]->GetActorLocation();
+			Teleport(Fuel[0], Docked + FVector(0.0f, 0.0f, 3000.0f));
+			After(Mode, 1.0f, [Mode, Panel, Fuel, Docked]()
+			{
+				LogPanel(Mode->GetWorld(), TEXT("a tank pushed out"));
+				Panel->CompleteInteraction(PlayerPawn(Mode->GetWorld()));
+				UE_LOG(LogMindKore, Log, TEXT("Ship probe [lever, a tank out]: ended %s"), Mode->bEnded ? TEXT("yes") : TEXT("no"));
+				Teleport(Fuel[0], Docked);
+				After(Mode, 1.0f, [Mode, Panel]()
+				{
+					LogPanel(Mode->GetWorld(), TEXT("the tank back in"));
+					Panel->CompleteInteraction(PlayerPawn(Mode->GetWorld()));
+					UE_LOG(LogMindKore, Log, TEXT("Ship probe [end]: ended %s"), Mode->bEnded ? TEXT("yes") : TEXT("no"));
+				});
+			});
 		});
 	}
 

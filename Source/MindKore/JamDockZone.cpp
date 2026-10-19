@@ -60,9 +60,9 @@ void AJamDockZone::Tick(float DeltaSeconds)
 		UE_LOG(LogMindKore, Log, TEXT("Dock %s: %d/%d parts"), *GetName(), Parts.Num(), RequiredCount);
 		Count = Parts.Num();
 	}
-	if (!bCompleted && Count >= RequiredCount)
+	if (!bAnnounced && IsCompleted())
 	{
-		bCompleted = true;
+		bAnnounced = true;
 		UE_LOG(LogMindKore, Log, TEXT("Dock %s: complete (%d/%d)"), *GetName(), Count, RequiredCount);
 		OnCompleted.Broadcast(this);
 	}

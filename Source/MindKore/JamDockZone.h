@@ -13,8 +13,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FJamDockCompleted, class AJamDockZon
  * Where loot is delivered: a box at the ship. Every loose body carrying
  * RequiredTag inside it is counted; once inside, a part is captured softly -
  * its damping goes up and a weak pull draws it to the box centre - so it
- * settles instead of drifting out. OnCompleted fires once, when the count
- * first reaches RequiredCount.
+ * settles instead of drifting out. The count is live: a part pushed back out
+ * counts no more (IsCompleted goes false again). OnCompleted fires once, when
+ * the count first reaches RequiredCount.
  */
 UCLASS()
 class MINDKORE_API AJamDockZone : public AActor
@@ -47,8 +48,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Jam|Dock")
 	int32 GetCount() const { return Count; }
 
+	/** Enough parts inside now. */
 	UFUNCTION(BlueprintPure, Category = "Jam|Dock")
-	bool IsCompleted() const { return bCompleted; }
+	bool IsCompleted() const { return Count >= RequiredCount; }
 
 	virtual void Tick(float DeltaSeconds) override;
 
@@ -56,5 +58,6 @@ private:
 	/** Captured last tick: a part that leaves gets its zero-G damping back. */
 	TArray<TWeakObjectPtr<UPrimitiveComponent>> Captured;
 	int32 Count = 0;
-	bool bCompleted = false;
+	/** OnCompleted has fired (once per run). */
+	bool bAnnounced = false;
 };
