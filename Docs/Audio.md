@@ -18,8 +18,9 @@
 | Шаги и падения на мясе (планетоид, живые стены) | доноры MindKore `SC_MK_Hit_Torso` / `SC_MK_Hit_Limb` на пешке: шаг каждые 130 см, высота ×0.4–0.55, громкость 0.35 | `AJamZeroGPawn` (`FleshStepSound`, `FleshCrashSound`) |
 | Смена оружия (кобура, ремень) | `Scripts/jam_switch_foley.py`: записанные доноры (кожа кобуры, ремень, антабка, стук приклада), тот же тракт «через скафандр», что у механизмов; `SW_Jam_Stow_*` / `SW_Jam_Draw_*`, разброс громкости и высоты на каждом проигрывании | [RecoilWeapons-Pose — Смена оружия](RecoilWeapons-Pose.md#смена-оружия-убрать-и-достать) |
 
-WAV импортирует `Scripts/jam_import_audio.py` (папка назначения —
-переменная `JAM_AUDIO_DEST`).
+WAV импортирует `Scripts/jam_import_audio.py`: берёт `SW_Jam_*.wav` из папки
+`JAM_WAV_DIR`, кладёт в `JAM_AUDIO_DEST` (по умолчанию
+`/Game/JamArt/Audio/Weapons`, у летунов — `/Game/JamArt/Audio/Flyer`).
 
 ## Вакуум и воздух
 
