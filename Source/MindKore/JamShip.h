@@ -35,10 +35,20 @@ public:
 
 	virtual void UpdateRotation(float DeltaTime) override;
 
+	/**
+	 * A view kick (a shot's recoil, a gun's draw nudge), degrees of pitch and
+	 * yaw in the view's own frame. Kept until the next UpdateRotation, which
+	 * turns the view by it as by the mouse: around the view's own axes in
+	 * free rotation, on the upright view in gravity - so it is never a
+	 * foreign write that would rebuild the view from the shown one.
+	 */
+	void AddViewKick(const FRotator& Kick) { PendingViewKick += Kick; }
+
 	/** The gravity direction the view uses now (eased toward the pawn's). */
 	FVector GetViewGravity() const { return SmoothedGravity; }
 
 private:
+	FRotator PendingViewKick = FRotator::ZeroRotator;
 	FVector SmoothedGravity = FVector::ZeroVector;
 	bool bWasFreeBodyRotation = false;
 	/** World from the view's local frame, carried along as gravity turns. */

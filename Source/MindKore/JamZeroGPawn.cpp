@@ -215,18 +215,16 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	UInputAction* ThrustAction = MakeAction(TEXT("IA_ZG_Thrust"), EInputActionValueType::Axis2D);
 	UInputAction* LiftAction = MakeAction(TEXT("IA_ZG_Lift"), EInputActionValueType::Axis1D);
 	UInputAction* StabiliseAction = MakeAction(TEXT("IA_ZG_Stabilise"), EInputActionValueType::Boolean);
-	UInputAction* UseAction = MakeAction(TEXT("IA_ZG_Use"), EInputActionValueType::Boolean);
 	UInputAction* PrimaryAction = MakeAction(TEXT("IA_ZG_Primary"), EInputActionValueType::Boolean);
-	UInputAction* PushAction = MakeAction(TEXT("IA_ZG_Push"), EInputActionValueType::Boolean);
+	UInputAction* SecondaryAction = MakeAction(TEXT("IA_ZG_Secondary"), EInputActionValueType::Boolean);
+	UInputAction* MiddleAction = MakeAction(TEXT("IA_ZG_Middle"), EInputActionValueType::Boolean);
+	UInputAction* WheelAction = MakeAction(TEXT("IA_ZG_Wheel"), EInputActionValueType::Axis1D);
+	UInputAction* ReloadAction = MakeAction(TEXT("IA_ZG_Reload"), EInputActionValueType::Boolean);
+	UInputAction* UseAction = MakeAction(TEXT("IA_ZG_Use"), EInputActionValueType::Boolean);
 	UInputAction* RollAction = MakeAction(TEXT("IA_ZG_Roll"), EInputActionValueType::Axis1D);
 	UInputAction* GrappleAction = MakeAction(TEXT("IA_ZG_Grapple"), EInputActionValueType::Boolean);
 	UInputAction* BulletTimeAction = MakeAction(TEXT("IA_ZG_BulletTime"), EInputActionValueType::Boolean);
 	UInputAction* CrowbarAction = MakeAction(TEXT("IA_ZG_Crowbar"), EInputActionValueType::Boolean);
-	UInputAction* StrapAction = MakeAction(TEXT("IA_ZG_Strap"), EInputActionValueType::Boolean);
-	UInputAction* WelderAction = MakeAction(TEXT("IA_ZG_Welder"), EInputActionValueType::Boolean);
-	UInputAction* ToolSecondaryAction = MakeAction(TEXT("IA_ZG_ToolSecondary"), EInputActionValueType::Boolean);
-	UInputAction* ReelAction = MakeAction(TEXT("IA_ZG_Reel"), EInputActionValueType::Axis1D);
-	UInputAction* GunKeyAction = MakeAction(TEXT("IA_ZG_GunKey"), EInputActionValueType::Boolean);
 	UInputAction* AimAction = MakeAction(TEXT("IA_ZG_Aim"), EInputActionValueType::Boolean);
 	UInputAction* JumpAction = MakeAction(TEXT("IA_ZG_Jump"), EInputActionValueType::Boolean);
 
@@ -239,25 +237,19 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Map(LiftAction, EKeys::SpaceBar, false, false);
 	Map(LiftAction, EKeys::LeftControl, false, true);
 	Map(StabiliseAction, EKeys::X, false, false);
-	// Owner 17.10/18.10: RMB aims with a gun out (grabs a loose body in reach - unarmed), else grabs/lets go/holds on (Use);
-	// F interacts (else pushes), Q/E roll, V bullet time, Alt the grapple.
-	Map(UseAction, EKeys::RightMouseButton, false, false);
+	// The hands' keys, each bound once, here: what they do is Route's table (owner 17-19.10). F interacts
+	// (else pushes), Q/E roll, V bullet time, Alt the grapple.
 	Map(PrimaryAction, EKeys::LeftMouseButton, false, false);
-	Map(PushAction, EKeys::F, false, false);
+	Map(SecondaryAction, EKeys::RightMouseButton, false, false);
+	Map(MiddleAction, EKeys::MiddleMouseButton, false, false);
+	Map(WheelAction, EKeys::MouseWheelAxis, false, false);
+	Map(ReloadAction, EKeys::R, false, false);
+	Map(UseAction, EKeys::F, false, false);
 	Map(RollAction, EKeys::E, false, false);
 	Map(RollAction, EKeys::Q, false, true);
 	Map(GrappleAction, EKeys::LeftAlt, false, false);
 	Map(BulletTimeAction, EKeys::V, false, false);
 	Map(CrowbarAction, EKeys::G, false, false);
-	// Hull repair (Docs/HullRepair.md): 4 the strap (it took over the T tether), 5 the welder;
-	// R and the wheel go to the tool in hand, 1/2/3 put it away (the guns keep their own bindings).
-	Map(StrapAction, EKeys::Four, false, false);
-	Map(WelderAction, EKeys::Five, false, false);
-	Map(ToolSecondaryAction, EKeys::R, false, false);
-	Map(ReelAction, EKeys::MouseWheelAxis, false, false);
-	Map(GunKeyAction, EKeys::One, false, false);
-	Map(GunKeyAction, EKeys::Two, false, false);
-	Map(GunKeyAction, EKeys::Three, false, false);
 	Map(AimAction, EKeys::LeftShift, false, false);
 	// Space is also Lift: thrust up in zero-G, a jump (press) in a gravity zone.
 	Map(JumpAction, EKeys::SpaceBar, false, false);
@@ -267,27 +259,33 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindAction(LiftAction, ETriggerEvent::Triggered, this, &AJamZeroGPawn::Lift);
 	Input->BindActionValueLambda(StabiliseAction, ETriggerEvent::Started, [this](const FInputActionValue&) { bStabilising = true; });
 	Input->BindActionValueLambda(StabiliseAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { bStabilising = false; });
-	Input->BindAction(UseAction, ETriggerEvent::Started, this, &AJamZeroGPawn::Use);
-	// RMB released: the aim it raised comes down (Use).
-	Input->BindActionValueLambda(UseAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { Guns->Scope->SetAimHeld(false); });
 	// Act on press. An automatic gun keeps firing while LMB is held; Fire's
 	// interval gate makes the press frame (Started and Triggered) one shot.
-	Input->BindAction(PrimaryAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PrimaryPressed);
-	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Triggered, [this](const FInputActionValue&)
-	{
-		const FJamWeapon* Weapon = Guns->GetWeapon();
-		if (!GrabbedBody.IsValid() && HullTools->GetTool() == EJamHullTool::None && Weapon && Weapon->bAutomatic)
-		{
-			Fire();
-		}
-	});
+	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Started, [this](const FInputActionValue&) { Press(EJamHandKey::Primary); });
+	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Triggered, [this](const FInputActionValue&) { Press(EJamHandKey::PrimaryHeld); });
+	Input->BindActionValueLambda(SecondaryAction, ETriggerEvent::Started, [this](const FInputActionValue&) { Press(EJamHandKey::Secondary); });
+	Input->BindActionValueLambda(WheelAction, ETriggerEvent::Started, [this](const FInputActionValue& Value) { Press(EJamHandKey::Wheel, Value.Get<float>()); });
+	Input->BindActionValueLambda(ReloadAction, ETriggerEvent::Started, [this](const FInputActionValue&) { Press(EJamHandKey::Reload); });
+	// Releases end a hold whatever is in hand: the torch, the RMB aim. MMB holds the aim the same way;
+	// the gun rises to the eye only while one is drawn (UJamScopeComponent::TickComponent).
 	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { HullTools->PrimaryReleased(); });
-	Input->BindActionValueLambda(StrapAction, ETriggerEvent::Started, [this](const FInputActionValue&) { HullTools->SelectTool(EJamHullTool::Strap); });
-	Input->BindActionValueLambda(WelderAction, ETriggerEvent::Started, [this](const FInputActionValue&) { HullTools->SelectTool(EJamHullTool::Welder); });
-	Input->BindActionValueLambda(ToolSecondaryAction, ETriggerEvent::Started, [this](const FInputActionValue&) { HullTools->SecondaryPressed(); });
-	Input->BindActionValueLambda(ReelAction, ETriggerEvent::Started, [this](const FInputActionValue& Value) { HullTools->Reel(Value.Get<float>() > 0.0f ? 1 : -1); });
-	Input->BindActionValueLambda(GunKeyAction, ETriggerEvent::Started, [this](const FInputActionValue&) { HullTools->SelectTool(EJamHullTool::None); });
-	Input->BindAction(PushAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PushPressed);
+	Input->BindActionValueLambda(SecondaryAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { Guns->Scope->SetAimHeld(false); });
+	Input->BindActionValueLambda(MiddleAction, ETriggerEvent::Started, [this](const FInputActionValue&) { Guns->Scope->SetHeld(true); });
+	Input->BindActionValueLambda(MiddleAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { Guns->Scope->SetHeld(false); });
+	// The digits from the lists: the guns 1..N in Guns->Weapons order, then the strap and the welder (GetToolSlot).
+	static const FKey Digits[] = { EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine, EKeys::Zero };
+	const int32 Slots = GetToolSlot(EJamHullTool::Welder) + 1;
+	if (Slots > int32(UE_ARRAY_COUNT(Digits)))
+	{
+		UE_LOG(LogMindKore, Error, TEXT("%s: %d guns and 2 tools need %d digit keys, there are %d"), *GetName(), Guns->Weapons.Num(), Slots, int32(UE_ARRAY_COUNT(Digits)));
+	}
+	for (int32 Slot = 0; Slot < FMath::Min(Slots, int32(UE_ARRAY_COUNT(Digits))); ++Slot)
+	{
+		UInputAction* SlotAction = MakeAction(*FString::Printf(TEXT("IA_ZG_Slot%d"), Slot + 1), EInputActionValueType::Boolean);
+		Map(SlotAction, Digits[Slot], false, false);
+		Input->BindActionValueLambda(SlotAction, ETriggerEvent::Started, [this, Slot](const FInputActionValue&) { PressSlot(Slot); });
+	}
+	Input->BindAction(UseAction, ETriggerEvent::Started, this, &AJamZeroGPawn::PushPressed);
 	// Left Shift held: the predicted paths are drawn.
 	Input->BindActionValueLambda(AimAction, ETriggerEvent::Started, [this](const FInputActionValue&) { bAiming = true; });
 	Input->BindActionValueLambda(AimAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { bAiming = false; });
@@ -297,7 +295,6 @@ void AJamZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &AJamZeroGPawn::BulletTimeReleased);
 	Input->BindAction(CrowbarAction, ETriggerEvent::Started, this, &AJamZeroGPawn::ToggleCrowbar);
 	Input->BindAction(JumpAction, ETriggerEvent::Started, this, &AJamZeroGPawn::JumpPressed);
-	Guns->BindInput(*Input, *Mapping);
 }
 
 void AJamZeroGPawn::PawnClientRestart()
@@ -332,9 +329,210 @@ void AJamZeroGPawn::Lift(const FInputActionValue& Value)
 	ThrustInput.Z += Value.Get<float>();
 }
 
+// --- movement mode -------------------------------------------------------------
+
+const FJamMoveRules& AJamZeroGPawn::Allows() const
+{
+	// One row per EJamMoveMode:               fire   use    grapple jump   thrusters
+	static const FJamMoveRules Rules[] = {
+		/* Float: Space is the up thruster */  { true, true,  true,  false, true },
+		/* Walk */                              { true, true,  true,  true,  false },
+		/* Ladder: Space pushes off it */       { true, false, false, true,  false },
+		/* Hang: the keys are the arm */        { true, true,  true,  false, false },
+	};
+	return Rules[uint8(MoveMode)];
+}
+
+void AJamZeroGPawn::SetMode(EJamMoveMode NewMode)
+{
+	if (NewMode == MoveMode)
+	{
+		return;
+	}
+	const EJamMoveMode OldMode = MoveMode;
+	switch (OldMode)
+	{
+	case EJamMoveMode::Walk:
+		bGrounded = false;
+		break;
+	case EJamMoveMode::Ladder:
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: off %s"), *GetName(), *GetNameSafe(ActiveLadder));
+		ActiveLadder = nullptr;
+		bLadderMounting = false;
+		LadderCooldownUntil = GetWorld()->GetTimeSeconds() + 0.3;
+		RestoreLadderBodyRadius();
+		break;
+	case EJamMoveMode::Hang:
+		ClingTarget = nullptr;
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: let go at %.0f cm/s"), GetBodyVelocity().Size());
+		break;
+	default:
+		break;
+	}
+	MoveMode = NewMode;
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: %s -> %s"), *GetName(), *UEnum::GetDisplayValueAsText(OldMode).ToString(),
+		*UEnum::GetDisplayValueAsText(NewMode).ToString());
+	if (NewMode == EJamMoveMode::Walk)
+	{
+		bGrounded = false;
+	}
+}
+
+// --- hands -----------------------------------------------------------------------
+
+EJamHands AJamZeroGPawn::GetHands() const
+{
+	return Hands == EJamHands::Gun && !Guns->IsWeaponUnlocked(Guns->CurrentWeapon) ? EJamHands::Empty : Hands;
+}
+
+void AJamZeroGPawn::SetHands(EJamHands NewHands, EJamHullTool NewTool)
+{
+	if (NewHands == EJamHands::Empty)
+	{
+		NewHands = EJamHands::Gun; // free hands want the gun; with none picked up GetHands reads Empty
+	}
+	if (NewHands == Hands && (NewHands != EJamHands::Tool || NewTool == EJamHullTool::None || NewTool == HullTools->GetLastTool()))
+	{
+		return;
+	}
+	const EJamHands OldHands = Hands;
+	switch (OldHands)
+	{
+	case EJamHands::Gun:
+		// The reload is abandoned either way; a grab takes the gun out of view this frame, a tool lets it go away on its path.
+		Guns->Holster(/*bAtOnce=*/NewHands == EJamHands::Held);
+		break;
+	case EJamHands::Tool:
+		HullTools->PutAway();
+		break;
+	case EJamHands::Held:
+		if (GrabbedBody.IsValid())
+		{
+			UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: let go of %s"), *GetNameSafe(GrabbedBody->GetOwner()));
+		}
+		GrabbedBody = nullptr;
+		break;
+	default:
+		break;
+	}
+	if (NewHands == EJamHands::Held)
+	{
+		HandsBeforeHeld = OldHands;
+	}
+	Hands = NewHands;
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG hands: %s -> %s"), *UEnum::GetDisplayValueAsText(OldHands).ToString(), *UEnum::GetDisplayValueAsText(NewHands).ToString());
+	switch (NewHands)
+	{
+	case EJamHands::Gun:
+		if (OldHands == EJamHands::Held)
+		{
+			Guns->Rearm(); // back from unarmed: the last gun, drawn (owner 19.10); from a tool its put-away just runs back
+		}
+		break;
+	case EJamHands::Tool:
+		HullTools->TakeOut(NewTool);
+		break;
+	default:
+		break;
+	}
+}
+
+void AJamZeroGPawn::TakeTool(EJamHullTool Tool)
+{
+	SetHands(HullTools->GetTool() == Tool ? EJamHands::Gun : EJamHands::Tool, Tool);
+}
+
+EJamHandAction AJamZeroGPawn::Route(EJamHandKey Key) const
+{
+	using A = EJamHandAction;
+	// One row per EJamHands, one column per EJamHandKey (Docs/ZeroG.md, «Руки»):
+	//                     LMB              LMB held     RMB        wheel      R
+	static const A Table[4][5] = {
+		/* Gun */          { A::Fire,        A::AutoFire, A::Aim,    A::NextGun, A::Reload },
+		/* Tool */         { A::ToolPrimary, A::None,     A::Hands,  A::Reel,    A::ToolSecondary },
+		/* Held */         { A::Throw,       A::None,     A::Hands,  A::NextGun, A::None },
+		/* Empty */        { A::None,        A::None,     A::Hands,  A::None,    A::None },
+	};
+	const A Action = Table[uint8(GetHands())][uint8(Key)];
+	// The move mode's say (Allows): a ladder takes RMB (the hands are on the rungs).
+	if ((Action == A::Fire || Action == A::AutoFire) && !Allows().bFire)
+	{
+		return A::None;
+	}
+	if ((Action == A::Aim || Action == A::Hands) && !Allows().bUse)
+	{
+		return A::None;
+	}
+	return Action;
+}
+
+void AJamZeroGPawn::Press(EJamHandKey Key, float Value)
+{
+	const int32 Step = Value > 0.0f ? 1 : -1;
+	switch (Route(Key))
+	{
+	case EJamHandAction::Fire:
+		Fire();
+		break;
+	case EJamHandAction::AutoFire:
+		if (const FJamWeapon* Weapon = Guns->GetWeapon(); Weapon && Weapon->bAutomatic)
+		{
+			Fire();
+		}
+		break;
+	case EJamHandAction::Reload:
+		Guns->Reload();
+		break;
+	case EJamHandAction::NextGun:
+		Guns->SelectStep(Step);
+		if (Guns->IsWeaponUnlocked(Guns->CurrentWeapon))
+		{
+			SetHands(EJamHands::Gun); // holding a body: it is let go, the gun drawn
+		}
+		break;
+	case EJamHandAction::Aim:
+	case EJamHandAction::Hands:
+		Use();
+		break;
+	case EJamHandAction::Throw:
+		ThrowHeld();
+		break;
+	case EJamHandAction::ToolPrimary:
+		HullTools->PrimaryPressed();
+		break;
+	case EJamHandAction::ToolSecondary:
+		HullTools->SecondaryPressed();
+		break;
+	case EJamHandAction::Reel:
+		HullTools->Reel(Step);
+		break;
+	default:
+		break;
+	}
+}
+
+void AJamZeroGPawn::PressSlot(int32 Slot)
+{
+	if (Slot >= Guns->Weapons.Num())
+	{
+		TakeTool(Slot == GetToolSlot(EJamHullTool::Strap) ? EJamHullTool::Strap : EJamHullTool::Welder);
+		return;
+	}
+	// Any gun's key puts a hull tool away; a gun picked up is then the one in hand, from whatever was there.
+	if (GetHands() == EJamHands::Tool)
+	{
+		SetHands(EJamHands::Gun);
+	}
+	if (Guns->IsWeaponUnlocked(Slot))
+	{
+		Guns->SelectWeapon(Slot);
+		SetHands(EJamHands::Gun);
+	}
+}
+
 void AJamZeroGPawn::Use()
 {
-	if (IsClimbingLadder())
+	if (!Allows().bUse)
 	{
 		return;
 	}
@@ -379,6 +577,7 @@ bool AJamZeroGPawn::Cling(UPrimitiveComponent* Target, const FVector& Point)
 		return false;
 	}
 	// The hand takes the point; the velocity is kept - the arm catches it (UpdateArm).
+	SetMode(EJamMoveMode::Hang);
 	ClingTarget = Target;
 	HandLocal = Target->GetComponentTransform().InverseTransformPosition(Point);
 	ArmRestCm = FMath::Max(ArmMinCm, float(FVector::Dist(ShoulderLocation(), Point)));
@@ -389,10 +588,9 @@ bool AJamZeroGPawn::Cling(UPrimitiveComponent* Target, const FVector& Point)
 
 void AJamZeroGPawn::LetGoCling()
 {
-	if (ClingTarget.IsValid() || ClingTarget.IsStale())
+	if (MoveMode == EJamMoveMode::Hang)
 	{
-		ClingTarget = nullptr;
-		UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: let go at %.0f cm/s"), GetBodyVelocity().Size());
+		SetMode(FreeMode()); // the exit lets go of the hold
 	}
 }
 
@@ -508,7 +706,8 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 	}
 
 	const FVector Impulse = Change * Mu;
-	AddBodyImpulse(Impulse);
+	// Every tick, not a single kick: past AddBodyImpulse's launch rule, which would read a frame's share.
+	Body->AddImpulse(Impulse, NAME_None, /*bVelChange=*/false);
 	if (bMoving)
 	{
 		Target->AddImpulseAtLocation(-Impulse, Hand);
@@ -523,12 +722,11 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 
 EJamRmbAction AJamZeroGPawn::GetRmbAction() const
 {
-	if (IsClimbingLadder())
+	if (!Allows().bUse)
 	{
 		return EJamRmbAction::None;
 	}
-	const bool bGunOut = Guns->GetWeapon() && HullTools->GetTool() == EJamHullTool::None && !GrabbedBody.IsValid() && !IsClinging();
-	if (bGunOut)
+	if (GetHands() == EJamHands::Gun && !IsClinging())
 	{
 		return GrabCandidate.IsValid() ? EJamRmbAction::Grab : EJamRmbAction::Aim;
 	}
@@ -539,19 +737,13 @@ EJamRmbAction AJamZeroGPawn::GetRmbAction() const
 	return GrabCandidate.IsValid() ? EJamRmbAction::Grab : EJamRmbAction::Cling;
 }
 
-void AJamZeroGPawn::PrimaryPressed()
+FString AJamZeroGPawn::GetRmbPrompt() const
 {
-	if (GrabbedBody.IsValid())
+	if (GetRmbAction() != EJamRmbAction::Grab)
 	{
-		ThrowHeld();
-		return;
+		return FString();
 	}
-	if (HullTools->GetTool() != EJamHullTool::None)
-	{
-		HullTools->PrimaryPressed();
-		return;
-	}
-	Fire();
+	return GetHands() == EJamHands::Gun ? TEXT("[ПКМ] взять (оружие убрать)") : TEXT("[ПКМ] взять");
 }
 
 void AJamZeroGPawn::PushPressed()
@@ -608,6 +800,12 @@ void AJamZeroGPawn::ToggleGrapple()
 	if (!HasGrapple())
 	{
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG grapple: not taken yet"));
+		return;
+	}
+	if (!Allows().bGrapple)
+	{
+		// The ladder holds the body still: a hook would only tug at it (and a hooked body does not take a ladder).
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG grapple: not from the ladder"));
 		return;
 	}
 	FHitResult Hit;
@@ -705,6 +903,24 @@ FVector AJamZeroGPawn::GetBodyVelocity() const
 void AJamZeroGPawn::AddBodyImpulse(const FVector& Impulse)
 {
 	Body->AddImpulse(Impulse, NAME_None, /*bVelChange=*/false);
+	// Walking, a kick up past the threshold leaves the ground as a jump does: Walk would
+	// otherwise see the floor within GroundProbeCm next frame and clip the upward speed
+	// (an SV-98 shot at the feet lifted the body only below ~70 FPS).
+	const float Up = MoveMode == EJamMoveMode::Walk ? float(FVector::DotProduct(Impulse, -GravityDirection)) / Body->GetMass() : 0.0f;
+	if (Up > LaunchThresholdCm)
+	{
+		LastJumpSeconds = GetWorld()->GetTimeSeconds();
+		bGrounded = false;
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: launched off the ground at %.0f cm/s"), *GetName(), Up);
+	}
+}
+
+bool AJamZeroGPawn::IsStrapPulling() const
+{
+	return HullTools->GetLines().ContainsByPredicate([this](const FJamStrapLine& Line)
+	{
+		return Line.Tension > 0.0f && (Line.A.Get() == Body || Line.B.Get() == Body);
+	});
 }
 
 bool AJamZeroGPawn::Push()
@@ -784,7 +1000,7 @@ bool AJamZeroGPawn::Grab(UPrimitiveComponent* Target, FVector Point)
 	Target->WakeAllRigidBodies();
 	UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: %s, %.0f kg"), *GetNameSafe(Target->GetOwner()), Target->GetMass());
 	// Both hands on it (owner 18.10: «хватать объекты можно но в таком случае игрок переходит в Unarmed»).
-	Guns->Holster();
+	SetHands(EJamHands::Held);
 	return true;
 }
 
@@ -824,13 +1040,11 @@ void AJamZeroGPawn::UpdateDust()
 
 void AJamZeroGPawn::Release()
 {
-	if (GrabbedBody.IsValid())
+	// Hands free (leaving Held lets the body go): back to what was in hand, the gun drawn (owner 19.10).
+	if (Hands == EJamHands::Held)
 	{
-		UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: let go of %s"), *GetNameSafe(GrabbedBody->GetOwner()));
+		SetHands(HandsBeforeHeld);
 	}
-	GrabbedBody = nullptr;
-	// Hands free: back to the last gun, drawn (owner 19.10).
-	Guns->Rearm();
 }
 
 void AJamZeroGPawn::ToggleTether()
@@ -1069,7 +1283,7 @@ void AJamZeroGPawn::ApplyThrusters(float DeltaSeconds)
 {
 	const FVector Input = ThrustInput.GetClampedToMaxSize(1.0f);
 	ThrustInput = FVector::ZeroVector;
-	if (!bThrustersEnabled || DeltaSeconds <= 0.0f)
+	if (!bThrustersEnabled || !Allows().bThrusters || DeltaSeconds <= 0.0f)
 	{
 		return;
 	}
@@ -1116,6 +1330,11 @@ void AJamZeroGPawn::SetGravity(const FVector& Direction, float StrengthCm, bool 
 	if (bWas != IsInGravity())
 	{
 		bGrounded = false;
+		// Free hands follow the zone; a hold or a ladder is left by its own rules.
+		if (MoveMode == EJamMoveMode::Float || MoveMode == EJamMoveMode::Walk)
+		{
+			SetMode(FreeMode());
+		}
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: %s at %s, %.0f cm/s"), *GetName(), IsInGravity() ? TEXT("gravity on (walking)") : TEXT("gravity off (zero-G)"),
 			*GetActorLocation().ToCompactString(), GetBodyVelocity().Size());
 	}
@@ -1181,7 +1400,14 @@ void AJamZeroGPawn::Walk(float DeltaSeconds)
 	const FVector Velocity = GetBodyVelocity();
 	float Normal = FVector::DotProduct(Velocity, Up);
 	FVector Tangent = Velocity - Up * Normal;
-	if (bGrounded)
+	// Pulled from outside (the hook, a taut strap line): the ground neither brakes the body nor
+	// holds it down, as in the air - the hook's 1500 cm/s^2 never beat the 4000 brake and the snap.
+	const bool bPulled = GrappleTarget.IsValid() || IsStrapPulling();
+	if (bGrounded && bPulled)
+	{
+		LastGroundedSeconds = GetWorld()->GetTimeSeconds();
+	}
+	if (bGrounded && !bPulled)
 	{
 		// On the ground the walk runs in the ground's plane: up a slope the wish
 		// climbs along it (in the gravity plane the climb was cancelled every
@@ -1240,6 +1466,8 @@ void AJamZeroGPawn::Walk(float DeltaSeconds)
 
 void AJamZeroGPawn::BeginLadderClimb(AJamLadder* Ladder)
 {
+	// Entering Ladder: what the mode needs the ladder for (SetMode leaves Walk).
+	SetMode(EJamMoveMode::Ladder);
 	ActiveLadder = Ladder;
 	if (!bRestoreLadderRadius)
 	{
@@ -1279,14 +1507,10 @@ void AJamZeroGPawn::PlayRung(float Volume)
 
 void AJamZeroGPawn::EndLadderClimb()
 {
-	if (ActiveLadder)
+	if (MoveMode == EJamMoveMode::Ladder)
 	{
-		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: off %s"), *GetName(), *ActiveLadder->GetName());
+		SetMode(FreeMode()); // the exit: off the ladder, the cooldown, the body's radius back
 	}
-	ActiveLadder = nullptr;
-	bLadderMounting = false;
-	LadderCooldownUntil = GetWorld()->GetTimeSeconds() + 0.3;
-	RestoreLadderBodyRadius();
 }
 
 void AJamZeroGPawn::RestoreLadderBodyRadius()
@@ -1431,7 +1655,11 @@ void AJamZeroGPawn::ClimbLadder(float DeltaSeconds)
 
 void AJamZeroGPawn::JumpPressed()
 {
-	if (IsClimbingLadder())
+	if (!Allows().bJump)
+	{
+		return; // Zero-G: Space is the up thruster (Lift); holding on, it is the arm (UpdateArm), never a jump or the jet exit.
+	}
+	if (MoveMode == EJamMoveMode::Ladder)
 	{
 		const FVector Away = ActiveLadder->GetActorTransform().TransformVectorNoScale(FVector(0, -1, 0));
 		const FVector Up = IsInGravity() ? -GravityDirection : FVector::UpVector;
@@ -1441,10 +1669,6 @@ void AJamZeroGPawn::JumpPressed()
 		Body->SetPhysicsLinearVelocity(Away * JumpSpeedCm * 0.6f + Up * JumpSpeedCm * 0.35f);
 		LastJumpSeconds = GetWorld()->GetTimeSeconds();
 		return;
-	}
-	if (!IsInGravity() || IsClinging())
-	{
-		return; // Zero-G: Space is the up thruster (Lift); holding on, it is the arm (UpdateArm), never a jump or the jet exit.
 	}
 	const FVector Up = -GravityDirection;
 	const FVector Velocity = GetBodyVelocity();
@@ -1538,15 +1762,10 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 		: FVector::ZeroVector;
 	Camera->SetRelativeLocation(Body->GetComponentTransform().InverseTransformVectorNoScale(EyeOffset + Shake));
 	RefreshGrabCandidate();
-	// A gun drawn (1/2/3, the wheel) empties the hands first.
-	if (GrabbedBody.IsValid() && Guns->GetWeapon())
-	{
-		UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: a gun drawn - letting go"));
-		Release();
-	}
+	// The hand: on the hold (Hang) or on a held loose body (in any mode).
 	UpdateArm(DeltaSeconds);
 	UpdateDust();
-	if (!IsClimbingLadder() && IsInGravity() && !IsClinging() && GetWorld()->GetTimeSeconds() >= LadderCooldownUntil
+	if (MoveMode == EJamMoveMode::Walk && GetWorld()->GetTimeSeconds() >= LadderCooldownUntil
 		&& !GrabbedBody.IsValid() && !TetheredBody.IsValid() && !GrappleTarget.IsValid())
 	{
 		FVector Move = ViewDirection() * ThrustInput.X + Camera->GetRightVector() * ThrustInput.Y;
@@ -1571,19 +1790,25 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 			}
 		}
 	}
-	if (IsClimbingLadder())
+	switch (MoveMode)
 	{
-		ClimbLadder(DeltaSeconds);
-	}
-	else if (IsInGravity())
-	{
-		Walk(DeltaSeconds);
-	}
-	else
-	{
+	case EJamMoveMode::Float:
 		ApplyThrusters(DeltaSeconds);
+		break;
+	case EJamMoveMode::Walk:
+		Walk(DeltaSeconds);
+		break;
+	case EJamMoveMode::Ladder:
+		ClimbLadder(DeltaSeconds);
+		break;
+	case EJamMoveMode::Hang:
+		// The arm (UpdateArm) holds the body and took the keys; gravity still pulls, nothing walks,
+		// brakes or snaps it to the ground (Walk used to, and fought the arm with the feet on the floor).
+		ThrustInput = FVector::ZeroVector;
+		Body->AddForce(GravityDirection * GravityStrengthCm, NAME_None, /*bAccelChange=*/true);
+		break;
 	}
-	if (!IsClimbingLadder())
+	if (MoveMode != EJamMoveMode::Ladder)
 	{
 		RestoreLadderBodyRadius();
 	}
@@ -1621,7 +1846,7 @@ void AJamZeroGPawn::KickCamera(float AmplitudeCm)
 bool AJamZeroGPawn::Fire()
 {
 	FVector Recoil;
-	if (!Guns->Fire(ViewLocation(), ViewDirection(), Recoil))
+	if (!Allows().bFire || !Guns->Fire(ViewLocation(), ViewDirection(), Recoil))
 	{
 		return false;
 	}
@@ -1638,8 +1863,8 @@ void AJamZeroGPawn::ReceiveResolvedImpact_Implementation(const FMKResolvedImpact
 	Vitals->ApplyIncoming(ResolvedImpact.DamageAmount, ResolvedImpact.Kind, /*bBlocked=*/false, ResolvedImpact.ShotId);
 	if (ResolvedImpact.bHasPhysicsImpulse)
 	{
-		// N s to kg cm/s, as MKPhysicsBridge::ApplyPointImpulse converts.
-		Body->AddImpulseAtLocation(ResolvedImpact.ImpulseNewtonSeconds * 100.0, ResolvedImpact.Hit.ImpactPoint);
+		// N s to kg cm/s, as MKPhysicsBridge::ApplyPointImpulse converts; at the body's centre (its rotation is locked).
+		AddBodyImpulse(ResolvedImpact.ImpulseNewtonSeconds * 100.0);
 	}
 }
 

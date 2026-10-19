@@ -7,9 +7,6 @@
 #include "JamWeapons.generated.h"
 
 class UAudioComponent;
-class UEnhancedInputComponent;
-class UInputAction;
-class UInputMappingContext;
 class UJamScopeComponent;
 class UMaterialInterface;
 class UMKImpactDataAsset;
@@ -495,12 +492,6 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	int32 CurrentWeapon = 0;
 
-	/** Unarmed (Holster): CurrentWeapon stays as it was, out of hand. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
-	bool bHolstered = false;
-
-
-
 	/** Off (the ship map): every gun starts locked until a pickup unlocks it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons")
 	bool bStartWithAllWeapons = true;
@@ -597,7 +588,7 @@ public:
 	void TracePose(int32 Weapon, bool bReload, int32 Shells, float Seconds, float Step, TArray<FVector>& OutPlace, TArray<FVector>& OutTurn,
 		int32 SwitchPhase = 0) const;
 
-	/** Every gun's aim and the SV-98's scope (JamScope.h): made in BindInput; UpdateViewModel takes the shown gun's aimed pose from it (AimPose). */
+	/** Every gun's aim and the SV-98's scope (JamScope.h): made on BeginPlay; UpdateViewModel takes the shown gun's aimed pose from it (AimPose). */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	TObjectPtr<UJamScopeComponent> Scope = nullptr;
 
@@ -624,8 +615,12 @@ public:
 	 */
 	bool Fire(const FVector& Start, const FVector& Direction, FVector& OutRecoil);
 
+	/** The gun the hands hold or take next (a switch, when one is in hand). Not the hands: AJamZeroGPawn::PressSlot. */
 	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
 	void SelectWeapon(int32 Index);
+
+	/** The next unlocked gun Step's way (the wheel). */
+	void SelectStep(int32 Step);
 
 	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
 	void Reload();
@@ -637,32 +632,28 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
 	bool IsWeaponUnlocked(int32 Index) const { return Weapons.IsValidIndex(Index) && Weapons[Index].bUnlocked; }
 
-	/** The gun in hand, or null: none unlocked yet, or unarmed (Holster). */
-	const FJamWeapon* GetWeapon() const { return !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr; }
+	/** The gun in hand, or null: none unlocked yet, or the owner's hands hold something else (AJamZeroGPawn::GetHands). */
+	const FJamWeapon* GetWeapon() const;
 
 	/**
-	 * Unarmed, at once: the gun leaves the view in the same frame and does not fire (owner 18-19.10: a
-	 * grab - AJamZeroGPawn::Grab). Rearm (the grab let go) or a selection brings a gun back with a Draw.
+	 * The hands leave the gun (AJamZeroGPawn::SetHands): its reload is abandoned. At once, the gun
+	 * leaves the view in the same frame (owner 18-19.10: a grab); otherwise UpdateSwitch puts it away
+	 * on its path (a hull tool). The hands coming back bring it in with a draw.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
-	void Holster();
+	void Holster(bool bAtOnce);
 
-	/** Back from unarmed to the last gun, with a Draw (AJamZeroGPawn::Release). */
-	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
+	/** Back from unarmed (a held body let go): the current gun, logged and drawn (AJamZeroGPawn::SetHands). */
 	void Rearm();
 
 	/**
-	 * A gun coming back into hand out of unarmed (Rearm, a selection): logged. The draw itself is
-	 * UpdateSwitch's (JamWeaponParts.cpp), as for any switch - the gun, wanted again, comes in from
-	 * away along its own path. Fire waits for IsDrawing.
+	 * A gun coming back into hand out of unarmed (Rearm): logged. The draw itself is UpdateSwitch's
+	 * (JamWeaponParts.cpp), as for any switch - the gun, wanted again, comes in from away along its
+	 * own path. Fire waits for IsDrawing.
 	 */
 	void Draw();
 
 	/** A put-away or draw still running for the gun in hand: no shot yet (!IsWeaponReady). */
 	bool IsDrawing() const;
-
-	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
-	bool IsHolstered() const { return bHolstered; }
 
 	/** The current gun is drawn far enough to fire (DrawReadySeconds) and no put-away is wanted. */
 	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
@@ -684,11 +675,8 @@ public:
 	/** Seconds left of a reload; 0 when not reloading. */
 	float GetReloadRemaining() const;
 
-	/** The HUD line: «[n] Name ammo/reserve» (and the reload), or «без оружия». */
+	/** The HUD line: «[n] Name ammo/reserve» (and the reload; also while a hull tool is out), or «без оружия» (holding a body, none unlocked). */
 	FString Describe() const;
-
-	/** R reload, 1/2/3 select, the mouse wheel steps through the unlocked guns. */
-	void BindInput(UEnhancedInputComponent& Input, UInputMappingContext& Mapping);
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -714,7 +702,8 @@ private:
 	void UpdateViewModel(float DeltaTime);
 	/** Turn the owner's view by degrees in the view's own frame. */
 	void TurnView(float PitchDeg, float YawDeg) const;
-	void SelectStep(int32 Step);
+	/** The owner's hands hold the gun (AJamZeroGPawn::GetHands); an owner without hands always. */
+	bool IsInHand() const;
 
 	// JamWeaponParts.cpp: the hammer, cases, magazines and round-by-round loading.
 	/** Fill the guns' parts and reload curves; from the constructor (ConstructorHelpers). */
@@ -798,7 +787,4 @@ private:
 	double ReloadEndSeconds = 0.0;
 	/** R pressed during the shot's cycle: the reload starts when it is through (a shot or a switch drops it). */
 	bool bReloadQueued = false;
-
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<UInputAction>> InputActions;
 };

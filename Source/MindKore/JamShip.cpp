@@ -51,6 +51,9 @@ void AJamShipController::UpdateRotation(float DeltaTime)
 	// The pawn's gravity; outside every zone the frame keeps the last one.
 	const AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(GetPawn());
 	const bool bInGravity = Floater && Floater->IsInGravity();
+	// The view kicks since the last frame (AddViewKick): spent here, in this frame's write.
+	const FRotator Kick(PendingViewKick.Pitch, PendingViewKick.Yaw, 0.0f);
+	PendingViewKick = FRotator::ZeroRotator;
 	// Only the view turns, never the physics body. Teleporting the sphere's
 	// rotation every frame against its rotation lock left it spinning at
 	// 10^5..10^6 deg/s, and on touchdown friction turned that spin into a
@@ -60,7 +63,8 @@ void AJamShipController::UpdateRotation(float DeltaTime)
 	{
 		// Compose in body space: after a flip, yaw still turns around the
 		// player's own up axis. Euler pitch/yaw accumulation cannot do this.
-		const FQuat View = (GetControlRotation().Quaternion() * RotationInput.Quaternion()).GetNormalized();
+		// The kick after the mouse, in the view's own frame: a rolled view kicks toward its own up.
+		const FQuat View = (GetControlRotation().Quaternion() * RotationInput.Quaternion() * Kick.Quaternion()).GetNormalized();
 		LastWrittenRotation = View.Rotator();
 		SetControlRotation(LastWrittenRotation);
 		bWasFreeBodyRotation = true;
@@ -129,7 +133,8 @@ void AJamShipController::UpdateRotation(float DeltaTime)
 
 	bWasFreeBodyRotation = false;
 	FRotator View = RelativeView;
-	FRotator DeltaRotation(RotationInput);
+	// The kick turns the upright view like the mouse does; the roll left over from free rotation fades on its own below.
+	FRotator DeltaRotation(RotationInput + Kick);
 	if (PlayerCameraManager)
 	{
 		PlayerCameraManager->ProcessViewRotation(DeltaTime, View, DeltaRotation);
@@ -512,12 +517,14 @@ void AJamShipHUD::DrawHUD()
 			const UJamHullToolsComponent* Tools = Player->HullTools;
 			if (Tools->GetTool() == EJamHullTool::Strap)
 			{
-				DrawText(FString::Printf(TEXT("[4] Стяжка: линий %d/%d   ЛКМ — зацепить, колесо — подмотка, R — срезать"), Tools->GetLines().Num(), Tools->MaxLines), Tool, 24.0f, Line, Font);
+				DrawText(FString::Printf(TEXT("[%d] Стяжка: линий %d/%d   ЛКМ — зацепить, колесо — подмотка, R — срезать"), Player->GetToolSlot(EJamHullTool::Strap) + 1,
+					Tools->GetLines().Num(), Tools->MaxLines), Tool, 24.0f, Line, Font);
 				Line -= 20.0f;
 			}
 			else if (Tools->GetTool() == EJamHullTool::Welder)
 			{
-				DrawText(FString::Printf(TEXT("[5] Сварка: %s   ЛКМ — горелка, R — варить/резать   %s"), Tools->IsCutting() ? TEXT("режу") : TEXT("варю"),
+				DrawText(FString::Printf(TEXT("[%d] Сварка: %s   ЛКМ — горелка, R — варить/резать   %s"), Player->GetToolSlot(EJamHullTool::Welder) + 1,
+					Tools->IsCutting() ? TEXT("режу") : TEXT("варю"),
 					*Tools->GetWeldStatus().ToString()), Tool, 24.0f, Line, Font);
 				Line -= 20.0f;
 			}
@@ -1392,7 +1399,7 @@ namespace
 				Pawn->HullTools->AddLine(Hit.GetComponent(), Hit.ImpactPoint, PlateBody, PlateBody->GetComponentLocation());
 				Pawn->HullTools->AddLine(Hit.GetComponent(), Hit.ImpactPoint, Pawn->Body, Pawn->Body->GetComponentLocation(), /*bBelt=*/true);
 			}
-			Pawn->HullTools->SelectTool(EJamHullTool::Welder);
+			Pawn->SetHands(EJamHands::Tool, EJamHullTool::Welder);
 			Pawn->HullTools->PrimaryPressed();
 			Mode->Tools.AddUnique(MKJamGrappleTool());
 			Pawn->ToggleGrapple();

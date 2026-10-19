@@ -6,9 +6,6 @@
 #include "JamScope.generated.h"
 
 class UCameraComponent;
-class UEnhancedInputComponent;
-class UInputAction;
-class UInputMappingContext;
 class UJamWeaponsComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
@@ -104,7 +101,7 @@ struct FJamGunAim
 /**
  * The SV-98's telescopic sight, a true 3D one (owner 18.10: «сделай true 3d прицел»).
  *
- * Holding ScopeKey brings the rifle up to the eye as a mass on damped springs, one
+ * Holding MMB (AJamZeroGPawn: SetHeld) brings the rifle up to the eye as a mass on damped springs, one
  * per channel (Aims[2].In / Out: a late start, an arc, a floaty overshoot, the muzzle
  * swinging late; the body's velocity changes sway it): its eyepiece settles onto
  * the camera's axis Aims[2].EyeCm in front of
@@ -135,7 +132,7 @@ struct FJamGunAim
  * (the gun, its moving part, flash, smoke, dust); rounds' tracers, made later,
  * stay visible. It renders only while the aim is up.
  *
- * Made and fed by UJamWeaponsComponent: it creates this in BindInput and asks
+ * Made and fed by UJamWeaponsComponent: it creates this on BeginPlay and asks
  * AimPose for the gun's rest pose in view every tick (one writer of the gun).
  */
 UCLASS(ClassGroup = (Jam))
@@ -145,10 +142,6 @@ class MINDKORE_API UJamScopeComponent : public UActorComponent
 
 public:
 	UJamScopeComponent();
-
-	/** Held: aim through the scope. The one place to change the key. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope")
-	FKey ScopeKey = EKeys::MiddleMouseButton;
 
 	/** The gun with the scope (UJamWeaponsComponent::Weapons, 2: the SV-98). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope")
@@ -253,7 +246,7 @@ public:
 	/** The capture's full field of view, degrees: the eyepiece's angle as drawn in the world's field / Magnification. */
 	float GetCaptureFieldOfView() const;
 
-	/** Held from code (probes); the key does the same. */
+	/** MMB held (AJamZeroGPawn binds it; probes call it too). */
 	void SetHeld(bool bInHeld) { bHeld = bInHeld; }
 
 	/** The pawn's RMB while a gun is out (AJamZeroGPawn::Use): aim as with the key. */
@@ -264,8 +257,6 @@ public:
 
 	/** UJamWeaponsComponent: Weapon's rest pose in view moved toward the eye, and the share of its kick that stays. */
 	void AimPose(int32 Weapon, FTransform& Rest, float& KickScale) const;
-
-	void BindInput(UEnhancedInputComponent& Input, UInputMappingContext& Mapping);
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -293,9 +284,6 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> ReticleMID = nullptr;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UInputAction> AimAction = nullptr;
 
 	bool bHeld = false;
 	bool bHeldByHands = false;

@@ -77,6 +77,11 @@ bool AJamWeaponPickup::Give(AActor* Hand)
 		return false;
 	}
 	Guns->UnlockWeapon(WeaponIndex);
+	// Taken while holding a body: the body is let go and the new gun drawn (a hull tool in hand stays).
+	if (AJamZeroGPawn* Pawn = Cast<AJamZeroGPawn>(Hand); Pawn && Pawn->GetHands() == EJamHands::Held)
+	{
+		Pawn->SetHands(EJamHands::Gun);
+	}
 	JamToast(this, FText::Format(LOCTEXT("GunUnlocked", "Получено: {0}"), Guns->Weapons[WeaponIndex].Name));
 	return true;
 }

@@ -9,12 +9,8 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
-#include "EnhancedInputComponent.h"
 #include "GameFramework/HUD.h"
 #include "GameFramework/PlayerController.h"
-#include "InputAction.h"
-#include "InputMappingContext.h"
-#include "JamHullTools.h"
 #include "JamLivingWall.h"
 #include "JamWeapons.h"
 #include "JamZeroGPawn.h"
@@ -212,18 +208,6 @@ void UJamScopeComponent::StepMotion(float DeltaTime, bool bAim)
 	}
 }
 
-void UJamScopeComponent::BindInput(UEnhancedInputComponent& Input, UInputMappingContext& Mapping)
-{
-	if (!AimAction)
-	{
-		AimAction = NewObject<UInputAction>(this, TEXT("IA_Jam_Scope"));
-		AimAction->ValueType = EInputActionValueType::Boolean;
-		Mapping.MapKey(AimAction, ScopeKey);
-	}
-	Input.BindActionValueLambda(AimAction, ETriggerEvent::Started, [this](const FInputActionValue&) { bHeld = true; });
-	Input.BindActionValueLambda(AimAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { bHeld = false; });
-}
-
 bool UJamScopeComponent::Build()
 {
 	Weapons = GetOwner()->FindComponentByClass<UJamWeaponsComponent>();
@@ -331,8 +315,8 @@ bool UJamScopeComponent::Build()
 			Primitive->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 		}
 	}
-	UE_LOG(LogMindKore, Log, TEXT("Scope %s: capture FOV %.2f deg (x%.1f), target %dx%d, %d owner primitives hidden, key %s"),
-		*GetNameSafe(GetOwner()), Capture->FOVAngle, Magnification, RenderTargetSize, RenderTargetSize, Primitives.Num(), *ScopeKey.ToString());
+	UE_LOG(LogMindKore, Log, TEXT("Scope %s: capture FOV %.2f deg (x%.1f), target %dx%d, %d owner primitives hidden"),
+		*GetNameSafe(GetOwner()), Capture->FOVAngle, Magnification, RenderTargetSize, RenderTargetSize, Primitives.Num());
 	return true;
 }
 
@@ -345,15 +329,14 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	}
 	// The gun shown in view, which during a switch is still the old one on its way out (review 19.10: reading
 	// CurrentWeapon dropped the aim and the gun's field of view in one frame). Aim with it only while it is the
-	// one wanted - not on its way out, not with a hull tool in hand, not during a reload; going away it lowers on
+	// one wanted - not on its way out, not with the hands on something else (a hull tool), not during a reload; going away it lowers on
 	// its Out springs. The scope (lens, capture) belongs to the SV-98 alone.
 	const UStaticMeshComponent* Gun = Weapons->ViewModel;
 	const int32 Shown = Weapons->GetShownWeapon();
 	const bool bGunInView = Weapons->Weapons.IsValidIndex(Shown) && Aims.IsValidIndex(Shown);
 	const bool bScopeInView = bGunInView && Shown == ScopedWeapon;
-	const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>();
 	const bool bWants = (bHeld || bHeldByHands) && bGunInView && Shown == Weapons->CurrentWeapon
-		&& !(Tools && Tools->GetTool() != EJamHullTool::None) && Weapons->GetReloadRemaining() <= 0.0f;
+		&& Weapons->GetWeapon() && Weapons->GetReloadRemaining() <= 0.0f;
 	const float WasAlpha = Alpha;
 	// The body's velocity change this frame, in the camera's frame: the gun's inertia sways it the other way.
 	const FVector BodyVelocity = GetOwner()->GetVelocity();
@@ -666,13 +649,13 @@ namespace
 		After(Idle, [World]() { UGameplayStatics::SetGlobalTimeDilation(World, 1.0f); });
 		After(Idle + 4.0f, [World]() { UGameplayStatics::SetGlobalTimeDilation(World, 0.1f); });
 		const float Away = Idle + 4.2f;
-		After(Away, [Scope, Pawn]() { Scope->SetHeld(false); Pawn->Guns->Holster(); });
+		After(Away, [Scope, Pawn]() { Scope->SetHeld(false); Pawn->SetHands(EJamHands::Held); });
 		for (int32 Index = 0; Index < 12; ++Index)
 		{
 			After(Away + Index / 30.0f + 0.001f, [Still, Index]() { Still(2, TEXT("holster"), Index, Index / 30.0f); });
 		}
 		const float Draw = Away + 0.6f;
-		After(Draw, [Pawn]() { Pawn->Guns->SelectWeapon(2); });
+		After(Draw, [Pawn]() { Pawn->SetHands(EJamHands::Gun); });
 		for (int32 Index = 0; Index < 24; ++Index)
 		{
 			After(Draw + Index / 30.0f + 0.001f, [Still, Index]() { Still(2, TEXT("draw"), Index, Index / 30.0f); });
@@ -762,7 +745,7 @@ namespace
 		After(7.25f, [Pawn, State]() { const bool bFired = Pawn->Fire(); State(bFired ? TEXT("fire during the draw: FIRED") : TEXT("fire during the draw: refused")); });
 		After(8.1f, [Pawn, State]() { State(Pawn->Guns->IsDrawing() ? TEXT("0.9 s after: still drawing") : TEXT("0.9 s after: draw settled")); });
 		// Holding on to the hull needs free hands or a hull tool (a gun out aims): the strap in hand.
-		After(8.2f, [Pawn]() { Pawn->HullTools->SelectTool(EJamHullTool::Strap); });
+		After(8.2f, [Pawn]() { Pawn->PressSlot(Pawn->GetToolSlot(EJamHullTool::Strap)); });
 		// The nearest fixed surface from where the probe started: rays out six ways, the first static hit.
 		After(8.3f, [World, Face, Pawn, Home = Pawn->GetActorLocation()]()
 		{
@@ -784,10 +767,10 @@ namespace
 			}
 		});
 		After(8.5f, [Pawn, State]() { State(TEXT("strap in hand, the wall ahead")); Pawn->Use(); State(TEXT("strap in hand, after RMB on the wall")); });
-		After(8.8f, [Pawn, State]() { Pawn->Use(); State(TEXT("clinging, RMB again")); Pawn->HullTools->SelectTool(EJamHullTool::None); });
+		After(8.8f, [Pawn, State]() { Pawn->Use(); State(TEXT("clinging, RMB again")); Pawn->PressSlot(Pawn->GetToolSlot(EJamHullTool::Strap)); });
 		// 4. A gun out, the body taken (unarmed), then a gun selected (2): the body is let go, the gun drawn.
 		After(9.1f, [Loose, Face, Pin, Pawn]() { Pin(); Face(Loose->GetActorLocation(), Pawn->GetActorLocation(), 120.0f); });
-		After(9.3f, [Pawn, State]() { Pawn->Use(); State(TEXT("gun out, body taken again")); Pawn->Guns->SelectWeapon(1); });
+		After(9.3f, [Pawn, State]() { Pawn->Use(); State(TEXT("gun out, body taken again")); Pawn->PressSlot(1); });
 		After(9.5f, [State]() { State(TEXT("gun 2 selected while holding")); UE_LOG(LogMindKore, Log, TEXT("RMB probe: done")); });
 	}
 

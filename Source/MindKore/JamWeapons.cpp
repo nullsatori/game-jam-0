@@ -5,18 +5,15 @@
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
-#include "EnhancedInputComponent.h"
 #include "Engine/World.h"
-#include "JamHullTools.h"
 #include "JamLivingWall.h"
 #include "JamMuzzleFx.h"
 #include "JamScope.h"
+#include "JamShip.h"
 #include "JamZeroGPawn.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "EngineUtils.h"
-#include "InputAction.h"
-#include "InputMappingContext.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
 #include "MKImpactDelivery.h"
@@ -280,6 +277,20 @@ void UJamWeaponsComponent::BeginPlay()
 		// Muzzle flash and powder smoke, in the same camera space as the gun (JamMuzzleFx.h).
 		NewObject<UJamMuzzleFxComponent>(GetOwner(), TEXT("MuzzleFx"))->RegisterComponent();
 	}
+	// Every gun's aim and the SV-98's scope; it builds itself once the gun in view exists (UJamScopeComponent::Build).
+	Scope = NewObject<UJamScopeComponent>(GetOwner(), TEXT("Scope"));
+	Scope->RegisterComponent();
+}
+
+bool UJamWeaponsComponent::IsInHand() const
+{
+	const AJamZeroGPawn* Pawn = Cast<AJamZeroGPawn>(GetOwner());
+	return !Pawn || Pawn->GetHands() == EJamHands::Gun;
+}
+
+const FJamWeapon* UJamWeaponsComponent::GetWeapon() const
+{
+	return IsInHand() && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
 }
 
 void UJamWeaponsComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -344,8 +355,16 @@ void UJamWeaponsComponent::TurnView(float PitchDeg, float YawDeg) const
 		return;
 	}
 	// In degrees, as MindKore's AddRecoilRotationDegrees (AddControllerPitchInput
-	// would scale them by the input settings), and in the view's own frame: a
-	// rolled zero-G view kicks toward its own up.
+	// would scale them by the input settings). The ship's controller takes it as
+	// its own turn in its next UpdateRotation: a SetControlRotation behind its back
+	// read as a foreign write in gravity and rebuilt the view from the shown one,
+	// the roll left from zero-G included.
+	if (AJamShipController* Ship = Cast<AJamShipController>(Controller))
+	{
+		Ship->AddViewKick(FRotator(PitchDeg, YawDeg, 0.0f));
+		return;
+	}
+	// Another controller: at once, in the view's own frame (a rolled view kicks toward its own up).
 	const FQuat Kick = FRotator(PitchDeg, YawDeg, 0.0f).Quaternion();
 	Controller->SetControlRotation((Controller->GetControlRotation().Quaternion() * Kick).Rotator());
 }
@@ -377,10 +396,9 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	{
 		return;
 	}
-	// A hull tool in hand (the strap, the welder) puts the gun away; a switch puts one away and
+	// The hands on something else (a hull tool) put the gun away; a switch puts one away and
 	// draws the next (JamWeaponParts.cpp). The gun shown is the one on its way, not yet the current one.
-	const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>();
-	const FJamWeapon* Weapon = UpdateSwitch(DeltaTime, Tools && Tools->GetTool() != EJamHullTool::None, PoseSwitch);
+	const FJamWeapon* Weapon = UpdateSwitch(DeltaTime, !IsInHand(), PoseSwitch);
 	// The cycle's clock runs for the gun in hand and wanted (drawn or being drawn); a gun put away keeps its cycle
 	// where it was, its sound stopped, and picks it up again when it is back (owner 19.10: «механика не врёт»).
 	const int32 Running = SwitchStage == ESwitch::Drawn || SwitchStage == ESwitch::Draw ? ShownWeapon : INDEX_NONE;
@@ -464,41 +482,8 @@ FTransform UJamWeaponsComponent::GetMuzzleTransform() const
 	return FTransform(Bore, Location);
 }
 
-void UJamWeaponsComponent::BindInput(UEnhancedInputComponent& Input, UInputMappingContext& Mapping)
-{
-	const auto MakeAction = [this, &Mapping](const TCHAR* Name, EInputActionValueType Type, const FKey& Key)
-	{
-		UInputAction* Action = NewObject<UInputAction>(this, Name);
-		Action->ValueType = Type;
-		Mapping.MapKey(Action, Key);
-		InputActions.Add(Action);
-		return Action;
-	};
-	Input.BindAction(MakeAction(TEXT("IA_Jam_Reload"), EInputActionValueType::Boolean, EKeys::R), ETriggerEvent::Started, this, &UJamWeaponsComponent::Reload);
-	Input.BindActionValueLambda(MakeAction(TEXT("IA_Jam_Wheel"), EInputActionValueType::Axis1D, EKeys::MouseWheelAxis), ETriggerEvent::Started,
-		[this](const FInputActionValue& Value) { SelectStep(Value.Get<float>() > 0.0f ? 1 : -1); });
-	const FKey Keys[3] = { EKeys::One, EKeys::Two, EKeys::Three };
-	for (int32 Index = 0; Index < 3; ++Index)
-	{
-		UInputAction* Select = MakeAction(*FString::Printf(TEXT("IA_Jam_Weapon%d"), Index + 1), EInputActionValueType::Boolean, Keys[Index]);
-		Input.BindActionValueLambda(Select, ETriggerEvent::Started, [this, Index](const FInputActionValue&) { SelectWeapon(Index); });
-	}
-	// The scope: made here, not on BeginPlay - a player pawn binds input before it begins play.
-	if (!Scope)
-	{
-		Scope = NewObject<UJamScopeComponent>(GetOwner(), TEXT("Scope"));
-		Scope->RegisterComponent();
-	}
-	Scope->BindInput(Input, Mapping);
-}
-
 void UJamWeaponsComponent::SelectStep(int32 Step)
 {
-	// The wheel is bound twice: with a hull tool in hand it reels the strap (AJamZeroGPawn), not the guns.
-	if (const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>(); Tools && Tools->GetTool() != EJamHullTool::None)
-	{
-		return;
-	}
 	// The next unlocked gun in the wheel's direction.
 	const int32 Count = Weapons.Num();
 	for (int32 Tries = 1; Tries <= Count; ++Tries)
@@ -524,26 +509,23 @@ void UJamWeaponsComponent::UnlockWeapon(int32 Index)
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s unlocked"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString());
 }
 
-void UJamWeaponsComponent::Holster()
+void UJamWeaponsComponent::Holster(bool bAtOnce)
 {
-	if (bHolstered)
-	{
-		return;
-	}
-	bHolstered = true;
 	bReloadQueued = false;
 	ReloadEndSeconds = 0.0; // as a switch: the reload is abandoned, the gun's cycle freezes (UpdateViewModel)
-	ClearView(); // gone this frame, no put-away (JamWeaponParts.cpp)
-	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: unarmed"), *GetNameSafe(GetOwner()));
+	if (bAtOnce)
+	{
+		ClearView(); // gone this frame, no put-away (JamWeaponParts.cpp)
+	}
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s"), *GetNameSafe(GetOwner()), bAtOnce ? TEXT("unarmed") : TEXT("put away"));
 }
 
 void UJamWeaponsComponent::Rearm()
 {
-	if (!bHolstered || !IsWeaponUnlocked(CurrentWeapon))
+	if (!IsWeaponUnlocked(CurrentWeapon))
 	{
 		return;
 	}
-	bHolstered = false;
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: rearmed - %s"), *GetNameSafe(GetOwner()), *Weapons[CurrentWeapon].Name.ToString());
 	Draw();
 }
@@ -563,18 +545,8 @@ bool UJamWeaponsComponent::IsDrawing() const
 
 void UJamWeaponsComponent::SelectWeapon(int32 Index)
 {
-	// Out of unarmed (the same gun or another): drawn. Any switch is UpdateSwitch's: it puts the shown
-	// gun away and draws the current one.
-	const bool bFromUnarmed = bHolstered && IsWeaponUnlocked(Index);
-	if (bFromUnarmed && Index == CurrentWeapon)
-	{
-		Rearm();
-		return;
-	}
-	if (bFromUnarmed)
-	{
-		bHolstered = false;
-	}
+	// Any switch is UpdateSwitch's: it puts the shown gun away and draws the current one. The hands are the
+	// owner's: out of them (a tool, a body held) this only picks the gun they take next (AJamZeroGPawn::PressSlot).
 	if (!Weapons.IsValidIndex(Index) || Index == CurrentWeapon || !Weapons[Index].bUnlocked)
 	{
 		return;
@@ -584,10 +556,6 @@ void UJamWeaponsComponent::SelectWeapon(int32 Index)
 	ReloadEndSeconds = 0.0; // A switch abandons a reload; the last gun's cycle freezes until it is back (UpdateViewModel).
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s (%d/%d)"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString(),
 		Weapons[Index].Ammo, Weapons[Index].Reserve);
-	if (bFromUnarmed)
-	{
-		Draw();
-	}
 }
 
 float UJamWeaponsComponent::GetReloadRemaining() const
@@ -597,7 +565,9 @@ float UJamWeaponsComponent::GetReloadRemaining() const
 
 FString UJamWeaponsComponent::Describe() const
 {
-	const FJamWeapon* Weapon = GetWeapon();
+	// A gun put away for a hull tool keeps its line (its rounds still count); holding a body is unarmed.
+	const AJamZeroGPawn* Pawn = Cast<AJamZeroGPawn>(GetOwner());
+	const FJamWeapon* Weapon = IsWeaponUnlocked(CurrentWeapon) && !(Pawn && Pawn->GetHands() == EJamHands::Held) ? &Weapons[CurrentWeapon] : nullptr;
 	if (!Weapon)
 	{
 		return TEXT("без оружия");
@@ -612,7 +582,7 @@ FString UJamWeaponsComponent::Describe() const
 
 void UJamWeaponsComponent::Reload()
 {
-	FJamWeapon* Weapon = !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
+	FJamWeapon* Weapon = GetWeapon() ? &Weapons[CurrentWeapon] : nullptr;
 	if (!Weapon || !IsWeaponReady() || Weapon->Ammo >= Weapon->MagazineSize || Weapon->Reserve <= 0 || GetReloadRemaining() > 0.0f)
 	{
 		return;
@@ -631,7 +601,7 @@ void UJamWeaponsComponent::Reload()
 bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, FVector& OutRecoil)
 {
 	OutRecoil = FVector::ZeroVector;
-	FJamWeapon* Weapon = !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
+	FJamWeapon* Weapon = GetWeapon() ? &Weapons[CurrentWeapon] : nullptr;
 	// Round-by-round loading breaks off for a shot - once the shot is sure (review 19.10: it broke off before the
 	// checks below, and a refused shot lost both).
 	const bool bBreakLoading = Weapon && Weapon->ShellMesh && Weapon->Ammo > 0 && GetReloadRemaining() > 0.0f;
