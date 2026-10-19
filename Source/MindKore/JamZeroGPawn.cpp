@@ -1768,8 +1768,13 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 	if (MoveMode == EJamMoveMode::Walk && GetWorld()->GetTimeSeconds() >= LadderCooldownUntil
 		&& !GrabbedBody.IsValid() && !TetheredBody.IsValid() && !GrappleTarget.IsValid())
 	{
+		// The ground under the body now, as Walk will find it this tick: bGrounded is the last tick's,
+		// and stepping off a hatch's lip into the well the first tick in the air is the grab's. At
+		// 60 FPS (7.5 cm a tick at the walk) the stale flag let the body pass the ladder's axis first.
+		FHitResult Ground;
+		const bool bOnGround = GetWorld()->GetTimeSeconds() - LastJumpSeconds >= 0.25 && ProbeGround(Ground);
 		FVector Move = ViewDirection() * ThrustInput.X + Camera->GetRightVector() * ThrustInput.Y;
-		if (Move.IsNearlyZero() && !bGrounded)
+		if (Move.IsNearlyZero() && !bOnGround)
 		{
 			Move = GetBodyVelocity().GetSafeNormal();
 		}
@@ -1783,7 +1788,7 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 				}
 				JumpedFromLadder.Reset();
 			}
-			if (It->CanEnter(GetActorLocation(), Move, bGrounded))
+			if (It->CanEnter(GetActorLocation(), Move, bOnGround))
 			{
 				BeginLadderClimb(*It);
 				break;

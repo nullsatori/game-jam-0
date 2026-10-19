@@ -2,6 +2,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/SphereComponent.h"
 #include "EngineUtils.h"
+#include "Engine/OverlapResult.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
 #include "JamZeroGPawn.h"
@@ -67,7 +68,7 @@ namespace
 		float Seconds;             // the step's length, or its limit with an Until
 		int32 Until = 0;           // 0 time, 1 until on the ladder, 2 until off it, 3 until up at Top.Z (the mount starts)
 		bool bJump = false;        // Space at the start
-		bool bTowardAxis = false;  // yaw toward the ladder from where the pawn is, else along its face
+		bool bTowardAxis = false;  // yaw toward the ladder from where the pawn is at the step's start, else along its face
 		bool bShot = false;        // HighResShot at the end (with the "shots" argument)
 	};
 
@@ -79,7 +80,9 @@ namespace
 	 * Every 0.2 s: position in the ladder's frame (X along the rungs, Y out of
 	 * the face toward the ladder, Z up), the speed from that position's change,
 	 * the body's physics velocity, on/off. "shots": HighResShot stills of the
-	 * climb and the mount (needs a real RHI).
+	 * climb and the mount (needs a real RHI). "trace": a line every frame - the mode,
+	 * the position and velocity in the ladder's frame, the ground, IsInReach/CanEnter,
+	 * the body's contacts. Run it at a fixed rate too (-UseFixedTimeStep -FPS=60).
 	 */
 	void RunLadderProbe(const TArray<FString>& Args, UWorld* World)
 	{
@@ -93,6 +96,7 @@ namespace
 			return;
 		}
 		const bool bShots = Args.Contains(TEXT("shots"));
+		const bool bTrace = Args.Contains(TEXT("trace"));
 		const FTransform Frame = Ladder->GetActorTransform();
 		UE_LOG(LogMindKore, Log, TEXT("Ladder probe: %s at %s rotation %s, reach box %s, Top %s (world %s), Bottom %s (world %s), %.0f cm/s, dead zone %.0f deg, rung every %.0f cm"),
 			*Ladder->GetName(), *Frame.GetLocation().ToCompactString(), *Frame.Rotator().ToCompactString(),
@@ -137,12 +141,16 @@ namespace
 			double LastSample = 0;
 			FVector LastLocal = FVector::ZeroVector;
 			double HoldUntil = 0; // a still being taken: the view held, no keys
+			uint64 LastFrame = 0;
+			FVector LastInput = FVector::ZeroVector;
+			int32 YawStep = -1;
+			double Yaw = 0;
 		};
 		const TSharedRef<FState> State = MakeShared<FState>();
 		State->StepStart = World->GetTimeSeconds();
 		const TSharedRef<FTimerHandle> Handle = MakeShared<FTimerHandle>();
 		const TWeakObjectPtr<AJamLadder> WeakLadder = Ladder;
-		World->GetTimerManager().SetTimer(*Handle, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Controller, WeakLadder, State, Handle, bShots]()
+		World->GetTimerManager().SetTimer(*Handle, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Controller, WeakLadder, State, Handle, bShots, bTrace]()
 		{
 			UWorld* World = Pawn->GetWorld();
 			const AJamLadder* Ladder = WeakLadder.Get();
@@ -154,6 +162,40 @@ namespace
 			const FTransform& Frame = Ladder->GetActorTransform();
 			const double Now = World->GetTimeSeconds();
 			const FVector Local = Frame.InverseTransformPosition(Pawn->GetActorLocation());
+			if (bTrace && State->LastFrame != GFrameCounter)
+			{
+				State->LastFrame = GFrameCounter;
+				const FVector View = Controller->GetControlRotation().Vector();
+				const FVector Right = FRotationMatrix(Controller->GetControlRotation()).GetUnitAxis(EAxis::Y);
+				const FVector Move = View * State->LastInput.X + Right * State->LastInput.Y;
+				const FVector Velocity = Frame.InverseTransformVectorNoScale(Pawn->GetBodyVelocity());
+				const float Radius = Pawn->Body->GetScaledSphereRadius();
+				FCollisionQueryParams Params(SCENE_QUERY_STAT(LadderTrace), false, Pawn);
+				FHitResult Ground;
+				const bool bGround = World->SweepSingleByChannel(Ground, Pawn->GetActorLocation(), Pawn->GetActorLocation() + Pawn->GetGravityDirection() * Pawn->GroundProbeCm,
+					FQuat::Identity, Pawn->Body->GetCollisionObjectType(), FCollisionShape::MakeSphere(Radius - 2.0f), Params);
+				// The ground as the pawn's ladder check sees it next tick (ProbeGround from here, outside the 0.25 s after a jump); "grounded" is the flag Walk left.
+				const bool bFloor = bGround && FVector::DotProduct(Ground.ImpactNormal, -Pawn->GetGravityDirection()) >= FMath::Cos(FMath::DegreesToRadians(Pawn->MaxGroundAngleDeg));
+				TArray<FOverlapResult> Touching;
+				World->OverlapMultiByChannel(Touching, Pawn->GetActorLocation(), FQuat::Identity, Pawn->Body->GetCollisionObjectType(),
+					FCollisionShape::MakeSphere(Radius + 1.0f), Params);
+				FString Contacts;
+				for (const FOverlapResult& Overlap : Touching)
+				{
+					FMTDResult Mtd;
+					const bool bIn = Overlap.Component.IsValid() && Overlap.Component->ComputePenetration(Mtd, FCollisionShape::MakeSphere(Radius + 1.0f), Pawn->GetActorLocation(), FQuat::Identity);
+					Contacts += FString::Printf(TEXT(" %s%s"), *GetNameSafe(Overlap.Component.Get()),
+						bIn ? *FString::Printf(TEXT("[n %s, %.1f]"), *Frame.InverseTransformVectorNoScale(Mtd.Direction).ToCompactString(), Mtd.Distance - 1.0f) : TEXT(""));
+				}
+				UE_LOG(LogMindKore, Log, TEXT("Ladder trace f%llu dt %.4f [%s]: mode %d, local (%.1f, %.1f, %.1f), vel (%.0f, %.0f, %.0f), %s, reach %d, enter next tick %d (move local %s), radius %.0f, ground sweep %s%s, touching:%s"),
+					GFrameCounter, World->GetDeltaSeconds(), State->Step >= 0 ? Steps[State->Step].Name : TEXT("settle"), int32(Pawn->GetMoveMode()),
+					Local.X, Local.Y, Local.Z, Velocity.X, Velocity.Y, Velocity.Z, Pawn->IsGrounded() ? TEXT("grounded") : TEXT("air"),
+					Ladder->IsInReach(Pawn->GetActorLocation()), Ladder->CanEnter(Pawn->GetActorLocation(), Move, bFloor),
+					*Frame.InverseTransformVectorNoScale(Move).ToCompactString(), Radius,
+					bGround ? *GetNameSafe(Ground.GetComponent()) : TEXT("none"),
+					bGround ? *FString::Printf(TEXT(" n %s t %.2f%s"), *Frame.InverseTransformVectorNoScale(Ground.ImpactNormal).ToCompactString(), Ground.Time, Ground.bStartPenetrating ? TEXT(" inside") : TEXT("")) : TEXT(""),
+					*Contacts);
+			}
 			const auto Sample = [&](const TCHAR* Note)
 			{
 				const double Since = FMath::Max(Now - State->LastSample, 1e-3);
@@ -216,20 +258,24 @@ namespace
 			{
 				Sample(TEXT(""));
 			}
-			FVector Toward = Frame.GetUnitAxis(EAxis::Y);
-			if (Step.bTowardAxis)
+			if (State->YawStep != State->Step)
 			{
+				// Turned once as the step starts, as a player turns to the hole and walks: re-aimed every
+				// tick, the yaw flipped 180 degrees as the body passed over the axis, and W led away from
+				// the ladder; at 30 FPS no tick fell between leaving the lip and the axis.
+				State->YawStep = State->Step;
 				const FVector Axis = Frame.GetLocation() - Pawn->GetActorLocation();
-				Toward = FVector(Axis.X, Axis.Y, 0).GetSafeNormal();
+				State->Yaw = (Step.bTowardAxis ? FVector(Axis.X, Axis.Y, 0).GetSafeNormal() : Frame.GetUnitAxis(EAxis::Y)).Rotation().Yaw;
 			}
-			Controller->SetControlRotation(FRotator(Step.Pitch, Toward.Rotation().Yaw, 0));
+			Controller->SetControlRotation(FRotator(Step.Pitch, State->Yaw, 0));
 			Pawn->ProbeThrust(Step.Input, false);
+			State->LastInput = Step.Input;
 		}), 0.0005f, true);
 	}
 
 	FAutoConsoleCommandWithWorldAndArgs GLadderProbe(
 		TEXT("jam.Ladder.Probe"),
-		TEXT("The first ladder: grab, climb by the view, S, dead zone, strafe, over the top, down to the floor, jump off, strafe off; logs position and speed. 'shots': stills (needs a real RHI)."),
+		TEXT("The first ladder: grab, climb by the view, S, dead zone, strafe, over the top, down to the floor, jump off, strafe off; logs position and speed. 'shots': stills (needs a real RHI); 'trace': a line every frame (mode, ground, CanEnter, contacts)."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunLadderProbe));
 }
 
