@@ -28,10 +28,19 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 - NullRHI — доказательство логики, не вида: тайминги рендера и кадры из него
   ничего не значат.
 - **Частота кадров.** Без ключей NullRHI идёт на свободной частоте (~600–1000
-  FPS), и ошибки длины кадра не видны. Пробы лестницы и движения
-  (`jam.Ladder.Probe`, `jam.Move.Probe`, `jam.Hang.Probe`) гонять с
-  `-UseFixedTimeStep -FPS=60` (частота игры); перед слиянием — ещё
-  `-FPS=30` и `-FPS=144`.
+  FPS), и ошибки длины кадра не видны. Пробы движения, руки, головы и стволов
+  (`jam.ZeroG.Probe`, `jam.Move.Probe`, `jam.Ladder.Probe`, `jam.Hang.Probe`,
+  `jam.Head.Probe`, `jam.Hands.Probe`) гонять с `-UseFixedTimeStep -FPS=60`
+  (частота игры); перед слиянием — на 30, 60 и 144 одной командой:
+
+  ```powershell
+  .\Scripts\jam_fps_sweep.ps1 /Game/Jam/Maps/Lvl_Jam_Ship jam.Move.Probe
+  ```
+
+  Скрипт гоняет пробу на трёх частотах параллельно, печатает число PASS и
+  строки FAIL/TIMEOUT по каждой и выходит с кодом 1, если они есть. Числа без
+  PASS (скорости маха, отклонения) сравнивать по логам `Saved/Logs/Sweep_*`:
+  расхождение между частотами — баг, а не шум (правило — в `CLAUDE.md`).
 
 ## Логика (NullRHI)
 
