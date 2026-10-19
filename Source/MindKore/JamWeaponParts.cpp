@@ -14,6 +14,9 @@
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "EnhancedInputSubsystems.h"
+#include "InputAction.h"
+#include "JamHullTools.h"
 #include "GameFramework/PlayerController.h"
 #include "JamLivingWall.h"
 #include "JamZeroGPawn.h"
@@ -1627,6 +1630,56 @@ namespace
 			const float Cycle = Rifle.GetActionCycleSeconds();
 			UE_LOG(LogMindKore, Log, TEXT("Switch probe: the reload started %.3f s after the shot (cycle %.2f s; expected at its end): %s"), Started, Cycle,
 				Started >= Cycle - 0.001f && Started <= Cycle + 0.1f ? TEXT("PASS") : TEXT("FAIL"));
+		});
+		// The wheel with a hull tool in hand (review 19.10): it reels the strap and leaves the guns alone; without one
+		// it steps the guns. Injected into the real input action, as the mouse would.
+		const auto Wheel = [Pawn, Guns]()
+		{
+			const APlayerController* Controller = Cast<APlayerController>(Pawn->GetController());
+			UEnhancedInputLocalPlayerSubsystem* Input = Controller ? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(Controller->GetLocalPlayer()) : nullptr;
+			UInputAction* Action = FindObject<UInputAction>(Guns, TEXT("IA_Jam_Wheel"));
+			if (Input && Action)
+			{
+				Input->InjectInputForAction(Action, FInputActionValue(1.0f), {}, {});
+			}
+			return Input && Action;
+		};
+		After(At += 2.0f, [Pawn, Guns, Probe, Wheel]()
+		{
+			Pawn->HullTools->SelectTool(EJamHullTool::Strap);
+			Probe->Ammo = Guns->CurrentWeapon;
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: the strap in hand, the wheel turned (%s)"), Wheel() ? TEXT("injected") : TEXT("NO INPUT"));
+		});
+		After(At += 0.3f, [Pawn, Guns, Probe, Wheel]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: wheel with the strap - gun %d -> %d (expected unchanged): %s"), Probe->Ammo, Guns->CurrentWeapon,
+				Guns->CurrentWeapon == Probe->Ammo ? TEXT("PASS") : TEXT("FAIL"));
+			Pawn->HullTools->SelectTool(EJamHullTool::None);
+			Wheel();
+		});
+		After(At += 0.3f, [Guns, Probe]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: wheel with no tool - gun %d -> %d (expected another): %s"), Probe->Ammo, Guns->CurrentWeapon,
+				Guns->CurrentWeapon != Probe->Ammo ? TEXT("PASS") : TEXT("FAIL"));
+		});
+		// Spent cases and dropped magazines thrown in this probe: none blocks Visibility, the look traces' channel
+		// (RMB grab, F push, the grapple, the hull tools), so RMB never picks one (review 19.10).
+		After(At += 0.3f, [Pawn]()
+		{
+			int32 Debris = 0;
+			int32 Visible = 0;
+			for (TActorIterator<AStaticMeshActor> It(Pawn->GetWorld()); It; ++It)
+			{
+				const UStaticMeshComponent* Body = It->GetStaticMeshComponent();
+				const FString Mesh = Body && Body->GetStaticMesh() ? Body->GetStaticMesh()->GetName() : FString();
+				if (Body && Body->IsSimulatingPhysics() && (Mesh.StartsWith(TEXT("SM_Jam_Case")) || Mesh.StartsWith(TEXT("SM_Jam_Shell")) || Mesh.EndsWith(TEXT("_Mag"))))
+				{
+					++Debris;
+					Visible += Body->GetCollisionResponseToChannel(ECC_Visibility) != ECR_Ignore ? 1 : 0;
+				}
+			}
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: %d loose case(s)/magazine(s), %d on Visibility (expected 0): %s"), Debris, Visible,
+				Debris > 0 && Visible == 0 ? TEXT("PASS") : TEXT("FAIL"));
 		});
 		After(At += 2.0f, []() { UE_LOG(LogMindKore, Log, TEXT("Switch probe: all done")); });
 	}
