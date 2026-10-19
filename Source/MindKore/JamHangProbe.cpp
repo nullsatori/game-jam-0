@@ -303,7 +303,7 @@ namespace
 		Place(Pawn, FVector(Centre.X, Centre.Y, Down.ImpactPoint.Z + 60.0f), FVector::ZeroVector);
 		Look(Pawn, FVector(1.0f, 0.0f, -0.1f)); // ahead, a little down: the cabin swings past
 		After(Pawn, 1.5f, [Pawn, Centre, BodyZ]() { Place(Pawn, FVector(Centre.X, Centre.Y, BodyZ), FVector::ZeroVector); });
-		After(Pawn, 1.55f, [Pawn, Up]()
+		After(Pawn, 1.55f, [Pawn, Up, Down, Centre]()
 		{
 			const FVector Hand(Pawn->ShoulderLocation().X, Pawn->ShoulderLocation().Y, Up.ImpactPoint.Z);
 			const bool bHeld = Pawn->Cling(Up.GetComponent(), Hand);
@@ -321,11 +321,31 @@ namespace
 				Frames(Pawn, TEXT("pull-up Space"), 0.2f, 0.4f);
 			});
 			After(Pawn, 4.3f, [Pawn]() { Sample(Pawn, TEXT("keys up"), 0.2f, 1.0f); });
-			After(Pawn, 5.5f, [Pawn]()
+			After(Pawn, 5.5f, [Pawn, Up, Down, Centre]()
 			{
 				Pawn->LetGoCling();
 				Sample(Pawn, TEXT("fall"), 0.1f, 0.5f);
-				After(Pawn, 0.6f, []() { UE_LOG(LogMindKore, Log, TEXT("Hang probe: done")); });
+				// Far: standing on the floor, the ceiling taken 180 cm ahead (~230 cm from the eye) - the arm reels the
+				// body in (ArmRelaxCmS) and up, and it swings under the hand; let go after 2 s.
+				After(Pawn, 0.6f, [Pawn, Up, Down, Centre]()
+				{
+					Place(Pawn, FVector(Centre.X, Centre.Y, Down.ImpactPoint.Z + 60.0f), FVector::ZeroVector);
+					After(Pawn, 1.5f, [Pawn, Up]()
+					{
+						const FVector Hand(Pawn->ShoulderLocation().X + 180.0f, Pawn->ShoulderLocation().Y, Up.ImpactPoint.Z);
+						const float Reach = float(FVector::Dist(Pawn->ShoulderLocation(), Hand));
+						UE_LOG(LogMindKore, Log, TEXT("Hang probe [far]: %s the ceiling %.0f cm from the eye"),
+							Pawn->Cling(Up.GetComponent(), Hand) ? TEXT("holding") : TEXT("NOT holding"), Reach);
+						Sample(Pawn, TEXT("far"), 0.1f, 2.0f);
+						After(Pawn, 2.0f, [Pawn]()
+						{
+							LogArm(Pawn, TEXT("far let go"), Pawn->GetWorld()->GetTimeSeconds());
+							Pawn->LetGoCling();
+							After(Pawn, 0.001f, [Pawn]() { LogArm(Pawn, TEXT("far released"), Pawn->GetWorld()->GetTimeSeconds()); });
+							After(Pawn, 0.3f, []() { UE_LOG(LogMindKore, Log, TEXT("Hang probe: done")); });
+						});
+					});
+				});
 			});
 		});
 	}

@@ -661,7 +661,9 @@ FVector AJamZeroGPawn::GetHandLocation() const
 
 void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 {
-	UPrimitiveComponent* Held = GrabbedBody.Get();
+	// Held: the arm is on a held body. Holding on as well, it is on the hold (the keys are the arm, not the
+	// thrusters; the head keeps clear of the plane) - steering the hold "to the view" swung the pawn round it.
+	UPrimitiveComponent* Held = ClingTarget.IsValid() ? nullptr : GrabbedBody.Get();
 	UPrimitiveComponent* Target = ClingTarget.IsValid() ? ClingTarget.Get() : Held;
 	if (!Target || DeltaSeconds <= 0.0f)
 	{
@@ -1124,10 +1126,16 @@ bool AJamZeroGPawn::Grab(UPrimitiveComponent* Target, FVector Point)
 	// prop and leaves the pawn alone. Nothing on the rotation: the prop turns
 	// freely about the hand.
 	GrabbedBody = Target;
-	HandLocal = Target->GetComponentTransform().InverseTransformPosition(Point);
-	HoldDirection = (Point - ShoulderLocation()).GetSafeNormal();
-	ArmRestCm = FMath::Max(ArmMinCm, float(FVector::Dist(ShoulderLocation(), Point)));
-	HoldRestCm = bHoldInFront ? HoldDistanceCm : ArmRestCm;
+	// Holding on (only a probe gets here: RMB lets go of the hold first), the arm stays on the hold - its hand
+	// and reach are kept, and the body is only in hand. They were taken over: the hand jumped on the ceiling, the
+	// reach to the body's 90 cm, and jam.Hands.Probe's hang swung at up to 550 cm/s.
+	if (!IsClinging())
+	{
+		HandLocal = Target->GetComponentTransform().InverseTransformPosition(Point);
+		HoldDirection = (Point - ShoulderLocation()).GetSafeNormal();
+		ArmRestCm = FMath::Max(ArmMinCm, float(FVector::Dist(ShoulderLocation(), Point)));
+		HoldRestCm = bHoldInFront ? HoldDistanceCm : ArmRestCm;
+	}
 	GrabCandidate = nullptr;
 	Target->WakeAllRigidBodies();
 	UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: %s, %.0f kg"), *GetNameSafe(Target->GetOwner()), Target->GetMass());
