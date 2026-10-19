@@ -98,7 +98,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship|Weld", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float SealCoverage = 0.9f;
 
-	/** The contour is drawn (and coverage measured) while a plate is in Catch or the player is this close, cm. */
+	/** The contour is measured (gaps, coverage) while a plate is in Catch or the player is this close, cm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship|Weld", meta = (ClampMin = "0.0"))
 	float ShowContourCm = 600.0f;
 
@@ -116,6 +116,17 @@ public:
 	AActor* GetPlate() const { return Plate.Get(); }
 	int32 JunkCount() const;
 	bool IsTacked() const { return bTacked; }
+
+	/**
+	 * The contour for the suit projector (UJamWeldProjectorComponent), read only: each piece's centre on the
+	 * edge and outward normal in socket space, its seam 0..1, its gap (cm, last measured; huge where no plate)
+	 * and the game time it was last welded.
+	 */
+	const TArray<FVector2D>& GetSegmentCentres() const { return SegmentCentre; }
+	const TArray<FVector2D>& GetSegmentNormals() const { return SegmentNormal; }
+	const TArray<float>& GetSeam() const { return Seam; }
+	const TArray<float>& GetGaps() const { return Gap; }
+	const TArray<double>& GetLastWelded() const { return LastWelded; }
 
 	virtual void Tick(float DeltaSeconds) override;
 
@@ -139,7 +150,6 @@ private:
 	AActor* ProbeUp(const FVector2D& Local, float& OutGapCm) const;
 	void Measure();
 	void UpdateState();
-	void DrawContour() const;
 };
 
 /**

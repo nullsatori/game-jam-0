@@ -19,6 +19,7 @@
 #include "JamPickups.h"
 #include "JamShipParts.h"
 #include "JamWeapons.h"
+#include "JamWeldProjector.h"
 #include "JamZeroGPawn.h"
 #include "MKDoor.h"
 #include "MKKeyring.h"
@@ -1352,6 +1353,324 @@ namespace
 		TEXT("jam.Hull.Probe"),
 		TEXT("jam.Hull.Probe [Index]: hull repair logic on one breach - strap, junk, weld, tack, seal, cut, cling, death and respawn."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunHullProbe));
+
+	/**
+	 * jam.Hull.Stills [Index]: rendered stills (real RHI) of the suit projector's weld frame on
+	 * Socket_Breach<Index>, from 2 m and 8 m, in five states: a plate strapped with a gap (one edge
+	 * lifted, a taut and a slack line, junk inside), the plate flush with junk inside (a line at its
+	 * limit), tacked, half welded, sealed. The plate is held still for the stills (physics off), so
+	 * each state is posed, not raced to; the weld goes through AJamPlateSocket::Weld as the torch
+	 * does. Junk is removed after the second state: one breach a run. Last, ProfileGPU with the
+	 * frame lit and with the view turned away.
+	 */
+	void RunHullStills(const TArray<FString>& Args, UWorld* World)
+	{
+		AJamShipGameMode* Mode = World->GetAuthGameMode<AJamShipGameMode>();
+		AJamZeroGPawn* Pawn = PlayerPawn(World);
+		TArray<AJamPlateSocket*> Sockets;
+		for (TActorIterator<AJamPlateSocket> It(World); It; ++It)
+		{
+			Sockets.Add(*It);
+		}
+		Sockets.Sort([](const AJamPlateSocket& A, const AJamPlateSocket& B) { return A.GetName() < B.GetName(); });
+		TArray<AActor*> Plates = Tagged(World, TEXT("Hull.Plate"));
+		Plates.Sort([](const AActor& A, const AActor& B) { return A.GetName() < B.GetName(); });
+		const int32 Index = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 0;
+		if (!Mode || !Pawn || !Sockets.IsValidIndex(Index) || Plates.IsEmpty())
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Hull stills: needs the ship map, the pawn, a breach %d and a Hull.Plate"), Index);
+			return;
+		}
+		const TWeakObjectPtr<AJamPlateSocket> WeakSocket(Sockets[Index]);
+		const FTransform Frame = Sockets[Index]->GetActorTransform();
+		const FVector Out = Frame.GetUnitAxis(EAxis::Z);
+		const float SurfaceZ = Sockets[Index]->SurfaceZ;
+		UPrimitiveComponent* PlateBody = Cast<UPrimitiveComponent>(Plates[Index % Plates.Num()]->GetRootComponent());
+		PlateBody->SetSimulatePhysics(false);
+		UE_LOG(LogMindKore, Log, TEXT("Hull stills: %s, out %s, plate %s, junk inside %d"), *Sockets[Index]->GetName(), *Out.ToCompactString(),
+			*PlateBody->GetOwner()->GetName(), Sockets[Index]->JunkCount());
+
+		// The plate: flush, or turned about its edge at -Y so the edge at +Y stands LiftCm off the hull.
+		const auto PosePlate = [Frame, SurfaceZ, PlateBody](float LiftCm)
+		{
+			const float Angle = FMath::Atan2(LiftCm, 300.0f);
+			const FQuat Turn(FVector::XAxisVector, Angle);
+			const FVector Pivot(0.0f, -150.0f, SurfaceZ);
+			const FVector Centre = Pivot + Turn.RotateVector(FVector(0.0f, 150.0f, 10.0f));
+			// Which way the turn lifts is checked in the log by the gaps it leaves.
+			PlateBody->SetWorldLocationAndRotation(Frame.TransformPositionNoScale(Centre), Frame.GetRotation() * Turn, false, nullptr, ETeleportType::TeleportPhysics);
+		};
+		// The eye Distance from the breach centre, 35 degrees off its normal, looking at it.
+		const auto Place = [Pawn, Frame, Out, SurfaceZ](float Distance)
+		{
+			const FVector Centre = Frame.TransformPositionNoScale(FVector(0.0f, 0.0f, SurfaceZ));
+			// Along the hull (X): across it the ship's other faces stand in the way of the far views.
+			const FVector Eye = Centre + (Out * FMath::Cos(FMath::DegreesToRadians(35.0f)) + Frame.GetUnitAxis(EAxis::X) * FMath::Sin(FMath::DegreesToRadians(35.0f))) * Distance;
+			const FVector CameraOffset = Pawn->Camera->GetComponentLocation() - Pawn->GetActorLocation();
+			Teleport(Pawn, Eye - CameraOffset);
+			if (APlayerController* Controller = Cast<APlayerController>(Pawn->GetController()))
+			{
+				Controller->SetControlRotation((Centre - Eye).Rotation());
+			}
+		};
+		const auto Shot = [Pawn, WeakSocket](const FString& Name)
+		{
+			const UJamWeldProjectorComponent* Projector = Pawn->WeldProjector;
+			const AJamPlateSocket* S = WeakSocket.Get();
+			UE_LOG(LogMindKore, Log, TEXT("Hull stills [%s]: projector %s (core %s) on %s, %.0f cd, star %.2f lux, %d boxes, picture [%s]; seam %.0f%%, coverage %.0f%%, tacked %s, sealed %s, junk %d, eye %.0f cm"),
+				*Name, Projector->IsLit() ? TEXT("lit") : TEXT("DARK"), Projector->IsCoreOn() ? TEXT("on") : TEXT("off"), *GetNameSafe(Projector->GetTarget()), Projector->Candelas, Projector->StarLux,
+				Projector->GetBoxCount(), *FString::Join(Projector->GetPictureLines(), TEXT(" | ")), S->GetSeamFraction() * 100.0f, S->GetCoverage() * 100.0f,
+				S->IsTacked() ? TEXT("yes") : TEXT("no"), S->bFilled ? TEXT("yes") : TEXT("no"), S->JunkCount(),
+				FVector::Dist(Pawn->Camera->GetComponentLocation(), S->GetActorLocation()));
+			Cast<APlayerController>(Pawn->GetController())->ConsoleCommand(TEXT("HighResShot 1"));
+		};
+		// A line from the hull outer face beside the breach (Along cm from its centre on X) to a point on the plate.
+		const auto Strap = [Pawn, Frame, SurfaceZ, PlateBody](float Along, const FVector& OnPlateLocal, float StretchCm)
+		{
+			const FVector Above = Frame.TransformPositionNoScale(FVector(Along, 0.0f, SurfaceZ + 50.0f));
+			FHitResult Hit;
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(JamHullStills), false, Pawn);
+			Params.AddIgnoredActor(PlateBody->GetOwner());
+			if (!Pawn->GetWorld()->LineTraceSingleByChannel(Hit, Above, Above - Frame.GetUnitAxis(EAxis::Z) * 100.0f, ECC_Visibility, Params) || !Hit.GetComponent())
+			{
+				UE_LOG(LogMindKore, Warning, TEXT("Hull stills: no hull under %s to anchor a line"), *Above.ToCompactString());
+				return;
+			}
+			const FVector OnPlate = PlateBody->GetComponentTransform().TransformPositionNoScale(OnPlateLocal);
+			const int32 Line = Pawn->HullTools->AddLine(Hit.GetComponent(), Hit.ImpactPoint, PlateBody, OnPlate);
+			Pawn->HullTools->SetLineLength(Line, float(FVector::Dist(Hit.ImpactPoint, OnPlate)) - StretchCm);
+		};
+		const auto WeldTo = [WeakSocket, Frame, SurfaceZ](float Fraction)
+		{
+			// The torch along the contour, in the socket order of pieces, up to Fraction of it.
+			AJamPlateSocket* S = WeakSocket.Get();
+			const TArray<FVector2D>& Centres = S->GetSegmentCentres();
+			const int32 Count = FMath::RoundToInt32(Centres.Num() * Fraction);
+			int32 Welded = 0;
+			for (int32 Piece = 0; Piece < Count; ++Piece)
+			{
+				const FVector Point = Frame.TransformPositionNoScale(FVector(Centres[Piece].X, Centres[Piece].Y, SurfaceZ + 20.0f));
+				for (int32 Pass = 0; Pass < 4; ++Pass)
+				{
+					Welded += S->Weld(Point, 0.05f, false) == EJamWeldResult::Welded ? 1 : 0;
+				}
+			}
+			UE_LOG(LogMindKore, Log, TEXT("Hull stills: welded to %.0f%% of the contour, %d torch steps took, seam %.0f%%"), Fraction * 100.0f, Welded, S->GetSeamFraction() * 100.0f);
+		};
+		const auto Gaps = [WeakSocket](const TCHAR* Stage)
+		{
+			const AJamPlateSocket* S = WeakSocket.Get();
+			int32 Count = 0;
+			FString Runs;
+			const TArray<float>& Gap = S->GetGaps();
+			const TArray<FVector2D>& Normals = S->GetSegmentNormals();
+			for (int32 Piece = 0; Piece < Gap.Num(); ++Piece)
+			{
+				if (FMath::Abs(Gap[Piece]) > S->MaxGapCm)
+				{
+					++Count;
+					if (Piece == 0 || FMath::Abs(Gap[Piece - 1]) <= S->MaxGapCm)
+					{
+						Runs += FString::Printf(TEXT(" from %d (normal %s)"), Piece, *Normals[Piece].ToString());
+					}
+				}
+			}
+			UE_LOG(LogMindKore, Log, TEXT("Hull stills [%s]: %d of %d pieces on a gap:%s"), Stage, Count, Gap.Num(), *Runs);
+		};
+
+		if (Args.Num() > 1 && Args[1] == TEXT("plates"))
+		{
+			// Plates: the frame with empty hands, then with a plate on the belt strap - far and unaligned, near
+			// and misaligned, a plate too small, and the fitting one aligned over the hole.
+			UPrimitiveComponent* Small = Cast<UPrimitiveComponent>(Plates[(Index + 1) % Plates.Num()]->GetRootComponent());
+			if (Small == PlateBody)
+			{
+				UE_LOG(LogMindKore, Warning, TEXT("Hull stills: plates mode needs two Hull.Plate bodies"));
+				return;
+			}
+			Small->SetSimulatePhysics(false);
+			const auto Pose = [Frame, SurfaceZ](UPrimitiveComponent* Body, const FVector& Local, float YawDeg)
+			{
+				// Local: the plate's centre in the breach frame; its 20 cm turned flat to the hull, YawDeg about the normal.
+				const FQuat Turn(FVector::ZAxisVector, FMath::DegreesToRadians(YawDeg));
+				Body->SetWorldLocationAndRotation(Frame.TransformPositionNoScale(Local + FVector(0.0f, 0.0f, SurfaceZ)), Frame.GetRotation() * Turn,
+					false, nullptr, ETeleportType::TeleportPhysics);
+			};
+			// On a slack strap from the hull beside the breach: framed as a plate on its way, and nothing pulls the pawn.
+			const auto Belt = [Pawn, Frame, SurfaceZ](UPrimitiveComponent* Body)
+			{
+				Pawn->HullTools->CutAll();
+				const FVector Above = Frame.TransformPositionNoScale(FVector(300.0f, 0.0f, SurfaceZ + 50.0f));
+				FHitResult Hit;
+				FCollisionQueryParams Params(SCENE_QUERY_STAT(JamHullStills), false, Pawn);
+				Params.AddIgnoredActor(Body->GetOwner());
+				if (Pawn->GetWorld()->LineTraceSingleByChannel(Hit, Above, Above - Frame.GetUnitAxis(EAxis::Z) * 100.0f, ECC_Visibility, Params) && Hit.GetComponent())
+				{
+					const int32 Line = Pawn->HullTools->AddLine(Hit.GetComponent(), Hit.ImpactPoint, Body, Body->GetComponentLocation());
+					Pawn->HullTools->SetLineLength(Line, float(FVector::Dist(Hit.ImpactPoint, Body->GetComponentLocation())) + 20.0f);
+				}
+			};
+			const auto Report = [Pawn](const TCHAR* Name)
+			{
+				UE_LOG(LogMindKore, Log, TEXT("Hull plates [%s]: projector %s, picture [%s]"), Name, Pawn->WeldProjector->IsLit() ? TEXT("lit") : TEXT("DARK"),
+					*FString::Join(Pawn->WeldProjector->GetPictureLines(), TEXT(" | ")));
+				Cast<APlayerController>(Pawn->GetController())->ConsoleCommand(TEXT("HighResShot 1"));
+			};
+			After(Mode, 0.5f, [Mode, Pose, PlateBody, Small, Place]()
+			{
+				for (TActorIterator<AActor> It(Mode->GetWorld()); It; ++It)
+				{
+					if (It->ActorHasTag(TEXT("Junk.Foreign")))
+					{
+						It->Destroy();
+					}
+				}
+				Pose(PlateBody, FVector(0.0f, 0.0f, 3000.0f), 0.0f);
+				// The small one: 2 x 2 m, too small for the 2.5 m hole.
+				Small->SetWorldScale3D(Small->GetComponentScale() * FVector(2.0f / 3.0f, 2.0f / 3.0f, 1.0f));
+				Pose(Small, FVector(0.0f, 0.0f, 3400.0f), 0.0f);
+				Place(300.0f);
+			});
+			After(Mode, 1.8f, [Place]() { Place(300.0f); });
+			After(Mode, 3.0f, [Report]() { Report(TEXT("empty hands, 3 m")); });
+			After(Mode, 3.3f, [Pose, Belt, PlateBody, Place]() { Pose(PlateBody, FVector(60.0f, -40.0f, 260.0f), 20.0f); Belt(PlateBody); Place(450.0f); });
+			After(Mode, 5.0f, [Report]() { Report(TEXT("fitting plate on the strap, far: 2.5 m off the hull, turned 20 deg, eye 4.5 m")); });
+			After(Mode, 5.3f, [Pose, PlateBody, Place]() { Pose(PlateBody, FVector(45.0f, 30.0f, 40.0f), 12.0f); Place(250.0f); });
+			After(Mode, 7.0f, [Report]() { Report(TEXT("fitting plate near but misaligned: 45/30 cm off, turned 12 deg, eye 2.5 m")); });
+			After(Mode, 7.3f, [Pose, Belt, PlateBody, Small, Place]() { Pose(PlateBody, FVector(0.0f, 0.0f, 3000.0f), 0.0f); Pose(Small, FVector(0.0f, 0.0f, 30.0f), 0.0f); Belt(Small); Place(250.0f); });
+			After(Mode, 9.0f, [Report]() { Report(TEXT("too small plate (2 x 2 m) over the hole, eye 2.5 m")); });
+			After(Mode, 9.3f, [Pose, Belt, PlateBody, Small, Place]() { Pose(Small, FVector(0.0f, 0.0f, 3400.0f), 0.0f); Pose(PlateBody, FVector(5.0f, -4.0f, 11.0f), 2.0f); Belt(PlateBody); Place(250.0f); });
+			After(Mode, 11.0f, [Report]() { Report(TEXT("fitting plate aligned and covering, near, eye 2.5 m")); });
+			After(Mode, 11.3f, [Place]() { Place(600.0f); });
+			After(Mode, 12.5f, [Report]() { Report(TEXT("fitting plate aligned and covering, eye 6 m")); });
+			After(Mode, 13.0f, []() { UE_LOG(LogMindKore, Log, TEXT("Hull stills: done")); });
+			return;
+		}
+
+		if (Args.Num() > 1 && Args[1] == TEXT("strips"))
+		{
+			// Strips: the frame half welded from 3 m; its appear held every 33 ms, then a second of its tremble.
+			After(Mode, 0.5f, [Mode, Pawn, PosePlate, Place]()
+			{
+				for (TActorIterator<AActor> It(Mode->GetWorld()); It; ++It)
+				{
+					if (It->ActorHasTag(TEXT("Junk.Foreign")))
+					{
+						It->Destroy();
+					}
+				}
+				PosePlate(0.0f);
+				Place(300.0f);
+			});
+			After(Mode, 1.0f, [WeldTo]() { WeldTo(0.5f); });
+			After(Mode, 1.3f, [Place]() { Place(300.0f); });
+			After(Mode, 3.5f, [Pawn]() { Pawn->WeldProjector->HoldClock(0.0); Pawn->WeldProjector->Replay(); });
+			const FString Tag = FString::Printf(TEXT("s%d"), Index);
+			float At = 3.7f;
+			for (int32 Frame30 = 0; Frame30 < 30; ++Frame30, At += 0.2f)
+			{
+				After(Mode, At, [Pawn, Frame30]() { Pawn->WeldProjector->HoldClock(Frame30 / 30.0); });
+				After(Mode, At + 0.07f, [Pawn, Tag, Frame30]()
+				{
+					UE_LOG(LogMindKore, Log, TEXT("Hull strips [appear %s +%d ms]: %s"), *Tag, FMath::RoundToInt32(Frame30 * 1000.0f / 30.0f),
+						*FString::Join(Pawn->WeldProjector->GetPictureLines(), TEXT(" | ")));
+					Cast<APlayerController>(Pawn->GetController())->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=WeldAppear_%s_%04d"), *Tag, FMath::RoundToInt32(Frame30 * 1000.0f / 30.0f)));
+				});
+			}
+			for (int32 Frame30 = 0; Frame30 < 30; ++Frame30, At += 0.2f)
+			{
+				After(Mode, At, [Pawn, Frame30]() { Pawn->WeldProjector->HoldClock(2.5 + Frame30 / 30.0); });
+				After(Mode, At + 0.07f, [Pawn, Tag, Frame30]()
+				{
+					Cast<APlayerController>(Pawn->GetController())->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=WeldTremble_%s_%04d"), *Tag, FMath::RoundToInt32(Frame30 * 1000.0f / 30.0f)));
+				});
+			}
+			After(Mode, At + 0.3f, [Pawn]() { Pawn->WeldProjector->HoldClock(-1.0); UE_LOG(LogMindKore, Log, TEXT("Hull stills: done")); });
+			return;
+		}
+
+		// 1: strapped with a gap - the +Y edge 12 cm off, a taut line to it and a slack one, junk inside.
+		After(Mode, 0.5f, [PosePlate, Place, Strap]()
+		{
+			PosePlate(12.0f);
+			Strap(280.0f, FVector(0.0f, 140.0f, 10.0f), 10.0f);
+			Strap(-280.0f, FVector(-140.0f, 0.0f, 10.0f), -40.0f);
+			Place(200.0f);
+		});
+		// Again: at 0.5 s the pawn may still stand in the cabin gravity, its camera elsewhere on the body.
+		After(Mode, 1.8f, [Place]() { Place(200.0f); });
+		After(Mode, 2.6f, [Gaps]() { Gaps(TEXT("gap")); });
+		After(Mode, 2.7f, [Shot]() { Shot(TEXT("gap, 2 m")); });
+		After(Mode, 3.2f, [Place]() { Place(800.0f); });
+		After(Mode, 3.9f, [Shot]() { Shot(TEXT("gap, 8 m")); });
+		// 2: flush, junk inside, a line at its limit.
+		After(Mode, 4.4f, [Pawn, PosePlate, Place, Strap]()
+		{
+			Pawn->HullTools->CutAll();
+			PosePlate(0.0f);
+			Strap(280.0f, FVector(140.0f, 0.0f, 10.0f), 22.0f);
+			Place(200.0f);
+		});
+		After(Mode, 5.4f, [Gaps]() { Gaps(TEXT("junk")); });
+		After(Mode, 5.5f, [Shot]() { Shot(TEXT("junk inside, 2 m")); });
+		After(Mode, 6.0f, [Place]() { Place(800.0f); });
+		After(Mode, 6.7f, [Shot]() { Shot(TEXT("junk inside, 8 m")); });
+		// 3: junk out, tacked (30%), one slack line left.
+		After(Mode, 7.2f, [Mode, Pawn, Strap, Place]()
+		{
+			int32 Removed = 0;
+			for (TActorIterator<AActor> It(Mode->GetWorld()); It; ++It)
+			{
+				if (It->ActorHasTag(TEXT("Junk.Foreign")))
+				{
+					It->Destroy();
+					++Removed;
+				}
+			}
+			UE_LOG(LogMindKore, Log, TEXT("Hull stills: %d junk removed"), Removed);
+			Pawn->HullTools->CutAll();
+			Strap(-280.0f, FVector(-140.0f, 0.0f, 10.0f), -40.0f);
+			Place(200.0f);
+		});
+		After(Mode, 7.6f, [WeldTo]() { WeldTo(0.3f); });
+		After(Mode, 9.4f, [Shot]() { Shot(TEXT("tacked, 2 m")); });
+		After(Mode, 9.9f, [Place]() { Place(800.0f); });
+		After(Mode, 10.6f, [Shot]() { Shot(TEXT("tacked, 8 m")); });
+		// 4: half welded, the last bead still hot at 2 m.
+		After(Mode, 11.0f, [Place]() { Place(200.0f); });
+		After(Mode, 11.6f, [WeldTo]() { WeldTo(0.5f); });
+		After(Mode, 11.9f, [Shot]() { Shot(TEXT("half welded, 2 m")); });
+		After(Mode, 12.4f, [Place]() { Place(800.0f); });
+		After(Mode, 13.1f, [Shot]() { Shot(TEXT("half welded, 8 m")); });
+		// 5: sealed, cold: the ring beats.
+		After(Mode, 13.5f, [Place, WeldTo]() { WeldTo(1.0f); Place(200.0f); });
+		After(Mode, 13.75f, [Shot]() { Shot(TEXT("sealed, its pulse +0.25 s, 2 m")); });
+		After(Mode, 15.2f, [Shot]() { Shot(TEXT("sealed, 2 m")); });
+		After(Mode, 15.7f, [Place]() { Place(800.0f); });
+		After(Mode, 16.4f, [Shot]() { Shot(TEXT("sealed, 8 m")); });
+		// The cost: ProfileGPU with the frame lit at 2 m, then with the view turned away (the projector dark).
+		After(Mode, 17.0f, [Place]() { Place(200.0f); });
+		After(Mode, 18.0f, [Pawn]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Hull stills: ProfileGPU, projector %s"), Pawn->WeldProjector->IsLit() ? TEXT("lit") : TEXT("dark"));
+			Cast<APlayerController>(Pawn->GetController())->ConsoleCommand(TEXT("ProfileGPU"));
+		});
+		After(Mode, 19.0f, [Pawn, Out]()
+		{
+			Cast<APlayerController>(Pawn->GetController())->SetControlRotation(Out.Rotation());
+		});
+		After(Mode, 20.5f, [Pawn]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Hull stills: ProfileGPU, projector %s"), Pawn->WeldProjector->IsLit() ? TEXT("lit") : TEXT("dark"));
+			Cast<APlayerController>(Pawn->GetController())->ConsoleCommand(TEXT("ProfileGPU"));
+		});
+		After(Mode, 21.5f, []() { UE_LOG(LogMindKore, Log, TEXT("Hull stills: done")); });
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GHullStills(
+		TEXT("jam.Hull.Stills"),
+		TEXT("jam.Hull.Stills [Index]: rendered stills of the suit projector weld frame on one breach - strapped with a gap, junk inside, tacked, half welded, sealed - from 2 m and 8 m, then ProfileGPU lit and dark (HighResShot; real RHI)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunHullStills));
 
 	/** jam.Ship.PlanetShots: two stills standing on the planetoid (top and side). */
 	void RunPlanetShots(UWorld* World)
