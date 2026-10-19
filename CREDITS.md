@@ -120,6 +120,12 @@ Freesound 863729, turned out CC BY 4.0 there and was not used).
 - **shell load.ogg** — **CeebFrack**
   ([Freesound 108793](https://freesound.org/people/CeebFrack/sounds/108793/)):
   `SW_Jam_Shell_Shotgun`.
+- **Glock17_Slide** («Racking and releasing a Glock 17's slide») — **Stoniac**
+  ([Freesound 842731](https://freesound.org/people/Stoniac/sounds/842731/)):
+  `SW_Jam_SlideRelease_Pistol`, `SW_Jam_SlideHome_Pistol` — one slide release cut
+  in two by `Scripts/jam_slide_sounds.py` (20.10.2026). CC0 1.0, checked on its
+  Freesound page on 20.10.2026; HQ preview `842731_15508415-hq.mp3`, 749 328 bytes
+  (the original is a 2.9 MB WAV).
 
 Rendered for listening only, not in the game (variants the owner did not pick,
 all CC0 as above): Freesound 427592 «9mm pistol shot» by michorvath, 431834 «Sauer 404

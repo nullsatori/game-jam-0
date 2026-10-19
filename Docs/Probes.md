@@ -88,6 +88,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `jam.Weapons.MagFrames` | сброс и вставка магазинов USP и СВ-98 на 60 к/с |
 | `jam.Weapons.SwitchFrames` | убрать и достать каждый ствол, кадры через 33 мс |
 | `jam.Weapons.SlideFrames` | затворная задержка USP: последний выстрел и сброс задержки в пустой перезарядке, кадры через 33 мс |
+| `jam.Weapons.SlideTake` | звук затворной задержки USP (рендер не нужен, `-nullrhi` без `-nosound`): последний выстрел, пустая перезарядка со сбросом, снова последний выстрел, только сброс — запись мастера 9 с, `Saved/Clips/SlideTake.wav`, покадровая таблица `SlideTake.csv`, время действий в лог ([RecoilWeapons-Sound](RecoilWeapons-Sound.md#затворная-задержка-usp-2010-ветка-jam-slide-sound)) |
 | `jam.Wall.BlastFrames [См]` | выстрел дробовика в стену с 10 м, кадр каждый кадр 0.5 с (`JamBlast_<кадр>_<мс>.png`; с `-UseFixedTimeStep -FPS=60`) |
 | `jam.Weapons.Fx [space]` | вспышка покадрово и дым за 3 с |
 | `jam.Weapons.Smoke [budget \| foot cling burst sv98]` | дым в мире на `Lvl_Jam_Range` (с `-UseFixedTimeStep -FPS=60`): пешком в зале — дробовик и второй выстрел сквозь облако; вис на якоре — СВ-98 и второй; очередь пистолета в невесомости; СВ-98 — лента «облако на месте, тело уплывает» и возврат сквозь облако (или только названные моменты); кадры от глаза и со стороны, в лог — облака против дула каждые 0.25 с. `budget` — три облака дробовика на стенде `jam.Weapons.Fx` и `ProfileGPU` ([RecoilWeapons-Fx](RecoilWeapons-Fx.md#честная-физика-ветка-jam-smoke-world-1910)) |
