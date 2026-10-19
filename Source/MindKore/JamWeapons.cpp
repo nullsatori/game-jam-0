@@ -277,7 +277,7 @@ void UJamWeaponsComponent::BeginPlay()
 		ActionInView->SetupAttachment(ViewModel);
 		ActionInView->RegisterComponent();
 		MakePartComponents(*ViewModel);
-		// Muzzle flash and powder smoke, in the same camera space as the gun (JamMuzzleFx.h).
+		// Muzzle flash (on the gun in view) and powder smoke (in the world): JamMuzzleFx.h.
 		NewObject<UJamMuzzleFxComponent>(GetOwner(), TEXT("MuzzleFx"))->RegisterComponent();
 	}
 	// Every gun's aim and the SV-98's scope; it builds itself once the gun in view exists (UJamScopeComponent::Build).
@@ -651,11 +651,13 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	Weapon->PrevSinceShot = -KINDA_SMALL_NUMBER; // a new shot: its case, hammer and cycle sound (UpdatePartEvents)
 	// A slight pitch spread so a held trigger does not repeat one sample.
 	UGameplayStatics::PlaySound2D(this, Weapon->ShotSound, 1.0f, FMath::FRandRange(0.97f, 1.03f));
-	const FVector Muzzle = GetMuzzleTransform().GetLocation();
+	const FTransform MuzzleTransform = GetMuzzleTransform();
+	const FVector Muzzle = MuzzleTransform.GetLocation();
 	AJamFlyerHabitat::ReportNoise(this, Muzzle, nullptr, TEXT("a shot")); // flyers hear it only through air
 	if (UJamMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UJamMuzzleFxComponent>())
 	{
-		Fx->Shot(CurrentWeapon, Muzzle, ViewModel);
+		// Before the kick (the caller adds OutRecoil): the smoke takes the gun's velocity at the shot.
+		Fx->Shot(CurrentWeapon, MuzzleTransform, ViewModel);
 	}
 	for (int32 Pellet = 0; Pellet < Weapon->Pellets; ++Pellet)
 	{

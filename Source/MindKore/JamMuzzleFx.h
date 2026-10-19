@@ -34,7 +34,7 @@ struct FJamMuzzleFx
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
 	float FlashReachCm = 5.0f;
 
-	/** 0: lobes go every way; higher: they lean out along the bore. */
+	/** 0: lobes go every way; higher: they lean out along the bore (the gun's X: the flash lives in the gun's space). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
 	float FlashForward = 1.0f;
 
@@ -44,7 +44,7 @@ struct FJamMuzzleFx
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.01"))
 	float FlashGlowSeconds = 0.12f;
 
-	/** Muzzle-brake side jets (the SV-98): lobes out of both sides of the gun reaching this far, cm. 0: none. */
+	/** Muzzle-brake side jets (the SV-98): lobes out of both sides of the gun (its Y) reaching this far, cm. 0: none. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
 	float SideJetCm = 0.0f;
 
@@ -86,13 +86,18 @@ struct FJamMuzzleFx
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float SmokeOpacity = 0.15f;
 
-	/** After the throw, each puff keeps drifting straight on at this speed, cm/s: inertia, no buoyancy. */
+	/** After the throw, each puff keeps drifting straight on at this speed, cm/s: no buoyancy. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0"))
 	float SmokeDriftCm = 2.0f;
 
-	/** Share of the puffs thrown as a ring around the bore (a muzzle brake's ring/cone); the rest go every way. */
+	/**
+	 * Share of the puffs (and of the gas) out of a muzzle brake's side ports: half
+	 * out of each side of the gun, leaning back, in a row reaching further out - two
+	 * jets across the bore; the rest go on out of the bore (every way without a brake).
+	 * Puffs out of the ports are drawn out along their jet, not along the shot.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float SmokeRing = 0.0f;
+	float SmokeBrake = 0.0f;
 
 	/** Puffs are wisps drawn out along the shot, up to this length over width. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "1.0"))
@@ -109,7 +114,11 @@ struct FJamMuzzleFx
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "8", ClampMax = "64"))
 	int32 CloudVoxels = 32;
 
-	/** The gas's speed out along the bore at the shot, cm/s; it dies within a second down to SmokeDriftCm. */
+	/**
+	 * The gas's speed out of the muzzle along the bore at the shot, cm/s (a brake
+	 * keeps only 1 - SmokeBrake of it forward), on top of the gun's own velocity; the
+	 * whole of it dies within a second down to SmokeDriftCm.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float CloudThrowCm = 60.0f;
 
@@ -121,7 +130,7 @@ struct FJamMuzzleFx
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float TunnelCm = 3.0f;
 
-	/** This gun's blast shoves the older clouds ahead along the shot, cm/s (the shotgun). */
+	/** This gun's blast shoves the older clouds ahead of the muzzle along the bore, cm/s (the shotgun). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float ShoveCm = 0.0f;
 };
@@ -136,13 +145,21 @@ struct FJamMuzzleFx
  * density bands with Bayer-dithered steps, a faint scanline fringe on its
  * edge, a heat shimmer behind it for its first 100 ms.
  *
- * Everything lives in the owner's camera space, like the gun in view: the
- * cloud stays around the gun when the view turns or the recoil throws the
- * pawn (in world space a 7 m/s kick would leave it behind in a frame).
- * Sprites are engine planes in two instanced meshes, turned to the camera;
- * the look is in M_Jam_MuzzleFlash / M_Jam_MuzzleSmoke (Scripts/jam_muzzle_fx.py).
+ * The flash is the gun's: its ~0.1 s of hot gas stays on the muzzle socket, in
+ * the gun's own space, through the kick. The smoke is the world's (owner 19.10,
+ * «делаем честную физику»): born where the gas leaves the gun, thrown along the
+ * muzzle's exhaust at the shot (the bore, or a brake's side ports), with the
+ * gun's velocity at the shot (the shooter's before the kick); then it slows on
+ * its own and nothing ties it to the shooter - a recoil carries the pawn away
+ * from it. That holds for the volumetric clouds (jam.Fx.VolumetricSmoke 1) and
+ * for the card puffs (0) alike: the cards are worked out in the world and only
+ * drawn as sprites turned to the owner's camera. Flash and cards are engine
+ * planes in two instanced meshes on that camera; the look is in
+ * M_Jam_MuzzleFlash / M_Jam_MuzzleSmoke / M_Jam_MuzzleSmokeVolume
+ * (Scripts/jam_muzzle_fx.py).
  *
- * UJamWeaponsComponent makes this on BeginPlay and calls Shot with the muzzle.
+ * UJamWeaponsComponent makes this on BeginPlay and calls Shot with the muzzle
+ * before the shot's recoil reaches the owner.
  */
 UCLASS(ClassGroup = (Jam))
 class MINDKORE_API UJamMuzzleFxComponent : public UActorComponent
@@ -184,7 +201,7 @@ public:
 	/** Clouds alive now (tests). */
 	int32 GetCloudCount() const;
 
-	/** The living clouds, in view space (log lines of the stills). */
+	/** The living clouds in the world: centre, its shot's muzzle, distance from the eye (log lines of the stills). */
 	FString DescribeClouds() const;
 
 	/** Remove every cloud (stills). */
@@ -194,8 +211,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "1"))
 	int32 MaxPuffs = 160;
 
-	/** A shot of gun Weapon from Muzzle (world). The flash rides GunMesh (the gun in view) through its kick; null: it stays put. */
-	void Shot(int32 Weapon, const FVector& Muzzle, const USceneComponent* GunMesh);
+	/**
+	 * A shot of gun Weapon from Muzzle (world; X along the bore, Y out of the gun's side),
+	 * the owner still at its velocity before the kick. The flash rides GunMesh (the gun in
+	 * view) through its kick; null: it stays put in the camera's space.
+	 */
+	void Shot(int32 Weapon, const FTransform& Muzzle, const USceneComponent* GunMesh);
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -203,11 +224,16 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
+	/** A card puff, in the world: thrown from the muzzle at the shot, its directions in the bore's frame then. */
 	struct FPuff
 	{
-		/** The muzzle at the shot, in the gun's space (camera space without a gun). */
 		FVector Origin = FVector::ZeroVector;
+		FQuat Bore = FQuat::Identity;
+		/** The gun's velocity at the shot, world cm/s: it dies with the throw, as a cloud's. */
+		FVector GunVelocity = FVector::ZeroVector;
 		FVector Direction = FVector::ZeroVector;
+		/** The wisp's long axis, bore frame: the shot, or its jet out of a brake port. */
+		FVector Along = FVector::ForwardVector;
 		float SpreadCm = 0.0f;
 		float BackCm = 0.0f;
 		float StartCm = 0.0f;
@@ -222,7 +248,7 @@ private:
 		float Tear = 0.0f;
 	};
 
-	/** A camera-facing sprite at Location (camera space), XAxis along its length (projected on the view plane). */
+	/** A camera-facing sprite at Location, XAxis along its length (projected on the view plane); all in camera space. */
 	static FTransform Sprite(const FVector& Location, const FVector& XAxis, float LengthCm, float WidthCm);
 
 	UPROPERTY(Transient)
@@ -234,7 +260,11 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UPointLightComponent> Light = nullptr;
 
-	/** One piece of the flash: a lobe of gas or a spark, relative to the muzzle in camera space. */
+	/** The owner's camera: the eye the sprites turn to and the rounds leave from. */
+	UPROPERTY(Transient)
+	TObjectPtr<USceneComponent> View = nullptr;
+
+	/** One piece of the flash: a lobe of gas or a spark, relative to the muzzle in the bore's frame. */
 	struct FFlashBit
 	{
 		FVector Direction = FVector::ForwardVector;
@@ -272,7 +302,9 @@ private:
 		FVector Centre = FVector::ZeroVector;
 		FVector Velocity = FVector::ZeroVector;
 		FVector DriftVelocity = FVector::ZeroVector;
-		/** The view at the shot: the cloud's axes (X along the bore). */
+		/** The muzzle at the shot, world (log lines). */
+		FVector Muzzle = FVector::ZeroVector;
+		/** The cloud's axes: the muzzle's frame at the shot (X along the bore); for a brake turned so X runs out of its ports (the puffs are drawn out along X). */
 		FQuat Basis = FQuat::Identity;
 		float Age = -1.0f;
 		float Seed = 0.0f;
@@ -281,7 +313,7 @@ private:
 		TArray<FWake> Wakes;
 	};
 
-	void SpawnCloud(int32 Weapon, const FVector& Muzzle);
+	void SpawnCloud(int32 Weapon, const FTransform& Muzzle, const FVector& GunVelocity);
 	void TickClouds(float DeltaTime);
 	/** A wake along Origin + t Direction (world) through every living cloud it crosses but Except. */
 	void AddWake(const FVector& Origin, const FVector& Direction, float RadiusCm, float RingSpeed, const FCloud* Except);
@@ -295,8 +327,8 @@ private:
 	TArray<FPuff> Puffs;
 	TArray<FFlashBit> FlashBits;
 	int32 FlashGun = INDEX_NONE;
-	/** The flash's muzzle in FlashGunMesh's space (or camera space without it). */
-	FVector FlashOrigin = FVector::ZeroVector;
+	/** The flash's muzzle (X along the bore) in FlashGunMesh's space (or the camera's without it). */
+	FTransform FlashMuzzle = FTransform::Identity;
 	TWeakObjectPtr<const USceneComponent> FlashGunMesh;
 	float FlashAge = 0.0f;
 };
