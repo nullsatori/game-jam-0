@@ -791,6 +791,8 @@ private:
 	void PlayMechanismSound(FJamWeapon& Gun, USoundBase* Sound, float At);
 
 	double ReloadEndSeconds = 0.0;
+	/** R pressed during the shot's cycle: the reload starts when it is through (a shot or a switch drops it). */
+	bool bReloadQueued = false;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UInputAction>> InputActions;

@@ -286,6 +286,12 @@ void UJamWeaponsComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	UpdatePartEvents(DeltaTime);
+	// An R pressed during the shot's cycle, now through.
+	if (bReloadQueued && Weapons.IsValidIndex(CurrentWeapon) && Weapons[CurrentWeapon].SinceShot >= Weapons[CurrentWeapon].FireReadySince)
+	{
+		bReloadQueued = false;
+		Reload();
+	}
 	// The rounds were counted on the way (UpdatePartEvents: the magazine's seat, each round's); the end only frees the gun.
 	if (ReloadEndSeconds > 0.0 && GetWorld()->GetTimeSeconds() >= ReloadEndSeconds && Weapons.IsValidIndex(CurrentWeapon))
 	{
@@ -523,6 +529,7 @@ void UJamWeaponsComponent::Holster()
 		return;
 	}
 	bHolstered = true;
+	bReloadQueued = false;
 	ReloadEndSeconds = 0.0; // as a switch: the reload is abandoned, the gun's cycle freezes (UpdateViewModel)
 	ClearView(); // gone this frame, no put-away (JamWeaponParts.cpp)
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: unarmed"), *GetNameSafe(GetOwner()));
@@ -571,6 +578,7 @@ void UJamWeaponsComponent::SelectWeapon(int32 Index)
 		return;
 	}
 	CurrentWeapon = Index;
+	bReloadQueued = false;
 	ReloadEndSeconds = 0.0; // A switch abandons a reload; the last gun's cycle freezes until it is back (UpdateViewModel).
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s (%d/%d)"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString(),
 		Weapons[Index].Ammo, Weapons[Index].Reserve);
@@ -607,6 +615,13 @@ void UJamWeaponsComponent::Reload()
 	{
 		return;
 	}
+	// Not over the shot's cycle (review 19.10: R right after a shot ran the bolt and the magazine at once):
+	// it waits for the cycle's end (TickComponent).
+	if (Weapon->SinceShot < Weapon->FireReadySince)
+	{
+		bReloadQueued = true;
+		return;
+	}
 	const float Seconds = StartReloadTimeline(*Weapon);
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: reloading %s, %.2f s"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString(), Seconds);
 }
@@ -615,25 +630,30 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 {
 	OutRecoil = FVector::ZeroVector;
 	FJamWeapon* Weapon = !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
-	if (Weapon && Weapon->ShellMesh && Weapon->Ammo > 0 && GetReloadRemaining() > 0.0f)
-	{
-		ReloadEndSeconds = 0.0; // round-by-round loading breaks off for a shot
-	}
+	// Round-by-round loading breaks off for a shot - once the shot is sure (review 19.10: it broke off before the
+	// checks below, and a refused shot lost both).
+	const bool bBreakLoading = Weapon && Weapon->ShellMesh && Weapon->Ammo > 0 && GetReloadRemaining() > 0.0f;
 	// Not before the gun is drawn and has settled (IsDrawing), nor before its own cycle is through.
-	if (!Weapon || Weapon->SinceShot < Weapon->FireReadySince || GetReloadRemaining() > 0.0f || IsDrawing())
+	if (!Weapon || Weapon->SinceShot < Weapon->FireReadySince || (GetReloadRemaining() > 0.0f && !bBreakLoading) || IsDrawing())
 	{
 		return false;
+	}
+	if (bBreakLoading)
+	{
+		ReloadEndSeconds = 0.0;
 	}
 	if (Weapon->Ammo <= 0)
 	{
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s is empty"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString());
-		// The dry click, once per interval while the trigger is held (no reserve: no reload to stop it).
-		Weapon->FireReadySince = Weapon->SinceShot + Weapon->FireInterval;
+		// The dry click, once per interval while the trigger is held (no reserve: no reload to stop it); the
+		// reload starts first, the cycle being through, so it does not wait out the click's interval.
 		UGameplayStatics::PlaySound2D(this, Weapon->EmptySound);
 		Reload();
+		Weapon->FireReadySince = Weapon->SinceShot + Weapon->FireInterval;
 		return false;
 	}
 	--Weapon->Ammo;
+	bReloadQueued = false; // the trigger won over a waiting R
 	// Not before the slide, the pump or the bolt is home again.
 	Weapon->FireReadySince = FMath::Max(Weapon->FireInterval, Weapon->GetActionCycleSeconds());
 	// One kick per shot, whatever the pellets do. Guns cost no oxygen.
