@@ -11,6 +11,9 @@
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
+#include "Components/AudioComponent.h"
+#include "JamFlyer.h"
+#include "JamOxygen.h"
 #include "JamWeapons.h"
 #include "JamZeroGPawn.h"
 #include "Kismet/GameplayStatics.h"
@@ -68,6 +71,29 @@ AJamLivingWall::AJamLivingWall()
 	GroanSound = Grunt.Object;
 	static ConstructorHelpers::FObjectFinder<USoundBase> Torso(TEXT("/Game/MindKore/Audio/Impact/SC_MK_Hit_Torso.SC_MK_Hit_Torso"));
 	CloseSound = Torso.Object;
+	// The pain call's scream: the flyer's own donors (CREDITS.md) an octave and a half down - the flesh and the flock are one
+	// voice. The death cry's body and throat, the call's throat, the sub, the suit's tail in vacuum; MindKore's grunt under it.
+	const auto Stem = [](const TCHAR* Name, float GainDb, bool bVacuumOnly)
+	{
+		FJamSoundLayer Layer;
+		const FString Path = FString::Printf(TEXT("/Game/JamArt/Audio/Flyer/%s.%s"), Name, Name);
+		ConstructorHelpers::FObjectFinder<USoundBase> Finder(*Path);
+		Layer.Sound = Finder.Object;
+		Layer.GainDb = GainDb;
+		Layer.GainJitterDb = 1.5f;
+		Layer.bVacuumOnly = bVacuumOnly;
+		return Layer;
+	};
+	ScreamSound.Layers = { Stem(TEXT("SW_Jam_Flyer_Death_Body"), 0.0f, false), Stem(TEXT("SW_Jam_Flyer_Death_Character"), 0.0f, false),
+		Stem(TEXT("SW_Jam_Flyer_Aggro_Character"), -3.0f, false), Stem(TEXT("SW_Jam_Flyer_Death_Sub"), 2.0f, false),
+		Stem(TEXT("SW_Jam_Flyer_Death_Tail"), 0.0f, true) };
+	FJamSoundLayer Grunt2;
+	Grunt2.Sound = Grunt.Object;
+	Grunt2.GainDb = -4.0f;
+	ScreamSound.Layers.Add(Grunt2);
+	ScreamSound.Volume = 1.6f;
+	ScreamSound.Pitch = FVector2D(0.42f, 0.47f); // the engine floor is 0.4: about an octave and a half down
+	ScreamSound.LowPassVacuumHz = FVector2D(4000.0f, 5000.0f);
 }
 
 void AJamLivingWall::OnConstruction(const FTransform& Transform)
@@ -558,6 +584,10 @@ void AJamLivingWall::ProcessHits(double Now)
 		}
 		LastWoundCentre = Wound.Centre;
 		const FVector WorldCentre = Wall.TransformPosition(FVector(Wound.Centre.X, 0.0f, Wound.Centre.Y));
+		if (bBlast && Count >= PainCallCells)
+		{
+			PainCall(WorldCentre + GetFrontNormal() * Shape.Side * GetHalfDepthCm(), FString::Printf(TEXT("a blast tore %d cells"), Count));
+		}
 
 		// Rim jets of a big hole: rim cells (a whole 4-neighbour) spread around it.
 		int32 Spurting = 0;
@@ -718,6 +748,92 @@ void AJamLivingWall::UpdateWounds(double Now)
 					FMath::Min(0.8f, 0.3f + 0.02f * Wound.Cells.Num()), 0.6f);
 			}
 			Wounds.RemoveAtSwap(Slot);
+		}
+	}
+}
+
+void AJamLivingWall::PainCall(const FVector& Where, const FString& Why)
+{
+	UWorld* World = GetWorld();
+	const double Now = World->GetTimeSeconds();
+	if (Now < NextPainCallSeconds)
+	{
+		return;
+	}
+	NextPainCallSeconds = Now + PainCallCooldownSeconds;
+	++PainCalls;
+	const APawn* Listener = UGameplayStatics::GetPlayerPawn(this, 0);
+	const AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(Listener);
+	const bool bAir = Floater && Floater->Oxygen && Floater->Oxygen->IsBreathable();
+	// The scream at the wound (through the suit in vacuum, like every creature here).
+	FSoundAttenuationSettings Far = JamFlyerAttenuation(8000.0f, 1500.0f);
+	Far.AttenuationShapeExtents = FVector(1500.0f, 0.0f, 0.0f);
+	Far.dBAttenuationAtMax = -30.0f;
+	const FJamSoundPlay Scream = JamPlaySoundEvent(this, ScreamSound, Where, nullptr, Far, bAir, nullptr);
+	// The same scream in the radio: no place, no distance, a narrow band, a pitch that will not hold still.
+	if (RadioVolume > 0.0f)
+	{
+		FSoundAttenuationSettings Radio;
+		Radio.bAttenuate = false;
+		Radio.bSpatialize = false;
+		FJamSoundEvent RadioEvent = ScreamSound;
+		RadioEvent.Volume = ScreamSound.Volume * RadioVolume;
+		RadioEvent.LowPassVacuumHz = RadioEvent.LowPassAirHz = FVector2D(2400.0f, 2800.0f);
+		RadioEvent.Pitch = FVector2D(0.44f, 0.5f);
+		RadioEvent.Layers.RemoveAll([](const FJamSoundLayer& Layer) { return Layer.bVacuumOnly; });
+		const TSharedRef<FJamSoundPlay> Play = MakeShared<FJamSoundPlay>(JamPlaySoundEvent(this, RadioEvent, Where, nullptr, Radio, /*bAir=*/true, nullptr, 1.0f, 1.0f, 1.0f));
+		for (const TWeakObjectPtr<UAudioComponent>& Each : Play->Components)
+		{
+			if (UAudioComponent* Component = Each.Get())
+			{
+				Component->SetHighPassFilterEnabled(true);
+				Component->SetHighPassFilterFrequency(450.0f);
+			}
+		}
+		// The warble: the pitch wanders every 60 ms for two seconds (a voice that is not his).
+		for (int32 Step = 1; Step < 34; ++Step)
+		{
+			FTimerHandle Handle;
+			World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [Play, Step]()
+			{
+				Play->SetPitch(Play->Pitch * FMath::FRandRange(0.9f, 1.1f) * (1.0f - 0.004f * Step));
+			}), Step * 0.06f, false);
+		}
+	}
+	// Blood and spores out of the wound, a puff at a time, drifting off: seen from afar.
+	if (SpurtVfx && VentSeconds > 0.0f)
+	{
+		const FVector Out = (Where - GetActorLocation()).GetSafeNormal(UE_SMALL_NUMBER, GetFrontNormal());
+		const int32 Puffs = FMath::Max(1, FMath::RoundToInt(VentSeconds / VentPuffSeconds));
+		for (int32 Puff = 0; Puff < Puffs; ++Puff)
+		{
+			FTimerHandle Handle;
+			World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(this, [this, Where, Out, Puff, Puffs]()
+			{
+				const FVector Direction = (Out + FMath::VRand() * 0.35f).GetSafeNormal();
+				const float Fade = 1.0f - float(Puff) / Puffs;
+				// Flesh torn loose with it, every other puff (the chunks of a hit, larger): what reads from afar.
+				if (TearVfx && Puff % 2 == 0)
+				{
+					UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, TearVfx, Where + Direction * 30.0f, Direction.Rotation(), FVector(VentScale * 0.5f * Fade + 0.5f));
+				}
+				if (UNiagaraComponent* Effect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, SpurtVfx, Where + Direction * 30.0f, Direction.Rotation(),
+					FVector(VentScale * (0.6f + 0.4f * Fade)), /*bAutoDestroy=*/true, /*bAutoActivate=*/false))
+				{
+					Effect->SetVariableInt(TEXT("User.BloodDropletCount"), FMath::RoundToInt(60 * Fade) + 8);
+					Effect->SetVariableInt(TEXT("User.BloodMistCount"), FMath::RoundToInt(30 * Fade) + 4);
+					Effect->Activate();
+				}
+			}), 0.01f + Puff * VentPuffSeconds, false);
+		}
+	}
+	UE_LOG(LogMindKore, Log, TEXT("Wall %s: pain call %d (%s) at %s - scream %s, in the radio %.2f, venting %.1f s; %d linked flock(s)"), *GetName(), PainCalls, *Why,
+		*Where.ToCompactString(), *Scream.Describe(), RadioVolume, VentSeconds, LinkedHabitats.Num());
+	for (const FJamFleshLink& Link : LinkedHabitats)
+	{
+		if (AJamFlyerHabitat* Home = Link.Habitat.Get())
+		{
+			Home->AnswerPainCall(Where, Link.ArrivalDelaySeconds, GetName());
 		}
 	}
 }

@@ -1,5 +1,7 @@
 #include "JamWeapons.h"
 
+#include "JamFlyer.h"
+
 #include "Camera/CameraComponent.h"
 #include "Components/AudioComponent.h"
 #include "Components/SphereComponent.h"
@@ -672,6 +674,7 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	// A slight pitch spread so a held trigger does not repeat one sample.
 	UGameplayStatics::PlaySound2D(this, Weapon->ShotSound, 1.0f, FMath::FRandRange(0.97f, 1.03f));
 	const FVector Muzzle = GetMuzzleTransform().GetLocation();
+	AJamFlyerHabitat::ReportNoise(this, Muzzle, nullptr, TEXT("a shot")); // flyers hear it only through air
 	if (UJamMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UJamMuzzleFxComponent>())
 	{
 		Fx->Shot(CurrentWeapon, Muzzle, ViewModel);
@@ -765,6 +768,7 @@ bool UJamWeaponsComponent::TraceShot(const FJamWeapon& Weapon, const FVector& St
 	Resolved.ImpulseNewtonSeconds = Resolved.ShotDirection * Weapon.HitImpulse / 100.0f;
 	Resolved.bHasPhysicsImpulse = true;
 	const bool bDelivered = MKDeliverResolvedImpact(Shooter, Shooter, Resolved);
+	AJamFlyerHabitat::ReportNoise(this, Hit.ImpactPoint, Hit.GetActor(), TEXT("a round landing")); // air, or a roost's hull (contact)
 	// Every loose body takes the gun's push at the hit point (MindKore's props
 	// ignore rounds; here the push is the point).
 	UPrimitiveComponent* HitComponent = Hit.GetComponent();

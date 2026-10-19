@@ -3,7 +3,10 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "MKImpactReceiver.h"
+#include "JamFlyerAudio.h"
 #include "JamLivingWall.generated.h"
+
+class AJamFlyerHabitat;
 
 class UInstancedStaticMeshComponent;
 class UMaterialInterface;
@@ -13,6 +16,20 @@ class UMaterialInstanceDynamic;
 class UNiagaraSystem;
 class UPhysicalMaterial;
 class USoundBase;
+
+/** A flock this flesh calls when it is torn (AJamLivingWall::PainCall): flesh is their nervous system. */
+USTRUCT(BlueprintType)
+struct FJamFleshLink
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall")
+	TObjectPtr<AJamFlyerHabitat> Habitat = nullptr;
+
+	/** The flock gathers over the wound this long before it goes for the player, s: set it so they meet the player on the way back. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall", meta = (ClampMin = "0.0"))
+	float ArrivalDelaySeconds = 8.0f;
+};
 
 /**
  * A living wall of woven tissue - the Whomping Willow as a door. A pistol round
@@ -276,6 +293,50 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Feedback", meta = (ClampMin = "0.05"))
 	float SpurtPulseSeconds = 0.45f;
 
+	// --- nerves: the pain call ----------------------------------------------
+
+	/** Flocks this wall calls when a blast tears it (Docs/LivingWall.md, "encounter"). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Nerves")
+	TArray<FJamFleshLink> LinkedHabitats;
+
+	/** A blast opening at least this many cells sends the pain call. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Nerves", meta = (ClampMin = "1"))
+	int32 PainCallCells = 6;
+
+	/** One pain call at most this often, s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Nerves", meta = (ClampMin = "0.0"))
+	float PainCallCooldownSeconds = 20.0f;
+
+	/** The scream: the flyer's death cry and call, an octave and a half down (Scripts/jam_flyer_sounds.py stems), at the wall. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Nerves")
+	FJamSoundEvent ScreamSound;
+
+	/** The same scream in the player's radio: no space, band-limited, warbling - not his voice. 0: none. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Nerves", meta = (ClampMin = "0.0"))
+	float RadioVolume = 0.6f;
+
+	/** Blood and spores vent from the wound this long, a puff every VentPuffSeconds, s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Nerves", meta = (ClampMin = "0.0"))
+	float VentSeconds = 6.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Nerves", meta = (ClampMin = "0.05"))
+	float VentPuffSeconds = 0.35f;
+
+	/** The vent's puffs this big (SpurtVfx scaled up: seen from afar). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|LivingWall|Nerves", meta = (ClampMin = "0.1"))
+	float VentScale = 6.0f;
+
+	/**
+	 * The flesh screams (at the wall and in the radio), vents blood and spores from Where, and calls its
+	 * linked flocks: they hunt and gather over Where (AJamFlyerHabitat::AnswerPainCall). Generic: any
+	 * wounded flesh can call it (the wall on a blast; later the planet's craters and plugs).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Jam|LivingWall")
+	void PainCall(const FVector& Where, const FString& Why);
+
+	/** Pain calls sent so far (the probe reads it). */
+	int32 GetPainCalls() const { return PainCalls; }
+
 	// --- queries (probe, HUD) ----------------------------------------------
 
 	/** Cells not whole (torn or regrowing). */
@@ -314,6 +375,8 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
+	double NextPainCallSeconds = 0.0;
+	int32 PainCalls = 0;
 	struct FCell
 	{
 		/** 1 whole, 0 torn (waiting), between: regrowing. */
