@@ -346,7 +346,7 @@ void AJamZeroGPawn::Use()
 		Release();
 		return;
 	}
-	if (ClingConstraint)
+	if (IsClinging())
 	{
 		LetGoCling();
 		return;
@@ -360,41 +360,156 @@ void AJamZeroGPawn::Use()
 	FHitResult Hit;
 	if (GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation(), ViewLocation() + ViewDirection() * GrabReachCm, ECC_Visibility, Params))
 	{
-		Cling(Hit.GetComponent());
+		Cling(Hit.GetComponent(), Hit.ImpactPoint);
 	}
 }
 
-bool AJamZeroGPawn::Cling(UPrimitiveComponent* Target)
+bool AJamZeroGPawn::Cling(UPrimitiveComponent* Target, const FVector& Point)
 {
-	if (!Target || Target->IsSimulatingPhysics() || ClingConstraint)
+	if (!Target || Target->IsSimulatingPhysics() || IsClinging())
 	{
 		return false;
 	}
-	// The body locked to the world where it is: no drift from recoil or the torch.
-	Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
-	ClingConstraint = NewObject<UPhysicsConstraintComponent>(this);
-	ClingConstraint->SetupAttachment(Body);
-	ClingConstraint->RegisterComponent();
-	ClingConstraint->SetWorldLocation(Body->GetComponentLocation());
-	ClingConstraint->SetLinearXLimit(LCM_Locked, 0.0f);
-	ClingConstraint->SetLinearYLimit(LCM_Locked, 0.0f);
-	ClingConstraint->SetLinearZLimit(LCM_Locked, 0.0f);
-	ClingConstraint->SetAngularSwing1Limit(ACM_Free, 0.0f);
-	ClingConstraint->SetAngularSwing2Limit(ACM_Free, 0.0f);
-	ClingConstraint->SetAngularTwistLimit(ACM_Free, 0.0f);
-	ClingConstraint->SetConstrainedComponents(Body, NAME_None, nullptr, NAME_None);
-	UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: holding on to %s"), *GetNameSafe(Target->GetOwner()));
+	// The hand takes the point; the velocity is kept - the arm catches it (UpdateArm).
+	ClingTarget = Target;
+	HandLocal = Target->GetComponentTransform().InverseTransformPosition(Point);
+	ArmRestCm = FMath::Max(ArmMinCm, float(FVector::Dist(ShoulderLocation(), Point)));
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: holding on to %s, the hand %.0f cm from the eye, coming in at %.0f cm/s"),
+		*GetNameSafe(Target->GetOwner()), ArmRestCm, GetBodyVelocity().Size());
 	return true;
 }
 
 void AJamZeroGPawn::LetGoCling()
 {
-	if (ClingConstraint)
+	if (ClingTarget.IsValid() || ClingTarget.IsStale())
 	{
-		ClingConstraint->BreakConstraint();
-		ClingConstraint->DestroyComponent();
-		ClingConstraint = nullptr;
-		UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: let go"));
+		ClingTarget = nullptr;
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: let go at %.0f cm/s"), GetBodyVelocity().Size());
+	}
+}
+
+FVector AJamZeroGPawn::ShoulderLocation() const
+{
+	return Body->GetComponentLocation() + EyeOffset;
+}
+
+float AJamZeroGPawn::GetArmLengthCm() const
+{
+	return float(FVector::Dist(ShoulderLocation(), GetHandLocation()));
+}
+
+FVector AJamZeroGPawn::GetHandLocation() const
+{
+	const UPrimitiveComponent* Target = ClingTarget.IsValid() ? ClingTarget.Get() : GrabbedBody.Get();
+	return Target ? Target->GetComponentTransform().TransformPosition(HandLocal) : ShoulderLocation();
+}
+
+void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
+{
+	UPrimitiveComponent* Held = GrabbedBody.Get();
+	UPrimitiveComponent* Target = ClingTarget.IsValid() ? ClingTarget.Get() : Held;
+	if (!Target || DeltaSeconds <= 0.0f)
+	{
+		return;
+	}
+	const FVector Hand = Target->GetComponentTransform().TransformPosition(HandLocal);
+	const FVector Shoulder = ShoulderLocation();
+	const float Length = float(FVector::Dist(Shoulder, Hand));
+	if (Length < KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+	// N points from the hand to the eye; the pawn is one end, the hold (static,
+	// infinite mass) or the held body the other. Mu is their reduced mass: the
+	// springs below are accelerations of the relative motion, so a 4 kg can and
+	// an 800 kg part feel the same arm, and the impulse Mu x change is split
+	// equal and opposite.
+	const FVector N = (Shoulder - Hand) / Length;
+	const bool bMoving = Target->IsSimulatingPhysics();
+	const float PawnMass = Body->GetMass();
+	const float Mu = bMoving ? PawnMass * Target->GetMass() / (PawnMass + Target->GetMass()) : PawnMass;
+	const FVector Relative = GetBodyVelocity() - (bMoving ? Target->GetPhysicsLinearVelocityAtPoint(Hand) : FVector::ZeroVector);
+	const float Radial = FVector::DotProduct(Relative, N);
+	const FVector Across = Relative - N * Radial;
+
+	// On a fixed hold the thrust keys are the arm, not the thrusters: toward the
+	// hand pulls the reach in, across it pumps the swing.
+	FVector Wish = FVector::ZeroVector;
+	if (!Held)
+	{
+		const FVector Input = ThrustInput.GetClampedToMaxSize(1.0f);
+		ThrustInput = FVector::ZeroVector;
+		const FRotationMatrix View(GetControlRotation());
+		Wish = View.GetUnitAxis(EAxis::X) * Input.X + View.GetUnitAxis(EAxis::Y) * Input.Y + View.GetUnitAxis(EAxis::Z) * Input.Z;
+	}
+	const float Toward = -FVector::DotProduct(Wish, N);
+	const float RestTarget = Held ? HoldRestCm : ArmLengthCm;
+	if (Toward > 0.1f)
+	{
+		// The reach leads the eye by at most 20 cm: pulling against a wall stores no spring to fire you off it later.
+		ArmRestCm = FMath::Max3(ArmMinCm, ArmRestCm - Toward * ArmPullCmS * DeltaSeconds, FMath::Min(ArmRestCm, Length - 20.0f));
+	}
+	else if (Toward < -0.1f && ArmRestCm < RestTarget)
+	{
+		ArmRestCm = FMath::Min(RestTarget, ArmRestCm - Toward * ArmPullCmS * DeltaSeconds);
+	}
+	else
+	{
+		ArmRestCm = FMath::FInterpConstantTo(ArmRestCm, RestTarget, DeltaSeconds, ArmRelaxCmS);
+	}
+
+	// The reach: a damped spring along N, implicit Euler on the velocity
+	// (v' = (v - dt k x) / (1 + dt c + dt^2 k)), stable at any frame time.
+	const float Dt = DeltaSeconds;
+	const float K = FMath::Square(ArmStiffness);
+	const float C = 2.0f * ArmDampingRatio * ArmStiffness;
+	const float NewRadial = (Radial - Dt * K * (Length - ArmRestCm)) / (1.0f + Dt * C + Dt * Dt * K);
+	FVector Change = N * (NewRadial - Radial);
+
+	if (Held)
+	{
+		// The hand steers the held body across the arm: to the view, or where it
+		// was grabbed. The same implicit spring, critically damped, on the
+		// across-the-arm error of the eye's offset from the hand.
+		const FVector Want = -(bHoldInFront ? ViewDirection() : HoldDirection) * Length;
+		const FVector Error = FVector::VectorPlaneProject((Shoulder - Hand) - Want, N);
+		const float Ks = FMath::Square(HoldSteerStiffness);
+		const float Cs = 2.0f * HoldSteerStiffness;
+		Change += (Across - Dt * Ks * Error) / (1.0f + Dt * Cs + Dt * Dt * Ks) - Across;
+	}
+	else if (!Wish.IsNearlyZero())
+	{
+		// Pump: like the thrusters, up to SwingMaxSpeedCm along the input, never braking.
+		const FVector Pump = FVector::VectorPlaneProject(Wish, N);
+		const float PumpSize = Pump.Size();
+		if (PumpSize > 0.1f)
+		{
+			const FVector Direction = Pump / PumpSize;
+			const float Add = FMath::Min(SwingAccelCm * PumpSize * Dt, SwingMaxSpeedCm - FVector::DotProduct(Across, Direction));
+			Change += Direction * FMath::Max(Add, 0.0f);
+		}
+	}
+	else
+	{
+		// Hands still: a big swing lasts, a small one settles to rest (a steady weld).
+		const float Speed = Across.Size();
+		if (Speed > KINDA_SMALL_NUMBER)
+		{
+			Change -= Across / Speed * FMath::Min(FMath::Min(SwingDampAccelCm, Speed * SwingDampRate) * Dt, Speed);
+		}
+	}
+
+	const FVector Impulse = Change * Mu;
+	AddBodyImpulse(Impulse);
+	if (bMoving)
+	{
+		Target->AddImpulseAtLocation(-Impulse, Hand);
+	}
+	// A hard catch tugs the camera (the crash shake, small).
+	const float Tension = FMath::Abs(NewRadial - Radial) / Dt;
+	if (Tension > ArmTugMinAccelCm)
+	{
+		KickCamera(ArmTugCmPer1000 * Tension / 1000.0f);
 	}
 }
 
@@ -404,12 +519,12 @@ EJamRmbAction AJamZeroGPawn::GetRmbAction() const
 	{
 		return EJamRmbAction::None;
 	}
-	const bool bGunOut = Guns->GetWeapon() && HullTools->GetTool() == EJamHullTool::None && !GrabbedBody.IsValid() && !ClingConstraint;
+	const bool bGunOut = Guns->GetWeapon() && HullTools->GetTool() == EJamHullTool::None && !GrabbedBody.IsValid() && !IsClinging();
 	if (bGunOut)
 	{
 		return GrabCandidate.IsValid() ? EJamRmbAction::Grab : EJamRmbAction::Aim;
 	}
-	if (GrabbedBody.IsValid() || ClingConstraint)
+	if (GrabbedBody.IsValid() || IsClinging())
 	{
 		return EJamRmbAction::LetGo;
 	}
@@ -647,62 +762,21 @@ bool AJamZeroGPawn::Grab(UPrimitiveComponent* Target, FVector Point)
 			Target->GetMass(), MaxGrabMassKg);
 		return false;
 	}
-	// One joint between the two bodies at the grab point: a spring on the
-	// position, nothing on the rotation. Both ends feel it, so momentum is
-	// shared - not a handle that moves the prop and leaves the pawn alone.
-	GrabConstraint = NewObject<UPhysicsConstraintComponent>(this);
-	GrabConstraint->SetupAttachment(Body);
-	GrabConstraint->RegisterComponent();
-	GrabConstraint->SetWorldLocation(Point);
-	GrabConstraint->SetDisableCollision(true);
-	GrabConstraint->SetLinearXLimit(LCM_Free, 0.0f);
-	GrabConstraint->SetLinearYLimit(LCM_Free, 0.0f);
-	GrabConstraint->SetLinearZLimit(LCM_Free, 0.0f);
-	GrabConstraint->SetAngularSwing1Limit(ACM_Free, 0.0f);
-	GrabConstraint->SetAngularSwing2Limit(ACM_Free, 0.0f);
-	GrabConstraint->SetAngularTwistLimit(ACM_Free, 0.0f);
-	GrabConstraint->SetLinearPositionDrive(true, true, true);
-	GrabConstraint->SetLinearVelocityDrive(true, true, true);
-	// Force mode, not the default acceleration mode: a force acts equally and
-	// oppositely on both bodies whatever their masses.
-	GrabConstraint->SetLinearDriveAccelerationMode(false);
-	GrabConstraint->SetLinearDriveParams(GrabStiffness, GrabDamping, /*ForceLimit=*/0.0f);
-	// The prop is component 1 (the child), the pawn component 2 (the parent):
-	// the drive's position target is the child frame's position in the parent
-	// frame. Frame 2 moves to the pawn's centre (its rotation is locked, so the
-	// frame never turns); frame 1 stays at the grab point on the prop. The
-	// target is then where the grab point should sit from the pawn's centre, in
-	// body space (UpdateHoldTarget, every tick). The other way round the target
-	// lives in the prop's spinning frame - seen in the probe as the part shoved
-	// to the opposite side.
-	// Mass conditioning rescales the two masses for stability: momentum is then
-	// not conserved (the probe saw 45000 kg cm/s after a 30000 push with an
-	// 800 kg part). Off, the pair moves as 100 + 800 kg.
-	GrabConstraint->ConstraintInstance.DisableMassConditioning();
-	GrabConstraint->SetConstrainedComponents(Target, NAME_None, Body, NAME_None);
-	GrabOffsetLocal = Body->GetComponentTransform().InverseTransformVectorNoScale(Point - Body->GetComponentLocation());
-	GrabConstraint->SetConstraintReferencePosition(EConstraintFrame::Frame2, FVector::ZeroVector);
+	// The hand on the grab point, the pair on the arm (UpdateArm): equal and
+	// opposite impulses, so momentum is shared - not a handle that moves the
+	// prop and leaves the pawn alone. Nothing on the rotation: the prop turns
+	// freely about the hand.
 	GrabbedBody = Target;
-	UpdateHoldTarget();
+	HandLocal = Target->GetComponentTransform().InverseTransformPosition(Point);
+	HoldDirection = (Point - ShoulderLocation()).GetSafeNormal();
+	ArmRestCm = FMath::Max(ArmMinCm, float(FVector::Dist(ShoulderLocation(), Point)));
+	HoldRestCm = bHoldInFront ? HoldDistanceCm : ArmRestCm;
 	GrabCandidate = nullptr;
 	Target->WakeAllRigidBodies();
 	UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: %s, %.0f kg"), *GetNameSafe(Target->GetOwner()), Target->GetMass());
 	// Both hands on it (owner 18.10: «хватать объекты можно но в таком случае игрок переходит в Unarmed»).
 	Guns->Holster();
 	return true;
-}
-
-void AJamZeroGPawn::UpdateHoldTarget()
-{
-	if (!GrabConstraint)
-	{
-		return;
-	}
-	const FVector Target = bHoldInFront
-		? Body->GetComponentTransform().InverseTransformVectorNoScale(
-			ViewLocation() - Body->GetComponentLocation() + ViewDirection() * HoldDistanceCm)
-		: GrabOffsetLocal;
-	GrabConstraint->SetLinearPositionTarget(Target);
 }
 
 void AJamZeroGPawn::UpdateDust()
@@ -741,12 +815,6 @@ void AJamZeroGPawn::UpdateDust()
 
 void AJamZeroGPawn::Release()
 {
-	if (GrabConstraint)
-	{
-		GrabConstraint->BreakConstraint();
-		GrabConstraint->DestroyComponent();
-		GrabConstraint = nullptr;
-	}
 	if (GrabbedBody.IsValid())
 	{
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: let go of %s"), *GetNameSafe(GrabbedBody->GetOwner()));
@@ -1337,9 +1405,9 @@ void AJamZeroGPawn::JumpPressed()
 		LastJumpSeconds = GetWorld()->GetTimeSeconds();
 		return;
 	}
-	if (!IsInGravity())
+	if (!IsInGravity() || IsClinging())
 	{
-		return; // Zero-G: Space is the up thruster (Lift).
+		return; // Zero-G: Space is the up thruster (Lift); holding on, it is the arm (UpdateArm), never a jump or the jet exit.
 	}
 	const FVector Up = -GravityDirection;
 	const FVector Velocity = GetBodyVelocity();
@@ -1362,9 +1430,13 @@ void AJamZeroGPawn::JumpPressed()
 void AJamZeroGPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (GrabConstraint && !GrabbedBody.IsValid())
+	if (GrabbedBody.IsStale())
 	{
 		Release();
+	}
+	if (ClingTarget.IsStale())
+	{
+		LetGoCling();
 	}
 	if (TetherConstraint && !TetheredBody.IsValid())
 	{
@@ -1388,9 +1460,9 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: a gun drawn - letting go"));
 		Release();
 	}
-	UpdateHoldTarget();
+	UpdateArm(DeltaSeconds);
 	UpdateDust();
-	if (!IsClimbingLadder() && IsInGravity() && !ClingConstraint && GetWorld()->GetTimeSeconds() >= LadderCooldownUntil
+	if (!IsClimbingLadder() && IsInGravity() && !IsClinging() && GetWorld()->GetTimeSeconds() >= LadderCooldownUntil
 		&& !GrabbedBody.IsValid() && !TetheredBody.IsValid() && !GrappleTarget.IsValid())
 	{
 		FVector Move = ViewDirection() * ThrustInput.X + Camera->GetRightVector() * ThrustInput.Y;

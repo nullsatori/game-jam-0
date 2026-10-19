@@ -51,10 +51,15 @@ enum class EJamRmbAction : uint8
  * wall you fly, against light junk the junk flies; throw what you hold (LMB),
  * taking the opposite momentum; the recoil of a shot (LMB, empty hands).
  *
- * Holding is physical: a grab (E on a simulated body) joins the pawn's body
- * and the prop at the grab point with a soft linear spring (angular free), so
- * a heavy part drags the pawn as much as the pawn drags it. E, F or RMB lets
- * go; LMB throws with equal and opposite impulses.
+ * Holding is an arm (UpdateArm, owner 19.10: «физика когда схватываешься уже
+ * вайт накл»): the hand holds a point - on the hull (Cling) or on a loose body
+ * (Grab) - and the shoulder (the eye) hangs from it on a stiff, springy reach.
+ * Only the reach is held: around the hand the body swings and keeps its
+ * momentum, and letting go keeps the velocity. On a fixed hold the thrust keys
+ * are the arm (pull toward the hand, swing across it); a held loose body is the
+ * second mass on the same arm (the hand steers it to the view), so a heavy part
+ * drags the pawn as much as the pawn drags it. RMB lets go; LMB throws with
+ * equal and opposite impulses.
  *
  * Towing and hull repair: the strap and the welder in hand (HullTools, keys
  * 4/5, Docs/HullRepair.md). The rope (AttachTether: a soft spherical distance
@@ -197,15 +202,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "1.0"))
 	float MaxGrabMassKg = 5000.0f;
 
-	/** Spring of the grab joint, force mode (kg/s^2): with 100 kg + 800 kg about 15 rad/s. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "0.0"))
-	float GrabStiffness = 20000.0f;
-
-	/** Damping of the grab joint, force mode (kg/s): about critical for a heavy part, overdamped for a light one - no wobble. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "0.0"))
-	float GrabDamping = 3000.0f;
-
-	/** The held thing's grab point is pulled to this far in front of the camera, cm. */
+	/** The held thing's grab point is held this far in front of the eye (the arm's rest reach on a loose body), cm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "0.0"))
 	float HoldDistanceCm = 150.0f;
 
@@ -220,6 +217,61 @@ public:
 	/** A light prop is not thrown faster than this (the impulse shrinks to fit). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Grab", meta = (ClampMin = "1.0"))
 	float MaxThrowSpeedCm = 1100.0f;
+
+	// --- the arm: holding on (Cling) and holding a loose body (Grab) ----------------
+	// One spring-damper along the line from the hand to the shoulder (the eye);
+	// nothing across it on a fixed hold, so you swing. Solved implicitly on the
+	// velocity every tick (stable at any frame time), as equal and opposite
+	// impulses on the pawn and a held body (momentum kept).
+
+	/** Reach from the eye to the hand on a fixed hold: you hang at it, cm. A hold taken farther reels you in to it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "10.0"))
+	float ArmLengthCm = 70.0f;
+
+	/** A full pull-up brings the eye this close to the hand, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
+	float ArmMinCm = 25.0f;
+
+	/** Natural frequency of the reach spring, rad/s (an acceleration spring on the pair's reduced mass): stiff but elastic. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.1"))
+	float ArmStiffness = 22.0f;
+
+	/** Damping ratio of the reach spring: under 1 the arm gives a little bounce when it catches you. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
+	float ArmDampingRatio = 0.8f;
+
+	/** On a fixed hold, thrust keys toward the hand shorten the reach at this rate (a pull-up; let go mid-pull to fling), away from it lengthen it back, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
+	float ArmPullCmS = 400.0f;
+
+	/** Without a pull the reach returns to its rest (ArmLengthCm, HoldDistanceCm) at this rate, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
+	float ArmRelaxCmS = 300.0f;
+
+	/** On a fixed hold, thrust keys across the arm pump the swing: cm/s^2 along the input, up to SwingMaxSpeedCm along it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
+	float SwingAccelCm = 600.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
+	float SwingMaxSpeedCm = 500.0f;
+
+	/** On a fixed hold without input the swing is braked by min(SwingDampAccelCm, speed x SwingDampRate), cm/s^2: a big swing lasts, a small one settles to rest (welding). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
+	float SwingDampAccelCm = 120.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
+	float SwingDampRate = 6.0f;
+
+	/** A held loose body: the hand steers it across the arm to the view (bHoldInFront) or where it was grabbed, critically damped, rad/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
+	float HoldSteerStiffness = 10.0f;
+
+	/** The arm catching harder than this (cm/s^2 along it) tugs the camera with the crash shake, ArmTugCmPer1000 cm per 1000 cm/s^2. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
+	float ArmTugMinAccelCm = 2500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
+	float ArmTugCmPer1000 = 0.15f;
 
 	// --- tether (T) ---------------------------------------------------------------
 
@@ -443,12 +495,22 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG")
 	UPrimitiveComponent* GetTethered() const { return TetheredBody.Get(); }
 
-	/** Hold on to a fixed thing (RMB on the hull): the body is pinned where it is, so recoil and the torch do not drift it. False when Target simulates. */
-	bool Cling(UPrimitiveComponent* Target);
+	/** Hold on to a fixed thing at Point (RMB on the hull): the body hangs from the hand on the arm and settles to rest there. False when Target simulates. */
+	bool Cling(UPrimitiveComponent* Target, const FVector& Point);
 
 	void LetGoCling();
 
-	bool IsClinging() const { return ClingConstraint != nullptr; }
+	bool IsClinging() const { return ClingTarget.IsValid(); }
+
+	/** The hand (world) on the hold or the held body; the eye when the hands are free. */
+	FVector GetHandLocation() const;
+
+	/** The arm now: the eye's distance from the hand, and the reach it is pulled to, cm. */
+	float GetArmLengthCm() const;
+	float GetArmRestCm() const { return ArmRestCm; }
+
+	/** The eye: the arm's shoulder end (body centre plus the eased eye offset, no shake). */
+	FVector ShoulderLocation() const;
 
 	/** The simulated body E would grab now (null when none or something is held). */
 	UPrimitiveComponent* GetGrabCandidate() const { return GrabCandidate.Get(); }
@@ -520,20 +582,21 @@ protected:
 	FVector ViewDirection() const;
 	void RefreshGrabCandidate();
 
-	UPROPERTY(Transient)
-	TObjectPtr<UPhysicsConstraintComponent> GrabConstraint = nullptr;
-
 	TWeakObjectPtr<UPrimitiveComponent> GrabbedBody;
-	/** Where the grab point sat from the body's centre at the grab, body space: the target when not holding in front. */
-	FVector GrabOffsetLocal = FVector::ZeroVector;
-	void UpdateHoldTarget();
+	/** The fixed thing held on to (Cling). */
+	TWeakObjectPtr<UPrimitiveComponent> ClingTarget;
+	/** The hand on the hold or the held body, in its component space. */
+	FVector HandLocal = FVector::ZeroVector;
+	/** A held loose body: its rest reach, and the direction from the eye to the hand it is kept at when not held in front (world; the body never turns). */
+	float HoldRestCm = 0.0f;
+	FVector HoldDirection = FVector::ForwardVector;
+	/** The reach the arm pulls to now, cm. */
+	float ArmRestCm = 0.0f;
+	void UpdateArm(float DeltaSeconds);
 	void UpdateDust();
 
 	UPROPERTY(Transient)
 	TObjectPtr<UPhysicsConstraintComponent> TetherConstraint = nullptr;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UPhysicsConstraintComponent> ClingConstraint = nullptr;
 
 	TWeakObjectPtr<UPrimitiveComponent> TetheredBody;
 
