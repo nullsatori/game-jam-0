@@ -87,11 +87,23 @@ void AJamZeroGGameMode::StartPlay()
 	Super::StartPlay();
 	FRandomStream Random(DriftSeed);
 	int32 Count = 0;
+	int32 Hitting = 0;
 	for (TActorIterator<AMKPhysicsProp> It(GetWorld()); It; ++It)
 	{
 		UPrimitiveComponent* PropBody = It->Body;
-		// Jam.NoDrift: placed parts (a module on the asteroid) stay where the level put them.
-		if (!PropBody || !PropBody->IsSimulatingPhysics() || It->ActorHasTag(TEXT("Jam.NoDrift")))
+		if (!PropBody || !PropBody->IsSimulatingPhysics())
+		{
+			continue;
+		}
+		// Its collisions become blows: a heavy fast prop breaks glass and hurts.
+		if (!It->FindComponentByClass<UJamCollisionImpactComponent>())
+		{
+			UJamCollisionImpactComponent* Impacts = NewObject<UJamCollisionImpactComponent>(*It);
+			Impacts->RegisterComponent();
+		}
+		++Hitting;
+		// Jam.NoDrift: placed parts (a module on the asteroid) stay where the level put them - they still hit.
+		if (It->ActorHasTag(TEXT("Jam.NoDrift")))
 		{
 			continue;
 		}
@@ -100,16 +112,10 @@ void AJamZeroGGameMode::StartPlay()
 		PropBody->SetPhysicsLinearVelocity(Random.GetUnitVector() * Random.FRandRange(0.0f, InitialDriftMaxCm));
 		PropBody->SetPhysicsAngularVelocityInDegrees(Random.GetUnitVector() * Random.FRandRange(0.0f, InitialSpinMaxDeg));
 		PropBody->WakeAllRigidBodies();
-		// Its collisions become blows: a heavy fast prop breaks glass and hurts.
-		if (!It->FindComponentByClass<UJamCollisionImpactComponent>())
-		{
-			UJamCollisionImpactComponent* Impacts = NewObject<UJamCollisionImpactComponent>(*It);
-			Impacts->RegisterComponent();
-		}
 		++Count;
 	}
-	UE_LOG(LogMindKore, Log, TEXT("ZeroG mode: world gravity Z %.1f, %d props set drifting (up to %.0f cm/s)"),
-		GetWorld()->GetGravityZ(), Count, InitialDriftMaxCm);
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG mode: world gravity Z %.1f, %d props hit when they crash, %d of them set drifting (up to %.0f cm/s)"),
+		GetWorld()->GetGravityZ(), Hitting, Count, InitialDriftMaxCm);
 }
 
 void AJamZeroGHUD::DrawHUD()
