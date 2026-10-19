@@ -6,6 +6,7 @@
 #include "JamWeapons.h"
 
 #include "Camera/CameraComponent.h"
+#include "Components/AudioComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
@@ -519,7 +520,7 @@ void UJamWeaponsComponent::UpdatePose(const FJamWeapon& Weapon, float DeltaTime)
 			Pose.Turn = FVector(Weapon.StowTurn.Pitch, Weapon.StowTurn.Yaw, Weapon.StowTurn.Roll);
 		}
 		PoseWeapon = ShownWeapon;
-		PosePrevSince = SinceShotSeconds;
+		PosePrevSince = Weapon.SinceShot;
 		PosePrevReload = -1.0f;
 	}
 	// Held poses for stills: from rest up to the held moment, the same every frame.
@@ -539,7 +540,7 @@ void UJamWeaponsComponent::UpdatePose(const FJamWeapon& Weapon, float DeltaTime)
 			Pose.Turn = FVector(Weapon.StowTurn.Pitch, Weapon.StowTurn.Yaw, Weapon.StowTurn.Roll);
 		}
 		StepPose(Weapon, Pose, 1000.0f, 1000.0f, -1.0f, -1.0f, 0.0f, 0, Span.Time1, Span);
-		PosePrevSince = SinceShotSeconds;
+		PosePrevSince = Weapon.SinceShot;
 		PosePrevReload = -1.0f;
 		return;
 	}
@@ -554,12 +555,12 @@ void UJamWeaponsComponent::UpdatePose(const FJamWeapon& Weapon, float DeltaTime)
 		{
 			StepPose(Weapon, Pose, 1000.0f, 1000.0f, 0.0f, ReloadAt, ReloadDuration(Weapon, PoseShells), PoseShells, ReloadAt);
 		}
-		PosePrevSince = SinceShotSeconds;
+		PosePrevSince = Weapon.SinceShot;
 		PosePrevReload = -1.0f;
 		return;
 	}
 	// Live: a new shot or reload starts its timeline at 0; the springs carry on from where they are.
-	const float Since = SinceShotSeconds;
+	const float Since = Weapon.SinceShot;
 	if (Since < PosePrevSince)
 	{
 		PosePrevSince = 0.0f;
@@ -687,7 +688,7 @@ const FJamWeapon* UJamWeaponsComponent::UpdateSwitch(float DeltaTime, bool bHand
 		const FJamWeapon* Gun = Weapons.IsValidIndex(Index) ? &Weapons[Index] : nullptr;
 		ViewModel->SetStaticMesh(Gun ? Gun->ViewMesh.Get() : nullptr);
 		ActionInView->SetStaticMesh(Gun ? Gun->ActionMesh.Get() : nullptr);
-		SinceShotSeconds = 1000.0f;
+		SinceKickSeconds = 1000.0f; // a gun coming into view shows no kick (its cycle keeps its own clock)
 	};
 	const auto Play = [this](USoundBase* Sound) { if (Sound) { UGameplayStatics::PlaySound2D(this, Sound); } };
 	// The shoulder taking the gun: a nudge of the view that comes all the way back.
@@ -820,6 +821,15 @@ void UJamWeaponsComponent::UpdateParts(const FJamWeapon* Weapon, float SinceShot
 	SetPart(ShellInView, Weapon->ShellMesh, bShell);
 }
 
+void UJamWeaponsComponent::PlayMechanismSound(FJamWeapon& Gun, USoundBase* Sound, float At)
+{
+	// From where the gun's clock is: on time after a crossing, mid-way when a frozen cycle picks up again.
+	const float Into = FMath::Max(0.0f, Gun.SinceShot - At);
+	Gun.MechanismSound = UGameplayStatics::SpawnSound2D(this, Sound, 1.0f, 1.0f, Into);
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s %s from %.3f s"), *GetNameSafe(GetOwner()), Sound == Gun.CycleSound ? TEXT("cycle") : TEXT("sound"),
+		*Sound->GetName(), Into);
+}
+
 void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 {
 	// Loose bodies: the oldest beyond the cap, and any drifted out of range, go.
@@ -833,11 +843,10 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 			Debris.RemoveAt(Index);
 		}
 	}
-	if (!IsWeaponUnlocked(CurrentWeapon) || !ViewModel || !ViewModel->GetAttachParent())
+	if (!ViewModel || !ViewModel->GetAttachParent())
 	{
 		return;
 	}
-	FJamWeapon& Weapon = Weapons[CurrentWeapon];
 	const FTransform Gun = ViewModel->GetComponentTransform();
 	const FTransform View = ViewModel->GetAttachParent()->GetComponentTransform();
 	const auto Play = [this](USoundBase* Sound)
@@ -849,32 +858,44 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 		}
 	};
 
-	// After the shot (live time: a held pose throws nothing).
-	// Only a shot restarts these (Fire sets PrevSinceShot). A gun shown resets SinceShotSeconds too
-	// and must throw nothing (owner 19.10: a switch threw a case); the gun going away after a switch
-	// has its cycle abandoned (SelectWeapon) - no case, on the way out or drawn back.
-	const float Since = SinceShotSeconds;
-	if (Since < PrevSinceShot || ShownWeapon != CurrentWeapon)
+	// After the shot, on the clock of the gun whose cycle runs (UpdateViewModel; live time: a held pose throws
+	// nothing). Only a shot restarts it (Fire sets PrevSinceShot). A gun put away keeps its clock still, so no
+	// case flies and no cycle sound starts away from it; the rest of the cycle comes when it is back
+	// (owner 19.10: «механика не врёт» - the pump, its sound and its case together, or none of them).
+	if (Weapons.IsValidIndex(CycleWeapon))
 	{
-		PrevSinceShot = Since;
+		FJamWeapon& Shot = Weapons[CycleWeapon];
+		const float Prev = Shot.PrevSinceShot;
+		const float Since = Shot.SinceShot;
+		if (Shot.CaseMesh && Crossed(Prev, Since, Shot.EjectSeconds))
+		{
+			// Out of the port to the right and up, end over end about the line of sight.
+			const FVector Velocity = GetOwner()->GetVelocity() + View.TransformVectorNoScale(Shot.EjectVelocity * FMath::FRandRange(0.85f, 1.15f)
+				+ FVector(FMath::FRandRange(-20.0f, 20.0f), 0.0f, FMath::FRandRange(-25.0f, 25.0f)));
+			const FVector Spin = View.GetUnitAxis(EAxis::X) * FMath::FRandRange(900.0f, 1600.0f) * (FMath::RandBool() ? 1.0f : -1.0f)
+				+ FMath::VRand() * 300.0f;
+			const FRotator Facing = FRotationMatrix::MakeFromXZ(View.GetUnitAxis(EAxis::Y), View.GetUnitAxis(EAxis::Z)).Rotator()
+				+ FRotator(FMath::FRandRange(-15.0f, 15.0f), FMath::FRandRange(-20.0f, 20.0f), 0.0f);
+			SpawnDebris(Shot.CaseMesh, FTransform(Facing, Gun.TransformPosition(Shot.EjectPort)), Velocity, Spin, 0.012f);
+			++CasesThrown;
+		}
+		if (Shot.HammerSound && Crossed(Prev, Since, Shot.HammerSoundSeconds))
+		{
+			PlayMechanismSound(Shot, Shot.HammerSound, Shot.HammerSoundSeconds);
+		}
+		// The pump or the bolt, on the same clock as its animation and case (it was a timer a switch cleared).
+		if (Shot.CycleSound && Crossed(Prev, Since, Shot.CycleDelaySeconds))
+		{
+			PlayMechanismSound(Shot, Shot.CycleSound, Shot.CycleDelaySeconds);
+			++CycleSoundsPlayed;
+		}
+		Shot.PrevSinceShot = Since;
 	}
-	if (Weapon.CaseMesh && Crossed(PrevSinceShot, Since, Weapon.EjectSeconds))
+	if (!IsWeaponUnlocked(CurrentWeapon))
 	{
-		// Out of the port to the right and up, end over end about the line of sight.
-		const FVector Velocity = GetOwner()->GetVelocity() + View.TransformVectorNoScale(Weapon.EjectVelocity * FMath::FRandRange(0.85f, 1.15f)
-			+ FVector(FMath::FRandRange(-20.0f, 20.0f), 0.0f, FMath::FRandRange(-25.0f, 25.0f)));
-		const FVector Spin = View.GetUnitAxis(EAxis::X) * FMath::FRandRange(900.0f, 1600.0f) * (FMath::RandBool() ? 1.0f : -1.0f)
-			+ FMath::VRand() * 300.0f;
-		const FRotator Facing = FRotationMatrix::MakeFromXZ(View.GetUnitAxis(EAxis::Y), View.GetUnitAxis(EAxis::Z)).Rotator()
-			+ FRotator(FMath::FRandRange(-15.0f, 15.0f), FMath::FRandRange(-20.0f, 20.0f), 0.0f);
-		SpawnDebris(Weapon.CaseMesh, FTransform(Facing, Gun.TransformPosition(Weapon.EjectPort)), Velocity, Spin, 0.012f);
-		++CasesThrown;
+		return;
 	}
-	if (Crossed(PrevSinceShot, Since, Weapon.HammerSoundSeconds))
-	{
-		Play(Weapon.HammerSound);
-	}
-	PrevSinceShot = Since;
+	FJamWeapon& Weapon = Weapons[CurrentWeapon];
 
 	// Into the reload (live time).
 	const float Time = ReloadEndSeconds > 0.0 ? float(GetWorld()->GetTimeSeconds() - ReloadStartSeconds) : -1.0f;
@@ -1500,7 +1521,7 @@ namespace
 				Thrown == 0 ? TEXT("PASS") : TEXT("FAIL"));
 		});
 		// A cycle cut short: the shotgun fired and put away mid-pump (its case due at 0.26 s), drawn
-		// back - the abandoned cycle throws nothing, not on the draw-back either; no round is lost.
+		// back - the cycle froze while away and finishes on the draw-back: one case, one round spent.
 		After(At += 0.1f, [Pawn, Guns, Probe]()
 		{
 			Probe->Cases = Guns->GetCasesThrown();
@@ -1513,8 +1534,8 @@ namespace
 		{
 			const int32 Thrown = Guns->GetCasesThrown() - Probe->Cases;
 			const int32 Ammo = Guns->Weapons[1].Ammo;
-			UE_LOG(LogMindKore, Log, TEXT("Switch probe: cycle cut by a switch and drawn back - %d case(s) (expected 0), ammo %d -> %d (expected -1): %s"),
-				Thrown, Probe->Ammo, Ammo, Thrown == 0 && Ammo == Probe->Ammo - 1 ? TEXT("PASS") : TEXT("FAIL"));
+			UE_LOG(LogMindKore, Log, TEXT("Switch probe: cycle cut by a switch and drawn back - %d case(s) (expected 1), ammo %d -> %d (expected -1): %s"),
+				Thrown, Probe->Ammo, Ammo, Thrown == 1 && Ammo == Probe->Ammo - 1 ? TEXT("PASS") : TEXT("FAIL"));
 			Probe->Cases = Guns->GetCasesThrown();
 			UE_LOG(LogMindKore, Log, TEXT("Switch probe: shot after the draw-back: %s"), Pawn->Fire() ? TEXT("fired") : TEXT("refused"));
 		});

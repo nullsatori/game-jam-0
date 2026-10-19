@@ -6,6 +6,7 @@
 #include "JamScope.h"
 #include "JamWeapons.generated.h"
 
+class UAudioComponent;
 class UEnhancedInputComponent;
 class UInputAction;
 class UInputMappingContext;
@@ -446,6 +447,19 @@ struct FJamWeapon
 
 	/** Seconds from a shot until the gun is home: the last key of ActionTravel / ActionTurn / ActionBody (0 without them). */
 	float GetActionCycleSeconds() const;
+
+	/**
+	 * Runtime, per gun (review 19.10: one clock for all guns let the SV-98's bolt hold the pistol's trigger):
+	 * seconds into this gun's last cycle. It runs only while the gun is in hand and wanted - drawn or being
+	 * drawn - and stands still while it is put away or unarmed, so an abandoned cycle freezes where it was,
+	 * its sound stopped, and finishes when the gun comes back: the pump, its sound and its case come together.
+	 */
+	float SinceShot = 1000.0f;
+	float PrevSinceShot = 1000.0f;
+	/** SinceShot from which it fires again: its cycle (or FireInterval) after a shot, FireInterval after a dry click. */
+	float FireReadySince = 0.0f;
+	/** The hammer / pump / bolt sound playing, stopped when the cycle freezes and picked up from its place after. */
+	TWeakObjectPtr<UAudioComponent> MechanismSound;
 };
 
 /**
@@ -725,7 +739,6 @@ private:
 	double ReloadStartSeconds = 0.0;
 	/** Rounds this reload loads one by one (ShellMesh guns). */
 	int32 ShellsPlanned = 0;
-	float PrevSinceShot = 1000.0f;
 	int32 CasesThrown = 0;
 	int32 CycleSoundsPlayed = 0;
 	float PrevReloadTime = -1.0f;
@@ -769,13 +782,14 @@ private:
 	float KickAttackLeft = 0.0f;
 	float SettlePitch = 0.0f;
 	float SettleYaw = 0.0f;
-	/** Seconds since the gun in view last fired: drives its kick and its moving part's cycle. */
-	float SinceShotSeconds = 1000.0f;
+	/** Seconds since the last shot, for the kick in view (the parts' cycle runs on FJamWeapon::SinceShot). */
+	float SinceKickSeconds = 1000.0f;
 	int32 ShownWeapon = INDEX_NONE;
-	/** The pending CycleSound of the last shot; a switch cancels it. */
-	FTimerHandle CycleTimer;
+	/** The gun whose cycle clock runs: the shown one while drawn or being drawn, else none. */
+	int32 CycleWeapon = INDEX_NONE;
+	/** Gun.MechanismSound from where Gun.SinceShot is past At (on time after a crossing, mid-way on a resume). */
+	void PlayMechanismSound(FJamWeapon& Gun, USoundBase* Sound, float At);
 
-	double NextShotSeconds = 0.0;
 	double ReloadEndSeconds = 0.0;
 
 	UPROPERTY(Transient)
