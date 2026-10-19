@@ -173,7 +173,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Roost")
 	int32 RoostSeed = 0;
 
-	/** No spot within this of a door (the airlock stays passable), cm. */
+	/** No spot within this of a door (the airlock stays passable) or of a living wall's centre (the wall's call wakes the roost, not the walk to it), cm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Roost", meta = (ClampMin = "0.0"))
 	float RoostClearOfDoorsCm = 400.0f;
 
