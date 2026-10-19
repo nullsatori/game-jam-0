@@ -48,6 +48,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `jam.Ship.Caves [Crater] [Plug]` | `Lvl_Jam_Ship` | мембрана кратера и пробка пещеры под дробовиком |
 | `jam.Ship.Lap`, `jam.Ship.JetExit`, `jam.Ship.Land` | `Lvl_Jam_Ship` | ходьба вокруг планетоида, реактивный выход из его гравитации, посадка |
 | `jam.Ship.Where [Tag]` | любая | где акторы с тегом (по умолчанию `Junk.Foreign`) |
+| `jam.Hands.Probe` | `Lvl_Jam_Ship` | руки ([ZeroG](ZeroG.md#руки)): инструмент посреди перезарядки СВ-98 бросает её (магазин не вылетает, патроны не засчитываются; контроль без инструмента — вылетает и засчитываются); с инструментом нет ствола (`GetWeapon`, подсказка HUD); затем каждая клавиша рук (ЛКМ, ПКМ, средняя, колесо, R, 1, 2, клавиши стяжки и сварки) через своё действие ввода со стволом, стяжкой, телом в руках и пустыми руками в `Walk`, `Hang`, `Ladder`, `Float` — против таблицы управления README. Каждая строка — `PASS` / `FAIL`, итог — `Hands probe: N checks, F failed`, конец — `Hands probe: done` |
 | `jam.Move.Probe` | `Lvl_Jam_Ship` | ходьба и внешняя скорость ([ZeroG](ZeroG.md#внешняя-скорость-на-ногах-ревью-37)): дробовик и снапа под ноги отрывают от пола, кошка в потолок поднимает, W с грузом 800 кг медленнее, вис за потолок стоя на полу раскачивается (рука не спорит с ходьбой), отдача сразу после входа в гравитацию с креном 60° не уводит взгляд. Каждая строка — `PASS` / `FAIL` и средний кадр; гонять с `-UseFixedTimeStep -FPS=30` и `-FPS=144`. Конец — `Move probe: done` |
 | `jam.Ladder.Probe` | `Lvl_Jam_Ship` | лестница (`Docs/Ladder.md`): захват, лаз по взгляду 350 см/с, остановка, S, мёртвая зона, A/D, сход наверх и на пол, прыжок (−252 / +147 см/с), сход вбок. Конец — `Ladder probe: done`, `TIMEOUT` в строке шага — провал |
 
@@ -80,7 +81,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 ## Какие пробы гонять
 
 Только те, которые правка может сломать: смена оружия — `SwitchProbe` и
-`RmbProbe`; отдача и движение — `ZeroG.Probe`; хват и рука — `Hang.Probe`, `Hull.Probe`,
+`RmbProbe`; руки и их клавиши — `Hands.Probe`; отдача и движение — `ZeroG.Probe`; хват и рука — `Hang.Probe`, `Hull.Probe`,
 `RmbProbe`; стены — `Wall.Probe`; корабль и обшивка — `Ship.Probe` и `Hull.Probe`;
 лестница — `Ladder.Probe` и `Ship.Probe`; режим движения, ходьба и отдача взгляда — `Move.Probe` на двух FPS. Для правок только арта хватит кадров.
 Шаг «сварено снова» в `jam.Hull.Probe` плавает от прогона к прогону: стяжка
