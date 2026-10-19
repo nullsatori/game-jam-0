@@ -177,11 +177,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Roost", meta = (ClampMin = "0.0"))
 	float RoostClearOfDoorsCm = 400.0f;
 
-	/** An armed player this close to a clinging flyer wakes the roost (the cascade), cm. */
+	/**
+	 * An armed player this close to a clinging flyer, in its line (not through the hull), wakes the roost (the
+	 * cascade), cm. No flyer lands this close to the player: its own landing is not his approach.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Roost", meta = (ClampMin = "0.0"))
 	float RoostWakeRadiusCm = 1000.0f;
 
-	/** Closer than this the player bumps it: it peels off with a warning screech and a feint, armed or not, cm. */
+	/** Closer than this (in its line) the player bumps it: it peels off with a warning screech and a feint, armed or not, cm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Roost", meta = (ClampMin = "0.0"))
 	float RoostTouchCm = 220.0f;
 
@@ -228,8 +231,21 @@ public:
 	bool MayFeint() const;
 	/** A scanner dart may start now (one at a time; DartEverySeconds). */
 	bool TakeDart();
-	/** A flyer screeched into the hunt: the cascade passes on from it, one step per WakeStepSeconds. */
+	/**
+	 * Caller joined the hunt: the cascade passes on from it, one step per WakeStepSeconds. Only a provocation
+	 * (Provoke) begins a cascade; the steps pass it on.
+	 */
 	void Alert(AJamFlyer* Caller);
+	/** A flock member sees the player at At (or a provocation shows where he is). */
+	void SawPlayer(const FVector& At);
+	/** Game seconds when the flock last saw the player (negative: never), and where. */
+	double GetPlayerSeenSeconds() const { return PlayerSeenSeconds; }
+	FVector GetPlayerSeenAt() const { return PlayerSeenAt; }
+	/**
+	 * Nobody in the hunting flock has seen the player for LostSeconds: the hunt turns into a search - the mood
+	 * drops to Stalking (shadow passes over where he was last seen) and calms down from there as usual.
+	 */
+	void LosePlayer(float LostSeconds);
 	/** Listeners (flock members in the noise's air) heard What at Where: the wandering ones investigate, the mood rises a rung (a roost: Hunting). */
 	void HearNoise(const FVector& Where, const TArray<AJamFlyer*>& Listeners, const FString& What);
 	/**
@@ -288,6 +304,8 @@ private:
 	FTimerHandle PulseTimer;
 	EJamFlockMood Mood = EJamFlockMood::Curious;
 	double LastProvokedSeconds = -100.0;
+	double PlayerSeenSeconds = -100.0;
+	FVector PlayerSeenAt = FVector::ZeroVector;
 	double NextDiveSeconds = 0.0;
 	double NextDartSeconds = 0.0;
 	double NextSwapSeconds = 0.0;
@@ -458,6 +476,13 @@ public:
 	/** "Held on it": the player's view within this of it, degrees. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Hunt", meta = (ClampMin = "0.0"))
 	float AimConeDeg = 5.0f;
+
+	/**
+	 * One that answered a call (screeched into the hunt, or unfolded in a roost row) less than this ago rejoins a
+	 * hunt silently: the same fight, no second aggro screech, s.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Hunt", meta = (ClampMin = "0.0"))
+	float RejoinQuietSeconds = 20.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Flyer|Hunt", meta = (ClampMin = "0.0"))
 	float CircleRadiusCm = 900.0f;
@@ -808,7 +833,11 @@ public:
 	/** The habitat hands itself over right after spawning (its geometry and the flock). */
 	void SetHome(AJamFlyerHabitat* InHabitat);
 
-	/** Into the hunt now with the aggro screech (a cascade, a hit), from any calm state; the cascade passes on. */
+	/**
+	 * Into the hunt now with the aggro screech (a cascade, a provocation, the end of a stalk), from any calm state.
+	 * One that answered a call within RejoinQuietSeconds rejoins without it. It does not call the flock itself:
+	 * the habitat's cascade passes on from it (AJamFlyerHabitat::Alert).
+	 */
 	void Aggro(const TCHAR* Why, bool bScreech = true);
 
 	/** Cling to a spot right away (the habitat's spawn). */
@@ -860,8 +889,13 @@ private:
 	void SetState(EJamFlyerState NewState, const FString& Why);
 	void Sense();
 	void Think(const FVector& Location, const FVector& Velocity);
-	/** Tracking ends (leash, lost sight): calm down, back to the roost if it wants more, else wander. */
+	/** Tracking ends (leash, lost sight in a calm flock): calm down, back to the roost if it wants more, else wander. */
 	void GoCalm(const FString& Why);
+	/**
+	 * The flock lost the player (nobody saw him for LoseSightSeconds and this one does not see him): the stalk runs
+	 * over where it last saw him, from this flyer's own bearing (the search spreads out). False: over the player.
+	 */
+	bool SearchFrame(FVector& OutCentre, FVector& OutForward) const;
 	/** Notice on sight (or Notice): the rung of the flock's mood. */
 	void OnNoticed(const FString& Why);
 	/** A stagger is over: flee, or back on the rung of the mood. */
@@ -906,6 +940,8 @@ private:
 	double StateSeconds = 0.0;
 	double StateUntil = 0.0;
 	double LastSeenSeconds = -100.0;
+	/** Last time it answered a call (Aggro out loud or in a row); RejoinQuietSeconds counts from it. */
+	double AnsweredSeconds = -100.0;
 	double CalmUntil = 0.0;
 	double NextSenseSeconds = 0.0;
 	bool bSeesPlayer = false;

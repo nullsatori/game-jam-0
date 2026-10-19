@@ -301,10 +301,14 @@ void AJamFlyerHabitat::SampleSpots()
 
 int32 AJamFlyerHabitat::ClaimSpot(AJamFlyer* Flyer, const FVector& Near)
 {
+	// Never within the wake radius of the player: its own landing there would wake the roost as if he had come close
+	// (a player hiding by the hull set off a new cascade with every flyer that landed beside him).
+	const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0);
 	TArray<int32, TInlineAllocator<3>> Nearest;
 	for (int32 Index = 0; Index < Spots.Num(); ++Index)
 	{
-		if (Spots[Index].Holder.IsValid() && Spots[Index].Holder.Get() != Flyer)
+		if ((Spots[Index].Holder.IsValid() && Spots[Index].Holder.Get() != Flyer)
+			|| (Player && FVector::Dist(Spots[Index].Point, Player->GetActorLocation()) < RoostWakeRadiusCm))
 		{
 			continue;
 		}
@@ -370,12 +374,17 @@ void AJamFlyerHabitat::Provoke(EJamFlockMood Level, const FString& Why, const FV
 		Reason += TEXT(" (the player is unarmed: stalking at most)");
 	}
 	LastProvokedSeconds = GetWorld()->GetTimeSeconds();
+	if (const APawn* Player = UGameplayStatics::GetPlayerPawn(this, 0))
+	{
+		SawPlayer(Player->GetActorLocation()); // a provocation shows where he is
+	}
 	if (Level <= Mood)
 	{
-		// Already hunting: the provoked one itself joins (a clinging one by the player, a touched one).
+		// Already hunting: the provoked one itself joins (a clinging one by the player, a touched one) and calls on.
 		if (Level == EJamFlockMood::Hunting && By && By->GetState() != EJamFlyerState::Dead && !By->IsHunting())
 		{
 			By->Aggro(*FString::Printf(TEXT("the flock hunts: %s"), *Reason));
+			Alert(By);
 			return;
 		}
 		UE_LOG(LogMindKore, Log, TEXT("Flock %s: provoked (%s), stays %s"), *GetName(), *Reason, MoodName(Mood));
@@ -406,6 +415,10 @@ void AJamFlyerHabitat::Provoke(EJamFlockMood Level, const FString& Why, const FV
 	if (First)
 	{
 		First->Aggro(*FString::Printf(TEXT("the flock hunts: %s"), *Reason));
+		if (First->IsHunting())
+		{
+			Alert(First);
+		}
 	}
 }
 
@@ -434,6 +447,24 @@ bool AJamFlyerHabitat::TakeDart()
 	}
 	NextDartSeconds = Now + FMath::FRandRange(DartEverySeconds.X, DartEverySeconds.Y);
 	return true;
+}
+
+void AJamFlyerHabitat::SawPlayer(const FVector& At)
+{
+	PlayerSeenSeconds = GetWorld()->GetTimeSeconds();
+	PlayerSeenAt = At;
+}
+
+void AJamFlyerHabitat::LosePlayer(float LostSeconds)
+{
+	if (Mood != EJamFlockMood::Hunting || GetWorld()->GetTimeSeconds() < RallyUntil)
+	{
+		return;
+	}
+	UE_LOG(LogMindKore, Log, TEXT("Flock %s: hunting -> stalking (lost the player for %.1f s: searches where it saw him last, %.0f m from the centre)"),
+		*GetName(), LostSeconds, FVector::Dist(PlayerSeenAt, GetActorLocation()) / 100.0f);
+	Mood = EJamFlockMood::Stalking;
+	LastProvokedSeconds = GetWorld()->GetTimeSeconds(); // the search lasts a calm-down step
 }
 
 void AJamFlyerHabitat::Alert(AJamFlyer* Caller)
@@ -493,7 +524,8 @@ void AJamFlyerHabitat::CascadeStep()
 	++CascadeWoken;
 	CascadeLastSeconds = Now;
 	CascadeDone.Add(Next);
-	Next->Aggro(*FString::Printf(TEXT("woken by %s's screech, step %d at +%.2f s"), *GetNameSafe(From), CascadeWoken, float(Now - CascadeStartedSeconds)));
+	Next->Aggro(*FString::Printf(TEXT("woken by %s's call, step %d at +%.2f s"), *GetNameSafe(From), CascadeWoken, float(Now - CascadeStartedSeconds)));
+	Alert(Next);
 	// The row: the clinging ones next to it unfold with it, silently (the wing snap), and call on too.
 	if (bClinging)
 	{
@@ -505,6 +537,7 @@ void AJamFlyerHabitat::CascadeStep()
 				++CascadeWoken;
 				CascadeDone.Add(Weak);
 				Other->Aggro(*FString::Printf(TEXT("unfolds in %s's row"), *Next->GetName()), /*bScreech=*/false);
+				Alert(Other);
 			}
 		}
 	}
@@ -1276,15 +1309,20 @@ void AJamFlyer::Aggro(const TCHAR* Why, bool bScreech)
 	{
 		Unfold();
 	}
-	LastSeenSeconds = GetWorld()->GetTimeSeconds(); // a woken flockmate gets LoseSightSeconds to find the player
-	SetState(EJamFlyerState::Circle, FString::Printf(TEXT("aggro: %s"), Why));
+	const double Now = GetWorld()->GetTimeSeconds();
+	LastSeenSeconds = Now; // a woken flockmate gets LoseSightSeconds to find the player
+	// Answered a call a moment ago: back into the same fight without a second screech.
+	const bool bQuiet = Now - AnsweredSeconds < RejoinQuietSeconds;
+	SetState(EJamFlyerState::Circle, bQuiet ? FString::Printf(TEXT("aggro: %s - rejoins silently, answered a call %.1f s ago"), Why, float(Now - AnsweredSeconds))
+		: FString::Printf(TEXT("aggro: %s"), Why));
+	if (bQuiet)
+	{
+		return;
+	}
+	AnsweredSeconds = Now;
 	if (bScreech)
 	{
 		Screech(TEXT("aggro"), false);
-	}
-	if (AJamFlyerHabitat* Home = Habitat.Get())
-	{
-		Home->Alert(this);
 	}
 }
 
@@ -1298,6 +1336,20 @@ void AJamFlyer::GoCalm(const FString& Why)
 		return;
 	}
 	SetState(EJamFlyerState::Wander, Why);
+}
+
+bool AJamFlyer::SearchFrame(FVector& OutCentre, FVector& OutForward) const
+{
+	const AJamFlyerHabitat* Home = Habitat.Get();
+	if (!Home || bSeesPlayer || GetWorld()->GetTimeSeconds() - Home->GetPlayerSeenSeconds() <= LoseSightSeconds)
+	{
+		return false;
+	}
+	OutCentre = Home->GetPlayerSeenAt();
+	const FVector Axis = Up(OutCentre);
+	const FVector Base = FVector::CrossProduct(Axis, FVector::RightVector).GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
+	OutForward = FQuat(Axis, Seed * 2.39996f).RotateVector(Base); // the golden angle per seed: bearings spread round
+	return true;
 }
 
 void AJamFlyer::Stagger(const FVector& Direction)
@@ -1378,6 +1430,10 @@ void AJamFlyer::Sense()
 	if (bSeesPlayer)
 	{
 		LastSeenSeconds = GetWorld()->GetTimeSeconds();
+		if (AJamFlyerHabitat* Home = Habitat.Get())
+		{
+			Home->SawPlayer(Target->GetActorLocation());
+		}
 	}
 }
 
@@ -1401,6 +1457,13 @@ void AJamFlyer::CheckAim(float DeltaSeconds)
 	if (AimedSeconds >= AimProvokeSeconds)
 	{
 		AimedSeconds = 0.0f;
+		// Only a gun it can see: the view through the hull (the player inside the ship) points at nothing.
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(JamFlyerAim), /*bTraceComplex=*/false, this);
+		Params.AddIgnoredActor(Pawn);
+		if (GetWorld()->LineTraceTestByChannel(Eye, GetActorLocation(), ECC_Visibility, Params))
+		{
+			return;
+		}
 		const EJamFlockMood Up = EJamFlockMood(FMath::Min(int32(Home->GetMood()) + 1, int32(EJamFlockMood::Hunting)));
 		Home->Provoke(Up, FString::Printf(TEXT("a gun held on %s for %.1f s"), *GetName(), AimProvokeSeconds), GetActorLocation(), this);
 		Notice(TEXT("a gun held on it"));
@@ -1426,7 +1489,12 @@ void AJamFlyer::ThinkRoost(float DeltaSeconds)
 	}
 	const APawn* Target = Player();
 	const float Distance = Target ? FVector::Dist(Target->GetActorLocation(), Centre) : UE_BIG_NUMBER;
-	if (Target && Distance < Home->RoostTouchCm)
+	// Close by, but the other side of the hull (the player inside the ship): nobody came near this one.
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamFlyerRoostNear), /*bTraceComplex=*/false, this);
+	Params.AddIgnoredActor(Target);
+	const bool bNear = Target && Distance < FMath::Max(Home->RoostTouchCm, Home->RoostWakeRadiusCm)
+		&& !GetWorld()->LineTraceTestByChannel(Centre, Target->GetActorLocation(), ECC_Visibility, Params);
+	if (bNear && Distance < Home->RoostTouchCm)
 	{
 		// Bumped: off with a warning screech and a feint at the one who touched it - not a bite.
 		LastSeenSeconds = Now;
@@ -1438,7 +1506,7 @@ void AJamFlyer::ThinkRoost(float DeltaSeconds)
 		Home->Provoke(EJamFlockMood::Hunting, FString::Printf(TEXT("the player touched %s on the roost"), *GetName()), Centre, this);
 		return;
 	}
-	if (Target && Distance < Home->RoostWakeRadiusCm && !Home->SparesPlayer())
+	if (bNear && Distance < Home->RoostWakeRadiusCm && !Home->SparesPlayer())
 	{
 		Home->Provoke(EJamFlockMood::Hunting, FString::Printf(TEXT("the armed player came within %.1f m of the roost"), Distance / 100.0f), Centre, this);
 		return;
@@ -1491,7 +1559,7 @@ void AJamFlyer::Think(const FVector& Location, const FVector& Velocity)
 	{
 		return;
 	}
-	const EJamFlockMood Mood = Home->GetMood();
+	EJamFlockMood Mood = Home->GetMood();
 	switch (State)
 	{
 	case EJamFlyerState::Wander:
@@ -1543,6 +1611,7 @@ void AJamFlyer::Think(const FVector& Location, const FVector& Velocity)
 	if (bRally)
 	{
 		LastSeenSeconds = Now; // the pain call told them where the player is
+		Home->SawPlayer(PlayerAt);
 	}
 	if (!bRally && !Home->Contains(PlayerAt, Home->LeashCm))
 	{
@@ -1561,13 +1630,25 @@ void AJamFlyer::Think(const FVector& Location, const FVector& Velocity)
 	}
 	if (Now - LastSeenSeconds > LoseSightSeconds)
 	{
-		GoCalm(FString::Printf(TEXT("de-aggro: lost sight of the player for %.1f s"), float(Now - LastSeenSeconds)));
-		return;
+		// Lost: only a calm flock lets it go (land or patrol). A hunting flock that lost the player as a whole
+		// searches (stalking: passes over where it saw him last) and calms down from there, a rung per calm-down.
+		if (Mood == EJamFlockMood::Curious)
+		{
+			GoCalm(FString::Printf(TEXT("de-aggro: lost sight of the player for %.1f s, the flock is calm"), float(Now - LastSeenSeconds)));
+			return;
+		}
+		if (Mood == EJamFlockMood::Hunting && Now - Home->GetPlayerSeenSeconds() > LoseSightSeconds)
+		{
+			Home->LosePlayer(float(Now - Home->GetPlayerSeenSeconds()));
+			Mood = Home->GetMood();
+		}
 	}
-	// Down the ladder: the flock calmed below hunting (or the player is unarmed).
+	// Down the ladder: the flock calmed below hunting, lost the player (the search), or the player is unarmed.
 	if (Mood != EJamFlockMood::Hunting && (State == EJamFlyerState::Circle || State == EJamFlyerState::Retreat))
 	{
-		SetState(EJamFlyerState::Stalk, FString::Printf(TEXT("the flock is %s now"), MoodName(Mood)));
+		FVector Centre, Forward;
+		SetState(EJamFlyerState::Stalk, FString::Printf(TEXT("the flock is %s now%s"), MoodName(Mood),
+			SearchFrame(Centre, Forward) ? TEXT(": searches where it saw the player last") : TEXT("")));
 		return;
 	}
 	CheckAim(GetWorld()->GetDeltaSeconds());
@@ -1617,14 +1698,18 @@ void AJamFlyer::Think(const FVector& Location, const FVector& Velocity)
 		break;
 	case EJamFlyerState::Stalk:
 	{
-		const FVector Behind = PlayerAt + Up(PlayerAt) * StalkHeightCm - ViewForward * StalkBehindCm;
+		// Over the player, or (the search) over where the flock saw him last.
+		FVector Centre = PlayerAt, Forward = ViewForward;
+		const bool bSearch = SearchFrame(Centre, Forward);
+		const FVector Behind = Centre + Up(Centre) * StalkHeightCm - Forward * StalkBehindCm;
 		if (StalkLeg == 0 && (FVector::Dist(Location, Behind) < 300.0f || Now >= StateUntil))
 		{
 			StalkLeg = 1;
 			StateUntil = Now + StalkLegSeconds;
-			UE_LOG(LogMindKore, Log, TEXT("Flyer %s: stalk - from above and behind, passes over the head (%.1f m off)"), *GetName(), Distance / 100.0f);
+			UE_LOG(LogMindKore, Log, TEXT("Flyer %s: stalk - from above and behind, passes over %s (%.1f m off)"), *GetName(),
+				bSearch ? TEXT("where the flock saw the player last") : TEXT("the head"), FVector::Dist(Location, Centre) / 100.0f);
 		}
-		else if (StalkLeg == 1 && (FVector::DotProduct(Location - Eye, ViewForward) > 600.0f || Now >= StateUntil))
+		else if (StalkLeg == 1 && (FVector::DotProduct(Location - (bSearch ? Centre : Eye), Forward) > 600.0f || Now >= StateUntil))
 		{
 			if (Mood == EJamFlockMood::Hunting)
 			{
@@ -1804,20 +1889,22 @@ FVector AJamFlyer::DesiredVelocity(const FVector& Location, const FVector& Veloc
 		{
 			break;
 		}
-		const FVector PlayerAt = Target->GetActorLocation();
-		const FVector Axis = Up(PlayerAt);
+		// Over the player (keeping his pace), or the search: over where the flock saw him last, each from its own side.
+		FVector Centre = Target->GetActorLocation(), Pass = ViewForward;
+		const bool bSearch = SearchFrame(Centre, Pass);
+		const FVector Axis = Up(Centre);
 		if (StalkLeg == 0)
 		{
-			const FVector Behind = PlayerAt + Axis * StalkHeightCm - ViewForward * StalkBehindCm;
+			const FVector Behind = Centre + Axis * StalkHeightCm - Pass * StalkBehindCm;
 			Desired = (Behind - Location).GetSafeNormal() * CircleSpeedCm * FMath::Clamp(float(FVector::Dist(Behind, Location)) / 400.0f, 0.4f, 1.0f);
 		}
 		else
 		{
 			// Straight over the head to well ahead: the shadow pass.
-			const FVector Ahead = PlayerAt + Axis * StalkHeightCm * 0.6f + ViewForward * 1500.0f;
+			const FVector Ahead = Centre + Axis * StalkHeightCm * 0.6f + Pass * 1500.0f;
 			Desired = (Ahead - Location).GetSafeNormal() * StalkPassSpeedCm;
 		}
-		Desired += Target->GetVelocity();
+		Desired += bSearch ? FVector::ZeroVector : Target->GetVelocity();
 		break;
 	}
 	case EJamFlyerState::Circle:
