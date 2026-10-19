@@ -681,6 +681,9 @@ private:
 	bool bGrounded = false;
 	float StepTravelCm = 0.0f;
 	double LastGroundedSeconds = -100.0;
+	/** A touchdown whose step waits for the landing's contact (Walk). */
+	double TouchdownSeconds = -100.0;
+	bool bTouchdownStepPending = false;
 	double LastJumpSeconds = -100.0;
 	/** The camera's offset from the body's centre (world space), eased toward the eye height. */
 	FVector EyeOffset = FVector::ZeroVector;

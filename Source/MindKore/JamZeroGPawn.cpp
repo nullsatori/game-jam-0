@@ -929,6 +929,7 @@ void AJamZeroGPawn::HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* Oth
 	}
 	LastThumpSeconds = Now;
 	const bool bFlesh = IsFlesh(Hit);
+	UE_LOG(LogMindKore, Verbose, TEXT("ZeroG pawn %s: crash thump on %s at %.0f cm/s (%s)"), *GetName(), *GetNameSafe(OtherActor), SpeedCm, bFlesh ? TEXT("flesh") : TEXT("not flesh"));
 	if (USoundBase* Sound = bFlesh && FleshCrashSound ? FleshCrashSound.Get() : CrashSound.Get())
 	{
 		UGameplayStatics::PlaySoundAtLocation(this, Sound, Hit.ImpactPoint, FMath::Clamp(SpeedCm / 1000.0f, 0.2f, 1.0f),
@@ -1187,14 +1188,38 @@ void AJamZeroGPawn::Walk(float DeltaSeconds)
 		Tangent += (Slope - Tangent).GetClampedToMaxSize(Accel * DeltaSeconds);
 		// Stuck to the ground: no bounce off the floor or off the curve of the planetoid.
 		Body->SetPhysicsLinearVelocity(Tangent + Ground * FMath::Min(Normal, 0.0f));
-		// Steps: one on touchdown (louder), then one every StepCm walked.
+		// Steps: one on touchdown (louder), then one every StepCm walked. The ground probe finds the
+		// ground before the body meets it, so the touchdown step waits for the contact (the fall into
+		// the ground stopped, at most 0.1 s): a hard landing's crash plays then, and replaces the step.
+		const double Now = GetWorld()->GetTimeSeconds();
 		StepTravelCm += float(Tangent.Size()) * DeltaSeconds;
-		if (bTouchdown || StepTravelCm >= StepCm)
+		if (bTouchdown)
 		{
-			PlayFleshStep(GroundHit, bTouchdown ? StepVolume * 2.0f : StepVolume);
+			TouchdownSeconds = Now;
+			bTouchdownStepPending = true;
 			StepTravelCm = 0.0f;
 		}
-		LastGroundedSeconds = GetWorld()->GetTimeSeconds();
+		if (bTouchdownStepPending)
+		{
+			if (Normal > -100.0f || Now - TouchdownSeconds >= 0.1)
+			{
+				bTouchdownStepPending = false;
+				if (Now - LastThumpSeconds > 0.1)
+				{
+					PlayFleshStep(GroundHit, StepVolume * 2.0f);
+				}
+				else
+				{
+					UE_LOG(LogMindKore, Verbose, TEXT("ZeroG pawn %s: touchdown step skipped, the crash played %.3f s ago"), *GetName(), Now - LastThumpSeconds);
+				}
+			}
+		}
+		else if (StepTravelCm >= StepCm)
+		{
+			PlayFleshStep(GroundHit, StepVolume);
+			StepTravelCm = 0.0f;
+		}
+		LastGroundedSeconds = Now;
 		return;
 	}
 	if (!Wish.IsNearlyZero())
