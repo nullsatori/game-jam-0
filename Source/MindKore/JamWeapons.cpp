@@ -80,6 +80,12 @@ float FJamWeapon::GetActionCycleSeconds() const
 	return Seconds;
 }
 
+bool FJamWeapon::CanLockOpen() const
+{
+	const FRichCurve* Rich = SlideLockTravel.GetRichCurveConst();
+	return Rich && Rich->GetNumKeys() > 0;
+}
+
 UJamWeaponsComponent::UJamWeaponsComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -466,9 +472,9 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	Offset.AddToTranslation(Pose.Place);
 	Offset.AddToTranslation(FVector(-Weapon->ViewKickBackCm * Kick, 0.0f, 0.0f));
 	ViewModel->SetRelativeTransform(Offset);
-	// The moving part runs its cycle along/about the gun's own X.
+	// The moving part runs its cycle along/about the gun's own X (or stands locked open, or runs home on its release).
 	ActionInView->SetRelativeLocationAndRotation(
-		Weapon->ActionPivot + FVector(Weapon->ActionTravelCm * EvalCycle(Weapon->ActionTravel, Since), 0.0f, 0.0f),
+		Weapon->ActionPivot + FVector(Weapon->ActionTravelCm * GetSlideAndHammer(*Weapon, Since).X, 0.0f, 0.0f),
 		FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Weapon->ActionTurnDeg * EvalCycle(Weapon->ActionTurn, Since))));
 	UpdateParts(Weapon, Since);
 	UpdateCycleEvents();
@@ -593,7 +599,9 @@ FString UJamWeaponsComponent::Describe() const
 void UJamWeaponsComponent::Reload()
 {
 	FJamWeapon* Weapon = GetWeapon() ? &Weapons[CurrentWeapon] : nullptr;
-	if (!Weapon || !IsWeaponReady() || Weapon->Ammo >= Weapon->MagazineSize || Weapon->Reserve <= 0 || GetReloadRemaining() > 0.0f)
+	// A magazine seated in a locked gun (an empty reload cut between the seat and the release) needs only the slide stop.
+	const bool bReleaseOnly = Weapon && Weapon->bSlideLocked && Weapon->Ammo > 0;
+	if (!Weapon || !IsWeaponReady() || (!bReleaseOnly && (Weapon->Ammo >= Weapon->MagazineSize || Weapon->Reserve <= 0)) || GetReloadRemaining() > 0.0f)
 	{
 		return;
 	}
@@ -605,7 +613,8 @@ void UJamWeaponsComponent::Reload()
 		return;
 	}
 	const float Seconds = StartReloadTimeline(*Weapon);
-	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: reloading %s, %.2f s"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString(), Seconds);
+	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: reloading %s, %.2f s%s"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString(), Seconds,
+		!bEmptyReload ? TEXT("") : ReloadFromSeconds > 0.0f ? TEXT(" (the slide release only)") : TEXT(" (empty: the slide released at the end)"));
 }
 
 bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, FVector& OutRecoil)
@@ -624,6 +633,15 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	{
 		ReloadEndSeconds = 0.0;
 	}
+	if (Weapon->bSlideLocked)
+	{
+		// Held open by the slide stop: the slide out of battery keeps the disconnector down, so the trigger moves
+		// dead - no shot, no hammer fall and no click (a real USP is silent here). The reload starts, as on empty.
+		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s - the slide is locked open, the trigger is dead"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString());
+		Reload();
+		Weapon->FireReadySince = Weapon->SinceShot + Weapon->FireInterval;
+		return false;
+	}
 	if (Weapon->Ammo <= 0)
 	{
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s is empty"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString());
@@ -635,6 +653,8 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 		return false;
 	}
 	--Weapon->Ammo;
+	// The last round: the empty magazine's follower lifts the slide stop, and this stroke ends locked open (SlideLockTravel).
+	Weapon->bSlideLocked = Weapon->Ammo == 0 && Weapon->CanLockOpen();
 	bReloadQueued = false; // the trigger won over a waiting R
 	// Not before the slide, the pump or the bolt is home again.
 	Weapon->FireReadySince = FMath::Max(Weapon->FireInterval, Weapon->GetActionCycleSeconds());

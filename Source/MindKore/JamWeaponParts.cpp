@@ -47,10 +47,45 @@ namespace
 		return Rich && Rich->GetNumKeys() > 0 ? Rich->GetLastKey().Time : 0.0f;
 	}
 
-	float ReloadDuration(const FJamWeapon& Weapon, int32 Shells)
+	float ReloadDuration(const FJamWeapon& Weapon, int32 Shells, bool bEmpty = false)
 	{
-		// Round by round: the lead in (the gun turns up), the rounds, the lead out.
+		// Round by round: the lead in (the gun turns up), the rounds, the lead out. Empty: the slide released too.
+		if (bEmpty && Weapon.EmptyReloadSeconds > 0.0f)
+		{
+			return Weapon.EmptyReloadSeconds;
+		}
 		return Weapon.ShellMesh ? 2.0f * LastKeyTime(Weapon.ReloadBody) + Shells * Weapon.ReloadSeconds : Weapon.ReloadSeconds;
+	}
+
+	float FirstKeyTime(const FRuntimeFloatCurve& Curve)
+	{
+		const FRichCurve* Rich = Curve.GetRichCurveConst();
+		return Rich && Rich->GetNumKeys() > 0 ? Rich->GetFirstKey().Time : TNumericLimits<float>::Max();
+	}
+
+	float LastKeyValue(const FRuntimeFloatCurve& Curve)
+	{
+		const FRichCurve* Rich = Curve.GetRichCurveConst();
+		return Rich && Rich->GetNumKeys() > 0 ? Rich->GetLastKey().Value : 0.0f;
+	}
+
+	/** The moving part's and the hammer's shares at shot time Since and reload time Reload (< 0: none) of an empty reload or not, the slide locked or not. */
+	FVector2D SlideAndHammerAt(const FJamWeapon& Weapon, float Since, float Reload, bool bEmpty, bool bLocked)
+	{
+		// The release, once the empty reload reaches it, is the truth until the reload ends; before it a locked slide
+		// stands where its last stroke left it; otherwise the shot's cycle.
+		if (bEmpty && Reload >= FirstKeyTime(Weapon.SlideReleaseTravel))
+		{
+			// The hammer rests on the slide's underside: it rides forward with it, to cocked as the slide is home.
+			const float Travel = JamEvalCycle(Weapon.SlideReleaseTravel, Reload);
+			const float LockedTravel = LastKeyValue(Weapon.SlideLockTravel);
+			return FVector2D(Travel, LockedTravel > 0.0f ? LastKeyValue(Weapon.SlideLockHammer) * Travel / LockedTravel : 0.0f);
+		}
+		if (bLocked)
+		{
+			return FVector2D(JamEvalCycle(Weapon.SlideLockTravel, Since), JamEvalCycle(Weapon.SlideLockHammer, Since));
+		}
+		return FVector2D(JamEvalCycle(Weapon.ActionTravel, Since), JamEvalCycle(Weapon.HammerTurn, Since));
 	}
 
 	bool Crossed(float Before, float Now, float At)
@@ -149,6 +184,43 @@ void UJamWeaponsComponent::SetupWeaponParts()
 		{ 0.36f, FVector(0.0f, 0.0f, 70.0f), FRotator(110.0f, 25.0f, -35.0f) },
 		{ 0.71f, FVector(0.0f, 0.0f, -20.0f), FRotator(0.0f, 0.0f, -25.0f) },
 		{ 0.86f, FVector(0.0f, 0.0f, 120.0f), FRotator(-180.0f, 30.0f, 60.0f) } };
+
+	// The slide stop (owner 19.10). The last round's stroke runs as any other into the rear stop (0.035 s)
+	// and off it, but the recoil spring only gets the slide 2 mm forward before the slide stop, lifted by the
+	// empty magazine's follower, catches it in its notch at 0.068 s: a knock and a double rebound (1.5%,
+	// 0.4%), locked at 0.88 of the travel (3.5 cm back, the barrel bare) from 0.105 s. The hammer, shoved
+	// past cocked, follows the slide 0.05 forward and rests on its underside 25 deg back.
+	Pistol.SlideLockTravel = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 70.0f }, { 0.035f, 1.0f, 8.0f, 0.0f }, { 0.05f, 0.96f, -3.0f, -3.0f },
+		{ 0.068f, 0.88f, -9.0f, 2.0f }, { 0.076f, 0.895f, 0.0f, 0.0f }, { 0.085f, 0.88f, -1.0f, 0.5f }, { 0.092f, 0.884f, 0.0f, 0.0f },
+		{ 0.105f, 0.88f, 0.0f, 0.0f } });
+	Pistol.SlideLockHammer = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.012f, 1.0f, 150.0f, 0.0f }, { 0.016f, 1.0f, 0.0f, -80.0f },
+		{ 0.035f, -0.55f, -20.0f, 0.0f }, { 0.05f, -0.55f, 0.0f, 0.0f }, { 0.068f, -0.5f, 3.0f, 0.0f }, { 0.08f, -0.5f, 0.0f, 0.0f } });
+	// The empty reload: the magazine out and in as the tactical one (seated at 0.86 s); the gun stays up,
+	// rolling a little further onto the thumb, which finds the slide stop (0.895 s, the click's touch) and
+	// presses it down at 0.975 s: the slide creeps out of the notch and the spring throws it home, faster and
+	// faster - 3.5 cm in 25 ms (at 60 fps one frame shows it mid-way), into battery at 1.0 s at ~3.2 m/s -
+	// with a double knock (5% at +14 ms, 1.5% at +36 ms, so a 60 fps frame catches each), settled at 1.05 s,
+	// chambering the first round. The gun leaves the reload pose from 0.95 s, the slam kicking it forward and
+	// muzzle down on the way; ready at 1.05 s, as the slide settles home.
+	Pistol.EmptyReloadSeconds = 1.05f;
+	Pistol.SlideReleaseSeconds = 0.975f;
+	Pistol.SlideReleaseTravel = JamMakeCycleCurve({ { 0.955f, 0.88f, 0.0f, 0.0f }, { 0.975f, 0.872f, -0.6f, -14.0f }, { 1.0f, 0.0f, -80.0f, 3.0f },
+		{ 1.014f, 0.05f, 0.0f, 0.0f }, { 1.028f, 0.0f, -4.0f, 1.5f }, { 1.036f, 0.015f, 0.0f, 0.0f }, { 1.05f, 0.0f, 0.0f, 0.0f } });
+	Pistol.EmptyReloadBody = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.03f, 1.0f, 0.0f, 0.0f }, { 0.28f, 1.0f, 0.0f, 0.0f },
+		{ 0.32f, 1.08f, 0.0f, 0.0f }, { 0.58f, 1.08f, 0.0f, 0.0f }, { 0.62f, 0.92f, 0.0f, 0.0f },
+		{ 0.84f, 0.92f, 0.0f, 0.0f }, { 0.88f, 1.0f, 0.0f, 0.6f }, { 0.95f, 1.04f, 0.0f, -2.0f }, { 1.03f, 0.0f, -1.0f, 0.0f } });
+	// The thumb pressing the stop on the frame's left (the gun dips and rolls into it), the slam (forward, muzzle down, a twist).
+	Pistol.SlideReleaseKicks = { { 0.94f, FVector(0.0f, 0.0f, -15.0f), FRotator(0.0f, 0.0f, -20.0f) },
+		{ 1.0f, FVector(80.0f, 0.0f, 20.0f), FRotator(-150.0f, 15.0f, -35.0f) } };
+	// No new recordings (owner 19.10: reuse the pistol's donors). The 1911 hammer take's two ticks, 90 ms apart in
+	// SW_Jam_Hammer_Pistol (0.03 and 0.12 s into the file): the thumb touching the stop, then the stop going down
+	// as the slide runs (0.985 s; started at the seat's frame, so a release-only reload plays it too). The Glock magazine slap (SW_Jam_MagIn_Pistol, its click 0.026 s into the
+	// file) 12% higher - brighter, smaller - lands on the slam at 1.0 s: the seat's hard knock with its sub.
+	Pistol.SlideReleaseSound = Pistol.HammerSound;
+	Pistol.SlideReleaseSoundSeconds = 0.865f;
+	Pistol.SlideHomeSound = Pistol.MagInSound;
+	Pistol.SlideHomeSoundPitch = 1.12f;
+	Pistol.SlideHomeSoundSeconds = 1.0f - 0.026f / 1.12f;
 
 	// Away to the holster on the right hip: a small lift first, then down and right, the
 	// muzzle tipping down ahead of the grip, faster and faster into the holster (gone at
@@ -338,10 +410,29 @@ void UJamWeaponsComponent::MakePartComponents(USceneComponent& Parent)
 float UJamWeaponsComponent::StartReloadTimeline(const FJamWeapon& Weapon)
 {
 	ShellsPlanned = Weapon.ShellMesh ? FMath::Min(Weapon.MagazineSize - Weapon.Ammo, Weapon.Reserve) : 0;
-	const float Seconds = ReloadDuration(Weapon, ShellsPlanned);
-	ReloadStartSeconds = GetWorld()->GetTimeSeconds();
+	bEmptyReload = Weapon.bSlideLocked && Weapon.EmptyReloadSeconds > 0.0f;
+	// Locked with rounds in: an empty reload was cut after its seat (a switch). The magazine is in - only the release
+	// is left, so the timeline starts at the seat; its events up to there are not crossed again (PrevReloadTime).
+	ReloadFromSeconds = bEmptyReload && Weapon.Ammo > 0 ? Weapon.MagInSoundSeconds : 0.0f;
+	if (ReloadFromSeconds > 0.0f)
+	{
+		PrevReloadTime = ReloadFromSeconds;
+	}
+	const float Seconds = ReloadDuration(Weapon, ShellsPlanned, bEmptyReload);
+	ReloadStartSeconds = GetWorld()->GetTimeSeconds() - ReloadFromSeconds;
 	ReloadEndSeconds = ReloadStartSeconds + Seconds;
-	return Seconds;
+	return Seconds - ReloadFromSeconds;
+}
+
+bool UJamWeaponsComponent::IsEmptyReload(const FJamWeapon& Weapon) const
+{
+	// A held still shows the reload the gun's state asks for; live, the one that was started.
+	return CVarReloadPoseAt.GetValueOnGameThread() >= 0.0f ? Weapon.bSlideLocked && Weapon.EmptyReloadSeconds > 0.0f : bEmptyReload;
+}
+
+FVector2D UJamWeaponsComponent::GetSlideAndHammer(const FJamWeapon& Weapon, float Since) const
+{
+	return SlideAndHammerAt(Weapon, Since, GetReloadTime(), IsEmptyReload(Weapon), Weapon.bSlideLocked);
 }
 
 float UJamWeaponsComponent::GetReloadTime() const
@@ -355,8 +446,10 @@ float UJamWeaponsComponent::GetReloadTime() const
 }
 
 void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State, float Since0, float Since1, float Reload0, float Reload1,
-	float ReloadLength, int32 Shells, float DeltaTime, const FSwitchSpan& Switch) const
+	float ReloadLength, int32 Shells, float DeltaTime, const FSwitchSpan& Switch, bool bEmpty) const
 {
+	// The empty reload holds the gun up for the slide release on its own stages.
+	const FRuntimeFloatCurve& ReloadBody = bEmpty && Weapon.EmptyReloadBody.GetRichCurveConst()->GetNumKeys() > 0 ? Weapon.EmptyReloadBody : Weapon.ReloadBody;
 	// How far toward the put-away pose at switch time W (each channel its own W).
 	const auto Away = [&Weapon, &Switch](float W)
 	{
@@ -395,12 +488,12 @@ void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State,
 		}
 		return Off <= Mid ? Weapon.StowMidCm * (Off / Mid) : FMath::Lerp(Weapon.StowMidCm, Weapon.StowOffsetCm, (Off - Mid) / (1.0f - Mid));
 	};
-	const auto Goal = [&Weapon, ReloadLength, &Away, &TurnAway, &AwayPlace](int32 Channel, float S, float R, float W)
+	const auto Goal = [&Weapon, &ReloadBody, ReloadLength, &Away, &TurnAway, &AwayPlace](int32 Channel, float S, float R, float W)
 	{
 		const float Off = Channel < 3 ? Away(W) : TurnAway(W);
 		const float Shot = JamEvalCycle(Weapon.ActionBody, S);
 		// The reload's stages, stepping out over its last 30 ms.
-		const float Reload = R >= 0.0f ? JamEvalCycle(Weapon.ReloadBody, R) * FMath::Clamp((ReloadLength - R) / 0.03f, 0.0f, 1.0f) : 0.0f;
+		const float Reload = R >= 0.0f ? JamEvalCycle(ReloadBody, R) * FMath::Clamp((ReloadLength - R) / 0.03f, 0.0f, 1.0f) : 0.0f;
 		if (Channel < 3)
 		{
 			return Weapon.ActionBodyOffsetCm[Channel] * Shot + Weapon.ReloadBodyOffsetCm[Channel] * Reload + AwayPlace(Off)[Channel];
@@ -462,6 +555,13 @@ void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State,
 			for (const FJamPoseKick& Each : Weapon.ReloadKicks)
 			{
 				if (Crossed(R0, R1, Each.Time))
+				{
+					Kick(Each);
+				}
+			}
+			for (const FJamPoseKick& Each : Weapon.SlideReleaseKicks)
+			{
+				if (bEmpty && Crossed(R0, R1, Each.Time))
 				{
 					Kick(Each);
 				}
@@ -561,7 +661,8 @@ void UJamWeaponsComponent::UpdatePose(const FJamWeapon& Weapon, float DeltaTime)
 		}
 		else
 		{
-			StepPose(Weapon, Pose, 1000.0f, 1000.0f, 0.0f, ReloadAt, ReloadDuration(Weapon, PoseShells), PoseShells, ReloadAt);
+			const bool bEmpty = IsEmptyReload(Weapon);
+			StepPose(Weapon, Pose, 1000.0f, 1000.0f, 0.0f, ReloadAt, ReloadDuration(Weapon, PoseShells, bEmpty), PoseShells, ReloadAt, FSwitchSpan(), bEmpty);
 		}
 		PosePrevSince = Weapon.SinceShot;
 		PosePrevReload = -1.0f;
@@ -576,16 +677,16 @@ void UJamWeaponsComponent::UpdatePose(const FJamWeapon& Weapon, float DeltaTime)
 	const float Reload = ReloadEndSeconds > 0.0 ? float(GetWorld()->GetTimeSeconds() - ReloadStartSeconds) : -1.0f;
 	if (Reload >= 0.0f && (PosePrevReload < 0.0f || Reload < PosePrevReload))
 	{
-		PosePrevReload = 0.0f;
+		PosePrevReload = ReloadFromSeconds; // a release-only reload starts at the seat: the knocks before it are not replayed
 	}
 	StepPose(Weapon, Pose, PosePrevSince, Since, PosePrevReload, Reload, float(ReloadEndSeconds - ReloadStartSeconds), ShellsPlanned, DeltaTime,
-		PoseSwitch);
+		PoseSwitch, bEmptyReload);
 	PosePrevSince = Since;
 	PosePrevReload = Reload;
 }
 
 void UJamWeaponsComponent::TracePose(int32 Weapon, bool bReload, int32 Shells, float Seconds, float Step,
-	TArray<FVector>& OutPlace, TArray<FVector>& OutTurn, int32 SwitchPhase) const
+	TArray<FVector>& OutPlace, TArray<FVector>& OutTurn, int32 SwitchPhase, bool bEmpty) const
 {
 	if (!Weapons.IsValidIndex(Weapon) || Step <= 0.0f)
 	{
@@ -593,7 +694,7 @@ void UJamWeaponsComponent::TracePose(int32 Weapon, bool bReload, int32 Shells, f
 	}
 	const FJamWeapon& Gun = Weapons[Weapon];
 	FPoseState State;
-	const float Length = ReloadDuration(Gun, Shells);
+	const float Length = ReloadDuration(Gun, Shells, bEmpty);
 	if (SwitchPhase == 2)
 	{
 		// A draw starts from the put-away pose.
@@ -614,7 +715,7 @@ void UJamWeaponsComponent::TracePose(int32 Weapon, bool bReload, int32 Shells, f
 		}
 		else if (bReload)
 		{
-			StepPose(Gun, State, 1000.0f, 1000.0f, T, T + Step, Length, Shells, Step);
+			StepPose(Gun, State, 1000.0f, 1000.0f, T, T + Step, Length, Shells, Step, FSwitchSpan(), bEmpty);
 		}
 		else
 		{
@@ -808,7 +909,7 @@ void UJamWeaponsComponent::UpdateParts(const FJamWeapon* Weapon, float SinceShot
 	}
 	SetPart(HammerInView, Weapon->HammerMesh, true);
 	HammerInView->SetRelativeLocationAndRotation(Weapon->HammerPivot,
-		FQuat(FVector::RightVector, FMath::DegreesToRadians(Weapon->HammerTurnDeg * JamEvalCycle(Weapon->HammerTurn, SinceShot))));
+		FQuat(FVector::RightVector, FMath::DegreesToRadians(Weapon->HammerTurnDeg * GetSlideAndHammer(*Weapon, SinceShot).Y)));
 
 	const float Time = GetReloadTime();
 	const bool bMagGone = Time >= Weapon->MagEjectSeconds && Time < Weapon->MagInSeconds;
@@ -950,6 +1051,26 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 		Weapon.Reserve -= Moved;
 		Play(Weapon.MagInSound);
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s magazine in, %d/%d"), *GetNameSafe(GetOwner()), *Weapon.Name.ToString(), Weapon.Ammo, Weapon.Reserve);
+	}
+	if (bEmptyReload)
+	{
+		// The slide stop: the thumb on it, the slide let go (free from here, whatever comes next), the slam into battery.
+		// The counting rule stays: the magazine is the gun's rounds (no round in the chamber is counted).
+		if (Crossed(PrevReloadTime, Time, Weapon.SlideReleaseSoundSeconds))
+		{
+			Play(Weapon.SlideReleaseSound);
+		}
+		if (Crossed(PrevReloadTime, Time, Weapon.SlideReleaseSeconds))
+		{
+			Weapon.bSlideLocked = false;
+			UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s slide released, %d/%d"), *GetNameSafe(GetOwner()), *Weapon.Name.ToString(), Weapon.Ammo, Weapon.Reserve);
+		}
+		if (Weapon.SlideHomeSound && Crossed(PrevReloadTime, Time, Weapon.SlideHomeSoundSeconds))
+		{
+			UGameplayStatics::PlaySound2D(this, Weapon.SlideHomeSound, 1.0f, Weapon.SlideHomeSoundPitch);
+			UE_LOG(LogMindKore, Log, TEXT("Weapon %s: sound %s at pitch %.2f (the slide home)"), *GetNameSafe(GetOwner()), *Weapon.SlideHomeSound->GetName(),
+				Weapon.SlideHomeSoundPitch);
+		}
 	}
 	if (Weapon.ShellMesh)
 	{
@@ -1119,9 +1240,10 @@ namespace
 
 	/**
 	 * jam.Weapons.PoseTrace: the pose springs and the part curves of every gun from rest,
-	 * every 10 ms through a shot's cycle and a reload (two rounds for the pump gun), as
-	 * log lines "Pose trace: <gun> <cycle|reload> t=.. place=(x,y,z) turn=(p,y,r) part=(a,b,c)"
-	 * (part: cycle - travel, turn, hammer; reload - magazine travel, arc, turn or round along, arc, turn).
+	 * every 10 ms through a shot's cycle and a reload (two rounds for the pump gun) and the
+	 * USP's empty reload, as log lines "Pose trace: <gun> <cycle|reload|empty> t=.. place=(x,y,z)
+	 * turn=(p,y,r) part=(a,b,c)" (part: cycle - travel, turn, hammer; reload - magazine travel,
+	 * arc, turn or round along, arc, turn; empty - slide travel, hammer, magazine travel).
 	 */
 	void RunPoseTrace(UWorld* World)
 	{
@@ -1165,6 +1287,21 @@ namespace
 					UE_LOG(LogMindKore, Log, TEXT("Pose trace: %s %s t=%.2f place=(%.3f,%.3f,%.3f) turn=(%.3f,%.3f,%.3f) part=(%.4f,%.4f,%.4f)"),
 						Names[Gun], bReload ? TEXT("reload") : TEXT("cycle"), T, Place[Index].X, Place[Index].Y, Place[Index].Z,
 						Turn[Index].X, Turn[Index].Y, Turn[Index].Z, Part.X, Part.Y, Part.Z);
+				}
+			}
+			if (Weapon.EmptyReloadSeconds > 0.0f)
+			{
+				// The empty reload: part = slide travel, hammer (both shares, as GetSlideAndHammer poses them), magazine travel.
+				TArray<FVector> Place, Turn;
+				Guns->TracePose(Gun, true, 0, ReloadDuration(Weapon, 0, true) + 0.4f, 0.01f, Place, Turn, 0, true);
+				for (int32 Index = 0; Index < Place.Num(); ++Index)
+				{
+					const float T = Index * 0.01f;
+					// Locked since long before; past the reload's end the slide is home (its last key).
+					const FVector2D Part = SlideAndHammerAt(Weapon, 1000.0f, T, true, true);
+					UE_LOG(LogMindKore, Log, TEXT("Pose trace: %s empty t=%.2f place=(%.3f,%.3f,%.3f) turn=(%.3f,%.3f,%.3f) part=(%.4f,%.4f,%.4f)"),
+						Names[Gun], T, Place[Index].X, Place[Index].Y, Place[Index].Z, Turn[Index].X, Turn[Index].Y, Turn[Index].Z,
+						Part.X, Part.Y, JamEvalCycle(Weapon.MagTravel, T));
 				}
 			}
 		}
@@ -1700,6 +1837,341 @@ namespace
 		});
 		After(At += 2.0f, []() { UE_LOG(LogMindKore, Log, TEXT("Switch probe: all done")); });
 	}
+
+	/**
+	 * jam.Weapons.SlideFrames: the USP's slide stop in first person, stills every 33 ms (HighResShot; needs a real
+	 * RHI), held with the slide locked: the last round's stroke locking it open (jam.Weapons.PoseAt,
+	 * JamSlide_lock_<ms>.png, 0-0.3 s) and the empty reload around the release (jam.Weapons.ReloadPoseAt,
+	 * JamSlide_release_<ms>.png, 0.8-1.25 s). The gun is given back as it was.
+	 */
+	void RunSlideFrames(UWorld* World)
+	{
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AJamZeroGPawn* Pawn = Controller ? Cast<AJamZeroGPawn>(Controller->GetPawn()) : nullptr;
+		IConsoleVariable* ShotAt = IConsoleManager::Get().FindConsoleVariable(TEXT("jam.Weapons.PoseAt"));
+		IConsoleVariable* ReloadAt = IConsoleManager::Get().FindConsoleVariable(TEXT("jam.Weapons.ReloadPoseAt"));
+		if (!Pawn || !ShotAt || !ReloadAt)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Slide frames: needs the AJamZeroGPawn"));
+			return;
+		}
+		FVector Target = Pawn->GetActorLocation() + FVector(600.0f, 0.0f, 0.0f);
+		FVector Stand = Pawn->GetActorLocation();
+		if (TActorIterator<AJamLivingWall> Wall(World); Wall)
+		{
+			Target = Wall->GetActorLocation();
+			Stand = Target + Wall->GetFrontNormal() * 600.0f;
+		}
+		const auto Hold = [Pawn, Controller, Stand, Target]()
+		{
+			Pawn->Body->SetWorldLocation(Stand, false, nullptr, ETeleportType::TeleportPhysics);
+			Pawn->Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+			Controller->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());
+		};
+		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
+		{
+			FTimerHandle Handle;
+			Pawn->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(Pawn, MoveTemp(Step)), Seconds, false);
+		};
+		float At = 8.0f; // shaders may still compile
+		After(At, [Pawn, Hold]()
+		{
+			Pawn->Guns->UnlockWeapon(0);
+			Pawn->Guns->FinishSwitch();
+			Hold();
+			FJamWeapon& Usp = Pawn->Guns->Weapons[0];
+			Usp.Ammo = 0;
+			Usp.bSlideLocked = true;
+		});
+		At += 1.0f;
+		for (const bool bReload : { false, true })
+		{
+			const float From = bReload ? 0.8f : 0.0f;
+			const float To = bReload ? 1.25f : 0.3f;
+			for (float T = From; T <= To + KINDA_SMALL_NUMBER; T += 1.0f / 30.0f)
+			{
+				After(At, [Hold, ShotAt, ReloadAt, bReload, T]()
+				{
+					Hold();
+					ShotAt->Set(bReload ? -1.0f : T, ECVF_SetByCode);
+					ReloadAt->Set(bReload ? T : -1.0f, ECVF_SetByCode);
+				});
+				After(At + 0.12f, [Pawn, Controller, bReload, T]()
+				{
+					const UJamWeaponsComponent* Guns = Pawn->Guns;
+					const FVector2D Part = Guns->GetSlideAndHammer(Guns->Weapons[0], T);
+					UE_LOG(LogMindKore, Log, TEXT("Slide frames: %s %.3f s - slide %.3f hammer %.3f"), bReload ? TEXT("release") : TEXT("lock"), T, Part.X, Part.Y);
+					Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=JamSlide_%s_%04d"), bReload ? TEXT("release") : TEXT("lock"),
+						FMath::RoundToInt(T * 1000.0f)));
+				});
+				At += 0.25f;
+			}
+		}
+		After(At, [Pawn, Hold, ShotAt, ReloadAt]()
+		{
+			ShotAt->Set(-1.0f, ECVF_SetByCode);
+			ReloadAt->Set(-1.0f, ECVF_SetByCode);
+			FJamWeapon& Usp = Pawn->Guns->Weapons[0];
+			Usp.Ammo = Usp.MagazineSize;
+			Usp.bSlideLocked = false;
+			Hold();
+			UE_LOG(LogMindKore, Log, TEXT("Slide frames: done"));
+		});
+	}
+
+	FAutoConsoleCommandWithWorld GSlideFrames(
+		TEXT("jam.Weapons.SlideFrames"),
+		TEXT("The USP's slide locking open on the last round and released in the empty reload, stills every 33 ms (HighResShot; needs a real RHI)."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunSlideFrames));
+
+	/**
+	 * jam.Weapons.SlideProbe: the USP's slide stop live (runs headless). The last round locks the slide open
+	 * (logged every frame), a trigger pull does nothing (no shot, no hammer, no case; the reload starts as on
+	 * empty), a switch away and back, a hull tool and back, unarmed and back - still locked; the empty reload
+	 * releases the slide (every frame logged; refused before its end, fires after); a tactical reload never moves
+	 * the slide; an empty reload cut between the seat and the release leaves it locked with the magazine in, and
+	 * R then releases it only. Each check a PASS / FAIL line; the last "Slide probe: all done".
+	 */
+	void RunSlideProbe(UWorld* World)
+	{
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AJamZeroGPawn* Pawn = Controller ? Cast<AJamZeroGPawn>(Controller->GetPawn()) : nullptr;
+		if (!Pawn)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Slide probe: needs the AJamZeroGPawn"));
+			return;
+		}
+		UJamWeaponsComponent* Guns = Pawn->Guns;
+		for (int32 Gun = 0; Gun < Guns->Weapons.Num(); ++Gun)
+		{
+			Guns->UnlockWeapon(Gun);
+		}
+		Guns->SelectWeapon(0);
+		Guns->FinishSwitch();
+		struct FProbe
+		{
+			double Start = 0.0;
+			double ReloadAt = 0.0;
+			int32 Checks = 0;
+			int32 Failed = 0;
+			int32 Cases = 0;
+			int32 Reserve = 0;
+			int32 Debris = 0;
+			FVector2D Part = FVector2D::ZeroVector;
+			float SinceShot = 0.0f;
+			bool bTrack = false;
+			bool bWasLocked = false;
+			float ReleasedAt = -1.0f;
+			float MaxSlide = 0.0f;
+			uint64 Frame = 0;
+		};
+		TSharedRef<FProbe> Probe = MakeShared<FProbe>();
+		Probe->Start = World->GetTimeSeconds();
+		// What the view shows: the slide's share of its travel and the hammer's of its turn, read off the components.
+		const auto Shown = [Guns]()
+		{
+			const FJamWeapon& Usp = Guns->Weapons[0];
+			const FVector Hammer = Guns->HammerInView->GetRelativeRotation().Quaternion().GetAxisX();
+			return FVector2D(Guns->ActionInView->GetRelativeLocation().X / Usp.ActionTravelCm,
+				FMath::RadiansToDegrees(FMath::Atan2(-Hammer.Z, Hammer.X)) / Usp.HammerTurnDeg);
+		};
+		const auto Check = [Probe](const FString& What, bool bPass)
+		{
+			++Probe->Checks;
+			Probe->Failed += bPass ? 0 : 1;
+			UE_LOG(LogMindKore, Log, TEXT("Slide probe: %s: %s"), *What, bPass ? TEXT("PASS") : TEXT("FAIL"));
+		};
+		const auto Shoot = [Pawn, Guns](const TCHAR* What)
+		{
+			const bool bFired = Pawn->Fire();
+			Pawn->Body->SetPhysicsLinearVelocity(FVector::ZeroVector); // stay put
+			UE_LOG(LogMindKore, Log, TEXT("Slide probe: %s - %s -> %s"), What, bFired ? TEXT("fired") : TEXT("refused"), *Guns->Describe());
+			return bFired;
+		};
+		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
+		{
+			FTimerHandle Handle;
+			Pawn->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(Pawn, MoveTemp(Step)), Seconds, false);
+		};
+		FTimerHandle Every;
+		Pawn->GetWorldTimerManager().SetTimer(Every, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Guns, Probe, Shown]()
+		{
+			const FJamWeapon& Usp = Guns->Weapons[0];
+			const double Now = Pawn->GetWorld()->GetTimeSeconds();
+			const float Reload = Probe->ReloadAt > 0.0 && Guns->GetReloadRemaining() > 0.0f ? float(Now - Probe->ReloadAt) : -1.0f;
+			if (Probe->bWasLocked && !Usp.bSlideLocked && Reload >= 0.0f && Probe->ReleasedAt < 0.0f)
+			{
+				Probe->ReleasedAt = Reload;
+			}
+			Probe->bWasLocked = Usp.bSlideLocked;
+			// A 1 ms timer catches up several times a frame: one line per frame.
+			if (!Probe->bTrack || Probe->Frame == GFrameCounter)
+			{
+				return;
+			}
+			Probe->Frame = GFrameCounter;
+			const FVector2D Part = Shown();
+			Probe->MaxSlide = FMath::Max(Probe->MaxSlide, FMath::Abs(float(Part.X)));
+			UE_LOG(LogMindKore, Log, TEXT("Slide probe: t=%.3f since=%.3f reload=%.3f slide=%.4f hammer=%.4f locked=%d ammo=%d ready=%d"), float(Now - Probe->Start),
+				FMath::Min(Usp.SinceShot, 99.0f), Reload, Part.X, Part.Y, Usp.bSlideLocked ? 1 : 0, Usp.Ammo, Guns->IsWeaponReady() && Guns->GetReloadRemaining() <= 0.0f ? 1 : 0);
+		}), 0.001f, true);
+
+		const auto Locked = [Guns, Shown](float Slide)
+		{
+			const FJamWeapon& Usp = Guns->Weapons[0];
+			const FVector2D Part = Shown();
+			return Usp.bSlideLocked && Usp.Ammo == 0 && FMath::Abs(Part.X - Slide) < 0.002f && FMath::Abs(Part.Y - LastKeyValue(Usp.SlideLockHammer)) < 0.01f;
+		};
+		const float LockedSlide = LastKeyValue(Guns->Weapons[0].SlideLockTravel);
+		// The magazine emptied: the last round locks the slide open.
+		After(0.1f, [Guns, Probe]() { Guns->Weapons[0].Ammo = 2; Probe->Cases = Guns->GetCasesThrown(); });
+		After(0.2f, [Shoot]() { Shoot(TEXT("second to last round")); });
+		After(0.5f, [Shoot, Probe]() { Probe->bTrack = true; Shoot(TEXT("last round")); });
+		After(0.75f, [Probe]() { Probe->bTrack = false; });
+		After(0.9f, [Guns, Probe, Check, Locked, Shown, LockedSlide]()
+		{
+			const FVector2D Part = Shown();
+			Check(FString::Printf(TEXT("the last round locks the slide open - slide %.3f (expected %.3f), hammer %.3f (cocked back), %s, %d case(s) (expected 2)"),
+				Part.X, LockedSlide, Part.Y, *Guns->Describe(), Guns->GetCasesThrown() - Probe->Cases),
+				Locked(LockedSlide) && Guns->Describe().Contains(TEXT(" 0/")) && Guns->GetCasesThrown() - Probe->Cases == 2);
+		});
+		// The trigger with the slide locked: nothing - no shot, no hammer, no case (the reload starts, as on empty).
+		After(1.0f, [Pawn, Guns, Probe, Check, Shoot, Locked, Shown, LockedSlide]()
+		{
+			Probe->Cases = Guns->GetCasesThrown();
+			Probe->Part = Shown();
+			Probe->SinceShot = Guns->Weapons[0].SinceShot;
+			Probe->Debris = Guns->GetDebrisCount();
+			const bool bFired = Shoot(TEXT("trigger pulled with the slide locked"));
+			Check(FString::Printf(TEXT("trigger with the slide locked refused - rounds in flight %d, auto reload %s"), Guns->GetRoundsInFlight(),
+				Guns->GetReloadRemaining() > 0.0f ? TEXT("started") : TEXT("not started")),
+				!bFired && Guns->GetRoundsInFlight() == 0 && Guns->Weapons[0].SinceShot >= Probe->SinceShot);
+		});
+		After(1.05f, [Guns, Probe, Check, Shown, Locked, LockedSlide]()
+		{
+			const FVector2D Part = Shown();
+			Check(FString::Printf(TEXT("no hammer fall, no case - hammer %.3f -> %.3f, %d case(s)"), Probe->Part.Y, Part.Y, Guns->GetCasesThrown() - Probe->Cases),
+				Locked(LockedSlide) && FMath::Abs(Part.Y - Probe->Part.Y) < 0.001f && Guns->GetCasesThrown() == Probe->Cases);
+		});
+		// Away and back (the auto reload abandoned before the magazine drops), a hull tool and back, unarmed and back.
+		After(1.1f, [Guns]() { Guns->SelectWeapon(1); });
+		After(2.6f, [Guns]() { Guns->SelectWeapon(0); });
+		After(3.6f, [Guns, Probe, Check, Shown, Locked, LockedSlide]()
+		{
+			Check(FString::Printf(TEXT("switched to the shotgun and back - slide %.3f, %s, no magazine dropped (%d)"), Shown().X, *Guns->Describe(),
+				Guns->GetDebrisCount() - Probe->Debris), Locked(LockedSlide) && Guns->GetDebrisCount() == Probe->Debris && Guns->IsWeaponReady());
+		});
+		After(3.8f, [Pawn]() { Pawn->SetHands(EJamHands::Tool, EJamHullTool::Strap); });
+		After(4.8f, [Pawn]() { Pawn->SetHands(EJamHands::Gun); });
+		After(5.8f, [Guns, Check, Shown, Locked, LockedSlide]()
+		{
+			Check(FString::Printf(TEXT("put away for a hull tool and drawn - slide %.3f hammer %.3f"), Shown().X, Shown().Y), Locked(LockedSlide) && Guns->IsWeaponReady());
+		});
+		After(5.9f, [Pawn]() { Pawn->SetHands(EJamHands::Held); });
+		After(6.5f, [Pawn]() { Pawn->SetHands(EJamHands::Gun); });
+		After(7.5f, [Guns, Check, Shown, Locked, LockedSlide]()
+		{
+			Check(FString::Printf(TEXT("unarmed and drawn - slide %.3f hammer %.3f"), Shown().X, Shown().Y), Locked(LockedSlide) && Guns->IsWeaponReady());
+		});
+		// The empty reload: the magazine, then the slide released; the gun fires once it is through.
+		After(7.6f, [Pawn, Guns, Probe]()
+		{
+			Probe->Reserve = Guns->Weapons[0].Reserve;
+			Probe->ReloadAt = Pawn->GetWorld()->GetTimeSeconds();
+			Probe->ReleasedAt = -1.0f;
+			Probe->bTrack = true;
+			Guns->Reload();
+			UE_LOG(LogMindKore, Log, TEXT("Slide probe: R with the slide locked - %.3f s to go"), Guns->GetReloadRemaining());
+		});
+		After(7.6f + 1.02f, [Shoot, Check]() { Check(TEXT("a shot after the slam, before the reload's end, refused"), !Shoot(TEXT("1.02 s into the empty reload"))); });
+		After(7.6f + 1.065f, [Guns, Probe, Check, Shown]()
+		{
+			const FJamWeapon& Usp = Guns->Weapons[0];
+			Check(FString::Printf(TEXT("empty reload - slide released %.3f s in (expected %.2f), slide now %.4f, %d/%d (expected %d/%d)"), Probe->ReleasedAt,
+				Usp.SlideReleaseSeconds, Shown().X, Usp.Ammo, Usp.Reserve, Usp.MagazineSize, Probe->Reserve - Usp.MagazineSize),
+				!Usp.bSlideLocked && FMath::Abs(Probe->ReleasedAt - Usp.SlideReleaseSeconds) < 1.0f / 60.0f + 0.001f && FMath::Abs(Shown().X) < 0.001f
+				&& Usp.Ammo == Usp.MagazineSize && Usp.Reserve == Probe->Reserve - Usp.MagazineSize && Guns->GetReloadRemaining() <= 0.0f);
+		});
+		After(7.6f + 1.08f, [Probe, Shoot, Check]()
+		{
+			Probe->bTrack = false;
+			Check(TEXT("a shot after the empty reload"), Shoot(TEXT("after the empty reload")));
+		});
+		After(7.6f + 1.4f, [Guns, Check, Shown]()
+		{
+			Check(FString::Printf(TEXT("the slide cycles as before after it - slide %.4f, locked %d"), Shown().X, Guns->Weapons[0].bSlideLocked ? 1 : 0),
+				!Guns->Weapons[0].bSlideLocked && FMath::Abs(Shown().X) < 0.001f);
+		});
+		// The tactical reload (rounds left, the slide forward): as before, no release.
+		After(9.5f, [Guns, Probe]()
+		{
+			Guns->Weapons[0].Ammo = 5;
+			Probe->MaxSlide = 0.0f;
+			Probe->bTrack = true;
+			Guns->Reload();
+			UE_LOG(LogMindKore, Log, TEXT("Slide probe: tactical R at 5 rounds - %.3f s to go"), Guns->GetReloadRemaining());
+			Probe->Part.X = Guns->GetReloadRemaining();
+		});
+		After(9.5f + 1.1f, [Guns, Probe, Check]()
+		{
+			Probe->bTrack = false;
+			const FJamWeapon& Usp = Guns->Weapons[0];
+			Check(FString::Printf(TEXT("tactical reload %.3f s (expected %.2f), the slide's largest share %.4f (expected 0), %d rounds, locked %d"), Probe->Part.X,
+				Usp.ReloadSeconds, Probe->MaxSlide, Usp.Ammo, Usp.bSlideLocked ? 1 : 0),
+				FMath::IsNearlyEqual(float(Probe->Part.X), Usp.ReloadSeconds, 0.001f) && Probe->MaxSlide < 0.001f && Usp.Ammo == Usp.MagazineSize && !Usp.bSlideLocked);
+		});
+		// An empty reload cut between the seat and the release: locked with the magazine in; R releases it only.
+		After(11.0f, [Guns, Shoot]() { Guns->Weapons[0].Ammo = 1; Shoot(TEXT("last round again")); });
+		After(11.4f, [Pawn, Guns, Probe, Shoot]()
+		{
+			Probe->Reserve = Guns->Weapons[0].Reserve;
+			Probe->ReloadAt = Pawn->GetWorld()->GetTimeSeconds();
+			Shoot(TEXT("trigger with the slide locked (the auto reload)"));
+		});
+		After(11.4f + 0.92f, [Guns, Probe]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Slide probe: 0.92 s into the empty reload (seated, not released), the shotgun picked - %s"), *Guns->Describe());
+			Guns->SelectWeapon(1);
+		});
+		After(13.0f, [Guns]() { Guns->SelectWeapon(0); });
+		After(14.0f, [Guns, Probe, Check, Shown, LockedSlide]()
+		{
+			const FJamWeapon& Usp = Guns->Weapons[0];
+			Probe->Debris = Guns->GetDebrisCount();
+			Check(FString::Printf(TEXT("cut after the seat - locked %d, slide %.3f, %d/%d (expected 12/%d)"), Usp.bSlideLocked ? 1 : 0, Shown().X, Usp.Ammo, Usp.Reserve,
+				Probe->Reserve - Usp.MagazineSize), Usp.bSlideLocked && FMath::Abs(Shown().X - LockedSlide) < 0.002f && Usp.Ammo == Usp.MagazineSize
+				&& Usp.Reserve == Probe->Reserve - Usp.MagazineSize);
+		});
+		After(14.1f, [Pawn, Guns, Probe]()
+		{
+			Probe->Reserve = Guns->Weapons[0].Reserve;
+			Probe->ReloadAt = Pawn->GetWorld()->GetTimeSeconds();
+			Probe->Part.X = 0.0f;
+			Guns->Reload();
+			Probe->Part.X = Guns->GetReloadRemaining();
+			UE_LOG(LogMindKore, Log, TEXT("Slide probe: R with a magazine in and the slide locked - %.3f s to go"), Probe->Part.X);
+		});
+		After(14.1f + 0.3f, [Guns, Probe, Check, Shown]()
+		{
+			const FJamWeapon& Usp = Guns->Weapons[0];
+			const float Expected = Usp.EmptyReloadSeconds - Usp.MagInSoundSeconds;
+			Check(FString::Printf(TEXT("the release only - %.3f s (expected %.2f), slide %.4f, %d/%d (unchanged), %d magazine(s) dropped"), Probe->Part.X, Expected,
+				Shown().X, Usp.Ammo, Usp.Reserve, Guns->GetDebrisCount() - Probe->Debris),
+				FMath::IsNearlyEqual(float(Probe->Part.X), Expected, 0.001f) && !Usp.bSlideLocked && FMath::Abs(Shown().X) < 0.001f && Usp.Ammo == Usp.MagazineSize
+				&& Usp.Reserve == Probe->Reserve && Guns->GetDebrisCount() == Probe->Debris);
+		});
+		After(14.5f, [Shoot, Check]() { Check(TEXT("a shot after the release"), Shoot(TEXT("after the release only"))); });
+		After(15.0f, [Probe]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Slide probe: %d checks, %d failed"), Probe->Checks, Probe->Failed);
+			UE_LOG(LogMindKore, Log, TEXT("Slide probe: all done"));
+		});
+	}
+
+	FAutoConsoleCommandWithWorld GSlideProbe(
+		TEXT("jam.Weapons.SlideProbe"),
+		TEXT("The USP's slide stop live: locked open on the last round, a dead trigger, switches, the empty reload's release, the tactical reload unchanged (PASS / FAIL)."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunSlideProbe));
 
 	FAutoConsoleCommandWithWorld GSwitchProbe(
 		TEXT("jam.Weapons.SwitchProbe"),

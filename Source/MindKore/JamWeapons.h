@@ -315,6 +315,65 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Pose")
 	TArray<FJamPoseKick> RoundKicks;
 
+	/**
+	 * The slide stop (owner 19.10: «затворная задержка»). A gun with keys here locks its action open on the
+	 * last round: that shot's stroke runs SlideLockTravel / SlideLockHammer (seconds since the shot, shares
+	 * of ActionTravelCm / HammerTurnDeg; their last keys hold) instead of ActionTravel / HammerTurn, and the
+	 * part stays back - the trigger does nothing - until a reload. With the slide locked that is the empty
+	 * reload, EmptyReloadSeconds long: the magazine as in the tactical one, then the slide released.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|SlideLock")
+	FRuntimeFloatCurve SlideLockTravel;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|SlideLock")
+	FRuntimeFloatCurve SlideLockHammer;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|SlideLock", meta = (ClampMin = "0.0"))
+	float EmptyReloadSeconds = 0.0f;
+
+	/**
+	 * Seconds into the empty reload -> share of ActionTravelCm, from its first key on (it starts at the
+	 * locked share): the slide running home. The hammer, resting on the slide, rides forward with it to
+	 * cocked. At SlideReleaseSeconds the slide stop is down: the slide is free (no longer locked).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|SlideLock")
+	FRuntimeFloatCurve SlideReleaseTravel;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|SlideLock", meta = (ClampMin = "0.0"))
+	float SlideReleaseSeconds = 0.0f;
+
+	/** The gun in the empty reload, instead of ReloadBody (the same stages, then held for the thumb and out with the slam). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|SlideLock")
+	FRuntimeFloatCurve EmptyReloadBody;
+
+	/** Knocks on the pose springs in the empty reload, on top of ReloadKicks (the thumb on the slide stop, the slam). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|SlideLock")
+	TArray<FJamPoseKick> SlideReleaseKicks;
+
+	/** The slide stop pressed, started at SlideReleaseSoundSeconds into the empty reload. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|SlideLock")
+	TObjectPtr<USoundBase> SlideReleaseSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|SlideLock", meta = (ClampMin = "0.0"))
+	float SlideReleaseSoundSeconds = 0.0f;
+
+	/** The slide slamming home, started at SlideHomeSoundSeconds at this pitch. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|SlideLock")
+	TObjectPtr<USoundBase> SlideHomeSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|SlideLock", meta = (ClampMin = "0.0"))
+	float SlideHomeSoundSeconds = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|SlideLock", meta = (ClampMin = "0.1"))
+	float SlideHomeSoundPitch = 1.0f;
+
+	/** Runtime: the slide is held open by the slide stop (the last round went); a reload releases it. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapon|SlideLock")
+	bool bSlideLocked = false;
+
+	/** The gun has a slide stop (SlideLockTravel has keys). */
+	bool CanLockOpen() const;
+
 	/** Mechanism sounds, 2D, none by default: the hammer HammerSoundSeconds after a shot. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
 	TObjectPtr<USoundBase> HammerSound = nullptr;
@@ -430,7 +489,7 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound", meta = (ClampMin = "0.0"))
 	float CycleDelaySeconds = 0.0f;
 
-	/** The dry click when it fires on an empty magazine, 2D. */
+	/** The dry click when it fires on an empty magazine, 2D; none with the slide locked open (the trigger is dead there). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
 	TObjectPtr<USoundBase> EmptySound = nullptr;
 
@@ -586,7 +645,7 @@ public:
 	 * place and turn per sample. For stills and traces; the game steps them live.
 	 */
 	void TracePose(int32 Weapon, bool bReload, int32 Shells, float Seconds, float Step, TArray<FVector>& OutPlace, TArray<FVector>& OutTurn,
-		int32 SwitchPhase = 0) const;
+		int32 SwitchPhase = 0, bool bEmpty = false) const;
 
 	/** Every gun's aim and the SV-98's scope (JamScope.h): made on BeginPlay; UpdateViewModel takes the shown gun's aimed pose from it (AimPose). */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
@@ -611,7 +670,7 @@ public:
 	/**
 	 * Fire the current gun from Start along Direction (the pawn's view). OutRecoil
 	 * is the kick on the shooter, kg cm/s, for the pawn to apply. False when it
-	 * cannot fire now (nothing unlocked, interval, reload, empty - which starts a reload).
+	 * cannot fire now (nothing unlocked, interval, reload, empty or the slide locked - which starts a reload).
 	 */
 	bool Fire(const FVector& Start, const FVector& Direction, FVector& OutRecoil);
 
@@ -719,7 +778,11 @@ private:
 	float GetReloadTime() const;
 	/** Pose the parts for this frame; null: hide them. */
 	void UpdateParts(const FJamWeapon* Weapon, float SinceShot);
+	/** The empty reload (the slide released at its end) runs or is held (jam.Weapons.ReloadPoseAt with the slide locked). */
+	bool IsEmptyReload(const FJamWeapon& Weapon) const;
 public:
+	/** The moving part's share of ActionTravelCm (X) and the hammer's of HammerTurnDeg (Y) at shot time Since: the cycle, a slide lock, its release. */
+	FVector2D GetSlideAndHammer(const FJamWeapon& Weapon, float Since) const;
 	/** The magazine on ViewMesh at Time into a reload (the one path its place and turn take). */
 	static FTransform GetMagPose(const FJamWeapon& Weapon, float Time);
 private:
@@ -734,6 +797,9 @@ private:
 	double ReloadStartSeconds = 0.0;
 	/** Rounds this reload loads one by one (ShellMesh guns). */
 	int32 ShellsPlanned = 0;
+	/** This reload releases a locked slide (FJamWeapon::EmptyReloadSeconds); it started this far in (a magazine already seated: the release only). */
+	bool bEmptyReload = false;
+	float ReloadFromSeconds = 0.0f;
 	int32 CasesThrown = 0;
 	int32 CycleSoundsPlayed = 0;
 	float PrevReloadTime = -1.0f;
@@ -758,7 +824,7 @@ private:
 	};
 	/** Step the pose springs over shot time Since0..Since1 and reload time Reload0..Reload1 (< 0: none). */
 	void StepPose(const FJamWeapon& Weapon, FPoseState& State, float Since0, float Since1, float Reload0, float Reload1,
-		float ReloadLength, int32 Shells, float DeltaTime, const FSwitchSpan& Switch = FSwitchSpan()) const;
+		float ReloadLength, int32 Shells, float DeltaTime, const FSwitchSpan& Switch = FSwitchSpan(), bool bEmpty = false) const;
 	/** Run the switch this frame; returns the gun to show (null: away) and the span the springs step over. */
 	const FJamWeapon* UpdateSwitch(float DeltaTime, bool bHandsBusy, FSwitchSpan& OutSpan);
 	/** Unarmed at once: no gun in view, the next draw from away. */
