@@ -2,6 +2,8 @@ Binaries/
 Intermediate/
 Saved/
 DerivedDataCache/
+# written by every cook (RunUAT BuildCookRun)
+Build/Windows/FileOpenOrder/
 .vs/
 *.sln
 
