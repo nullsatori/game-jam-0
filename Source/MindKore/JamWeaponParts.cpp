@@ -824,10 +824,8 @@ void UJamWeaponsComponent::UpdateParts(const FJamWeapon* Weapon, float SinceShot
 	SetPart(ShellInView, Weapon->ShellMesh, bShell);
 }
 
-void UJamWeaponsComponent::PlayMechanismSound(FJamWeapon& Gun, USoundBase* Sound, float At)
+void UJamWeaponsComponent::PlayMechanismSound(FJamWeapon& Gun, USoundBase* Sound, float Into)
 {
-	// From where the gun's clock is: on time after a crossing, mid-way when a frozen cycle picks up again.
-	const float Into = FMath::Max(0.0f, Gun.SinceShot - At);
 	Gun.MechanismSound = UGameplayStatics::SpawnSound2D(this, Sound, 1.0f, 1.0f, Into);
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s %s from %.3f s"), *GetNameSafe(GetOwner()), Sound == Gun.CycleSound ? TEXT("cycle") : TEXT("sound"),
 		*Sound->GetName(), Into);
@@ -884,12 +882,12 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 		}
 		if (Shot.HammerSound && Crossed(Prev, Since, Shot.HammerSoundSeconds))
 		{
-			PlayMechanismSound(Shot, Shot.HammerSound, Shot.HammerSoundSeconds);
+			PlayMechanismSound(Shot, Shot.HammerSound, 0.0f);
 		}
 		// The pump or the bolt, on the same clock as its animation and case (it was a timer a switch cleared).
 		if (Shot.CycleSound && Crossed(Prev, Since, Shot.CycleDelaySeconds))
 		{
-			PlayMechanismSound(Shot, Shot.CycleSound, Shot.CycleDelaySeconds);
+			PlayMechanismSound(Shot, Shot.CycleSound, 0.0f);
 			++CycleSoundsPlayed;
 		}
 		Shot.PrevSinceShot = Since;

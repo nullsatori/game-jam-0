@@ -787,8 +787,11 @@ private:
 	int32 ShownWeapon = INDEX_NONE;
 	/** The gun whose cycle clock runs: the shown one while drawn or being drawn, else none. */
 	int32 CycleWeapon = INDEX_NONE;
-	/** Gun.MechanismSound from where Gun.SinceShot is past At (on time after a crossing, mid-way on a resume). */
-	void PlayMechanismSound(FJamWeapon& Gun, USoundBase* Sound, float At);
+	/**
+	 * Gun.MechanismSound, Into seconds into its file: 0 on its crossing (a long frame plays it late rather than
+	 * skip its click), mid-way when a frozen cycle picks up again.
+	 */
+	void PlayMechanismSound(FJamWeapon& Gun, USoundBase* Sound, float Into);
 
 	double ReloadEndSeconds = 0.0;
 	/** R pressed during the shot's cycle: the reload starts when it is through (a shot or a switch drops it). */

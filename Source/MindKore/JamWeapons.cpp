@@ -401,7 +401,7 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 			{
 				if (Each.Key && Each.Value <= Gun.SinceShot && Gun.SinceShot < Each.Value + Each.Key->GetDuration())
 				{
-					PlayMechanismSound(Gun, Each.Key, Each.Value);
+					PlayMechanismSound(Gun, Each.Key, Gun.SinceShot - Each.Value);
 				}
 			}
 		}
