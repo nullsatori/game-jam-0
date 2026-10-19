@@ -165,8 +165,10 @@ namespace
 		UJamDebugSubsystem* Debug = UJamDebugSubsystem::Get(World);
 		if (FParse::Param(FCommandLine::Get(), TEXT("UseFixedTimeStep")))
 		{
+			// A command-line fixed step also ignores t.MaxFPS (the engine does not wait), so the cap cannot be checked either.
 			UE_LOG(LogMindKore, Log, TEXT("Debug probe [fixed step]: SKIP - the command line already fixes the step (run without -UseFixedTimeStep)"));
-			DebugProbeFpsLimit(World);
+			UE_LOG(LogMindKore, Log, TEXT("Debug probe [fps limit]: SKIP - a command-line fixed step ignores t.MaxFPS (run without -UseFixedTimeStep)"));
+			DebugProbeFinish(World);
 			return;
 		}
 		Debug->SetValue(TEXT("System.FixedStep"), TEXT("60"));
