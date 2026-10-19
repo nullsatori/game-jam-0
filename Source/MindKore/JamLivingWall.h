@@ -306,6 +306,9 @@ public:
 	/** Centre of the newest wound, world. */
 	FVector GetLastWoundCentre() const;
 
+	/** Impacts waiting for the blast window to close (probe: the rounds landed, not yet a wound). */
+	int32 GetPendingHitCount() const { return Pending.Num(); }
+
 	virtual void ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& ResolvedImpact) override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;

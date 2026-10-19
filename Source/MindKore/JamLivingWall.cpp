@@ -1447,6 +1447,212 @@ namespace
 		TEXT("jam.Wall.Shots [Name|Tag]: rendered stills of a living wall: whole, right after a shotgun blast, closing, a second blast (HighResShot; needs a real RHI)."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunWallShots));
 
+	/** The wall tagged Jam.WallProbe, else the first. */
+	AJamLivingWall* FindProbeWall(UWorld* World)
+	{
+		AJamLivingWall* Wall = nullptr;
+		for (TActorIterator<AJamLivingWall> It(World); It; ++It)
+		{
+			if (!Wall || (It->ActorHasTag(TEXT("Jam.WallProbe")) && !Wall->ActorHasTag(TEXT("Jam.WallProbe"))))
+			{
+				Wall = *It;
+			}
+		}
+		return Wall;
+	}
+
+	/** One jam.Wall.HitLag run: each gun at 5 / 10 / 20 m in turn, watched frame by frame. */
+	struct FHitLag : TSharedFromThis<FHitLag>
+	{
+		TWeakObjectPtr<AJamLivingWall> Wall;
+		TWeakObjectPtr<AJamZeroGPawn> Pawn;
+		FVector Target = FVector::ZeroVector;
+		int32 Index = 0;
+		double FiredAt = 0.0;
+		double FirstAt = -1.0;
+		double LastAt = -1.0;
+		int32 Landed = 0;
+		int32 Frames = 0;
+		int32 Misses = 0;
+
+		static float Distance(int32 Trial) { return Trial % 3 == 0 ? 500.0f : Trial % 3 == 1 ? 1000.0f : 2000.0f; }
+
+		void Next()
+		{
+			AJamLivingWall* W = Wall.Get();
+			AJamZeroGPawn* P = Pawn.Get();
+			if (!W || !P)
+			{
+				return;
+			}
+			if (Index >= 9)
+			{
+				UE_LOG(LogMindKore, Log, TEXT("Hit lag: done"));
+				return;
+			}
+			// Every shot at a whole wall: a round through an open hole lands nowhere.
+			if (W->GetOpenCellCount() > 0 || W->GetPendingHitCount() > 0)
+			{
+				WallAfter(W, 0.25f, [This = AsShared()]() { This->Next(); });
+				return;
+			}
+			PlacePawn(P, Target + W->GetFrontNormal() * Distance(Index));
+			WallAfter(W, 0.3f, [This = AsShared()]()
+			{
+				AJamLivingWall* LiveWall = This->Wall.Get();
+				AJamZeroGPawn* LivePawn = This->Pawn.Get();
+				if (!LiveWall || !LivePawn)
+				{
+					return;
+				}
+				PlacePawn(LivePawn, This->Target + LiveWall->GetFrontNormal() * Distance(This->Index));
+				if (!AimAndFire(LivePawn, This->Index / 3, This->Target))
+				{
+					++This->Index;
+					This->Next();
+					return;
+				}
+				This->FiredAt = LiveWall->GetWorld()->GetTimeSeconds();
+				This->FirstAt = This->LastAt = -1.0;
+				This->Landed = This->Frames = 0;
+				This->Watch();
+			});
+		}
+
+		void Watch()
+		{
+			AJamLivingWall* W = Wall.Get();
+			AJamZeroGPawn* P = Pawn.Get();
+			if (!W || !P)
+			{
+				return;
+			}
+			const double Now = W->GetWorld()->GetTimeSeconds();
+			const int32 Pending = W->GetPendingHitCount();
+			const FJamWeapon& Gun = P->Guns->Weapons[Index / 3];
+			if (Pending > Landed)
+			{
+				FirstAt = FirstAt < 0.0 ? Now : FirstAt;
+				LastAt = Now;
+				Landed = Pending;
+			}
+			else if (Landed > 0 && Pending == 0)
+			{
+				// The wall's blast window closed: the wound is made (its own log line says what it tore).
+				UE_LOG(LogMindKore, Log, TEXT("Hit lag: %s %.0f m (%.0f m/s): first round on the wall +%.0f ms, last +%.0f ms (%d of %d, spread %.0f ms, window %.0f ms), wound +%.0f ms, %d frame(s)"),
+					*Gun.Name.ToString(), Distance(Index) / 100.0f, Gun.ProjectileSpeed / 100.0f, (FirstAt - FiredAt) * 1000.0, (LastAt - FiredAt) * 1000.0,
+					Landed, Gun.Pellets, (LastAt - FirstAt) * 1000.0, W->BlastWindowSeconds * 1000.0f, (Now - FiredAt) * 1000.0, Frames);
+				++Index;
+				Misses = 0;
+				WallAfter(W, 1.5f, [This = AsShared()]() { This->Next(); }); // the SV-98's cycle is 1.25 s
+				return;
+			}
+			if (Now - FiredAt > 2.0)
+			{
+				// A round through a gap of the weave lands behind it: that shot again, three times at most.
+				UE_LOG(LogMindKore, Warning, TEXT("Hit lag: %s %.0f m: no round on the wall in 2 s"), *Gun.Name.ToString(), Distance(Index) / 100.0f);
+				Index += ++Misses >= 3 ? 1 : 0;
+				Misses = Misses >= 3 ? 0 : Misses;
+				WallAfter(W, 0.5f, [This = AsShared()]() { This->Next(); });
+				return;
+			}
+			++Frames;
+			W->GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(W, [This = AsShared()]() { This->Watch(); }));
+		}
+	};
+
+	/**
+	 * jam.Wall.HitLag: from Fire to the wound, square on to the probe wall, each gun at
+	 * 5 / 10 / 20 m - the first and the last round landing on the wall (its pending hits),
+	 * how many of the pellets, and the wound (the blast window closed). World seconds,
+	 * watched every frame: run with -UseFixedTimeStep -FPS=N for the frame steps of N fps.
+	 * Each shot waits for the wall to be whole again. Ends with "Hit lag: done".
+	 */
+	void RunHitLag(UWorld* World)
+	{
+		AJamLivingWall* Wall = FindProbeWall(World);
+		AJamZeroGPawn* Pawn = WallProbePawn(World);
+		if (!Wall || !Pawn)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Hit lag: needs an AJamLivingWall and the AJamZeroGPawn"));
+			return;
+		}
+		const TSharedRef<FHitLag> Run = MakeShared<FHitLag>();
+		Run->Wall = Wall;
+		Run->Pawn = Pawn;
+		// A cell's crossing, as jam.Wall.Probe aims.
+		Run->Target = Wall->NearestCellCentre(Wall->GetActorLocation());
+		WallAfter(Wall, 1.0f, [Run]() { Run->Next(); });
+	}
+
+	FAutoConsoleCommandWithWorld GHitLag(
+		TEXT("jam.Wall.HitLag"),
+		TEXT("Fire to the living wall's wound for each gun at 5 / 10 / 20 m: first and last round landing, the wound (world ms; use -UseFixedTimeStep -FPS=N)."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunHitLag));
+
+	/** One frame of jam.Wall.BlastFrames, then the next frame's, until 0.5 s after the shot. */
+	void CaptureBlastFrame(AJamLivingWall* Wall, AJamZeroGPawn* Pawn, APlayerController* Controller, double FiredAt, int32 Frame)
+	{
+		const double Ms = (Wall->GetWorld()->GetTimeSeconds() - FiredAt) * 1000.0;
+		if (Ms > 500.0)
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Blast frames: done"));
+			return;
+		}
+		UE_LOG(LogMindKore, Log, TEXT("Blast frames: %02d +%.0f ms, %d round(s) in flight, %d on the wall waiting, %d cell(s) open"), Frame, Ms,
+			Pawn->Guns->GetRoundsInFlight(), Wall->GetPendingHitCount(), Wall->GetOpenCellCount());
+		Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=JamBlast_%02d_%03d"), Frame, FMath::RoundToInt(Ms)));
+		Wall->GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(Wall, [Wall, Pawn, Controller, FiredAt, Frame]()
+		{
+			CaptureBlastFrame(Wall, Pawn, Controller, FiredAt, Frame + 1);
+		}));
+	}
+
+	/**
+	 * jam.Wall.BlastFrames [DistanceCm]: a shotgun blast into the probe wall from 10 m (or
+	 * DistanceCm), a still every frame for 0.5 s from the shot's frame (HighResShot; needs a
+	 * real RHI): JamBlast_<frame>_<ms>.png. Run with -UseFixedTimeStep -FPS=60 so each frame
+	 * is 1/60 s of the world however long the still takes. The view is left to the kick and
+	 * the pawn to its recoil, as in play. A first blast warms the shaders up; the filmed
+	 * one comes once that hole has closed.
+	 */
+	void RunBlastFrames(const TArray<FString>& Args, UWorld* World)
+	{
+		AJamLivingWall* Wall = FindProbeWall(World);
+		AJamZeroGPawn* Pawn = WallProbePawn(World);
+		APlayerController* Controller = World->GetFirstPlayerController();
+		if (!Wall || !Pawn || !Controller)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Blast frames: needs an AJamLivingWall and the AJamZeroGPawn"));
+			return;
+		}
+		const float Distance = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 1000.0f;
+		const FVector Target = Wall->NearestCellCentre(Wall->GetActorLocation());
+		const FVector Stand = Target + Wall->GetFrontNormal() * Distance;
+		const auto Hold = [Pawn, Controller, Stand, Target]()
+		{
+			PlacePawn(Pawn, Stand);
+			Controller->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());
+		};
+		Hold();
+		WallAfter(Wall, 8.0f, [Hold, Pawn, Target]() { Hold(); AimAndFire(Pawn, 1, Target); });
+		WallAfter(Wall, 15.0f, [Hold]() { Hold(); });
+		WallAfter(Wall, 16.0f, [Wall, Pawn, Controller, Hold, Target, Distance]()
+		{
+			Hold();
+			UE_LOG(LogMindKore, Log, TEXT("Blast frames: shotgun at %.0f m, wall open %d cell(s) before the shot"), Distance / 100.0f, Wall->GetOpenCellCount());
+			if (AimAndFire(Pawn, 1, Target))
+			{
+				CaptureBlastFrame(Wall, Pawn, Controller, Wall->GetWorld()->GetTimeSeconds(), 0);
+			}
+		});
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GBlastFrames(
+		TEXT("jam.Wall.BlastFrames"),
+		TEXT("jam.Wall.BlastFrames [DistanceCm]: a shotgun blast into the probe wall from 10 m, a still every frame for 0.5 s (HighResShot; real RHI, -UseFixedTimeStep -FPS=60)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunBlastFrames));
+
 	/** jam.Wall.Seal: the seal check (CheckSealed) on every living wall of the map. */
 	void RunWallSeal(UWorld* World)
 	{
