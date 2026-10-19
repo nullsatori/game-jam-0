@@ -831,37 +831,14 @@ void UJamWeaponsComponent::PlayMechanismSound(FJamWeapon& Gun, USoundBase* Sound
 		*Sound->GetName(), Into);
 }
 
-void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
+void UJamWeaponsComponent::UpdateCycleEvents()
 {
-	// Loose bodies: the oldest beyond the cap, and any drifted out of range, go.
-	const FVector Here = GetOwner()->GetActorLocation();
-	Debris.RemoveAll([](const TWeakObjectPtr<AActor>& Each) { return !Each.IsValid(); });
-	for (int32 Index = Debris.Num() - 1; Index >= 0; --Index)
-	{
-		if (Index < Debris.Num() - MaxDebris || FVector::DistSquared(Debris[Index]->GetActorLocation(), Here) > FMath::Square(DebrisRangeCm))
-		{
-			Debris[Index]->Destroy();
-			Debris.RemoveAt(Index);
-		}
-	}
-	if (!ViewModel || !ViewModel->GetAttachParent())
-	{
-		return;
-	}
 	const FTransform Gun = ViewModel->GetComponentTransform();
 	const FTransform View = ViewModel->GetAttachParent()->GetComponentTransform();
-	const auto Play = [this](USoundBase* Sound)
-	{
-		if (Sound)
-		{
-			UGameplayStatics::PlaySound2D(this, Sound);
-			UE_LOG(LogMindKore, Log, TEXT("Weapon %s: sound %s"), *GetNameSafe(GetOwner()), *Sound->GetName());
-		}
-	};
-
-	// After the shot, on the clock of the gun whose cycle runs (UpdateViewModel; live time: a held pose throws
-	// nothing). Only a shot restarts it (Fire sets PrevSinceShot). A gun put away keeps its clock still, so no
-	// case flies and no cycle sound starts away from it; the rest of the cycle comes when it is back
+	// After the shot, on the clock of the gun whose cycle runs (UpdateViewModel calls this once the gun is posed
+	// this frame: the case leaves the port where it is drawn, a sound starts on the frame it is due; live time: a
+	// held pose throws nothing). Only a shot restarts it (Fire sets PrevSinceShot). A gun put away keeps its clock
+	// still, so no case flies and no cycle sound starts away from it; the rest of the cycle comes when it is back
 	// (owner 19.10: «механика не врёт» - the pump, its sound and its case together, or none of them).
 	if (Weapons.IsValidIndex(CycleWeapon))
 	{
@@ -892,6 +869,36 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 		}
 		Shot.PrevSinceShot = Since;
 	}
+}
+
+void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
+{
+	// Loose bodies: the oldest beyond the cap, and any drifted out of range, go.
+	const FVector Here = GetOwner()->GetActorLocation();
+	Debris.RemoveAll([](const TWeakObjectPtr<AActor>& Each) { return !Each.IsValid(); });
+	for (int32 Index = Debris.Num() - 1; Index >= 0; --Index)
+	{
+		if (Index < Debris.Num() - MaxDebris || FVector::DistSquared(Debris[Index]->GetActorLocation(), Here) > FMath::Square(DebrisRangeCm))
+		{
+			Debris[Index]->Destroy();
+			Debris.RemoveAt(Index);
+		}
+	}
+	if (!ViewModel || !ViewModel->GetAttachParent())
+	{
+		return;
+	}
+	const FTransform Gun = ViewModel->GetComponentTransform();
+	const FTransform View = ViewModel->GetAttachParent()->GetComponentTransform();
+	const auto Play = [this](USoundBase* Sound)
+	{
+		if (Sound)
+		{
+			UGameplayStatics::PlaySound2D(this, Sound);
+			UE_LOG(LogMindKore, Log, TEXT("Weapon %s: sound %s"), *GetNameSafe(GetOwner()), *Sound->GetName());
+		}
+	};
+
 	if (!IsWeaponUnlocked(CurrentWeapon))
 	{
 		return;

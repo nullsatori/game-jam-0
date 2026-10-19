@@ -730,7 +730,9 @@ public:
 	/** The magazine on ViewMesh at Time into a reload (the one path its place and turn take). */
 	static FTransform GetMagPose(const FJamWeapon& Weapon, float Time);
 private:
-	/** Events crossed since the last tick: the case out, the magazine let go, a round counted, the sounds. */
+	/** The shot's events the running gun's cycle clock crossed this frame: its case, hammer and cycle sound. */
+	void UpdateCycleEvents();
+	/** Reload events crossed since the last tick: the magazine let go and seated, a round counted, their sounds. */
 	void UpdatePartEvents(float DeltaTime);
 	void SpawnDebris(UStaticMesh* Mesh, const FTransform& Where, const FVector& Velocity, const FVector& SpinDegPerSec, float MassKg);
 

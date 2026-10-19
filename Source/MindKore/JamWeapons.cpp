@@ -386,14 +386,15 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	const int32 Running = SwitchStage == ESwitch::Drawn || SwitchStage == ESwitch::Draw ? ShownWeapon : INDEX_NONE;
 	if (Running != CycleWeapon)
 	{
-		if (Weapons.IsValidIndex(CycleWeapon))
+		// Only a cycle still running freezes: a finished one's reverb tail plays out and is not picked up again.
+		if (Weapons.IsValidIndex(CycleWeapon) && Weapons[CycleWeapon].SinceShot < Weapons[CycleWeapon].GetActionCycleSeconds())
 		{
 			if (UAudioComponent* Sound = Weapons[CycleWeapon].MechanismSound.Get())
 			{
 				Sound->Stop();
 			}
 		}
-		if (Weapons.IsValidIndex(Running))
+		if (Weapons.IsValidIndex(Running) && Weapons[Running].SinceShot < Weapons[Running].GetActionCycleSeconds())
 		{
 			FJamWeapon& Gun = Weapons[Running];
 			for (const TPair<USoundBase*, float> Each : { TPair<USoundBase*, float>(Gun.HammerSound, Gun.HammerSoundSeconds),
@@ -442,6 +443,7 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 		Weapon->ActionPivot + FVector(Weapon->ActionTravelCm * EvalCycle(Weapon->ActionTravel, Since), 0.0f, 0.0f),
 		FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Weapon->ActionTurnDeg * EvalCycle(Weapon->ActionTurn, Since))));
 	UpdateParts(Weapon, Since);
+	UpdateCycleEvents();
 }
 
 FTransform UJamWeaponsComponent::GetMuzzleTransform() const
