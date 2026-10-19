@@ -149,9 +149,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship", meta = (ClampMin = "0.0"))
 	float EndRestartSeconds = 6.0f;
 
-	/** How many Cargo pickups the level holds (for «Груз n/N»). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship", meta = (ClampMin = "0"))
-	int32 CargoTotal = 6;
+	/** How many AJamCargo the level holds (for «Груз n/N»), counted at StartPlay. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Ship")
+	int32 CargoTotal = 0;
 
 	/** Cargo taken this run. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Ship")

@@ -320,6 +320,13 @@ AJamShipGameMode::AJamShipGameMode()
 void AJamShipGameMode::StartPlay()
 {
 	Super::StartPlay();
+	// What the map holds, so a hand-edited map keeps «Груз n/N» right.
+	CargoTotal = 0;
+	for (TActorIterator<AJamCargo> It(GetWorld()); It; ++It)
+	{
+		++CargoTotal;
+	}
+	UE_LOG(LogMindKore, Log, TEXT("Ship: %d cargo in %s"), CargoTotal, *GetWorld()->GetMapName());
 }
 
 void AJamShipGameMode::SetPlayerDefaults(APawn* PlayerPawn)
