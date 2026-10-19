@@ -122,6 +122,9 @@ AJamZeroGPawn::AJamZeroGPawn()
 
 namespace
 {
+	TAutoConsoleVariable<int32> CVarZeroGTrace(TEXT("jam.ZeroG.Trace"), 0,
+		TEXT("1: the player's pawn logs a line every tick (mode, body, velocity, eye, arm, contacts and shakes so far) and every body hit."));
+
 	/** MK_Flesh (SurfaceType3, DefaultEngine.ini) from the hit, else from the component's first material
 	 *  (the planetoid's complex collision and a physics contact may not report one). */
 	bool IsFlesh(const FHitResult& Hit)
@@ -580,6 +583,13 @@ bool AJamZeroGPawn::Cling(UPrimitiveComponent* Target, const FVector& Point)
 	SetMode(EJamMoveMode::Hang);
 	ClingTarget = Target;
 	HandLocal = Target->GetComponentTransform().InverseTransformPosition(Point);
+	// The held surface's normal at the hand, on the eye's side (UpdateArm keeps the head off its plane).
+	const FVector Eye = ShoulderLocation();
+	const FVector Into = (Point - Eye).GetSafeNormal();
+	FHitResult Surface;
+	FCollisionQueryParams SurfaceParams(SCENE_QUERY_STAT(JamClingNormal), false, this);
+	const FVector Normal = Target->LineTraceComponent(Surface, Eye - Into * 5.0f, Point + Into * 10.0f, SurfaceParams) ? FVector(Surface.ImpactNormal) : -Into;
+	HoldNormalLocal = Target->GetComponentTransform().InverseTransformVectorNoScale(Normal);
 	ArmRestCm = FMath::Max(ArmMinCm, float(FVector::Dist(ShoulderLocation(), Point)));
 	UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: holding on to %s, the hand %.0f cm from the eye, coming in at %.0f cm/s"),
 		*GetNameSafe(Target->GetOwner()), ArmRestCm, GetBodyVelocity().Size());
@@ -596,7 +606,37 @@ void AJamZeroGPawn::LetGoCling()
 
 FVector AJamZeroGPawn::ShoulderLocation() const
 {
-	return Body->GetComponentLocation() + EyeOffset;
+	return Body->GetComponentLocation() + EyeShownOffset;
+}
+
+void AJamZeroGPawn::UpdateEye(float DeltaSeconds)
+{
+	// The camera at eye height over the body in gravity, at its centre in zero-G, eased both ways.
+	EyeOffset = FMath::VInterpTo(EyeOffset, -GravityDirection * EyeHeightCm, DeltaSeconds, EyeRiseRate);
+	// It has no collision of its own and rides up to 110 cm over the body, so the body never meets the
+	// ceiling the head is in (review #44): a sphere swept from the body's centre to the eye stops it. Under a
+	// lower ceiling the eye drops at once, and rises back eased (EyeRiseRate) - an uneven ceiling or the
+	// edge of a duct does not shake it. The sphere is wider by this frame's move: the sweep runs before
+	// physics moves the body (walking at 450 cm/s under a slab's edge the camera came 10 cm off it, not 15).
+	const float Want = float(EyeOffset.Size());
+	float Drop = 0.0f;
+	if (Want > 1.0f)
+	{
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(JamEyeClear), false, this);
+		if (const UPrimitiveComponent* Held = GrabbedBody.Get())
+		{
+			Params.AddIgnoredComponent(Held);
+		}
+		const FVector From = Body->GetComponentLocation();
+		FHitResult Hit;
+		const float Radius = EyeRadiusCm + float(GetBodyVelocity().Size()) * DeltaSeconds;
+		if (GetWorld()->SweepSingleByChannel(Hit, From, From + EyeOffset, FQuat::Identity, ECC_Camera, FCollisionShape::MakeSphere(Radius), Params))
+		{
+			Drop = Want - Hit.Distance;
+		}
+	}
+	EyeDropCm = Drop >= EyeDropCm ? Drop : FMath::FInterpTo(EyeDropCm, Drop, DeltaSeconds, EyeRiseRate);
+	EyeShownOffset = Want > 1.0f ? EyeOffset * (FMath::Max(0.0f, Want - EyeDropCm) / Want) : EyeOffset;
 }
 
 float AJamZeroGPawn::GetArmLengthCm() const
@@ -649,6 +689,7 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 		Wish = View.GetUnitAxis(EAxis::X) * Input.X + View.GetUnitAxis(EAxis::Y) * Input.Y + View.GetUnitAxis(EAxis::Z) * Input.Z;
 	}
 	const float Toward = -FVector::DotProduct(Wish, N);
+	const float RestBefore = ArmRestCm;
 	const float RestTarget = Held ? HoldRestCm : ArmLengthCm;
 	if (Toward > 0.1f)
 	{
@@ -662,6 +703,42 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 	else
 	{
 		ArmRestCm = FMath::FInterpConstantTo(ArmRestCm, RestTarget, DeltaSeconds, ArmRelaxCmS);
+	}
+	FVector HoldNormal = FVector::ZeroVector;
+	float Height = 0.0f;
+	if (!Held)
+	{
+		if (IsInGravity())
+		{
+			// In gravity the eye rides EyeHeightCm over the body, out of the body's collision: the head keeps
+			// HeadClearanceCm off the held surface's plane - the reach is not pulled shorter than puts the eye
+			// there, and the cushion below stops a swing onto the plane. In zero-G the eye is the body's centre
+			// and the body's own sphere keeps it off the hold (and a plane would stop a swing round an edge).
+			HoldNormal = Target->GetComponentTransform().TransformVectorNoScale(HoldNormalLocal);
+			Height = float(FVector::DotProduct(Shoulder - Hand, HoldNormal));
+			const float Facing = float(FVector::DotProduct(N, HoldNormal));
+			if (Facing > KINDA_SMALL_NUMBER)
+			{
+				ArmRestCm = FMath::Max(ArmRestCm, FMath::Min(HeadClearanceCm / Facing, FMath::Max(ArmLengthCm, ArmMinCm)));
+			}
+		}
+		// While the body rests against something on its way to the hand (the held door, the ground at the
+		// feet) the reach does not shorten - neither pulled in nor relaxed below what it was: the spring
+		// pressed the body into the contact every tick, the contact threw it back and the hard catch shook the
+		// camera - the hold jittered on doors, walls and the planetoid (jam.Head.Probe: 60 shakes a second).
+		// Not shortening, it also holds the body from sliding toward a hand down a slope; lengthening (keys
+		// away, relaxing back out after a pull) still works and takes the body off the contact.
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(JamArmBlock), false, this);
+		FCollisionResponseParams Response;
+		Body->InitSweepCollisionParams(Params, Response);
+		const FVector From = Body->GetComponentLocation();
+		FHitResult Block;
+		if (GetWorld()->SweepSingleByChannel(Block, From, From - N * ArmBlockProbeCm, FQuat::Identity, Body->GetCollisionObjectType(),
+			FCollisionShape::MakeSphere(Body->GetScaledSphereRadius()), Params, Response)
+			&& FVector::DotProduct(Block.ImpactNormal, N) > 0.3f)
+		{
+			ArmRestCm = FMath::Max3(ArmRestCm, RestBefore, Length);
+		}
 	}
 
 	// The reach: a damped spring along N, implicit Euler on the velocity
@@ -705,6 +782,18 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 		}
 	}
 
+	if (!HoldNormal.IsZero())
+	{
+		// The head's cushion: the eye closes on the held plane no faster than its gap over HeadClearanceCm
+		// shuts in HeadCushionSeconds - it eases onto the clearance instead of swinging or springing into the
+		// ceiling, and a hold taken closer eases it back out.
+		const float Along = float(FVector::DotProduct(Relative + Change, HoldNormal));
+		const float Least = (HeadClearanceCm - Height) / HeadCushionSeconds;
+		if (Along < Least)
+		{
+			Change += HoldNormal * (Least - Along);
+		}
+	}
 	const FVector Impulse = Change * Mu;
 	// Every tick, not a single kick: past AddBodyImpulse's launch rule, which would read a frame's share.
 	Body->AddImpulse(Impulse, NAME_None, /*bVelChange=*/false);
@@ -1138,6 +1227,10 @@ void AJamZeroGPawn::HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* Oth
 	{
 		return;
 	}
+	++ProbeContacts;
+	ProbeContactImpulse += float(NormalImpulse.Size());
+	UE_CLOG(CVarZeroGTrace.GetValueOnGameThread() > 0, LogMindKore, Log, TEXT("ZeroG trace: hit %s, normal %s, impulse %s"),
+		*GetNameSafe(OtherComp), *FVector(Hit.ImpactNormal).ToCompactString(), *NormalImpulse.ToCompactString());
 	float SpeedCm = 0.0f;
 	JamDeliverCollisionImpact(this, Body, Hit, NormalImpulse, CrashImpact, LastCrashSeconds, SpeedCm);
 	const float MinSpeedCm = IsInGravity() ? FMath::Max(FeedbackMinSpeedCm, GroundFeedbackMinSpeedCm) : FeedbackMinSpeedCm;
@@ -1157,6 +1250,7 @@ void AJamZeroGPawn::HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* Oth
 	}
 	ShakeRemaining = ShakeSeconds;
 	ShakeAmplitude = ShakeCmPer1000 * SpeedCm / 1000.0f;
+	++ProbeShakes;
 	// Landing on walkable ground in a gravity zone thumps but never hurts: a fall is how you arrive on the planetoid.
 	const bool bLanding = IsInGravity()
 		&& FVector::DotProduct(Hit.ImpactNormal, -GravityDirection) >= FMath::Cos(FMath::DegreesToRadians(MaxGroundAngleDeg));
@@ -1754,13 +1848,14 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 	UpdateGrapple();
 	DrawPrediction();
 	// The camera: at eye height over the body in gravity, at its centre in zero-G
-	// (eased both ways), plus the shake - a fading random world-space offset.
-	EyeOffset = FMath::VInterpTo(EyeOffset, -GravityDirection * EyeHeightCm, DeltaSeconds, EyeRiseRate);
+	// (eased both ways), kept off geometry (UpdateEye), plus the shake - a fading
+	// random world-space offset.
+	UpdateEye(DeltaSeconds);
 	ShakeRemaining = FMath::Max(0.0f, ShakeRemaining - DeltaSeconds);
 	const FVector Shake = ShakeRemaining > 0.0f
 		? FMath::VRand() * ShakeAmplitude * (ShakeRemaining / FMath::Max(ShakeSeconds, 0.01f))
 		: FVector::ZeroVector;
-	Camera->SetRelativeLocation(Body->GetComponentTransform().InverseTransformVectorNoScale(EyeOffset + Shake));
+	Camera->SetRelativeLocation(Body->GetComponentTransform().InverseTransformVectorNoScale(EyeShownOffset + Shake));
 	RefreshGrabCandidate();
 	// The hand: on the hold (Hang) or on a held loose body (in any mode).
 	UpdateArm(DeltaSeconds);
@@ -1827,6 +1922,11 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 		}
 	}
 	UpdateBulletTimePresentation();
+	UE_CLOG(CVarZeroGTrace.GetValueOnGameThread() > 0, LogMindKore, Log,
+		TEXT("ZeroG trace: t %.3f dt %.4f %s gravity %.0f%s body %s v %s = %.1f cm/s, eye %s, arm %.1f (reach %.1f), contacts %d (%.0f kg cm/s), shakes %d"),
+		GetWorld()->GetTimeSeconds(), DeltaSeconds, *UEnum::GetDisplayValueAsText(MoveMode).ToString(), GravityStrengthCm, bGrounded ? TEXT(" grounded") : TEXT(""),
+		*Body->GetComponentLocation().ToCompactString(), *GetBodyVelocity().ToCompactString(), GetBodyVelocity().Size(),
+		*(ShoulderLocation() - Body->GetComponentLocation()).ToCompactString(), GetArmLengthCm(), ArmRestCm, ProbeContacts, ProbeContactImpulse, ProbeShakes);
 }
 
 float AJamZeroGPawn::GetHeldMassKg() const
@@ -1846,6 +1946,7 @@ void AJamZeroGPawn::KickCamera(float AmplitudeCm)
 {
 	ShakeAmplitude = ShakeRemaining > 0.0f ? FMath::Max(ShakeAmplitude, AmplitudeCm) : AmplitudeCm;
 	ShakeRemaining = ShakeSeconds;
+	++ProbeShakes;
 }
 
 bool AJamZeroGPawn::Fire()
@@ -1857,9 +1958,7 @@ bool AJamZeroGPawn::Fire()
 	}
 	AddBodyImpulse(Recoil);
 	// The kick is felt in the camera too, not only in the speed readout.
-	const float Kick = RecoilShakeCmPer10000 * Recoil.Size() / 10000.0f;
-	ShakeAmplitude = ShakeRemaining > 0.0f ? FMath::Max(ShakeAmplitude, Kick) : Kick;
-	ShakeRemaining = ShakeSeconds;
+	KickCamera(RecoilShakeCmPer10000 * Recoil.Size() / 10000.0f);
 	return true;
 }
 

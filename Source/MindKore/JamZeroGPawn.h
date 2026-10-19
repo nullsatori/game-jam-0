@@ -517,6 +517,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.0"))
 	float EyeHeightCm = 110.0f;
 
+	/** The camera keeps this far off geometry: a sphere this size swept from the body's centre to the eye stops the eye under a ceiling, a cave plug or a low duct (review #44), cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "1.0"))
+	float EyeRadiusCm = 15.0f;
+
+	/** In gravity, holding on to a fixed thing, the eye stays at least this far off the held surface's plane: a pull-up or a swing stops there, the head does not enter the ceiling (in zero-G the eye is the body's centre and the body keeps it off), cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
+	float HeadClearanceCm = 30.0f;
+
 	/** How fast the camera moves to and from that height, 1/s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Walk", meta = (ClampMin = "0.1"))
 	float EyeRiseRate = 4.0f;
@@ -606,7 +614,7 @@ public:
 	float GetArmLengthCm() const;
 	float GetArmRestCm() const { return ArmRestCm; }
 
-	/** The eye: the arm's shoulder end (body centre plus the eased eye offset, no shake). */
+	/** The eye: the arm's shoulder end and the camera without its shake (body centre plus the eased eye offset, kept off geometry). */
 	FVector ShoulderLocation() const;
 
 	/** The simulated body E would grab now (null when none or something is held). */
@@ -711,6 +719,11 @@ public:
 	/** Revival: LetGoOfEverything, the body at Location at rest, full health and air. */
 	void ReviveAt(const FVector& Location);
 
+	/** Counted for the probes (jam.Head.Probe, jam.ZeroG.Trace): the body's hits, their impulses summed (kg cm/s), camera shakes started. */
+	int32 ProbeContacts = 0;
+	float ProbeContactImpulse = 0.0f;
+	int32 ProbeShakes = 0;
+
 	virtual void ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& ResolvedImpact) override;
 
 	virtual void Tick(float DeltaSeconds) override;
@@ -733,6 +746,12 @@ protected:
 	TWeakObjectPtr<UPrimitiveComponent> ClingTarget;
 	/** The hand on the hold or the held body, in its component space. */
 	FVector HandLocal = FVector::ZeroVector;
+	/** A fixed hold: the held surface's normal at the hand, on the eye's side, in its component space. */
+	FVector HoldNormalLocal = FVector::ZeroVector;
+	/** The eye eases onto HeadClearanceCm over the held plane in about this, s. */
+	static constexpr float HeadCushionSeconds = 0.1f;
+	/** How far the body's sphere is swept toward the hand to find what it rests against, cm. */
+	static constexpr float ArmBlockProbeCm = 2.0f;
 	/** A held loose body: its rest reach, and the direction from the eye to the hand it is kept at when not held in front (world; the body never turns). */
 	float HoldRestCm = 0.0f;
 	FVector HoldDirection = FVector::ForwardVector;
@@ -828,8 +847,14 @@ private:
 	double TouchdownSeconds = -100.0;
 	bool bTouchdownStepPending = false;
 	double LastJumpSeconds = -100.0;
-	/** The camera's offset from the body's centre (world space), eased toward the eye height. */
+	/** The eye's offset from the body's centre (world space), eased toward the eye height. */
 	FVector EyeOffset = FVector::ZeroVector;
+	/** How far the eye is pushed down from EyeOffset under a ceiling (UpdateEye), cm. */
+	float EyeDropCm = 0.0f;
+	/** The eye as it is: EyeOffset less the drop. The camera (with the shake) and the arm's shoulder sit here. */
+	FVector EyeShownOffset = FVector::ZeroVector;
+	/** EyeOffset eased to the gravity's eye height, then kept EyeRadiusCm off geometry (review #44). */
+	void UpdateEye(float DeltaSeconds);
 	void UpdateBulletTimePresentation();
 
 	UPROPERTY(Transient)
