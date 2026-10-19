@@ -5,7 +5,11 @@
 #include "JamHullTools.generated.h"
 
 class AJamPlateSocket;
+class UMaterialInstanceDynamic;
+class UMaterialInterface;
 class UPrimitiveComponent;
+class UStaticMesh;
+class UStaticMeshComponent;
 
 UENUM(BlueprintType)
 enum class EJamHullTool : uint8
@@ -28,7 +32,7 @@ struct FJamStrapLine
 	/** B is the owner's body (the belt): the line tows until its second end is clicked. */
 	bool bBelt = false;
 	float LengthCm = 0.0f;
-	/** Last tension, 0..1 of MaxForce (the colour). */
+	/** Last tension, 0..1 of MaxForce (how the thread reads). */
 	float Tension = 0.0f;
 };
 
@@ -47,6 +51,13 @@ struct FJamStrapLine
  * Welder: LMB held lays the seam where the torch (the crosshair within
  * WeldReachCm) meets a breach's contour (AJamPlateSocket::Weld); R switches
  * weld and cut.
+ *
+ * Each line is drawn as a laser thread of the suit's projector (the engine
+ * cylinder with M_Jam_StrapLaser, Scripts/jam_weld_projector.py) in the
+ * projector's colours (UJamWeldProjectorComponent HaloColour, CoreColour), its
+ * tension in its form: slack - broken and dropping out, taut - solid with pale
+ * beads running to the first end, faster the harder it pulls, at the limit - a
+ * pale flickering core.
  */
 UCLASS(ClassGroup = (Jam), meta = (BlueprintSpawnableComponent))
 class MINDKORE_API UJamHullToolsComponent : public UActorComponent
@@ -84,6 +95,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Welder", meta = (ClampMin = "10.0"))
 	float WeldReachCm = 150.0f;
 
+	/** The thread a line is drawn with (M_Jam_StrapLaser) and its core's radius, cm (the material widens it to 3 px with range). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Strap")
+	TSoftObjectPtr<UMaterialInterface> ThreadMaterial;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Strap", meta = (ClampMin = "0.1"))
+	float ThreadRadiusCm = 0.6f;
+
 	UFUNCTION(BlueprintPure, Category = "Jam")
 	EJamHullTool GetTool() const { return Tool; }
 
@@ -120,8 +138,18 @@ private:
 	bool bTorchOn = false;
 	FText WeldStatus;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> ThreadMesh = nullptr;
+
+	/** One thread per line, made on first need and hidden while its line is gone. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UStaticMeshComponent>> Threads;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> ThreadLooks;
+
 	bool TraceView(float Reach, FHitResult& OutHit) const;
 	UPrimitiveComponent* OwnerBody() const;
 	void ApplyLines(float DeltaSeconds);
-	void DrawLines() const;
+	void DrawLines();
 };

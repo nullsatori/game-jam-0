@@ -26,6 +26,7 @@
 #include "JamScope.h"
 #include "JamLadder.h"
 #include "JamWeapons.h"
+#include "JamWeldProjector.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "MKFastener.h"
@@ -94,6 +95,10 @@ AJamZeroGPawn::AJamZeroGPawn()
 	// Every map runs the ship's mode: the guns come from their pickups.
 	Guns->bStartWithAllWeapons = false;
 	HullTools = CreateDefaultSubobject<UJamHullToolsComponent>(TEXT("HullTools"));
+	WeldProjector = CreateDefaultSubobject<UJamWeldProjectorComponent>(TEXT("WeldProjector"));
+	WeldProjector->SetupAttachment(Camera);
+	// Under the lens, as MindKore's projector sits under the bodycam's.
+	WeldProjector->SetRelativeLocation(FVector(0.0f, 0.0f, -6.0f));
 
 	// A plate struck: the armour hit cue (CC0 donors, see CREDITS.md).
 	static ConstructorHelpers::FObjectFinder<USoundBase> Crash(

@@ -44,6 +44,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `jam.Flyer.Probe [all] [Habitat]` | `Lvl_Jam_ZeroG`, `Lvl_Jam_Ship` (`Planetoid`) | летун: блуждание, зрение, аггро, укусы, деаггро, смерть, труп |
 | `jam.Ship.Probe` | `Lvl_Jam_Ship` | каюта, скафандр, шлюз, невесомость, планетоид, лист обшивки, детали |
 | `jam.Hull.Probe [Index]` | `Lvl_Jam_Ship` | ремонт обшивки: стяжка, мусор, сварка, прихватка, шов, резка, держаться; смерть (горелка, крюк, линия на поясе — сняты, ввод выключен) и возрождение той же пешки в каюте (скафандр, запертые стволы, линия стяжки, шов на месте) |
+| `jam.Weld.Curves` | любая | кривые появления рамки проектора (полёт каждой группы, печать надписи) каждые 10 мс в `Saved/Logs/WeldCurves.csv` |
 | `jam.Ship.Caves [Crater] [Plug]` | `Lvl_Jam_Ship` | мембрана кратера и пробка пещеры под дробовиком |
 | `jam.Ship.Lap`, `jam.Ship.JetExit`, `jam.Ship.Land` | `Lvl_Jam_Ship` | ходьба вокруг планетоида, реактивный выход из его гравитации, посадка |
 | `jam.Ship.Where [Tag]` | любая | где акторы с тегом (по умолчанию `Junk.Foreign`) |
@@ -64,6 +65,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `jam.Wall.Shots [Name]` | живая стена до и после дробовика |
 | `jam.Flyer.Shots`, `jam.Flyer.BiteShot`, `jam.Flyer.CorpseShot` | летун, кровь на визоре, труп на планетоиде |
 | `jam.Ship.Shots`, `jam.Ship.PlanetShots`, `jam.Ship.CaveShots` | корабль, планетоид, кратеры и пещеры |
+| `jam.Hull.Stills <i> [plates\|strips]` | проектор скафандра на пробоине `i`: состояния с 2 и 8 м; листы (пустые руки, далеко, мимо, мал, закрывает); появление каждые 33 мс и секунда дрожи ([HullRepair](HullRepair.md#проектор-скафандра)) |
 | `jam.Ladder.Probe shots` | лестница корабля: спуск, вид на люк, переход через край, верхняя площадка, проём (тайминги шагов под рендером плывут — логика по NullRHI) |
 | `jam.Flyer.Clip [Seconds]` | ролик атаки со звуком (видео + мастер), `Saved/Clips` |
 | `jam.Flyer.MixCheck` | выстрел и попадание по летуну отдельно, для сравнения громкости |

@@ -15,6 +15,7 @@ class UInputAction;
 class UInputMappingContext;
 class UJamHullToolsComponent;
 class UJamOxygenComponent;
+class UJamWeldProjectorComponent;
 class UJamWeaponsComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
@@ -136,6 +137,10 @@ public:
 	/** Hull repair in hand: 4 the strap, 5 the welder (Docs/HullRepair.md). While one is out, LMB, R and the wheel are its. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
 	TObjectPtr<UJamHullToolsComponent> HullTools = nullptr;
+
+	/** The suit's projector under the lens: lays the weld frame of a breach in view onto the hull as red laser light. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Jam")
+	TObjectPtr<UJamWeldProjectorComponent> WeldProjector = nullptr;
 
 	// --- view ---------------------------------------------------------------
 

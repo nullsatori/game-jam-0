@@ -2,18 +2,26 @@
 
 #include "Camera/CameraComponent.h"
 #include "Components/SphereComponent.h"
-#include "DrawDebugHelpers.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "JamShipParts.h"
+#include "JamWeldProjector.h"
 #include "JamZeroGPawn.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "MindKore.h"
+#include "UObject/ConstructorHelpers.h"
 
 #define LOCTEXT_NAMESPACE "JamHullTools"
 
 UJamHullToolsComponent::UJamHullToolsComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	ThreadMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/Materials/Hull/M_Jam_StrapLaser.M_Jam_StrapLaser")));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	ThreadMesh = Cylinder.Object;
 }
 
 UPrimitiveComponent* UJamHullToolsComponent::OwnerBody() const
@@ -219,16 +227,60 @@ void UJamHullToolsComponent::ApplyLines(float DeltaSeconds)
 	}
 }
 
-void UJamHullToolsComponent::DrawLines() const
+void UJamHullToolsComponent::DrawLines()
 {
-	// ponytail: debug lines (Development builds), straight; a UCableComponent if the lines must sag or ship in Shipping.
-	for (const FJamStrapLine& Line : Lines)
+	UMaterialInterface* Look = ThreadMaterial.LoadSynchronous();
+	if (!ThreadMesh || !Look)
 	{
+		return;
+	}
+	const FBox Bounds = ThreadMesh->GetBoundingBox();
+	const FVector MeshSize = Bounds.GetSize();
+	const float PixelAngle = UJamWeldProjectorComponent::ViewPixelAngle(Cast<APawn>(GetOwner()));
+	for (int32 Index = 0; Index < FMath::Max(Lines.Num(), Threads.Num()); ++Index)
+	{
+		if (!Lines.IsValidIndex(Index))
+		{
+			Threads[Index]->SetVisibility(false);
+			continue;
+		}
+		if (!Threads.IsValidIndex(Index))
+		{
+			UStaticMeshComponent* Thread = NewObject<UStaticMeshComponent>(GetOwner());
+			Thread->SetStaticMesh(ThreadMesh);
+			Thread->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Thread->SetGenerateOverlapEvents(false);
+			Thread->SetCanEverAffectNavigation(false);
+			Thread->SetCastShadow(false);
+			Thread->bReceivesDecals = false;
+			UMaterialInstanceDynamic* Instance = UMaterialInstanceDynamic::Create(Look, this);
+			Instance->SetScalarParameterValue(TEXT("ZMin"), float(Bounds.Min.Z));
+			Instance->SetScalarParameterValue(TEXT("ZSpan"), float(FMath::Max(MeshSize.Z, 1.0)));
+			Instance->SetScalarParameterValue(TEXT("RadiusCm"), ThreadRadiusCm);
+			if (const AJamZeroGPawn* Pawn = Cast<AJamZeroGPawn>(GetOwner()); Pawn && Pawn->WeldProjector)
+			{
+				// One place for the colours: the projector's.
+				Instance->SetVectorParameterValue(TEXT("Halo"), Pawn->WeldProjector->HaloColour);
+				Instance->SetVectorParameterValue(TEXT("Core"), Pawn->WeldProjector->CoreColour);
+			}
+			Thread->SetMaterial(0, Instance);
+			Thread->RegisterComponent();
+			Threads.Add(Thread);
+			ThreadLooks.Add(Instance);
+		}
+		const FJamStrapLine& Line = Lines[Index];
 		const FVector PA = Line.A->GetComponentTransform().TransformPosition(Line.LocalA);
 		const FVector PB = Line.B->GetComponentTransform().TransformPosition(Line.LocalB) - (Line.bBelt ? FVector(0.0f, 0.0f, 20.0f) : FVector::ZeroVector);
-		// Slack white, taut yellow, at the limit red.
-		const FColor Colour = Line.Tension <= 0.0f ? FColor(200, 200, 200) : Line.Tension < 0.95f ? FColor(255, 210, 60) : FColor(255, 60, 40);
-		DrawDebugLine(GetWorld(), PA, PB, Colour, false, -1.0f, 0, Line.Tension > 0.0f ? 2.5f : 1.2f);
+		const float Length = FMath::Max(float(FVector::Dist(PA, PB)), 1.0f);
+		// The mesh's local Z runs from A to B; its bounds' centre goes on the middle of the line.
+		const FQuat Turn = FRotationMatrix::MakeFromZ(PB - PA).ToQuat();
+		const FVector Scale(2.0f * ThreadRadiusCm / FMath::Max(MeshSize.X, 1.0), 2.0f * ThreadRadiusCm / FMath::Max(MeshSize.Y, 1.0), Length / FMath::Max(MeshSize.Z, 1.0));
+		Threads[Index]->SetWorldTransform(FTransform(Turn, (PA + PB) * 0.5f - Turn.RotateVector(Bounds.GetCenter() * Scale), Scale));
+		Threads[Index]->SetVisibility(true);
+		UMaterialInstanceDynamic* Instance = ThreadLooks[Index];
+		Instance->SetScalarParameterValue(TEXT("Length"), Length);
+		Instance->SetScalarParameterValue(TEXT("Tension"), Line.Tension > 0.0f ? Line.Tension : -1.0f);
+		Instance->SetScalarParameterValue(TEXT("PixelAngle"), PixelAngle);
 	}
 }
 

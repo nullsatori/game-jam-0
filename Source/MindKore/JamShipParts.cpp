@@ -2,7 +2,6 @@
 
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "DrawDebugHelpers.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
@@ -265,44 +264,6 @@ void AJamPlateSocket::UpdateState()
 		: LOCTEXT("Unsealed", "Шов вскрыт: пробоина снова открыта"));
 }
 
-void AJamPlateSocket::DrawContour() const
-{
-	// ponytail: debug lines (Development builds); a decal or mesh strip if it must ship.
-	const FTransform& Frame = GetActorTransform();
-	const double Now = GetWorld()->GetTimeSeconds();
-	const float Z = SurfaceZ + 22.0f; // over a flush 20 cm plate
-	for (int32 Index = 0; Index < SegmentCentre.Num(); ++Index)
-	{
-		const FVector2D Along(-SegmentNormal[Index].Y, SegmentNormal[Index].X);
-		const FVector2D From = SegmentCentre[Index] - Along * (SegmentCm * 0.5f);
-		const FVector2D To = SegmentCentre[Index] + Along * (SegmentCm * 0.5f);
-		const bool bPressed = FMath::Abs(Gap[Index]) <= MaxGapCm;
-		FColor Colour;
-		if (Seam[Index] >= 1.0f)
-		{
-			Colour = Now - LastWelded[Index] < 1.5 ? FColor(255, 150, 40) : FColor(140, 140, 140); // fresh, then cold
-		}
-		else if (Seam[Index] > 0.0f)
-		{
-			Colour = FColor(255, 110, 30);
-		}
-		else if (bPressed)
-		{
-			Colour = FColor(255, 220, 60);
-		}
-		else
-		{
-			if (Index % 2)
-			{
-				continue; // a gap: red dashes
-			}
-			Colour = FColor(255, 50, 40);
-		}
-		DrawDebugLine(GetWorld(), Frame.TransformPositionNoScale(FVector(From.X, From.Y, Z)), Frame.TransformPositionNoScale(FVector(To.X, To.Y, Z)),
-			Colour, false, -1.0f, 0, Seam[Index] > 0.0f ? 4.0f : 2.5f);
-	}
-}
-
 void AJamPlateSocket::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -336,7 +297,6 @@ void AJamPlateSocket::Tick(float DeltaSeconds)
 		Measure();
 		UpdateState();
 	}
-	DrawContour();
 }
 
 // --- panel ------------------------------------------------------------------------------
