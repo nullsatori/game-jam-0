@@ -581,7 +581,7 @@ public:
 	void TracePose(int32 Weapon, bool bReload, int32 Shells, float Seconds, float Step, TArray<FVector>& OutPlace, TArray<FVector>& OutTurn,
 		int32 SwitchPhase = 0) const;
 
-	/** The SV-98's scope (JamScope.h): made in BindInput, it raises the rifle to the eye through UpdateViewModel. */
+	/** Every gun's aim and the SV-98's scope (JamScope.h): made in BindInput; UpdateViewModel takes the shown gun's aimed pose from it (AimPose). */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	TObjectPtr<UJamScopeComponent> Scope = nullptr;
 
@@ -636,9 +636,9 @@ public:
 	void Rearm();
 
 	/**
-	 * A gun coming back into hand out of unarmed (Rearm, a selection): drawn along its own path
-	 * (JamWeaponParts.cpp - the pistol from the right-hip holster, the shotgun over the right
-	 * shoulder, the SV-98 over the left). Fire waits for IsDrawing.
+	 * A gun coming back into hand out of unarmed (Rearm, a selection): logged. The draw itself is
+	 * UpdateSwitch's (JamWeaponParts.cpp), as for any switch - the gun, wanted again, comes in from
+	 * away along its own path. Fire waits for IsDrawing.
 	 */
 	void Draw();
 

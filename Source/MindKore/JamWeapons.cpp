@@ -387,7 +387,7 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	// Back along the view, the muzzle up and a little roll, about the grip (the
 	// meshes' origin); the rise turns about the camera's right axis whichever
 	// way the mesh itself faces. Springs back at ViewKickReturnRate.
-	// Aimed through the scope (JamScope.h), the rifle rests at the eye and kicks less.
+	// Aimed (JamScope.h), the gun rests at the eye and kicks less.
 	FTransform Offset = Weapon->ViewOffset;
 	float KickScale = 1.0f;
 	if (Scope)
@@ -513,10 +513,9 @@ void UJamWeaponsComponent::Rearm()
 
 void UJamWeaponsComponent::Draw()
 {
-	// The draw (owner 19.10): with the gun wanted again, the switch (UJamWeaponsComponent::UpdateSwitch,
-	// JamWeaponParts.cpp) brings it in from away along its own path - the pistol from the right-hip
-	// holster, the shotgun over the right shoulder, the SV-98 over the left - on the pose springs;
-	// it fires once drawn and settled (IsDrawing).
+	// Only the log line: with the gun wanted again, UpdateSwitch (JamWeaponParts.cpp) draws it in from away
+	// along its own path - the pistol from the right-hip holster, the shotgun over the right shoulder, the
+	// SV-98 over the left - on the pose springs; it fires once drawn and settled (IsDrawing).
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: draw %s"), *GetNameSafe(GetOwner()), Weapons.IsValidIndex(CurrentWeapon) ? *Weapons[CurrentWeapon].Name.ToString() : TEXT("-"));
 }
 
@@ -527,8 +526,8 @@ bool UJamWeaponsComponent::IsDrawing() const
 
 void UJamWeaponsComponent::SelectWeapon(int32 Index)
 {
-	// Out of unarmed (the same gun or another): drawn. A plain switch is not a draw here - the anim
-	// thread's switching (put away, draw) owns that.
+	// Out of unarmed (the same gun or another): drawn. Any switch is UpdateSwitch's: it puts the shown
+	// gun away and draws the current one.
 	const bool bFromUnarmed = bHolstered && IsWeaponUnlocked(Index);
 	if (bFromUnarmed && Index == CurrentWeapon)
 	{

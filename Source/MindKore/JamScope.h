@@ -162,14 +162,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion")
 	TArray<FJamGunAim> Aims;
 
-	/** The stand-in draw (StartDraw) starts the gun this far from its rest pose, cm in the camera's frame (low and to the right); it rises on its Out springs. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion")
-	FVector DrawFromCm = FVector(-6.0f, 4.0f, -26.0f);
-
-	/** ...turned this much (pitch, yaw, roll, degrees): the muzzle low, canted. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion")
-	FVector DrawFromTurn = FVector(-30.0f, 10.0f, 25.0f);
-
 	/** The body's velocity changes (thrust, recoil, landing) push the gun the other way: cm/s of the gun per cm/s of the body. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Motion", meta = (ClampMin = "0.0"))
 	float SwayPerBodyVelocity = 0.015f;
@@ -261,12 +253,6 @@ public:
 	/** The capture's full field of view, degrees: the eyepiece's angle as drawn in the world's field / Magnification. */
 	float GetCaptureFieldOfView() const;
 
-	/** Stand-in for the draw (UJamWeaponsComponent::Draw): the gun in hand rises from DrawFromCm / DrawFromTurn on its Out springs. */
-	void StartDraw() { bPendingDraw = true; }
-
-	/** A StartDraw still on its way: until the gun is back within 3 mm and 1 deg of rest, nearly still. */
-	bool IsDrawing() const { return bPendingDraw || bDrawing; }
-
 	/** Held from code (probes); the key does the same. */
 	void SetHeld(bool bInHeld) { bHeld = bInHeld; }
 
@@ -313,8 +299,6 @@ private:
 
 	bool bHeld = false;
 	bool bHeldByHands = false;
-	bool bPendingDraw = false;
-	bool bDrawing = false;
 	/** The gun whose pose the springs hold. */
 	int32 MotionWeapon = INDEX_NONE;
 	float Alpha = 0.0f;

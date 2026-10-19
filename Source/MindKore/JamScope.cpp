@@ -369,26 +369,9 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	if (!bGunInView || Current != MotionWeapon)
 	{
 		// No gun, or another one: it starts from its rest pose.
-		bMoving = bAimTarget = bDrawing = false;
+		bMoving = bAimTarget = false;
 		Alpha = 0.0f;
 		MotionWeapon = bGunInView ? Current : INDEX_NONE;
-	}
-	if (bGunInView && bPendingDraw)
-	{
-		// The stand-in draw (UJamWeaponsComponent::Draw): from low and to the side, up on the Out springs.
-		bPendingDraw = false;
-		bDrawing = bMoving = true;
-		bAimTarget = false;
-		SinceSwitch = 1.0f;
-		Place = Weapons->Weapons[Current].ViewOffset.GetTranslation() + DrawFromCm;
-		Turn = DrawFromTurn;
-		PlaceVelocity = TurnVelocity = FVector::ZeroVector;
-	}
-	if (bDrawing && (!bMoving || ((Place - Weapons->Weapons[Current].ViewOffset.GetTranslation()).Size() < 0.3f
-		&& PlaceVelocity.Size() < 2.0f && Turn.Size() < 1.0f)))
-	{
-		bDrawing = false;
-		UE_LOG(LogMindKore, Log, TEXT("Scope: draw settled"));
 	}
 	if (bGunInView)
 	{
@@ -646,7 +629,7 @@ namespace
 				Pawn->Guns->UnlockWeapon(Gun);
 				Controller->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());
 			});
-			const float In = At + 2.0f; // the draw (DrawFromCm) settled first
+			const float In = At + 2.0f; // the draw settled first
 			After(In, [Scope]() { Scope->SetHeld(true); });
 			for (int32 Index = 0; Index < 25; ++Index)
 			{

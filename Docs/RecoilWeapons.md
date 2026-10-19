@@ -833,16 +833,14 @@ HUD тихая подсказка «[ПКМ] взять (оружие убрат
 держаться за корпус ПКМ можно с инструментом корпуса в руке (4/5) — с оружием
 ПКМ прицеливается.
 
-**Хук доставания — `UJamWeaponsComponent::Draw()`.** Вызывается, когда ствол
-возвращается из «без оружия» (`Rearm` или выбор ствола); обычная смена ствола
-его не вызывает — смену (убрать / достать) делает анимационная ветка. Сейчас в нём заглушка: `UJamScopeComponent::StartDraw` — ствол
-поднимается снизу-справа на своих `Out`-пружинах (`DrawFromCm` (−6, 4, −26),
-`DrawFromTurn` (−30°, 10°, 25°)). Тело этой функции заменит доставание
-анимационной ветки (`jam-anim3`, пружины позы: пистолет из кобуры на правом
-бедре, дробовик из-за правого плеча, СВ-98 из-за левого) — в `jam-anim3` 7655cbc
-такого API ещё нет. Стрельба ждёт, пока доставание не закончится
-(`IsDrawing`, проверка в `Fire`): заглушка считает его законченным, когда ствол
-в 3 мм и 1° от покоя и почти остановился (~0.8 с).
+**Доставание из «без оружия».** `UJamWeaponsComponent::Draw()` только пишет в
+лог, когда ствол возвращается (`Rearm` или выбор ствола). Само доставание —
+то же, что при любой смене: `UpdateSwitch` (раздел «Смена оружия») ведёт ствол
+от позы «убран» своим путём на пружинах позы (пистолет из кобуры на правом
+бедре, дробовик из-за правого плеча, СВ-98 из-за левого). Стрельба ждёт, пока
+доставание не закончится (`IsDrawing`, проверка в `Fire`). Прежняя заглушка
+прицела (`StartDraw`, `DrawFromCm` / `DrawFromTurn`) удалена 19.10: её никто не
+вызывал.
 
 **Прицеливание всеми стволами** (`UJamScopeComponent::Aims`, по `FJamGunAim` на
 ствол). Прицельная линия — от `SightRearCm` к `SightFrontCm` в системе меша; у
@@ -917,7 +915,7 @@ HUD тихая подсказка «[ПКМ] взять (оружие убрат
 [RMB held 0.8 s]: ... aim 1.00 (gun 0)        [RMB up 0.8 s]: ... aim 0.00
 [gun out, body in reach]: RMB would grab -> Weapon: unarmed; [after RMB]: без оружия; holding 4 kg
 [holding, RMB again: let go] -> rearmed - Пистолет, draw Пистолет; RMB would aim
-[fire during the draw: refused] ... Scope: draw settled; [0.9 s after: draw settled]
+[fire during the draw: refused] ... [0.9 s after: draw settled]
 [strap in hand, the wall ahead]: RMB would cling -> ZeroG cling: holding on to StaticMeshActor_38; RMB again -> let go
 [gun out, body taken again] (unarmed) -> SelectWeapon(1): draw Дробовик, a gun drawn - letting go; [2] Дробовик 6/24, holding 0 kg
 ```
