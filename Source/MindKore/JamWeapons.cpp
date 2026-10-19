@@ -285,12 +285,10 @@ void UJamWeaponsComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	UpdatePartEvents(DeltaTime);
+	// The rounds were counted on the way (UpdatePartEvents: the magazine's seat, each round's); the end only frees the gun.
 	if (ReloadEndSeconds > 0.0 && GetWorld()->GetTimeSeconds() >= ReloadEndSeconds && Weapons.IsValidIndex(CurrentWeapon))
 	{
-		FJamWeapon& Weapon = Weapons[CurrentWeapon];
-		const int32 Moved = FMath::Min(Weapon.MagazineSize - Weapon.Ammo, Weapon.Reserve);
-		Weapon.Ammo += Moved;
-		Weapon.Reserve -= Moved;
+		const FJamWeapon& Weapon = Weapons[CurrentWeapon];
 		ReloadEndSeconds = 0.0;
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s reloaded, %d/%d"), *GetNameSafe(GetOwner()), *Weapon.Name.ToString(), Weapon.Ammo, Weapon.Reserve);
 	}

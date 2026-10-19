@@ -202,8 +202,9 @@ struct FJamWeapon
 
 	/**
 	 * The magazine, on ViewMesh in its frame, moved by MagTravelCm x MagTravel (seconds
-	 * since the reload began). At MagEjectSeconds it leaves as a loose body in the world;
-	 * the fresh one shows from MagInSeconds and the curve brings it home.
+	 * since the reload began). At MagEjectSeconds it leaves as a loose body in the world,
+	 * its rounds with it (Ammo 0); the fresh one shows from MagInSeconds, the curve brings
+	 * it home and at MagInSoundSeconds, the seat, it is filled from Reserve.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
 	TObjectPtr<UStaticMesh> MagMesh = nullptr;
@@ -331,6 +332,7 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
 	TObjectPtr<USoundBase> MagInSound = nullptr;
 
+	/** The seat: MagInSound plays and the rounds count (a magazine gun; a round-by-round one counts at ShellSeatSeconds). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound", meta = (ClampMin = "0.0"))
 	float MagInSoundSeconds = 0.0f;
 

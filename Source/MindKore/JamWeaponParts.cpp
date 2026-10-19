@@ -897,10 +897,18 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 		const FVector Spin = Gun.GetUnitAxis(EAxis::Y) * Weapon.MagEjectSpinDeg * FMath::FRandRange(0.75f, 1.25f) + FMath::VRand() * 40.0f;
 		SpawnDebris(Weapon.MagMesh, MagInView->GetComponentTransform(), Velocity, Spin, 0.25f);
 		Play(Weapon.MagOutSound);
+		// Its rounds leave with it (review 19.10: they stayed in Ammo until the reload's end); a reload
+		// abandoned before the seat leaves the gun empty.
+		Weapon.Ammo = 0;
 	}
-	if (Crossed(PrevReloadTime, Time, Weapon.MagInSoundSeconds))
+	if (!Weapon.ShellMesh && Crossed(PrevReloadTime, Time, Weapon.MagInSoundSeconds))
 	{
+		// The fresh magazine seated: the rounds count now, not at the reload's end - a switch after the seat keeps them.
+		const int32 Moved = FMath::Min(Weapon.MagazineSize - Weapon.Ammo, Weapon.Reserve);
+		Weapon.Ammo += Moved;
+		Weapon.Reserve -= Moved;
 		Play(Weapon.MagInSound);
+		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s magazine in, %d/%d"), *GetNameSafe(GetOwner()), *Weapon.Name.ToString(), Weapon.Ammo, Weapon.Reserve);
 	}
 	if (Weapon.ShellMesh)
 	{
