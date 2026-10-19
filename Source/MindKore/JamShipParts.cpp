@@ -221,19 +221,7 @@ void AJamPlateSocket::UpdateState()
 	const float Fraction = GetSeamFraction();
 	if (!bTacked && Root && Fraction >= TackFraction)
 	{
-		// Held by the seam where it lies. Whoever holds it lets go: a joint to a
-		// body that stops simulating would pin the pawn.
-		for (TActorIterator<AJamZeroGPawn> Pawn(GetWorld()); Pawn; ++Pawn)
-		{
-			if (Pawn->GetGrabbed() == Root)
-			{
-				Pawn->Release();
-			}
-			if (Pawn->GetTethered() == Root)
-			{
-				Pawn->DetachTether();
-			}
-		}
+		// Held by the seam where it lies; a pawn holding it lets go itself (AJamZeroGPawn::Tick).
 		Root->SetSimulatePhysics(false);
 		bTacked = true;
 		UE_LOG(LogMindKore, Log, TEXT("Breach %s: %s tacked (seam %.0f%%)"), *GetName(), *PlateActor->GetName(), Fraction * 100.0f);

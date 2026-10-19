@@ -1098,7 +1098,7 @@ namespace
 	 * jam.Hull.Probe [Index]: hull repair on Socket_Breach<Index> (the first by default), logic only.
 	 * A plate 40 cm off the hole, the torch tried (junk inside: refused); a strap from the opposite
 	 * wall through the hole pulls it on (gaps and coverage logged); the junk is removed; the whole
-	 * contour welded (tack, seal, the panel); half cut (unsealed, still tacked), all cut (loose),
+	 * contour welded with the pawn holding the plate (tack, seal, the panel; the tack must make it let go); half cut (unsealed, still tacked), all cut (loose),
 	 * welded again; cling to the hull and fire the sniper; then the suit on, a strap line wall - plate
 	 * and one on the belt, the torch lit and the hook in, and death: the torch, the hook and the belt
 	 * line go at once, the input stops; the same pawn wakes standing in the cabin with the suit, the
@@ -1233,8 +1233,10 @@ namespace
 			}
 			UE_LOG(LogMindKore, Log, TEXT("Hull probe: %d junk removed from the hull"), Removed);
 		});
-		After(Mode, 4.8f, [WeakSocket, Contour, Report]()
+		After(Mode, 4.8f, [Pawn, PlateBody, WeakSocket, Contour, Report]()
 		{
+			// Holding the plate while its seam tacks it: the pawn must let go by itself once it stops simulating.
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [held while welding]: grabbed %s"), Pawn->Grab(PlateBody, PlateBody->GetComponentLocation()) ? TEXT("yes") : TEXT("no"));
 			int32 Welded = 0;
 			int32 Gaps = 0;
 			for (const FVector& Point : Contour(5.0f))
@@ -1248,6 +1250,11 @@ namespace
 			}
 			UE_LOG(LogMindKore, Log, TEXT("Hull probe [welded along the contour]: %d welded torch steps, %d on a gap, junk %d"), Welded, Gaps, WeakSocket->JunkCount());
 			Report(TEXT("welded"));
+		});
+		After(Mode, 4.9f, [Pawn, PlateBody]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [tacked +0.1 s]: plate simulating %s, the pawn holds %s, speed %.0f cm/s"),
+				PlateBody->IsSimulatingPhysics() ? TEXT("yes") : TEXT("no"), *GetNameSafe(Pawn->GetGrabbed() ? Pawn->GetGrabbed()->GetOwner() : nullptr), Pawn->GetBodyVelocity().Size());
 		});
 		if (bShots)
 		{

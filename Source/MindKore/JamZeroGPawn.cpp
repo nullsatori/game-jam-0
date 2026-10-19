@@ -1482,7 +1482,8 @@ void AJamZeroGPawn::ReviveAt(const FVector& Location)
 void AJamZeroGPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (GrabbedBody.IsStale())
+	// A held or roped body that stops simulating (a plate tacked by its seam) would hang the pawn on the world: let go.
+	if (GrabbedBody.IsStale() || (GrabbedBody.IsValid() && !GrabbedBody->IsSimulatingPhysics()))
 	{
 		Release();
 	}
@@ -1490,7 +1491,7 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 	{
 		LetGoCling();
 	}
-	if (TetherConstraint && !TetheredBody.IsValid())
+	if (TetherConstraint && (!TetheredBody.IsValid() || !TetheredBody->IsSimulatingPhysics()))
 	{
 		DetachTether();
 	}
