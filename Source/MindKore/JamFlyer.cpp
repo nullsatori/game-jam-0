@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerStart.h"
 #include "HAL/IConsoleManager.h"
 #include "AudioDevice.h"
 #include "AudioMixerBlueprintLibrary.h"
@@ -243,6 +244,12 @@ void AJamFlyerHabitat::SampleSpots()
 	for (TActorIterator<AMKDoor> It(World); It; ++It)
 	{
 		Doors.Add(It->GetComponentsBoundingBox(true).GetCenter());
+	}
+	// A living wall is the encounter's door: no one clings by it, so the armed player who comes to tear it does not
+	// wake the roost by coming close - the wall's pain call does.
+	for (TActorIterator<AJamLivingWall> It(World); It; ++It)
+	{
+		Doors.Add(It->GetActorLocation());
 	}
 	const int32 Want = FMath::Max(1, FMath::CeilToInt(FlockSize * RoostShare * 1.6f));
 	FRandomStream Stream(RoostSeed != 0 ? RoostSeed : FMath::Rand());
@@ -3432,11 +3439,12 @@ namespace JamFlyerProbe
 	 * The roost scene (Lvl_Jam_Ship): the reveal from the airlock, unarmed - the hull bristling, the roost's
 	 * rustle, a sentry turning curious and darting in; the pistol; a round into the hull by the densest
 	 * clinging (contact): the cascade over the hull; the hunt with its tokens and feints, the pistol on the
-	 * nearest hunter - a stagger, a kill.
+	 * nearest hunter - a stagger, a kill. Staged for the roost on the player's ship; since 19.10 the roost is on
+	 * the wreck, 65 m from the airlock, and the scene was not reworked for it (Docs/Flyers.md, limits).
 	 */
 	bool MakeRoostScene(UWorld* World, FClip& Clip)
 	{
-		AJamFlyerHabitat* Home = FindRoost(World, TEXT("Ship"));
+		AJamFlyerHabitat* Home = FindRoost(World, TEXT(""));
 		AJamZeroGPawn* Pawn = ProbePawn(World);
 		FVector Exit, Out;
 		if (!Home || !Pawn || !AirlockExit(World, Exit, Out))
@@ -3716,7 +3724,7 @@ namespace JamFlyerProbe
 
 	FAutoConsoleCommandWithWorldAndArgs GFlyerClip(
 		TEXT("jam.Flyer.Clip"),
-		TEXT("jam.Flyer.Clip [Seconds] [Ffmpeg] [shotgun] [stat] [roost|wall]: a recorded take (video and sound) of a fly-by attack - or the ship's roost waking and hunting, or the flesh wall's pain call and the flock coming - the voices in the log; Saved/Clips (needs a real RHI and a window)."),
+		TEXT("jam.Flyer.Clip [Seconds] [Ffmpeg] [shotgun] [stat] [roost|wall]: a recorded take (video and sound) of a fly-by attack - or the roost waking and hunting, or the flesh wall's pain call and the flock coming - the voices in the log; Saved/Clips (needs a real RHI and a window)."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunFlyerClip));
 
 	/**
@@ -3974,12 +3982,12 @@ namespace JamFlyerProbe
 
 	/**
 	 * Just outside the airlock's outer door, and the way out: the door whose label holds "Airlock" and
-	 * lies farthest from the PlayerStart's ship centre along its own thin axis.
+	 * lies farthest from the PlayerStart (in the cabin) along its own thin axis.
 	 */
 	bool AirlockExit(UWorld* World, FVector& OutPoint, FVector& OutOut)
 	{
-		const AJamFlyerHabitat* Ship = FindRoost(World, TEXT("Ship"));
-		const FVector ShipCentre = Ship ? Ship->GetActorLocation() : FVector::ZeroVector;
+		TActorIterator<APlayerStart> Start(World);
+		const FVector ShipCentre = Start ? Start->GetActorLocation() : FVector::ZeroVector;
 		float Best = -1.0f;
 		for (TActorIterator<AMKDoor> It(World); It; ++It)
 		{
@@ -4001,6 +4009,27 @@ namespace JamFlyerProbe
 			}
 		}
 		return Best >= 0.0f;
+	}
+
+	/** The player's ship: what a line down onto the PlayerStart (in the cabin) hits first - its roof (not its attach root: the USD import's root is an empty actor). */
+	const AActor* ShipHull(UWorld* World)
+	{
+		TActorIterator<APlayerStart> Start(World);
+		if (!Start)
+		{
+			return nullptr;
+		}
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(JamShipHull), true);
+		if (const APawn* Pawn = ProbePawn(World))
+		{
+			Params.AddIgnoredActor(Pawn);
+		}
+		FHitResult Hit;
+		if (!World->LineTraceSingleByChannel(Hit, Start->GetActorLocation() + FVector(0, 0, 5000), Start->GetActorLocation(), ECC_Visibility, Params))
+		{
+			return nullptr;
+		}
+		return Hit.GetActor();
 	}
 
 	/** Flies the pawn along Points at Speed (teleported a step at a time, its velocity kept), then Done. */
@@ -4349,9 +4378,9 @@ namespace JamFlyerProbe
 
 	/**
 	 * jam.Flyer.RoostProbe [Habitat]: the first EVA (logic; NullRHI is fine). The roost at rest (spots,
-	 * clinging, sentries, the tick cost), then the unarmed player out of the airlock along the real way to
-	 * the pistol pickup (around the bow): no dive, no bite, sentries curious; a bump into a clinging one
-	 * (a warning screech and a feint); at the pickup the pistol; a test shot into space (vacuum: unheard);
+	 * clinging, sentries, the tick cost), then the unarmed player out of the airlock, over to the roost (on the
+	 * wreck) and back, round the ship's bow to the pistol pickup: no dive, no bite, sentries curious; at the roost
+	 * a bump into a clinging one (a warning screech and a feint); at the pickup the pistol; a test shot into space (vacuum: unheard);
 	 * back toward the roost and a round into its hull (contact): the cascade, the hunt with its tokens; then the
 	 * player only hides for 120 s (RoostHide: where the fight left him, "airlock" or "cabin") - no new cascade.
 	 */
@@ -4544,11 +4573,11 @@ namespace JamFlyerProbe
 
 	void RunFlyerRoostProbe(const TArray<FString>& Args, UWorld* World)
 	{
-		// Args: a part of the roost habitat's name ("Ship" by default); "airlock" or "cabin": where the player hides after the fight.
+		// Args: a part of the roost habitat's name (the first roost by default); "airlock" or "cabin": where the player hides after the fight.
 		const FString* HideArg = Args.FindByPredicate([](const FString& Arg) { return Arg == TEXT("airlock") || Arg == TEXT("cabin"); });
 		const FString Hide = HideArg ? *HideArg : FString();
 		const FString* Filter = Args.FindByPredicate([](const FString& Arg) { return Arg != TEXT("airlock") && Arg != TEXT("cabin"); });
-		AJamFlyerHabitat* Home = FindRoost(World, Filter ? *Filter : TEXT("Ship"));
+		AJamFlyerHabitat* Home = FindRoost(World, Filter ? *Filter : TEXT(""));
 		AJamZeroGPawn* Pawn = ProbePawn(World);
 		FVector Exit, Out;
 		AJamWeaponPickup* Pistol = nullptr;
@@ -4577,21 +4606,45 @@ namespace JamFlyerProbe
 			{
 				return;
 			}
-			// The way: out of the door, clear of the hull, round the bow (the ship's -X end), to the pickup.
+			// The way: out of the door, clear of the ship, over to the roost (6 m off the clinging one nearest the
+			// airlock: the unarmed visit), back past the airlock, round the ship's bow (its -X end) to the pickup.
+			const AActor* Ship = ShipHull(World);
+			if (!Ship)
+			{
+				UE_LOG(LogMindKore, Warning, TEXT("Flyer roost probe: no ship hull over the PlayerStart"));
+				return;
+			}
 			FVector Origin, Extent;
-			H->RoostOn[0]->GetActorBounds(true, Origin, Extent, true);
+			Ship->GetActorBounds(true, Origin, Extent, true);
 			const FVector Clear = Exit + Out * 700.0f;
 			const FVector Bow(Origin.X - Extent.X - 800.0f, Clear.Y, Clear.Z + 300.0f);
 			const FVector Target = Pistol->GetActorLocation() + FVector(0, -150, 0);
-			const TArray<FVector> Path = { Exit, Clear, Bow, Target };
+			const AJamFlyer* Near = nullptr;
+			for (const TWeakObjectPtr<AJamFlyer>& Weak : H->GetFlock())
+			{
+				if (Weak.IsValid() && Weak->GetState() == EJamFlyerState::Roost
+					&& (!Near || FVector::DistSquared(Weak->GetActorLocation(), Exit) < FVector::DistSquared(Near->GetActorLocation(), Exit)))
+				{
+					Near = Weak.Get();
+				}
+			}
+			const FJamRoostSpot* NearSpot = Near ? H->GetSpot(Near->GetRoostSpot()) : nullptr;
+			const FVector Visit = NearSpot ? NearSpot->Point + NearSpot->Normal * 600.0f : Clear;
+			const TArray<FVector> Path = { Exit, Clear, Visit, Clear, Bow, Target };
+			float Length = 0.0f;
+			for (int32 Leg = 1; Leg < Path.Num(); ++Leg)
+			{
+				Length += FVector::Dist(Path[Leg - 1], Path[Leg]);
+			}
 			const int32 BitesBefore = FlockBites(H);
-			UE_LOG(LogMindKore, Log, TEXT("Flyer roost probe [walk]: unarmed, %.0f m via %s and %s at 4 m/s; %s"), (FVector::Dist(Exit, Clear) + FVector::Dist(Clear, Bow) + FVector::Dist(Bow, Target)) / 100.0f,
-				*Clear.ToCompactString(), *Bow.ToCompactString(), *DescribeFlock(H));
-			// The bump: on the way out, brush past the clinging one nearest the door.
+			UE_LOG(LogMindKore, Log, TEXT("Flyer roost probe [walk]: unarmed, %.0f m at 4 m/s - out to %s, the roost visit %s (%.0f m from the airlock exit), back, the bow %s of %s (x %.0f..%.0f), the pickup; %s"),
+				Length / 100.0f, *Clear.ToCompactString(), *Visit.ToCompactString(), FVector::Dist(Visit, Exit) / 100.0f, *Bow.ToCompactString(), *Ship->GetName(),
+				Origin.X - Extent.X, Origin.X + Extent.X, *DescribeFlock(H));
+			// The bump: at the roost, brush past the clinging one nearest.
 			TSharedRef<bool> bBumped = MakeShared<bool>(false);
 			TSharedRef<int32> Steps = MakeShared<int32>(0);
 			WatchFlock(World, H, 120.0f, TEXT("first EVA, unarmed"), [WeakHome, bBumped]() { return false; }, []() {});
-			FlyPath(World, Path, 400.0f, [World, WeakHome, bBumped, Steps](const FVector& At, const FVector& Dir)
+			FlyPath(World, Path, 400.0f, [World, WeakHome, bBumped, Steps, Visit](const FVector& At, const FVector& Dir)
 			{
 				AJamZeroGPawn* Now = ProbePawn(World);
 				AJamFlyerHabitat* Hab = WeakHome.Get();
@@ -4602,7 +4655,7 @@ namespace JamFlyerProbe
 				// Looks where it goes, glancing at the hull now and then.
 				const float Glance = FMath::Sin(++(*Steps) * 0.02f);
 				Now->GetController()->SetControlRotation((Dir + (Hab->RoostFocus - At).GetSafeNormal() * FMath::Max(0.0f, Glance)).Rotation());
-				if (!*bBumped && *Steps == 60)
+				if (!*bBumped && FVector::Dist(At, Visit) < 50.0f)
 				{
 					AJamFlyer* Nearest = nullptr;
 					for (const TWeakObjectPtr<AJamFlyer>& Weak : Hab->GetFlock())
@@ -4685,7 +4738,7 @@ namespace JamFlyerProbe
 
 	FAutoConsoleCommandWithWorldAndArgs GFlyerRoostProbe(
 		TEXT("jam.Flyer.RoostProbe"),
-		TEXT("jam.Flyer.RoostProbe [Habitat] [airlock|cabin]: the first EVA - the roost at rest and its cost, the unarmed way from the airlock to the pistol (no bite; a bump), the pistol, a shot into space, a round into the roost's hull: the cascade; then the player hides 120 s (where the fight left him, inside the airlock, or in the cabin nearest the roost): no new cascade."),
+		TEXT("jam.Flyer.RoostProbe [Habitat] [airlock|cabin]: the first EVA - the roost at rest and its cost, the unarmed way from the airlock to the roost and on to the pistol (no bite; a bump at the roost), the pistol, a shot into space, a round into the roost's hull: the cascade; then the player hides 120 s (where the fight left him, inside the airlock, or in the cabin nearest the roost): no new cascade."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunFlyerRoostProbe));
 
 	/** In front of the wall on the side the airlock is on, Distance off it. */
@@ -4774,6 +4827,8 @@ namespace JamFlyerProbe
 				{
 					UE_LOG(LogMindKore, Log, TEXT("Flyer encounter probe [after the blast]: %d pain call(s); %s"), WeakWall.IsValid() ? WeakWall->GetPainCalls() : -1,
 						WeakHome.IsValid() ? *DescribeFlock(WeakHome.Get()) : TEXT("-"));
+					// The cost of the woken flock while it gathers and comes (it all flies now).
+					After(World, 0.5f, [World]() { RunFlyerCost({ TEXT("5") }, World); });
 					// Back to the airlock: where does the flock catch up?
 					TSharedRef<bool> bMet = MakeShared<bool>(false);
 					TSharedRef<float> Covered = MakeShared<float>(0.0f);
