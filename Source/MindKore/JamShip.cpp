@@ -434,11 +434,12 @@ void AJamShipGameMode::Tick(float DeltaSeconds)
 	{
 		Oxygen->SetBreathable(Air && Air->bBreathable, Air ? Air->RefillPerSecond : 0.0f);
 	}
-	// Gravity: the walking zone's, or none (zero-G).
+	// Gravity: the walking zone's acceleration as JamGravityAt gives it to every body (with the
+	// debug menu's global scale; scale 0 floats the pawn as outside every zone), or none (zero-G).
 	if (AJamZeroGPawn* Floater = Cast<AJamZeroGPawn>(Pawn))
 	{
-		const AJamGravityZone* Zone = JamGravityAt(GetWorld(), Location).Zone;
-		Floater->SetGravity(Zone ? Zone->GravityAt(Location) : FVector::ZeroVector, Zone ? Zone->GravityCm : 0.0f, Zone && Zone->bRadial);
+		const FJamGravity Gravity = JamGravityAt(GetWorld(), Location);
+		Floater->SetGravity(Gravity.Acceleration.GetSafeNormal(), float(Gravity.Acceleration.Size()), Gravity.Zone && Gravity.Zone->bRadial);
 	}
 }
 

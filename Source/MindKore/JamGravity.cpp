@@ -69,6 +69,9 @@ namespace
 	};
 	FPullCost GPullCost;
 
+	/** JamSetGravityScale: the debug menu's multiplier on every zone's gravity. */
+	float GGravityScale = 1.0f;
+
 	void LogPullCost(const TCHAR* Label)
 	{
 		const double Frames = double(FMath::Max<int64>(GPullCost.Frames, 1));
@@ -89,9 +92,19 @@ FJamGravity JamGravityAt(const UWorld* World, const FVector& Location)
 	Gravity.Zone = World ? BestZone(World, Location, /*bWalkOnly=*/true) : nullptr;
 	if (Gravity.Zone)
 	{
-		Gravity.Acceleration = Gravity.Zone->GravityAt(Location) * Gravity.Zone->GravityCm;
+		Gravity.Acceleration = Gravity.Zone->GravityAt(Location) * (Gravity.Zone->GravityCm * GGravityScale);
 	}
 	return Gravity;
+}
+
+void JamSetGravityScale(float Scale)
+{
+	GGravityScale = FMath::Max(Scale, 0.0f);
+}
+
+float JamGetGravityScale()
+{
+	return GGravityScale;
 }
 
 const AJamGravityZone* JamAirZoneAt(const UWorld* World, const FVector& Location)
@@ -255,6 +268,11 @@ bool FJamZonePriorityTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Tie: the smaller zone (the room inside the ball)"), JamGravityAt(World, FVector::ZeroVector).Zone == Room);
 	TestTrue(TEXT("Tie: the smallest (the nook)"), JamGravityAt(World, FVector(800, 0, 0)).Zone == Nook);
 	TestEqual(TEXT("The nook's strength"), JamGravityAt(World, FVector(800, 0, 0)).Acceleration, FVector(0, 0, -300));
+	JamSetGravityScale(0.5f);
+	TestEqual(TEXT("The global scale halves it"), JamGravityAt(World, FVector(800, 0, 0)).Acceleration, FVector(0, 0, -150));
+	JamSetGravityScale(0.0f);
+	TestTrue(TEXT("Scale 0: zero-G, the zone still wins"), JamGravityAt(World, FVector(800, 0, 0)).Acceleration.IsZero() && JamGravityAt(World, FVector(800, 0, 0)).Zone == Nook);
+	JamSetGravityScale(1.0f);
 	Ball->Priority = 1;
 	TestTrue(TEXT("Priority beats size"), JamGravityAt(World, FVector(800, 0, 0)).Zone == Ball);
 	TestTrue(TEXT("Radial: toward the ball's centre"), JamGravityAt(World, FVector(800, 0, 0)).Acceleration.GetSafeNormal().Equals(FVector(-800, 0, 3000).GetSafeNormal(), 1e-4));
