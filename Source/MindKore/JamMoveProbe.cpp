@@ -186,59 +186,46 @@ namespace JamMoveProbe
 	}
 
 	/**
-	 * Holding on to a wall with the feet on the floor: the keys across the arm
-	 * pump a swing along the wall (SwingAccelCm, less the floor's friction).
-	 * Walking braking the body at the same time would keep it near rest.
+	 * Holding on with the feet on the floor: standing in the cabin, the hand on
+	 * the ceiling overhead (the arm's rest set to that reach for the check: the
+	 * gravity zone stops ~2.5 m short of the hull's walls, so no wall is in
+	 * reach while standing in gravity). D across the arm pumps a swing along
+	 * the floor (SwingAccelCm, less the floor's friction); the walk braking the
+	 * body under the arm at 4000 cm/s^2 kept it near rest.
 	 */
 	void CheckFloorHang(AJamZeroGPawn* Pawn, const FCabin Cabin)
 	{
-		UWorld* World = Pawn->GetWorld();
-		FCollisionQueryParams Params(SCENE_QUERY_STAT(JamMoveProbe), false, Pawn);
-		const FVector Eye(Cabin.Centre.X, Cabin.Centre.Y, Cabin.FloorZ + 41.0 + Pawn->EyeHeightCm);
-		FHitResult Wall;
-		for (const FVector& Direction : { FVector::ForwardVector, FVector::BackwardVector, FVector::RightVector, FVector::LeftVector })
-		{
-			FHitResult Hit;
-			if (World->LineTraceSingleByChannel(Hit, Eye, Eye + Direction * 2000.0f, ECC_Visibility, Params) && Hit.GetComponent()
-				&& !Hit.GetComponent()->IsSimulatingPhysics() && (!Wall.bBlockingHit || Hit.Distance < Wall.Distance))
-			{
-				Wall = Hit;
-			}
-		}
-		if (!Wall.bBlockingHit)
-		{
-			UE_LOG(LogMindKore, Warning, TEXT("Move probe [floor hang]: no wall around the cabin centre - FAIL"));
-			CheckViewKick(Pawn, Cabin);
-			return;
-		}
-		const FVector Normal = FVector(Wall.ImpactNormal.X, Wall.ImpactNormal.Y, 0.0).GetSafeNormal();
-		const FVector Stand = FVector(Wall.ImpactPoint) + Normal * Pawn->ArmLengthCm;
-		const FRotator Facing = (-Normal).Rotation();
-		Place(Pawn, FVector(Stand.X, Stand.Y, Cabin.FloorZ + 41.0), &Facing);
+		const FRotator Up(89.0f, 0.0f, 0.0f);
+		Place(Pawn, Cabin.Centre, &Up);
 		After(Pawn, 1.5f, [Pawn, Cabin]()
 		{
 			FHitResult Hold;
 			FCollisionQueryParams Params(SCENE_QUERY_STAT(JamMoveProbe), false, Pawn);
 			Pawn->GetWorld()->LineTraceSingleByChannel(Hold, Pawn->ShoulderLocation(), Pawn->ShoulderLocation() + Pawn->GetControlRotation().Vector() * Pawn->GrabReachCm,
 				ECC_Visibility, Params);
+			const float Arm = Pawn->ArmLengthCm;
+			Pawn->ArmLengthCm = Hold.bBlockingHit ? float(Hold.Distance) : Arm;
+			const bool bStanding = Pawn->IsGrounded();
 			const bool bHeld = Hold.bBlockingHit && Pawn->Cling(Hold.GetComponent(), Hold.ImpactPoint);
-			UE_LOG(LogMindKore, Log, TEXT("Move probe [floor hang]: %s %s at %.0f cm, %s"), bHeld ? TEXT("holding") : TEXT("NOT holding"),
-				*GetNameSafe(Hold.GetActor()), Hold.Distance, Pawn->IsGrounded() ? TEXT("standing") : TEXT("not standing"));
+			UE_LOG(LogMindKore, Log, TEXT("Move probe [floor hang]: %s %s %.0f cm over the eye, %s, %s, mode %s"), bHeld ? TEXT("holding") : TEXT("NOT holding"),
+				*GetNameSafe(Hold.GetActor()), Hold.Distance, bStanding ? TEXT("was standing") : TEXT("was NOT standing"),
+				Pawn->IsInGravity() ? TEXT("in gravity") : TEXT("NOT in gravity"), *UEnum::GetDisplayValueAsText(Pawn->GetMoveMode()).ToString());
 			HoldKeys(Pawn, FVector(0.0f, 1.0f, 0.0f), 0.5f);
 			const TSharedRef<FClock> Clock = MakeShared<FClock>(Pawn->GetWorld());
-			After(Pawn, 0.5f, [Pawn, Cabin, Clock]()
+			After(Pawn, 0.5f, [Pawn, Cabin, Clock, Arm, bStanding]()
 			{
-				const FVector Along = (Pawn->ShoulderLocation() - Pawn->GetHandLocation()).GetSafeNormal();
 				const FVector Velocity = Pawn->GetBodyVelocity();
-				const float Across = float((Velocity - Along * FVector::DotProduct(Velocity, Along)).Size());
-				const bool bPass = Pawn->IsClinging() && Across > 100.0f;
-				UE_LOG(LogMindKore, Log, TEXT("Move probe [floor hang]: D held 0.5 s - across the arm %.0f cm/s (pump %.0f cm/s^2 less friction), arm %.1f cm, height over the floor %.1f cm, dt %.4f s - %s"),
-					Across, Pawn->SwingAccelCm, Pawn->GetArmLengthCm(), Pawn->Body->GetComponentLocation().Z - Cabin.FloorZ, Clock->MeanDt(Pawn->GetWorld()), Verdict(bPass));
-				After(Pawn, 1.5f, [Pawn, Cabin]()
+				const float Across = float(FVector(Velocity.X, Velocity.Y, 0.0).Size());
+				const float Height = float(Pawn->Body->GetComponentLocation().Z - Cabin.FloorZ);
+				const bool bPass = bStanding && Pawn->IsClinging() && Pawn->IsInGravity() && Across > 40.0f;
+				UE_LOG(LogMindKore, Log, TEXT("Move probe [floor hang]: D held 0.5 s - along the floor %.0f cm/s (pump %.0f cm/s^2 less friction), arm %.1f cm, body centre %.1f cm over the floor, dt %.4f s - %s"),
+					Across, Pawn->SwingAccelCm, Pawn->GetArmLengthCm(), Height, Clock->MeanDt(Pawn->GetWorld()), Verdict(bPass));
+				After(Pawn, 1.5f, [Pawn, Cabin, Arm]()
 				{
-					UE_LOG(LogMindKore, Log, TEXT("Move probe [floor hang]: hands still 1.5 s - %.0f cm/s, arm %.1f cm, %s"), Pawn->GetBodyVelocity().Size(),
-						Pawn->GetArmLengthCm(), Pawn->IsClinging() ? TEXT("holding") : TEXT("NOT holding"));
+					UE_LOG(LogMindKore, Log, TEXT("Move probe [floor hang]: hands still 1.5 s - %.0f cm/s, arm %.1f cm, body centre %.1f cm over the floor, %s"), Pawn->GetBodyVelocity().Size(),
+						Pawn->GetArmLengthCm(), Pawn->Body->GetComponentLocation().Z - Cabin.FloorZ, Pawn->IsClinging() ? TEXT("holding") : TEXT("NOT holding"));
 					LetGo(Pawn);
+					Pawn->ArmLengthCm = Arm;
 					CheckViewKick(Pawn, Cabin);
 				});
 			});
