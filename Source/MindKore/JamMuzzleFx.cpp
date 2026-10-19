@@ -12,6 +12,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
 #include "JamFlyer.h"
+#include "JamGravity.h"
 #include "JamLivingWall.h"
 #include "JamWeapons.h"
 #include "JamZeroGPawn.h"
@@ -29,7 +30,7 @@ namespace
 		TEXT("jam.Fx.VolumetricSmoke"), 1,
 		TEXT("1: muzzle smoke as volumetric voxel clouds (heterogeneous volumes); 0: card puffs. Both live in the world."));
 
-	/** The gas's velocity (its throw and what it took from the gun) dies down to its drift with this time constant, s. */
+	/** The exhaust's throw (relative to the cloud's centre of mass) dies down to its drift with this time constant, s. */
 	constexpr float GasSlowSeconds = 0.4f;
 
 	/**
@@ -286,6 +287,8 @@ void UJamMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const U
 		Puff.Origin = Muzzle.GetLocation();
 		Puff.Bore = Muzzle.GetRotation();
 		Puff.GunVelocity = GunVelocity;
+		// ponytail: air or vacuum is decided at the shot, a puff crossing a zone's edge keeps it.
+		Puff.AirDragSeconds = JamAirZoneAt(GetWorld(), Muzzle.GetLocation()) ? AirDragSeconds : 0.0f;
 		if (Index < Ports)
 		{
 			// Out of the brake's side ports: a jet each side, each puff drawn out along it.
@@ -342,9 +345,10 @@ FString UJamMuzzleFxComponent::DescribeClouds() const
 		{
 			// Its speed toward the eye: positive would be the cloud coming after the shooter.
 			const FVector ToEye = (Eye - Cloud.Centre).GetSafeNormal();
-			Line += FString::Printf(TEXT(" [gun %d age %.2f at %s, its muzzle at the shot %s (%.0f cm off), %.0f cm from the eye, %.0f cm/s, %.1f cm/s toward the eye, %d wake(s)]"),
+			const FVector Velocity = Cloud.Carried + Cloud.Velocity;
+			Line += FString::Printf(TEXT(" [gun %d age %.2f at %s, its muzzle at the shot %s (%.0f cm off), %.0f cm from the eye, %s cm/s (from the gun %s, throw and drift %.0f), %.1f cm/s toward the eye, %d wake(s)]"),
 				Cloud.Gun, Cloud.Age, *Cloud.Centre.ToCompactString(), *Cloud.Muzzle.ToCompactString(), FVector::Dist(Cloud.Centre, Cloud.Muzzle),
-				FVector::Dist(Cloud.Centre, Eye), Cloud.Velocity.Size(), Cloud.Velocity | ToEye, Cloud.Wakes.Num());
+				FVector::Dist(Cloud.Centre, Eye), *Velocity.ToCompactString(), *Cloud.Carried.ToCompactString(), Cloud.Velocity.Size(), Velocity | ToEye, Cloud.Wakes.Num());
 		}
 	}
 	return Line;
@@ -396,10 +400,12 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, c
 	Cloud->Basis = Gun.SmokeBrake > 0.0f ? Bore * FQuat(FVector::UpVector, UE_HALF_PI) : Bore;
 	// Born where the gas leaves the gun, with the gun's velocity at the shot and its throw
 	// out of the muzzle (a brake turns most of it out of the side ports, both ways: little
-	// is left forward). Then the whole of it dies down to a slow drift (TickClouds): no air
-	// to carry it, nothing to lift it, and nothing ties it to the shooter - kicked back by
-	// the recoil, the shooter drifts away from it.
-	Cloud->Velocity = GunVelocity + Bore.GetAxisX() * Gun.CloudThrowCm * (1.0f - Gun.SmokeBrake);
+	// is left forward). The throw dies down to a slow drift as the gas spreads; the gun's
+	// velocity is the centre of mass's and stays in a vacuum - only air takes it
+	// (TickClouds). Nothing ties it to the shooter: kicked back by the recoil, the shooter
+	// drifts away from it.
+	Cloud->Carried = GunVelocity;
+	Cloud->Velocity = Bore.GetAxisX() * Gun.CloudThrowCm * (1.0f - Gun.SmokeBrake);
 	Cloud->DriftVelocity = Bore.RotateVector(FVector(1.0f, FMath::FRandRange(-0.3f, 0.3f), FMath::FRandRange(-0.3f, 0.3f))) * Gun.SmokeDriftCm;
 	Cloud->Age = 0.0f;
 	Cloud->Seed = FMath::FRand();
@@ -469,7 +475,11 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 		}
 		const FJamMuzzleFx& Gun = Guns[Cloud.Gun];
 		Cloud.Velocity = Cloud.DriftVelocity + (Cloud.Velocity - Cloud.DriftVelocity) * FMath::Exp(-DeltaTime / GasSlowSeconds);
-		Cloud.Centre += Cloud.Velocity * DeltaTime;
+		if (JamAirZoneAt(GetWorld(), Cloud.Centre))
+		{
+			Cloud.Carried *= FMath::Exp(-DeltaTime / AirDragSeconds);
+		}
+		Cloud.Centre += (Cloud.Carried + Cloud.Velocity) * DeltaTime;
 		const float Half = Gun.CloudCm * 0.5f;
 		// The pawn flying through parts it: a wake along its path (and the voxels by the eye fade).
 		const FVector EyeLocal = Cloud.Basis.UnrotateVector(Eye - Cloud.Centre);
@@ -616,10 +626,10 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		}
 	}
 
-	// The card smoke, in vacuum and in the world, as the clouds: thrown out of the muzzle
-	// and swollen within a few tenths of a second, carried on by the gun's velocity at the
-	// shot as it dies down (GasSlowSeconds), then frozen in shape and drifting straight on
-	// (nothing to lift it). Worked out in the world, drawn in the camera's space.
+	// The card smoke, in the world, as the clouds: thrown out of the muzzle and swollen
+	// within a few tenths of a second, then frozen in shape and drifting straight on
+	// (nothing to lift it), all the while carried by the gun's velocity at the shot (kept in
+	// a vacuum, dying in air). Worked out in the world, drawn in the camera's space.
 	if (Puffs.IsEmpty() && Smoke->GetInstanceCount() == 0)
 	{
 		return;
@@ -639,7 +649,8 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		const float X = Puff.Age / Puff.Life;
 		const float Throw = 1.0f - FMath::Exp(-Puff.Age / 0.12f);
 		const float Grow = 1.0f - FMath::Exp(-Puff.Age / 0.15f);
-		const FVector Carried = Puff.GunVelocity * GasSlowSeconds * (1.0f - FMath::Exp(-Puff.Age / GasSlowSeconds));
+		// The gun's velocity is kept in a vacuum; in air it dies with AirDragSeconds (as a cloud's).
+		const FVector Carried = Puff.GunVelocity * (Puff.AirDragSeconds > 0.0f ? Puff.AirDragSeconds * (1.0f - FMath::Exp(-Puff.Age / Puff.AirDragSeconds)) : Puff.Age);
 		const FVector World = Puff.Origin + Carried + Puff.Bore.RotateVector(Puff.Direction * (Puff.SpreadCm * Throw + Puff.DriftCm * Puff.Age)
 			- FVector(Puff.BackCm * Throw, 0.0f, 0.0f));
 		const FVector Location = Camera.InverseTransformPosition(World);
@@ -751,7 +762,8 @@ namespace
 	}
 
 	/**
-	 * jam.Weapons.Smoke [budget]: the smoke's moments as they happen in play, on
+	 * jam.Weapons.Smoke [budget | foot cling burst sv98]: the smoke's moments (all, or
+	 * the ones named) as they happen in play, on
 	 * Lvl_Jam_Range (HighResShot JamSmoke_*; needs a real RHI; run it with
 	 * -UseFixedTimeStep -FPS=60 so the physics and the stills keep game time). Only the
 	 * stand is staged - the pawn put somewhere at rest, a gun drawn and refilled, the
@@ -893,27 +905,32 @@ namespace
 			return Origin + FRotationMatrix(Look).TransformVector(FVector(AlongCm, RightCm, UpCm));
 		};
 
+		// Only the moments named (foot, cling, burst, sv98), or all of them.
+		const auto Wants = [&Args](const TCHAR* Name) { return !Args.ContainsByPredicate([](const FString& Arg) { return Arg == TEXT("foot") || Arg == TEXT("cling") || Arg == TEXT("burst") || Arg == TEXT("sv98"); }) || Args.Contains(Name); };
 		// 1. On foot in the hall: a shotgun shot, a second through its cloud.
-		After(2.0f, [Arm]() { Arm(1); });
-		After(3.9f, [Pawn, Foot]() { *Foot = Pawn->Body->GetComponentLocation(); });
-		After(4.0f, [Pawn]() { Pawn->Fire(); }); // the shaders' warm-up
-		After(6.0f, [Arm, Place, Foot, Ahead]() { Arm(1); Place(*Foot, Ahead); });
-		After(7.0f, [Fire, Track, Frames, Still, Side, After, Eye, Frame, Ahead]()
+		if (Wants(TEXT("foot")))
 		{
-			Fire(TEXT("1_foot_shot1"));
-			Track(TEXT("1_foot"));
-			const FVector E = Eye();
-			After(0.3f, [Still]() { Still(TEXT("1_foot_shot1_0300ms")); });
-			After(0.6f, [Side, E, Frame, Ahead]() { Side(TEXT("1_foot_shot1_0600ms"), Frame(Ahead, E, 150.0f, -380.0f, -30.0f), Frame(Ahead, E, 150.0f, 0.0f, -5.0f)); });
-			After(1.0f, [Still]() { Still(TEXT("1_foot_shot1_1000ms")); });
-			After(1.5f, [Fire, Frames, Still, Side, After, E, Frame, Ahead]()
+			After(2.0f, [Arm]() { Arm(1); });
+			After(3.9f, [Pawn, Foot]() { *Foot = Pawn->Body->GetComponentLocation(); });
+			After(4.0f, [Pawn]() { Pawn->Fire(); }); // the shaders' warm-up
+			After(6.0f, [Arm, Place, Foot, Ahead]() { Arm(1); Place(*Foot, Ahead); });
+			After(7.0f, [Fire, Track, Frames, Still, Side, After, Eye, Frame, Ahead]()
 			{
-				Fire(TEXT("1_foot_shot2"));
-				Frames(TEXT("1_foot_shot2"));
-				After(1.5f, [Still]() { Still(TEXT("1_foot_shot2_settled_1500ms")); });
-				After(1.6f, [Side, E, Frame, Ahead]() { Side(TEXT("1_foot_shot2_settled_1600ms"), Frame(Ahead, E, 150.0f, -380.0f, -30.0f), Frame(Ahead, E, 150.0f, 0.0f, -5.0f)); });
+				Fire(TEXT("1_foot_shot1"));
+				Track(TEXT("1_foot"));
+				const FVector E = Eye();
+				After(0.3f, [Still]() { Still(TEXT("1_foot_shot1_0300ms")); });
+				After(0.6f, [Side, E, Frame, Ahead]() { Side(TEXT("1_foot_shot1_0600ms"), Frame(Ahead, E, 150.0f, -380.0f, -30.0f), Frame(Ahead, E, 150.0f, 0.0f, -5.0f)); });
+				After(1.0f, [Still]() { Still(TEXT("1_foot_shot1_1000ms")); });
+				After(1.5f, [Fire, Frames, Still, Side, After, E, Frame, Ahead]()
+				{
+					Fire(TEXT("1_foot_shot2"));
+					Frames(TEXT("1_foot_shot2"));
+					After(1.5f, [Still]() { Still(TEXT("1_foot_shot2_settled_1500ms")); });
+					After(1.6f, [Side, E, Frame, Ahead]() { Side(TEXT("1_foot_shot2_settled_1600ms"), Frame(Ahead, E, 150.0f, -380.0f, -30.0f), Frame(Ahead, E, 150.0f, 0.0f, -5.0f)); });
+				});
 			});
-		});
+		}
 
 		// 2. Holding on to the anchor block past the hall (zero-G): an SV-98 shot, a second after the bolt.
 		// Lvl_Jam_Range's Anchor_A (Scripts/build_range.py), the static block nearest its place.
@@ -939,104 +956,113 @@ namespace
 		const FBox Box = Block->Bounds.GetBox();
 		const FVector Hand(Box.GetCenter().X, Box.Max.Y, Box.GetCenter().Z + 30.0f);
 		const FRotator East(0.0f, 0.0f, 0.0f);
-		After(12.0f, [Arm]() { Arm(2); });
-		After(13.0f, [Pawn, Place, Block, Hand, East]()
+		if (Wants(TEXT("cling")))
 		{
-			Place(Hand + FVector(0.0f, 65.0f, -40.0f), East);
-			UE_LOG(LogMindKore, Log, TEXT("Smoke moments: 2_cling %s %s"), Pawn->Cling(Block, Hand) ? TEXT("holding on to") : TEXT("NOT holding on to"), *GetNameSafe(Block->GetOwner()));
-		});
-		After(15.0f, [Fire, Track, Frames, Still, Side, After, Eye, Frame, East, Pawn, Controller, ShotMuzzle]()
-		{
-			Fire(TEXT("2_cling_shot1"));
-			Track(TEXT("2_cling"));
-			const FVector E = Eye();
-			// The arm swings the body after the kick: the second shot is aimed at the cloud
-			// (a little ahead of the first shot's muzzle), as a player would aim it.
-			const FVector Cloud = *ShotMuzzle + FVector(25.0f, 0.0f, 0.0f);
-			After(1.4f, [Controller, Eye, Cloud]() { Controller->SetControlRotation((Cloud - Eye()).Rotation()); });
-			After(0.15f, [Still]() { Still(TEXT("2_cling_shot1_0150ms")); });
-			After(0.3f, [Still]() { Still(TEXT("2_cling_shot1_0300ms")); });
-			// From above: the brake's side jets across the shot.
-			After(0.45f, [Side, E, Frame, East]() { Side(TEXT("2_cling_shot1_brake_0450ms"), Frame(East, E, 70.0f, -5.0f, 260.0f), Frame(East, E, 70.0f, 0.0f, 0.0f)); });
-			After(1.0f, [Still]() { Still(TEXT("2_cling_shot1_1000ms")); });
-			After(1.2f, [Side, E, Frame, East]() { Side(TEXT("2_cling_shot1_1200ms"), Frame(East, E, 100.0f, 420.0f, 60.0f), Frame(East, E, 60.0f, 0.0f, -10.0f)); });
-			After(1.8f, [Fire, Frames, Still, Side, After, E, Frame, East, Pawn]()
+			After(12.0f, [Arm]() { Arm(2); });
+			After(13.0f, [Pawn, Place, Block, Hand, East]()
 			{
-				UE_LOG(LogMindKore, Log, TEXT("Smoke moments: 2_cling_shot2 aimed along %s"), *Pawn->Camera->GetForwardVector().ToCompactString());
-				Fire(TEXT("2_cling_shot2"));
-				Frames(TEXT("2_cling_shot2"));
-				After(1.5f, [Still]() { Still(TEXT("2_cling_shot2_settled_1500ms")); });
-				After(1.6f, [Side, E, Frame, East]() { Side(TEXT("2_cling_shot2_settled_1600ms"), Frame(East, E, 100.0f, 420.0f, 60.0f), Frame(East, E, 60.0f, 0.0f, -10.0f)); });
-				After(2.0f, [Pawn]() { Pawn->LetGoCling(); });
+				Place(Hand + FVector(0.0f, 65.0f, -40.0f), East);
+				UE_LOG(LogMindKore, Log, TEXT("Smoke moments: 2_cling %s %s"), Pawn->Cling(Block, Hand) ? TEXT("holding on to") : TEXT("NOT holding on to"), *GetNameSafe(Block->GetOwner()));
 			});
-		});
+			After(15.0f, [Fire, Track, Frames, Still, Side, After, Eye, Frame, East, Pawn, Controller, ShotMuzzle]()
+			{
+				Fire(TEXT("2_cling_shot1"));
+				Track(TEXT("2_cling"));
+				const FVector E = Eye();
+				// The arm swings the body after the kick: the second shot is aimed at the cloud
+				// (a little ahead of the first shot's muzzle), as a player would aim it.
+				const FVector Cloud = *ShotMuzzle + FVector(25.0f, 0.0f, 0.0f);
+				After(1.4f, [Controller, Eye, Cloud]() { Controller->SetControlRotation((Cloud - Eye()).Rotation()); });
+				After(0.15f, [Still]() { Still(TEXT("2_cling_shot1_0150ms")); });
+				After(0.3f, [Still]() { Still(TEXT("2_cling_shot1_0300ms")); });
+				// From above: the brake's side jets across the shot.
+				After(0.45f, [Side, E, Frame, East]() { Side(TEXT("2_cling_shot1_brake_0450ms"), Frame(East, E, 70.0f, -5.0f, 260.0f), Frame(East, E, 70.0f, 0.0f, 0.0f)); });
+				After(1.0f, [Still]() { Still(TEXT("2_cling_shot1_1000ms")); });
+				After(1.2f, [Side, E, Frame, East]() { Side(TEXT("2_cling_shot1_1200ms"), Frame(East, E, 100.0f, 420.0f, 60.0f), Frame(East, E, 60.0f, 0.0f, -10.0f)); });
+				After(1.8f, [Fire, Frames, Still, Side, After, E, Frame, East, Pawn]()
+				{
+					UE_LOG(LogMindKore, Log, TEXT("Smoke moments: 2_cling_shot2 aimed along %s"), *Pawn->Camera->GetForwardVector().ToCompactString());
+					Fire(TEXT("2_cling_shot2"));
+					Frames(TEXT("2_cling_shot2"));
+					After(1.5f, [Still]() { Still(TEXT("2_cling_shot2_settled_1500ms")); });
+					After(1.6f, [Side, E, Frame, East]() { Side(TEXT("2_cling_shot2_settled_1600ms"), Frame(East, E, 100.0f, 420.0f, 60.0f), Frame(East, E, 60.0f, 0.0f, -10.0f)); });
+					After(2.0f, [Pawn]() { Pawn->LetGoCling(); });
+				});
+			});
+		}
 
 		// 3. Free in zero-G past the hall, facing -Y (into the open): a pistol burst of four.
 		const FRotator South(0.0f, -90.0f, 0.0f);
 		const FVector Open(3700.0f, 300.0f, 700.0f);
-		After(22.0f, [Arm]() { Arm(0); });
-		After(23.0f, [Place, Open, South]() { Place(Open, South); });
-		After(25.0f, [Fire, Track, Still, Side, After, Eye, Frame, South, Place, Open]()
+		if (Wants(TEXT("burst")))
 		{
-			Place(Open, South);
-			const FVector E = Eye();
-			Fire(TEXT("3_burst_shot1"));
-			Track(TEXT("3_burst"));
-			for (int32 Shot = 2; Shot <= 4; ++Shot)
+			After(22.0f, [Arm]() { Arm(0); });
+			After(23.0f, [Place, Open, South]() { Place(Open, South); });
+			After(25.0f, [Fire, Track, Still, Side, After, Eye, Frame, South, Place, Open]()
 			{
-				After((Shot - 1) * 0.18f, [Fire, Shot]() { Fire(FString::Printf(TEXT("3_burst_shot%d"), Shot)); });
-			}
-			After(0.65f, [Still]() { Still(TEXT("3_burst_0650ms")); });
-			After(1.5f, [Still]() { Still(TEXT("3_burst_1500ms")); });
-			After(1.6f, [Side, E, Frame, South]() { Side(TEXT("3_burst_1600ms"), Frame(South, E, -100.0f, -650.0f, 80.0f), Frame(South, E, -100.0f, 0.0f, 0.0f)); });
-			After(2.5f, [Still]() { Still(TEXT("3_burst_2500ms")); });
-			After(2.6f, [Side, E, Frame, South]() { Side(TEXT("3_burst_2600ms"), Frame(South, E, -100.0f, -650.0f, 80.0f), Frame(South, E, -100.0f, 0.0f, 0.0f)); });
-		});
+				Place(Open, South);
+				const FVector E = Eye();
+				Fire(TEXT("3_burst_shot1"));
+				Track(TEXT("3_burst"));
+				for (int32 Shot = 2; Shot <= 4; ++Shot)
+				{
+					After((Shot - 1) * 0.18f, [Fire, Shot]() { Fire(FString::Printf(TEXT("3_burst_shot%d"), Shot)); });
+				}
+				After(0.65f, [Still]() { Still(TEXT("3_burst_0650ms")); });
+				After(1.5f, [Still]() { Still(TEXT("3_burst_1500ms")); });
+				After(1.6f, [Side, E, Frame, South]() { Side(TEXT("3_burst_1600ms"), Frame(South, E, -100.0f, -650.0f, 80.0f), Frame(South, E, -100.0f, 0.0f, 0.0f)); });
+				After(2.5f, [Still]() { Still(TEXT("3_burst_2500ms")); });
+				After(2.6f, [Side, E, Frame, South]() { Side(TEXT("3_burst_2600ms"), Frame(South, E, -100.0f, -650.0f, 80.0f), Frame(South, E, -100.0f, 0.0f, 0.0f)); });
+			});
+		}
 
 		// 4. Free in zero-G: an SV-98 shot, the pawn drifts off; then back into the cloud.
 		const FVector Open2(3700.0f, -100.0f, 700.0f);
-		After(31.0f, [Arm]() { Arm(2); });
-		After(32.0f, [Place, Open2, South]() { Place(Open2, South); });
-		After(34.0f, [Fire, Track, Still, Side, After, Eye, Frame, South, Place, Open2, Pawn, ShotMuzzle]()
+		if (Wants(TEXT("sv98")))
 		{
-			Place(Open2, South);
-			const FVector E = Eye();
-			Fire(TEXT("4_sv98_shot"));
-			Track(TEXT("4_sv98"));
-			// The strip: from the side, far enough to hold the cloud and the pawn 14 m off.
-			for (int32 Step = 1; Step <= 8; ++Step)
+			After(31.0f, [Arm]() { Arm(2); });
+			After(32.0f, [Place, Open2, South]() { Place(Open2, South); });
+			After(34.0f, [Fire, Track, Still, Side, After, Eye, Frame, South, Place, Open2, Pawn, ShotMuzzle]()
 			{
-				After(Step * 0.25f, [Side, E, Frame, South, Step]()
+				Place(Open2, South);
+				const FVector E = Eye();
+				Fire(TEXT("4_sv98_shot"));
+				Track(TEXT("4_sv98"));
+				// The strip: from the side, far enough to hold the cloud and the pawn 14 m off.
+				for (int32 Step = 1; Step <= 8; ++Step)
 				{
-					Side(FString::Printf(TEXT("4_sv98_strip_%04dms"), Step * 250), Frame(South, E, -650.0f, -1000.0f, 150.0f), Frame(South, E, -650.0f, 0.0f, 0.0f));
-				});
-			}
-			for (const float At : { 0.12f, 0.62f, 1.12f, 2.12f })
-			{
-				After(At, [Still, At]() { Still(FString::Printf(TEXT("4_sv98_%04dms"), FMath::RoundToInt(At * 1000.0f))); });
-			}
-			// Back toward the shot's muzzle at 800 cm/s (the stand's push), stills as the eye
-			// comes within 1.5 m of it, passes and leaves.
-			After(2.2f, [Pawn, After, Still, ShotMuzzle, Eye]()
-			{
-				const FVector Back = *ShotMuzzle - Eye();
-				Pawn->Body->SetPhysicsLinearVelocity(Back.GetSafeNormal() * 800.0f);
-				UE_LOG(LogMindKore, Log, TEXT("Smoke moments: 4_sv98 sent back toward the shot's muzzle, %.0f cm off, at 800 cm/s"), Back.Size());
-				for (const float Before : { 150.0f, 80.0f, 40.0f, 0.0f, -30.0f, -60.0f, -120.0f })
-				{
-					After((Back.Size() - Before) / 800.0f, [Still, Before]()
+					After(Step * 0.25f, [Side, E, Frame, South, Step]()
 					{
-						Still(FString::Printf(TEXT("4_sv98_back_%s%03dcm"), Before < 0.0f ? TEXT("past") : TEXT("to"), FMath::RoundToInt(FMath::Abs(Before))));
+						Side(FString::Printf(TEXT("4_sv98_strip_%04dms"), Step * 250), Frame(South, E, -650.0f, -1000.0f, 150.0f), Frame(South, E, -650.0f, 0.0f, 0.0f));
 					});
 				}
+				for (const float At : { 0.12f, 0.62f, 1.12f, 2.12f })
+				{
+					After(At, [Still, At]() { Still(FString::Printf(TEXT("4_sv98_%04dms"), FMath::RoundToInt(At * 1000.0f))); });
+				}
+				// Back toward the shot's muzzle at 800 cm/s (the stand's push), stills as the eye
+				// comes within 1.5 m of it, passes and leaves.
+				After(2.2f, [Pawn, After, Still, ShotMuzzle, Eye]()
+				{
+					const FVector Back = *ShotMuzzle - Eye();
+					Pawn->Body->SetPhysicsLinearVelocity(Back.GetSafeNormal() * 800.0f);
+					UE_LOG(LogMindKore, Log, TEXT("Smoke moments: 4_sv98 sent back toward the shot's muzzle, %.0f cm off, at 800 cm/s"), Back.Size());
+					for (const float Before : { 150.0f, 80.0f, 40.0f, 0.0f, -30.0f, -60.0f, -120.0f })
+					{
+						After((Back.Size() - Before) / 800.0f, [Still, Before]()
+						{
+							Still(FString::Printf(TEXT("4_sv98_back_%s%03dcm"), Before < 0.0f ? TEXT("past") : TEXT("to"), FMath::RoundToInt(FMath::Abs(Before))));
+						});
+					}
+				});
 			});
-		});
+		}
 		After(42.0f, []() { UE_LOG(LogMindKore, Log, TEXT("Smoke moments: done")); });
 	}
 
 	FAutoConsoleCommandWithWorldAndArgs GSmokeMoments(
 		TEXT("jam.Weapons.Smoke"),
-		TEXT("Stills of the smoke's moments in play on Lvl_Jam_Range (run with -UseFixedTimeStep -FPS=60): on foot, holding on, a pistol burst, an SV-98 shot drifting off and back. 'budget': three shotgun clouds on the jam.Weapons.Fx stand, then ProfileGPU."),
+		TEXT("Stills of the smoke's moments in play on Lvl_Jam_Range (run with -UseFixedTimeStep -FPS=60): on foot, holding on, a pistol burst, an SV-98 shot drifting off and back (or only those named: foot, cling, burst, sv98). 'budget': three shotgun clouds on the jam.Weapons.Fx stand, then ProfileGPU."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunSmokeMoments));
 
 	FAutoConsoleCommandWithWorld GClearSmoke(

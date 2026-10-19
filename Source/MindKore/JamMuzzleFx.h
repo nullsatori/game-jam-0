@@ -117,7 +117,8 @@ struct FJamMuzzleFx
 	/**
 	 * The gas's speed out of the muzzle along the bore at the shot, cm/s (a brake
 	 * keeps only 1 - SmokeBrake of it forward), on top of the gun's own velocity; the
-	 * whole of it dies within a second down to SmokeDriftCm.
+	 * throw dies within a second down to SmokeDriftCm, the gun's velocity stays
+	 * (AirDragSeconds in air).
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float CloudThrowCm = 60.0f;
@@ -149,12 +150,14 @@ struct FJamMuzzleFx
  * the gun's own space, through the kick. The smoke is the world's (owner 19.10,
  * «делаем честную физику»): born where the gas leaves the gun, thrown along the
  * muzzle's exhaust at the shot (the bore, or a brake's side ports), with the
- * gun's velocity at the shot (the shooter's before the kick); then it slows on
- * its own and nothing ties it to the shooter - a recoil carries the pawn away
- * from it. That holds for the volumetric clouds (jam.Fx.VolumetricSmoke 1) and
+ * gun's velocity at the shot (the shooter's before the kick). The throw dies as
+ * the gas spreads; the gun's velocity is the centre of mass's and stays in a
+ * vacuum (only air takes it, AirDragSeconds). Nothing ties it to the shooter -
+ * a recoil carries the pawn away from it. That holds for the volumetric clouds (jam.Fx.VolumetricSmoke 1) and
  * for the card puffs (0) alike: the cards are worked out in the world and only
  * drawn as sprites turned to the owner's camera. Flash and cards are engine
- * planes in two instanced meshes on that camera; the look is in
+ * planes in two instanced meshes (the flash's on that camera, the cards' at the
+ * world's origin); the look is in
  * M_Jam_MuzzleFlash / M_Jam_MuzzleSmoke / M_Jam_MuzzleSmokeVolume
  * (Scripts/jam_muzzle_fx.py).
  *
@@ -194,6 +197,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.5"))
 	float CloudSeconds = 7.0f;
 
+	/**
+	 * In a breathable zone (JamAirZoneAt) the air takes the velocity the smoke had from
+	 * the gun with this time constant, s; in a vacuum it keeps it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.05"))
+	float AirDragSeconds = 1.5f;
+
 	/** Voxels this close to the eye fade out (cm): flying through a cloud never fills the lens. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float EyeClearCm = 30.0f;
@@ -229,8 +239,10 @@ private:
 	{
 		FVector Origin = FVector::ZeroVector;
 		FQuat Bore = FQuat::Identity;
-		/** The gun's velocity at the shot, world cm/s: it dies with the throw, as a cloud's. */
+		/** The gun's velocity at the shot, world cm/s: kept in a vacuum, dying in air (AirDragSeconds), as a cloud's. */
 		FVector GunVelocity = FVector::ZeroVector;
+		/** AirDragSeconds if the shot was in air, 0 in a vacuum. */
+		float AirDragSeconds = 0.0f;
 		FVector Direction = FVector::ZeroVector;
 		/** The wisp's long axis, bore frame: the shot, or its jet out of a brake port. */
 		FVector Along = FVector::ForwardVector;
@@ -300,6 +312,9 @@ private:
 		TObjectPtr<UMaterialInstanceDynamic> Material = nullptr;
 		int32 Gun = 0;
 		FVector Centre = FVector::ZeroVector;
+		/** The centre of mass's velocity from the gun at the shot, world cm/s: kept in a vacuum, dying in air. */
+		FVector Carried = FVector::ZeroVector;
+		/** The exhaust's throw and shoves on top of Carried, dying down to DriftVelocity. */
 		FVector Velocity = FVector::ZeroVector;
 		FVector DriftVelocity = FVector::ZeroVector;
 		/** The muzzle at the shot, world (log lines). */
