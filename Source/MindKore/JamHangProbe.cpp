@@ -74,24 +74,41 @@ namespace
 		}
 	}
 
-	/** Thrust keys held (view frame: X forward, Z up) for Seconds, the view kept on the hand. */
-	void HoldKeys(AJamZeroGPawn* Pawn, const FVector& Input, float Seconds, bool bLookAtHand)
+	/** Thrust keys held (view frame: X forward, Z up) for Seconds from now, the view kept on the hand; then Done. The
+	 * keys set here are read by the next tick, for the frame ahead: the frame the end falls in gets its share of
+	 * the input, so the hold lasts the same time at any frame rate (whole frames were 11 of 12 at 30 FPS for 0.4 s,
+	 * 57 of 57.6 at 144). Done runs once the last share has been read - the next stage starts with no frame between. */
+	void HoldKeys(AJamZeroGPawn* Pawn, const FVector& Input, float Seconds, bool bLookAtHand, TFunction<void()> Done = nullptr)
 	{
 		const double End = Pawn->GetWorld()->GetTimeSeconds() + Seconds;
 		const TSharedRef<FTimerHandle> Hold = MakeShared<FTimerHandle>();
-		Pawn->GetWorldTimerManager().SetTimer(*Hold, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Hold, End, Input, bLookAtHand]()
+		const auto Press = [Pawn, Hold, End, Input, bLookAtHand, Done = MoveTemp(Done)]()
 		{
-			if (Pawn->GetWorld()->GetTimeSeconds() > End)
+			const UWorld* World = Pawn->GetWorld();
+			const double Share = (End - World->GetTimeSeconds()) / World->GetDeltaSeconds();
+			if (Share < 1.0e-3)
 			{
-				Pawn->GetWorldTimerManager().ClearTimer(*Hold);
+				if (Pawn->GetWorldTimerManager().IsTimerActive(*Hold))
+				{
+					// Clearing the timer frees this lambda's captures: keep the handle and what runs next.
+					const TFunction<void()> Next = Done;
+					const TSharedRef<FTimerHandle> Handle = Hold;
+					Pawn->GetWorldTimerManager().ClearTimer(*Handle);
+					if (Next)
+					{
+						Next();
+					}
+				}
 				return;
 			}
 			if (APlayerController* Controller = Cast<APlayerController>(Pawn->GetController()); Controller && bLookAtHand)
 			{
 				Controller->SetControlRotation((Pawn->GetHandLocation() - Pawn->ShoulderLocation()).Rotation());
 			}
-			Pawn->ProbeThrust(Input, false);
-		}), 0.0005f, true);
+			Pawn->ProbeThrust(Input * float(FMath::Min(Share, 1.0)), false);
+		};
+		Pawn->GetWorldTimerManager().SetTimer(*Hold, FTimerDelegate::CreateWeakLambda(Pawn, Press), 0.0005f, true);
+		Press();
 	}
 
 	void Look(AJamZeroGPawn* Pawn, const FVector& Direction)
@@ -229,25 +246,29 @@ namespace
 			Look(Pawn, -Bisector);
 			UE_LOG(LogMindKore, Log, TEXT("Hang probe [%s]: %s, D %.2f s then W %.2f s, let go"), *Label,
 				Pawn->Cling(Block, Edge) ? TEXT("holding on at rest") : TEXT("NOT holding"), PumpSeconds, PullSeconds);
-			HoldKeys(Pawn, FVector(0.0f, 1.0f, 0.0f), PumpSeconds, true);
-			Sample(Pawn, Label + TEXT(" D"), 0.1f, PumpSeconds);
-			After(Pawn, PumpSeconds, [Pawn, Label, PullSeconds]()
+			const auto LetGo = [Pawn, Label]()
 			{
-				if (PullSeconds > 0.0f)
+				LogArm(Pawn, Label + TEXT(" let go"), Pawn->GetWorld()->GetTimeSeconds());
+				Pawn->LetGoCling();
+				// The first frame after is the release speed: a pulled body reaches the block a few frames later.
+				After(Pawn, 0.001f, [Pawn, Label]() { LogArm(Pawn, Label + TEXT(" released"), Pawn->GetWorld()->GetTimeSeconds()); });
+				Sample(Pawn, Label + TEXT(" flying"), 0.25f, 0.5f);
+			};
+			HoldKeys(Pawn, FVector(0.0f, 1.0f, 0.0f), PumpSeconds, true, [Pawn, Label, PullSeconds, LetGo]()
+			{
+				if (PullSeconds <= 0.0f)
 				{
-					HoldKeys(Pawn, FVector(1.0f, 0.0f, 0.0f), PullSeconds, true);
-					Sample(Pawn, Label + TEXT(" W"), 0.03f, PullSeconds);
+					LetGo();
+					return;
 				}
-				After(Pawn, FMath::Max(PullSeconds, 0.001f), [Pawn, Label]()
-				{
-					LogArm(Pawn, Label + TEXT(" let go"), Pawn->GetWorld()->GetTimeSeconds());
-					Pawn->LetGoCling();
-					Sample(Pawn, Label + TEXT(" flying"), 0.25f, 0.5f);
-				});
+				HoldKeys(Pawn, FVector(1.0f, 0.0f, 0.0f), PullSeconds, true, LetGo);
+				Sample(Pawn, Label + TEXT(" W"), 0.025f, PullSeconds);
 			});
+			Sample(Pawn, Label + TEXT(" D"), 0.1f, PumpSeconds);
 		};
-		After(Pawn, 2.3f, [Fling]() { Fling(TEXT("swing-release"), 0.4f, 0.0f); });
-		After(Pawn, 3.6f, [Fling]() { Fling(TEXT("swing-pull-release"), 0.3f, 0.12f); });
+		// Stage lengths in whole frames at 30, 60 and 144 FPS (and 0.1 s at 30 / 60), so every rate lets go at the same moment.
+		After(Pawn, 2.3f, [Fling]() { Fling(TEXT("swing-release"), 0.5f, 0.0f); });
+		After(Pawn, 3.6f, [Fling]() { Fling(TEXT("swing-pull-release"), 1.0f / 3.0f, 0.1f); });
 		// A sniper-size kick (400 cm/s straight out) while holding on: the hold must come to rest (welding).
 		After(Pawn, 4.9f, [Pawn, Block, Edge, Bisector]()
 		{
@@ -294,8 +315,9 @@ namespace
 			After(Pawn, 3.2f, [Pawn]()
 			{
 				// Space (the view's up, toward the hand overhead) held 1 s.
-				HoldKeys(Pawn, FVector(0.0f, 0.0f, 1.0f), 1.0f, false);
-				Sample(Pawn, TEXT("pull-up Space"), 0.1f, 1.0f);
+				// The last line at the release of Space (a sample at +1.0 s raced it: 45.1 / 39.2 / 35.7 cm at 30 / 60 / 144 were the reach relaxing or not yet).
+				HoldKeys(Pawn, FVector(0.0f, 0.0f, 1.0f), 1.0f, false, [Pawn]() { LogArm(Pawn, TEXT("pull-up Space released"), Pawn->GetWorld()->GetTimeSeconds()); });
+				Sample(Pawn, TEXT("pull-up Space"), 0.1f, 0.9f);
 				Frames(Pawn, TEXT("pull-up Space"), 0.2f, 0.4f);
 			});
 			After(Pawn, 4.3f, [Pawn]() { Sample(Pawn, TEXT("keys up"), 0.2f, 1.0f); });

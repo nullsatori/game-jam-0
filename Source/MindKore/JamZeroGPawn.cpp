@@ -366,6 +366,7 @@ void AJamZeroGPawn::SetMode(EJamMoveMode NewMode)
 		RestoreLadderBodyRadius();
 		break;
 	case EJamMoveMode::Hang:
+		HandOverArmCarry();
 		ClingTarget = nullptr;
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: let go at %.0f cm/s"), GetBodyVelocity().Size());
 		break;
@@ -412,6 +413,10 @@ void AJamZeroGPawn::SetHands(EJamHands NewHands, EJamHullTool NewTool)
 		if (GrabbedBody.IsValid())
 		{
 			UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: let go of %s"), *GetNameSafe(GrabbedBody->GetOwner()));
+		}
+		if (!ClingTarget.IsValid()) // holding on, the arm is on the hold, not on the body
+		{
+			HandOverArmCarry();
 		}
 		GrabbedBody = nullptr;
 		break;
@@ -580,6 +585,7 @@ bool AJamZeroGPawn::Cling(UPrimitiveComponent* Target, const FVector& Point)
 		return false;
 	}
 	// The hand takes the point; the velocity is kept - the arm catches it (UpdateArm).
+	HandOverArmCarry(); // a held body's arm ends here (the arm goes to the hold)
 	SetMode(EJamMoveMode::Hang);
 	ClingTarget = Target;
 	HandLocal = Target->GetComponentTransform().InverseTransformPosition(Point);
@@ -659,24 +665,19 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 		return;
 	}
 	const FVector Hand = Target->GetComponentTransform().TransformPosition(HandLocal);
-	const FVector Shoulder = ShoulderLocation();
-	const float Length = float(FVector::Dist(Shoulder, Hand));
-	if (Length < KINDA_SMALL_NUMBER)
+	const FVector Start = ShoulderLocation() - Hand;
+	if (Start.Size() < KINDA_SMALL_NUMBER)
 	{
 		return;
 	}
-	// N points from the hand to the eye; the pawn is one end, the hold (static,
-	// infinite mass) or the held body the other. Mu is their reduced mass: the
-	// springs below are accelerations of the relative motion, so a 4 kg can and
-	// an 800 kg part feel the same arm, and the impulse Mu x change is split
-	// equal and opposite.
-	const FVector N = (Shoulder - Hand) / Length;
+	// The pawn is one end, the hold (static, infinite mass) or the held body the
+	// other. Mu is their reduced mass: the springs below are accelerations of the
+	// relative motion, so a 4 kg can and an 800 kg part feel the same arm, and
+	// the impulse Mu x change is split equal and opposite.
 	const bool bMoving = Target->IsSimulatingPhysics();
 	const float PawnMass = Body->GetMass();
 	const float Mu = bMoving ? PawnMass * Target->GetMass() / (PawnMass + Target->GetMass()) : PawnMass;
-	const FVector Relative = GetBodyVelocity() - (bMoving ? Target->GetPhysicsLinearVelocityAtPoint(Hand) : FVector::ZeroVector);
-	const float Radial = FVector::DotProduct(Relative, N);
-	const FVector Across = Relative - N * Radial;
+	const FVector Measured = GetBodyVelocity() - (bMoving ? Target->GetPhysicsLinearVelocityAtPoint(Hand) : FVector::ZeroVector);
 
 	// On a fixed hold the thrust keys are the arm, not the thrusters: toward the
 	// hand pulls the reach in, across it pumps the swing.
@@ -688,24 +689,9 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 		const FRotationMatrix View(GetControlRotation());
 		Wish = View.GetUnitAxis(EAxis::X) * Input.X + View.GetUnitAxis(EAxis::Y) * Input.Y + View.GetUnitAxis(EAxis::Z) * Input.Z;
 	}
-	const float Toward = -FVector::DotProduct(Wish, N);
-	const float RestBefore = ArmRestCm;
 	const float RestTarget = Held ? HoldRestCm : ArmLengthCm;
-	if (Toward > 0.1f)
-	{
-		// The reach leads the eye by at most 20 cm: pulling against a wall stores no spring to fire you off it later.
-		ArmRestCm = FMath::Max3(ArmMinCm, ArmRestCm - Toward * ArmPullCmS * DeltaSeconds, FMath::Min(ArmRestCm, Length - 20.0f));
-	}
-	else if (Toward < -0.1f && ArmRestCm < RestTarget)
-	{
-		ArmRestCm = FMath::Min(RestTarget, ArmRestCm - Toward * ArmPullCmS * DeltaSeconds);
-	}
-	else
-	{
-		ArmRestCm = FMath::FInterpConstantTo(ArmRestCm, RestTarget, DeltaSeconds, ArmRelaxCmS);
-	}
 	FVector HoldNormal = FVector::ZeroVector;
-	float Height = 0.0f;
+	bool bBlocked = false;
 	if (!Held)
 	{
 		if (IsInGravity())
@@ -715,12 +701,6 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 			// there, and the cushion below stops a swing onto the plane. In zero-G the eye is the body's centre
 			// and the body's own sphere keeps it off the hold (and a plane would stop a swing round an edge).
 			HoldNormal = Target->GetComponentTransform().TransformVectorNoScale(HoldNormalLocal);
-			Height = float(FVector::DotProduct(Shoulder - Hand, HoldNormal));
-			const float Facing = float(FVector::DotProduct(N, HoldNormal));
-			if (Facing > KINDA_SMALL_NUMBER)
-			{
-				ArmRestCm = FMath::Max(ArmRestCm, FMath::Min(HeadClearanceCm / Facing, FMath::Max(ArmLengthCm, ArmMinCm)));
-			}
 		}
 		// While the body rests against something on its way to the hand (the held door, the ground at the
 		// feet) the reach does not shorten - neither pulled in nor relaxed below what it was: the spring
@@ -732,69 +712,122 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 		FCollisionResponseParams Response;
 		Body->InitSweepCollisionParams(Params, Response);
 		const FVector From = Body->GetComponentLocation();
+		const FVector N = Start.GetUnsafeNormal();
 		FHitResult Block;
-		if (GetWorld()->SweepSingleByChannel(Block, From, From - N * ArmBlockProbeCm, FQuat::Identity, Body->GetCollisionObjectType(),
+		bBlocked = GetWorld()->SweepSingleByChannel(Block, From, From - N * ArmBlockProbeCm, FQuat::Identity, Body->GetCollisionObjectType(),
 			FCollisionShape::MakeSphere(Body->GetScaledSphereRadius()), Params, Response)
-			&& FVector::DotProduct(Block.ImpactNormal, N) > 0.3f)
-		{
-			ArmRestCm = FMath::Max3(ArmRestCm, RestBefore, Length);
-		}
+			&& FVector::DotProduct(Block.ImpactNormal, N) > 0.3f;
 	}
+	// On a fixed hold Tick adds gravity after this (Hang): the steps carry it too, to fall and catch within the frame.
+	const FVector Gravity = ClingTarget.IsValid() ? GravityDirection * GravityStrengthCm : FVector::ZeroVector;
 
-	// The reach: a damped spring along N, implicit Euler on the velocity
-	// (v' = (v - dt k x) / (1 + dt c + dt^2 k)), stable at any frame time.
-	const float Dt = DeltaSeconds;
+	// The relative motion in steps of at most 1/240 s, so the arm is the same at any frame rate. One implicit
+	// step a frame was stable but damped more the longer the frame; the reach's 20 cm lead and the pump were
+	// read once a frame too: at 30 / 60 / 144 FPS a pull mid-swing let go at 272 / 298 / 319 cm/s, a hang
+	// stretched the arm 5.6 / 3.6 / 2.6 cm.
+	const int32 Steps = FMath::Max(1, FMath::CeilToInt(DeltaSeconds * 240.0f - 0.001f));
+	const float Dt = DeltaSeconds / float(Steps);
 	const float K = FMath::Square(ArmStiffness);
 	const float C = 2.0f * ArmDampingRatio * ArmStiffness;
-	const float NewRadial = (Radial - Dt * K * (Length - ArmRestCm)) / (1.0f + Dt * C + Dt * Dt * K);
-	FVector Change = N * (NewRadial - Radial);
+	const float Ks = FMath::Square(HoldSteerStiffness);
+	const float Cs = 2.0f * HoldSteerStiffness;
+	// Resting against something (bBlocked), the reach stays at least what it and the arm were when the sweep looked.
+	const float BlockedRest = FMath::Max(ArmRestCm, float(Start.Size()));
+	FVector Offset = Start;
+	FVector Relative = Measured + ArmCarry / Mu;
+	float Tension = 0.0f;
+	for (int32 Step = 0; Step < Steps; ++Step)
+	{
+		// N points from the hand to the eye.
+		const float Length = float(Offset.Size());
+		const FVector N = Offset / Length;
+		const float Radial = FVector::DotProduct(Relative, N);
+		const FVector Across = Relative - N * Radial;
+		const float Toward = -FVector::DotProduct(Wish, N);
+		if (Toward > 0.1f)
+		{
+			// The reach leads the eye by at most 20 cm: pulling against a wall stores no spring to fire you off it later.
+			ArmRestCm = FMath::Max3(ArmMinCm, ArmRestCm - Toward * ArmPullCmS * Dt, FMath::Min(ArmRestCm, Length - 20.0f));
+		}
+		else if (Toward < -0.1f && ArmRestCm < RestTarget)
+		{
+			ArmRestCm = FMath::Min(RestTarget, ArmRestCm - Toward * ArmPullCmS * Dt);
+		}
+		else
+		{
+			ArmRestCm = FMath::FInterpConstantTo(ArmRestCm, RestTarget, Dt, ArmRelaxCmS);
+		}
+		const float Height = float(FVector::DotProduct(Offset, HoldNormal));
+		const float Facing = float(FVector::DotProduct(N, HoldNormal));
+		if (Facing > KINDA_SMALL_NUMBER)
+		{
+			ArmRestCm = FMath::Max(ArmRestCm, FMath::Min(HeadClearanceCm / Facing, FMath::Max(ArmLengthCm, ArmMinCm)));
+		}
+		if (bBlocked)
+		{
+			ArmRestCm = FMath::Max(ArmRestCm, BlockedRest);
+		}
 
-	if (Held)
-	{
-		// The hand steers the held body across the arm: to the view, or where it
-		// was grabbed. The same implicit spring, critically damped, on the
-		// across-the-arm error of the eye's offset from the hand.
-		const FVector Want = -(bHoldInFront ? ViewDirection() : HoldDirection) * Length;
-		const FVector Error = FVector::VectorPlaneProject((Shoulder - Hand) - Want, N);
-		const float Ks = FMath::Square(HoldSteerStiffness);
-		const float Cs = 2.0f * HoldSteerStiffness;
-		Change += (Across - Dt * Ks * Error) / (1.0f + Dt * Cs + Dt * Dt * Ks) - Across;
-	}
-	else if (!Wish.IsNearlyZero())
-	{
-		// Pump: like the thrusters, up to SwingMaxSpeedCm along the input, never braking.
-		const FVector Pump = FVector::VectorPlaneProject(Wish, N);
-		const float PumpSize = Pump.Size();
-		if (PumpSize > 0.1f)
+		// The reach: a damped spring along N, implicit Euler on the velocity
+		// (v' = (v - dt k x) / (1 + dt c + dt^2 k)).
+		const float NewRadial = (Radial - Dt * K * (Length - ArmRestCm)) / (1.0f + Dt * C + Dt * Dt * K);
+		FVector Change = N * (NewRadial - Radial);
+		Tension = FMath::Max(Tension, FMath::Abs(NewRadial - Radial) / Dt);
+
+		if (Held)
 		{
-			const FVector Direction = Pump / PumpSize;
-			const float Add = FMath::Min(SwingAccelCm * PumpSize * Dt, SwingMaxSpeedCm - FVector::DotProduct(Across, Direction));
-			Change += Direction * FMath::Max(Add, 0.0f);
+			// The hand steers the held body across the arm: to the view, or where it
+			// was grabbed. The same implicit spring, critically damped, on the
+			// across-the-arm error of the eye's offset from the hand.
+			const FVector Want = -(bHoldInFront ? ViewDirection() : HoldDirection) * Length;
+			const FVector Error = FVector::VectorPlaneProject(Offset - Want, N);
+			Change += (Across - Dt * Ks * Error) / (1.0f + Dt * Cs + Dt * Dt * Ks) - Across;
 		}
-	}
-	else
-	{
-		// Hands still: a big swing lasts, a small one settles to rest (a steady weld).
-		const float Speed = Across.Size();
-		if (Speed > KINDA_SMALL_NUMBER)
+		else if (!Wish.IsNearlyZero())
 		{
-			Change -= Across / Speed * FMath::Min(FMath::Min(SwingDampAccelCm, Speed * SwingDampRate) * Dt, Speed);
+			// Pump: like the thrusters, up to SwingMaxSpeedCm along the input, never braking.
+			const FVector Pump = FVector::VectorPlaneProject(Wish, N);
+			const float PumpSize = Pump.Size();
+			if (PumpSize > 0.1f)
+			{
+				const FVector Direction = Pump / PumpSize;
+				const float Add = FMath::Min(SwingAccelCm * PumpSize * Dt, SwingMaxSpeedCm - FVector::DotProduct(Across, Direction));
+				Change += Direction * FMath::Max(Add, 0.0f);
+			}
 		}
+		else
+		{
+			// Hands still: a big swing lasts, a small one settles to rest (a steady weld).
+			const float Speed = Across.Size();
+			if (Speed > KINDA_SMALL_NUMBER)
+			{
+				Change -= Across / Speed * FMath::Min(FMath::Min(SwingDampAccelCm, Speed * SwingDampRate) * Dt, Speed);
+			}
+		}
+
+		if (!HoldNormal.IsZero())
+		{
+			// The head's cushion: the eye closes on the held plane no faster than its gap over HeadClearanceCm
+			// shuts in HeadCushionSeconds - it eases onto the clearance instead of swinging or springing into the
+			// ceiling, and a hold taken closer eases it back out.
+			const float Along = float(FVector::DotProduct(Relative + Change, HoldNormal));
+			const float Least = (HeadClearanceCm - Height) / HeadCushionSeconds;
+			if (Along < Least)
+			{
+				Change += HoldNormal * (Least - Along);
+			}
+		}
+		Relative += Change + Gravity * Dt;
+		Offset += Relative * Dt;
 	}
 
-	if (!HoldNormal.IsZero())
-	{
-		// The head's cushion: the eye closes on the held plane no faster than its gap over HeadClearanceCm
-		// shuts in HeadCushionSeconds - it eases onto the clearance instead of swinging or springing into the
-		// ceiling, and a hold taken closer eases it back out.
-		const float Along = float(FVector::DotProduct(Relative + Change, HoldNormal));
-		const float Least = (HeadClearanceCm - Height) / HeadCushionSeconds;
-		if (Along < Least)
-		{
-			Change += HoldNormal * (Least - Along);
-		}
-	}
-	const FVector Impulse = Change * Mu;
+	// Chaos moves the body in a straight line on the velocity it ends the frame with: given the chord, it lands
+	// where the steps did. What the steps' end velocity has beyond the chord is carried into the next tick.
+	// Exact for the pawn on a hold with one physics step a frame and no contact; a contact, the MaxSpeedCm cap,
+	// a frame longer than MaxPhysicsDeltaTime (1/30 s) or a held body's spin leave that frame's carry a little off.
+	const FVector Chord = (Offset - Start) / DeltaSeconds;
+	ArmCarry = (Relative - Chord) * Mu;
+	const FVector Impulse = (Chord - Gravity * DeltaSeconds - Measured) * Mu;
 	// Every tick, not a single kick: past AddBodyImpulse's launch rule, which would read a frame's share.
 	Body->AddImpulse(Impulse, NAME_None, /*bVelChange=*/false);
 	if (bMoving)
@@ -802,11 +835,23 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 		Target->AddImpulseAtLocation(-Impulse, Hand);
 	}
 	// A hard catch tugs the camera (the crash shake, small).
-	const float Tension = FMath::Abs(NewRadial - Radial) / Dt;
 	if (Tension > ArmTugMinAccelCm)
 	{
 		KickCamera(ArmTugCmPer1000 * Tension / 1000.0f);
 	}
+}
+
+void AJamZeroGPawn::HandOverArmCarry()
+{
+	// The hand lets go mid-frame of the arm's steps: the velocity they ended with, not the frame's chord. The
+	// pawn's share at once (a respawn's zero velocity right after still wins), the held body's as an impulse.
+	Body->SetPhysicsLinearVelocity(ArmCarry / Body->GetMass(), /*bAddToCurrent=*/true);
+	UPrimitiveComponent* Target = ClingTarget.IsValid() ? ClingTarget.Get() : GrabbedBody.Get();
+	if (Target && Target->IsSimulatingPhysics())
+	{
+		Target->AddImpulseAtLocation(-ArmCarry, GetHandLocation());
+	}
+	ArmCarry = FVector::ZeroVector;
 }
 
 EJamRmbAction AJamZeroGPawn::GetRmbAction() const

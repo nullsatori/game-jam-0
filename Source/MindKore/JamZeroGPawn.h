@@ -314,7 +314,8 @@ public:
 	// --- the arm: holding on (Cling) and holding a loose body (Grab) ----------------
 	// One spring-damper along the line from the hand to the shoulder (the eye);
 	// nothing across it on a fixed hold, so you swing. Solved implicitly on the
-	// velocity every tick (stable at any frame time), as equal and opposite
+	// velocity in steps of at most 1/240 s within each tick (the same at any
+	// frame rate), as equal and opposite
 	// impulses on the pawn and a held body (momentum kept).
 
 	/** Reach from the eye to the hand on a fixed hold: you hang at it, cm. A hold taken farther reels you in to it. */
@@ -329,9 +330,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.1"))
 	float ArmStiffness = 22.0f;
 
-	/** Damping ratio of the reach spring: under 1 the arm gives a little bounce when it catches you. */
+	/** Damping ratio of the reach spring: under 1 the arm gives a little bounce when it catches you. 1 gives the catch
+	 * and the pull-up tuned at 60 FPS, when the spring took one implicit step a frame and 0.8 damped like this. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
-	float ArmDampingRatio = 0.8f;
+	float ArmDampingRatio = 1.0f;
 
 	/** On a fixed hold, thrust keys toward the hand shorten the reach at this rate (a pull-up; let go mid-pull to fling), away from it lengthen it back, cm/s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|Arm", meta = (ClampMin = "0.0"))
@@ -757,7 +759,11 @@ protected:
 	FVector HoldDirection = FVector::ForwardVector;
 	/** The reach the arm pulls to now, cm. */
 	float ArmRestCm = 0.0f;
+	/** The arm's steps end a tick faster than the velocity Chaos moves the body on (UpdateArm): the difference, as
+	 * the pawn's impulse (kg cm/s), goes into the next tick, or to the bodies when the hand lets go (HandOverArmCarry). */
+	FVector ArmCarry = FVector::ZeroVector;
 	void UpdateArm(float DeltaSeconds);
+	void HandOverArmCarry();
 	void UpdateDust();
 
 	UPROPERTY(Transient)
