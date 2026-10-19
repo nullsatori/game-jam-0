@@ -126,7 +126,8 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Pistol.MagOutSound = PistolMagOut.Object;
 	Pistol.MagInSound = PistolMagIn.Object;
 	Pistol.bAutomatic = true;
-	Pistol.ProjectileSpeed = 9000.0f;
+	// Near real muzzle velocities (owner 19.10: slow rounds made the flesh walls answer late): 9 mm 350 m/s.
+	Pistol.ProjectileSpeed = 35000.0f;
 	Pistol.KickPitchDeg = 1.2f;
 	Pistol.KickYawDeg = 0.3f;
 	Pistol.ViewKickBackCm = 3.0f;
@@ -159,7 +160,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Shotgun.CycleDelaySeconds = 0.15f; // the pump's clicks at 0.26 and 0.40 s after the shot, as its animation
 	Shotgun.EmptySound = ShotgunEmpty.Object;
 	Shotgun.ShellInsertSound = ShotgunShell.Object;
-	Shotgun.ProjectileSpeed = 6000.0f;
+	Shotgun.ProjectileSpeed = 40000.0f; // buckshot ~400 m/s
 	Shotgun.KickPitchDeg = 5.0f;
 	Shotgun.KickYawDeg = 1.2f;
 	Shotgun.ViewKickBackCm = 7.0f;
@@ -201,7 +202,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Sniper.EmptySound = SniperEmpty.Object;
 	Sniper.MagOutSound = SniperMagOut.Object;
 	Sniper.MagInSound = SniperMagIn.Object;
-	Sniper.ProjectileSpeed = 40000.0f;
+	Sniper.ProjectileSpeed = 80000.0f; // 7.62x54R ~800 m/s
 	Sniper.KickPitchDeg = 8.0f;
 	Sniper.KickYawDeg = 1.0f;
 	Sniper.ViewKickBackCm = 9.0f;
@@ -323,7 +324,10 @@ void UJamWeaponsComponent::UpdateRounds(float DeltaTime)
 		const FJamWeapon& Weapon = Weapons[Round.Weapon];
 		const float Step = FMath::Min(Weapon.ProjectileSpeed * DeltaTime, Weapon.RangeCm - Round.TravelledCm);
 		const FVector Next = Round.Position + Round.Direction * Step;
-		if (Step <= 0.0f || TraceShot(Weapon, Round.Position, Next, Round.Direction) || Round.TravelledCm + Step >= Weapon.RangeCm)
+		FVector Impact = Next;
+		// A landed round's streak was drawn to its impact for one frame; now it goes.
+		const bool bLands = !Round.bLanded && Step > 0.0f && TraceShot(Weapon, Round.Position, Next, Round.Direction, &Impact);
+		if (Round.bLanded || (!bLands && (Step <= 0.0f || Round.TravelledCm + Step >= Weapon.RangeCm)))
 		{
 			if (UStaticMeshComponent* Tracer = Round.Tracer.Get())
 			{
@@ -332,14 +336,18 @@ void UJamWeaponsComponent::UpdateRounds(float DeltaTime)
 			Rounds.RemoveAtSwap(Index);
 			continue;
 		}
-		Round.Position = Next;
-		Round.TravelledCm += Step;
+		const FVector Tail = TracerHead(Round);
+		Round.TravelledCm += float(FVector::Dist(Round.Position, Impact));
+		Round.Position = Impact;
+		Round.bLanded = bLands;
 		if (UStaticMeshComponent* Tracer = Round.Tracer.Get())
 		{
-			// The streak's head on the round (joining it from the muzzle), its tail behind it.
-			const FVector Head = Round.Position + Round.MuzzleOffset * FMath::Max(0.0f, 1.0f - Round.TravelledCm / TracerConvergeCm);
-			const float Length = FMath::Min(TracerLengthCm, Round.TravelledCm);
-			Tracer->SetWorldLocationAndRotation(Head - Round.Direction * Length * 0.5f, Round.Direction.Rotation());
+			// The streak covers this frame's flight (a fast round is a long streak, as on film; at
+			// 400 m/s and 60 fps 6.7 m), at least TracerLengthCm behind the head (slow time, slow rounds).
+			const FVector Head = TracerHead(Round);
+			const FVector Along = (Head - Tail).GetSafeNormal(UE_SMALL_NUMBER, Round.Direction);
+			const float Length = FMath::Max(float(FVector::Dist(Tail, Head)), FMath::Min(TracerLengthCm, Round.TravelledCm));
+			Tracer->SetWorldLocationAndRotation(Head - Along * Length * 0.5f, Along.Rotation());
 			Tracer->SetWorldScale3D(FVector(Length, TracerThicknessCm, TracerThicknessCm) / 100.0f);
 			Tracer->SetVisibility(true);
 		}
@@ -682,7 +690,13 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	return true;
 }
 
-bool UJamWeaponsComponent::TraceShot(const FJamWeapon& Weapon, const FVector& Start, const FVector& End, const FVector& Direction)
+FVector UJamWeaponsComponent::TracerHead(const FRound& Round) const
+{
+	// On the round, joining its path from the muzzle over TracerConvergeCm.
+	return Round.Position + Round.MuzzleOffset * FMath::Max(0.0f, 1.0f - Round.TravelledCm / TracerConvergeCm);
+}
+
+bool UJamWeaponsComponent::TraceShot(const FJamWeapon& Weapon, const FVector& Start, const FVector& End, const FVector& Direction, FVector* OutImpact)
 {
 	UWorld* World = GetWorld();
 	AActor* Shooter = GetOwner();
@@ -721,6 +735,10 @@ bool UJamWeaponsComponent::TraceShot(const FJamWeapon& Weapon, const FVector& St
 		return false;
 	}
 	const FHitResult& Hit = Hits[Selected];
+	if (OutImpact)
+	{
+		*OutImpact = Hit.ImpactPoint;
+	}
 	FMKImpactResolveParams ResolveParams;
 	ResolveParams.ImpactData = ImpactData;
 	FMKImpactFeedback Feedback;

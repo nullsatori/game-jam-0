@@ -89,7 +89,8 @@ PARTS = {
                    cyl(58.0, 83.0, 1.1, z=-2.3),
                    loft([section(83.0, 1.2, -3.6, 1.35), section(85.6, 1.2, -3.6, 1.35)]),
                    tube([[43, 0, -4.0], [44, 0, -6.1], [48, 0, -6.8], [52, 0, -6.0], [53.6, 0, -4.0]], 0.35),
-                   tube([[48.6, 0, -4.0], [48.4, 0, -5.0], [47.8, 0, -5.6]], 0.25),
+                   # the trigger: its tip curls forward (the finger's side), not back toward the butt
+                   tube([[47.8, 0, -4.0], [48.0, 0, -5.0], [48.6, 0, -5.6]], 0.25),
                    tube([[8 + 0.9 * math.cos(q), 0, -12.6 + 0.9 * math.sin(q)] for q in np.linspace(0, 2 * math.pi, 12, endpoint=False)], 0.18, True),
                    tube([[84.3 + 0.9 * math.cos(q), 0, -4.3 + 0.9 * math.sin(q)] for q in np.linspace(0, 2 * math.pi, 12, endpoint=False)], 0.18, True),
                    cyl(91.3, 91.7, 0.2, z=1.15, m=8)],
@@ -127,7 +128,7 @@ SV98 = {
         loft([section(112.0, 1.7, -1.7, 1.7, 16, 2.0), section(121.0, 1.7, -1.7, 1.7, 16, 2.0)]),  # muzzle brake
         ring(114.5, 0.0, 1.75, 16, 0.22), ring(117.0, 0.0, 1.75, 16, 0.22), ring(119.5, 0.0, 1.75, 16, 0.22),
         tube([[36.0, 0, -3.8], [37.0, 0, -6.4], [41.0, 0, -7.2], [44.0, 0, -6.2], [44.5, 0, -4.2]], 0.35),  # guard
-        tube([[41.2, 0, -4.0], [41.0, 0, -5.0], [40.4, 0, -5.6]], 0.25),                   # trigger
+        tube([[40.4, 0, -4.0], [40.6, 0, -5.0], [41.2, 0, -5.6]], 0.25),                   # trigger, tip curled forward
         taper(39.0, 45.0, 2.1, 1.6, z=7.0), taper(45.0, 64.0, 1.5, 1.5, z=7.0),            # scope: eyepiece, tube
         taper(64.0, 72.0, 1.5, 2.5, z=7.0), taper(72.0, 76.0, 2.5, 2.5, z=7.0),            # objective bell
         loft([section(54.0, 10.6, 8.0, 0.9), section(56.0, 10.6, 8.0, 0.9)]),              # elevation turret
