@@ -682,7 +682,8 @@ void AJamZeroGPawn::BulletTimeReleased()
 
 FVector AJamZeroGPawn::ViewLocation() const
 {
-	return Camera->GetComponentLocation();
+	// The eye without the shake: the shake moves only the camera, never what the view aims or holds.
+	return ShoulderLocation();
 }
 
 FVector AJamZeroGPawn::ViewDirection() const
@@ -920,10 +921,13 @@ void AJamZeroGPawn::HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* Oth
 	float SpeedCm = 0.0f;
 	JamDeliverCollisionImpact(this, Body, Hit, NormalImpulse, CrashImpact, LastCrashSeconds, SpeedCm);
 	const float MinSpeedCm = IsInGravity() ? FMath::Max(FeedbackMinSpeedCm, GroundFeedbackMinSpeedCm) : FeedbackMinSpeedCm;
-	if (SpeedCm < MinSpeedCm || ShakeRemaining > ShakeSeconds * 0.5f)
+	const double Now = GetWorld()->GetTimeSeconds();
+	// The same crash's later contacts: timed from the last crash, not from the shake - a shot or a bite shakes too.
+	if (SpeedCm < MinSpeedCm || Now - LastThumpSeconds < ShakeSeconds * 0.5f)
 	{
-		return; // A touch, or the same crash still shaking.
+		return; // A touch, or the same crash again.
 	}
+	LastThumpSeconds = Now;
 	const bool bFlesh = IsFlesh(Hit);
 	if (USoundBase* Sound = bFlesh && FleshCrashSound ? FleshCrashSound.Get() : CrashSound.Get())
 	{
@@ -1731,7 +1735,7 @@ namespace
 	 * Glass: a 4 kg canister at 200 cm/s (under the impulse threshold), then the
 	 * heaviest small body (bounding radius < 70 cm) at 800 cm/s, both thrown at
 	 * the pane; the pane's remaining area is logged after each. Then the pawn
-	 * is flung at the anchor at 1000 cm/s for a crash.
+	 * is flung at the anchor at 1000 cm/s for a crash, the camera kept shaking (a bite's shake) all the way.
 	 */
 	void ProbeCollisions(AJamZeroGPawn* Pawn)
 	{
@@ -1783,7 +1787,18 @@ namespace
 				UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [glass]: after the heavy one %.0f cm2"), Pane->GetRemainingAreaCm2());
 				Pawn->Body->SetWorldLocation(FVector(-200.0f, 0.0f, 0.0f), false, nullptr, ETeleportType::TeleportPhysics);
 				Pawn->Body->SetPhysicsLinearVelocity(FVector(1000.0f, 0.0f, 0.0f));
-				UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [crash]: pawn flung at the anchor at 1000 cm/s, health %.0f"), Pawn->Vitals->Health);
+				UE_LOG(LogMindKore, Log, TEXT("ZeroG probe [crash]: pawn flung at the anchor at 1000 cm/s, health %.0f, the camera kept shaking (a bite's shake must not cancel the crash)"), Pawn->Vitals->Health);
+				const TSharedRef<FTimerHandle> Shaking = MakeShared<FTimerHandle>();
+				const double ShakeUntil = Pawn->GetWorld()->GetTimeSeconds() + 0.6;
+				Pawn->GetWorld()->GetTimerManager().SetTimer(*Shaking, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Shaking, ShakeUntil]()
+				{
+					if (Pawn->GetWorld()->GetTimeSeconds() > ShakeUntil)
+					{
+						Pawn->GetWorld()->GetTimerManager().ClearTimer(*Shaking);
+						return;
+					}
+					Pawn->KickCamera(0.5f);
+				}), 0.02f, true);
 				FTimerHandle AfterCrash;
 				Pawn->GetWorld()->GetTimerManager().SetTimer(AfterCrash, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn]()
 				{

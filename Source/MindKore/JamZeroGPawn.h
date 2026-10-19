@@ -590,6 +590,7 @@ protected:
 	/** The body takes an impulse in kg cm/s (velocity change = Impulse / mass). */
 	void AddBodyImpulse(const FVector& Impulse);
 
+	/** Where the view aims from: the eye (ShoulderLocation), without the camera shake. */
 	FVector ViewLocation() const;
 	FVector ViewDirection() const;
 	void RefreshGrabCandidate();
@@ -638,6 +639,8 @@ private:
 	void HandleBodyHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp,
 		FVector NormalImpulse, const FHitResult& Hit);
 	double LastCrashSeconds = -100.0;
+	/** The last crash that thumped (sound, shake, self damage): its later contacts are cut off by this, and a touchdown step right after it is skipped. */
+	double LastThumpSeconds = -100.0;
 	float ShakeRemaining = 0.0f;
 	float ShakeAmplitude = 0.0f;
 	void DrawPrediction() const;
