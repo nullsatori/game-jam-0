@@ -80,20 +80,26 @@ bool UMKVitalsComponent::ApplyIncoming(float Damage, EMKImpactKind Kind, bool bB
 
 	if (HealthBefore > 0.0f && Health <= 0.0f)
 	{
-		// TEMPORARY: remove when the death/checkpoint owner of
-		// DESIGN_SURVIVAL_AND_PICKUPS section 12 exists. Until then zero health
-		// is logged and held at zero; nothing dies and nothing restarts.
-		UE_LOG(LogMindKore, Warning, TEXT("Vitals %s: health reached 0; no death owner exists yet, the player stays up"),
-			*GetNameSafe(GetOwner()));
+		// Death is the listener's (the jam's game mode); without one zero health is held at zero.
+		UE_LOG(LogMindKore, Warning, TEXT("Vitals %s: health reached 0, %d death listener(s)"), *GetNameSafe(GetOwner()),
+			OnDepleted.IsBound() ? 1 : 0);
+		OnDepleted.Broadcast();
 	}
 	return true;
 }
 
+void UMKVitalsComponent::Revive()
+{
+	Health = MaxHealth;
+	Armor = StartingArmor;
+	UE_LOG(LogMindKore, Log, TEXT("Vitals %s: revived, health %.1f, armour %.1f"), *GetNameSafe(GetOwner()), Health, Armor);
+}
+
 void UMKVitalsComponent::Restore(float AddHealth, float AddArmor)
 {
-	// TEMPORARY, with the note in ApplyIncoming: there is no death owner, so
-	// health held at zero is restored like any other. When death exists it wins
-	// over a use that pays on the same frame (SURVIVAL section 6).
+	// Health held at zero is restored like any other: Restore does not know
+	// about death (OnDepleted's listener owns it). SURVIVAL section 6 wants
+	// death to win over a use that pays on the same frame - not enforced here.
 	const float HealthBefore = Health;
 	const float ArmorBefore = Armor;
 	Health = FMath::Max(Health, FMath::Min(Health + MKNonNegative(AddHealth), MaxHealth));

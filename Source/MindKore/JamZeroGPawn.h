@@ -566,6 +566,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Jam|ZeroG|Walk")
 	void JumpPressed();
 
+	/**
+	 * Death and revival (AJamShipGameMode): the hands let go of everything -
+	 * the held body, the hold on the hull (the arm), the rope, the hook, the
+	 * ladder, the torch, the strap's line on the belt, the aim, bullet time and
+	 * the keys held. The strap's lines between two bodies, the keys on the ring,
+	 * the guns, their ammo and the tool in hand stay.
+	 */
+	void LetGoOfEverything();
+
+	/** Revival: LetGoOfEverything, the body at Location at rest, full health and air. */
+	void ReviveAt(const FVector& Location);
+
 	virtual void ReceiveResolvedImpact_Implementation(const FMKResolvedImpact& ResolvedImpact) override;
 
 	virtual void Tick(float DeltaSeconds) override;

@@ -22,6 +22,9 @@ struct FMKIncomingDamage
 /** A hit that was paid: what went into health and what the armour took. */
 DECLARE_MULTICAST_DELEGATE_TwoParams(FMKVitalsHit, float /*HealthDamage*/, float /*Absorbed*/);
 
+/** Health reached zero (once per life). */
+DECLARE_MULTICAST_DELEGATE(FMKVitalsDepleted);
+
 /**
  * DESIGN_SURVIVAL_AND_PICKUPS section 2, pure:
  *
@@ -50,7 +53,9 @@ MINDKORE_API FMKIncomingDamage MKApplyIncomingDamage(
  * Jam lift: in the starter AJamCharacter DOES implement IMKImpactReceiver and
  * forwards a round to ApplyIncoming - the paragraph above describes MindKore.
  *
- * Transient state: there is no save game, death or checkpoint in C++ yet.
+ * Transient state: there is no save game or checkpoint. Death is an event
+ * (OnDepleted); what follows is decided by its listener - in the jam, the
+ * game mode (AJamShipGameMode revives the same pawn with Revive).
  */
 UCLASS(ClassGroup = (MindKore), meta = (BlueprintSpawnableComponent))
 class MINDKORE_API UMKVitalsComponent : public UActorComponent
@@ -98,6 +103,12 @@ public:
 
 	/** After a hit that cost anything has been paid. The bodycam's projector shows the health on it. */
 	FMKVitalsHit OnHit;
+
+	/** The hit that took health to zero. Nothing here dies or restarts: the listener decides. */
+	FMKVitalsDepleted OnDepleted;
+
+	/** Back to full health and the starting armour (a revival). */
+	void Revive();
 
 	/**
 	 * Give back health and armour, each up to its maximum; what does not fit is

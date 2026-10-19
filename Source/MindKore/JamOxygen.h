@@ -9,8 +9,8 @@
  * The suit's oxygen, in seconds of breathing. Breathing drains 1/s; the
  * owner may charge thrusters and the stabiliser (both 0 by default); guns are free. Empty:
  * the owner's UMKVitalsComponent takes SuffocationDamagePerSecond, paid once
- * a second. Vitals at zero: this component is the zero-G mode's death owner -
- * it disables the player's input and restarts the level after RestartDelaySeconds.
+ * a second. It only spends air: death is the vitals' event (OnDepleted), and
+ * the game mode decides what follows (AJamShipGameMode revives in the cabin).
  */
 UCLASS(ClassGroup = (Jam), meta = (BlueprintSpawnableComponent))
 class MINDKORE_API UJamOxygenComponent : public UActorComponent
@@ -35,9 +35,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Oxygen", meta = (ClampMin = "0.0"))
 	float SuffocationDamagePerSecond = 10.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Oxygen", meta = (ClampMin = "0.0"))
-	float RestartDelaySeconds = 3.0f;
-
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Oxygen")
 	float Seconds = 180.0f;
 
@@ -57,9 +54,6 @@ public:
 	bool IsBreathable() const { return bBreathable; }
 
 	UFUNCTION(BlueprintPure, Category = "Jam|Oxygen")
-	bool IsDead() const { return bDead; }
-
-	UFUNCTION(BlueprintPure, Category = "Jam|Oxygen")
 	float GetFraction() const { return CapacitySeconds > 0.0f ? Seconds / CapacitySeconds : 0.0f; }
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -71,7 +65,6 @@ private:
 	float SuffocationAccumulator = 0.0f;
 	bool bBreathable = false;
 	float BreathableRefillPerSecond = 0.0f;
-	bool bDead = false;
 };
 
 /**

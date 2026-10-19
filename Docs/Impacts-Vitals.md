@@ -34,8 +34,10 @@
   `M_Decal_Default`.
 - `UMKVitalsComponent`: `MaxHealth` 100, `MaxArmor` 50, `StartingArmor` 0,
   `AbsorbFraction` 0.6; `ApplyIncoming(Damage, Kind, bBlocked, EventId)`,
-  `Restore(Health, Armor)`; при 0 здоровья только предупреждение в лог —
-  смерти нет.
+  `Restore(Health, Armor)`, `Revive()`; при 0 здоровья — предупреждение в лог и
+  событие `OnDepleted`. Что дальше, решает слушатель: в джеме это
+  `AJamShipGameMode` (возрождение в каюте); без слушателя здоровье просто
+  держится на нуле.
 
 ## Обязательный конфиг (`Config/DefaultEngine.ini`)
 

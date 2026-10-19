@@ -47,7 +47,7 @@
 (проград) с м/с, или крест, когда летишь назад (ретроград).
 
 Кислород — 180 с, тратит его только дыхание (1/с); двигатели, стабилизатор и
-стволы — бесплатно (`ThrusterPerSecond`, `StabiliserPerSecond` = 0). Ноль — удушье 10 HP/с; смерть — через 3 с уровень перезапускается, а на корабельной карте новое тело встаёт в каюте, мир остаётся ([HullRepair](HullRepair.md)).
+стволы — бесплатно (`ThrusterPerSecond`, `StabiliserPerSecond` = 0). Ноль — удушье 10 HP/с. Кислород только тратит воздух: смерть — событие `UMKVitalsComponent::OnDepleted`, решает режим (`AJamShipGameMode`, режим всех карт): через 3 с та же пешка встаёт у `PlayerStart` с тегом `Cabin` (нет такого — у любого, с предупреждением в лог), с полным здоровьем и кислородом; всё, что было при ней, и мир остаются ([HullRepair](HullRepair.md)).
 Баллон O2 (ПКМ) даёт +60 с.
 
 ## Хват (рука, как в White Knuckle)
@@ -124,7 +124,7 @@ Alt цепляет то, что под прицелом, в пределах `Gr
 | Файл | Что |
 |---|---|
 | `JamZeroGPawn.h/.cpp` | `AJamZeroGPawn : APawn, IMKImpactReceiver`; консольная команда `jam.ZeroG.Probe` |
-| `JamOxygen.h/.cpp` | `UJamOxygenComponent` (кислород, удушье, смерть, рестарт), `AJamOxygenCanister` |
+| `JamOxygen.h/.cpp` | `UJamOxygenComponent` (кислород, удушье), `AJamOxygenCanister` |
 | `JamGameMode.h/.cpp` | `AJamZeroGGameMode` (пешка, HUD, дрейф хлама), `AJamZeroGHUD` |
 | `Scripts/build_zerog.py` | сборка `/Game/Jam/Maps/Lvl_Jam_ZeroG` |
 
@@ -163,7 +163,7 @@ Alt цепляет то, что под прицелом, в пределах `Gr
 | `UJamOxygenComponent::CapacitySeconds` | 180 | |
 | `BreathingPerSecond` / `ThrusterPerSecond` / `StabiliserPerSecond` | 1 / 0 / 0 | |
 | `SuffocationDamagePerSecond` | 10 | платится раз в секунду через `UMKVitalsComponent` |
-| `RestartDelaySeconds` | 3 | после смерти — `APlayerController::RestartLevel`, на `Lvl_Jam_Ship` — `AJamShipGameMode::RespawnInCabin` |
+| `AJamShipGameMode::RespawnDelaySeconds` | 3 | от смерти до возрождения в каюте (`RespawnInCabin`) |
 | `AJamOxygenCanister::RefillSeconds` | 60 | |
 | `AJamZeroGGameMode::InitialDriftMaxCm` / `InitialSpinMaxDeg` / `DriftSeed` | 20 / 30 / 1337 | стартовый дрейф хлама |
 

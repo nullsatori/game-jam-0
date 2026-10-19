@@ -3,12 +3,8 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerController.h"
-#include "JamShip.h"
 #include "MKVitals.h"
 #include "MindKore.h"
-#include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
 #define LOCTEXT_NAMESPACE "JamOxygen"
@@ -39,10 +35,6 @@ void UJamOxygenComponent::Refill(float Amount)
 void UJamOxygenComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	if (bDead)
-	{
-		return;
-	}
 	if (bBreathable)
 	{
 		Seconds = FMath::Min(CapacitySeconds, Seconds + BreathableRefillPerSecond * DeltaTime);
@@ -53,9 +45,9 @@ void UJamOxygenComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	}
 
 	UMKVitalsComponent* Vitals = GetOwner()->FindComponentByClass<UMKVitalsComponent>();
-	if (!Vitals)
+	if (!Vitals || Vitals->IsDepleted())
 	{
-		return;
+		return; // dead: nothing more to take until the revival
 	}
 	if (IsEmpty())
 	{
@@ -71,34 +63,6 @@ void UJamOxygenComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	{
 		SuffocationAccumulator = 0.0f;
 	}
-
-	if (!Vitals->IsDepleted())
-	{
-		return;
-	}
-	bDead = true;
-	APawn* Pawn = Cast<APawn>(GetOwner());
-	APlayerController* PlayerController = Pawn ? Cast<APlayerController>(Pawn->GetController()) : nullptr;
-	UE_LOG(LogMindKore, Warning, TEXT("Oxygen %s: dead (oxygen %.0f s); restarting the level in %.0f s"),
-		*GetNameSafe(GetOwner()), Seconds, RestartDelaySeconds);
-	if (!PlayerController)
-	{
-		return;
-	}
-	Pawn->DisableInput(PlayerController);
-	FTimerHandle Restart;
-	GetWorld()->GetTimerManager().SetTimer(Restart,
-		FTimerDelegate::CreateWeakLambda(PlayerController, [PlayerController]()
-		{
-			// The ship map keeps its world (welds, a cleaned hull) and wakes you in the cabin.
-			if (AJamShipGameMode* Mode = PlayerController->GetWorld()->GetAuthGameMode<AJamShipGameMode>())
-			{
-				Mode->RespawnInCabin(PlayerController);
-				return;
-			}
-			PlayerController->RestartLevel();
-		}),
-		FMath::Max(RestartDelaySeconds, 0.01f), /*bLoop=*/false);
 }
 
 AJamOxygenCanister::AJamOxygenCanister()

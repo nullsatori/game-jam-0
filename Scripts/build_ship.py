@@ -414,7 +414,8 @@ airlock_zone = spawn(unreal.JamGravityZone, V(1300, 0, -25), None, "Gravity_Airl
 set_extent(airlock_zone, "zone", (100, 100, 125))
 airlock_zone.set_editor_property("refill_per_second", 20.0)
 
-spawn(unreal.PlayerStart, V(1650, 0, FLOOR + 100), R(), "PlayerStart")
+# Tag Cabin: AJamShipGameMode wakes the player here after death (Scripts/tag_cabin_start.py on a hand-edited map).
+spawn(unreal.PlayerStart, V(1650, 0, FLOOR + 100), R(), "PlayerStart").set_editor_property("tags", ["Cabin"])
 locker = spawn(unreal.JamSuitLocker, V(1500, 215, FLOOR + 100), R(yaw=-90.0), "SuitLocker")
 locker.set_actor_scale3d(V(0.6, 0.4, 2.0))
 locker.get_editor_property("mesh").set_material(0, OXYGEN)

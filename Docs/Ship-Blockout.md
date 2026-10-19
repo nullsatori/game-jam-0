@@ -175,7 +175,7 @@ Box Extent и режим овала не определяют область д�
   открыть; без скафандра — «Нужен скафандр»).
 - **Стволы** — `UJamWeaponsComponent` (`Guns`, см.
   [RecoilWeapons](RecoilWeapons.md)). На корабле пешка стартует без оружия
-  (`AJamShipGameMode::StartPlay` запирает все); `AJamWeaponPickup` открывает
+  (`AJamZeroGPawn` ставит `Guns->bStartWithAllWeapons = false`); `AJamWeaponPickup` открывает
   ствол любой пешке с этим компонентом. Тост «Получено: …».
 - **Корпус.** Лист на пробоину притягивают стяжкой и проваривают по контуру
   ([HullRepair](HullRepair.md)); пока `Clean_Hull` считает мусор, горелка не

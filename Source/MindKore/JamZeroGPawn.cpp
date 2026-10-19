@@ -90,6 +90,8 @@ AJamZeroGPawn::AJamZeroGPawn()
 	Vitals = CreateDefaultSubobject<UMKVitalsComponent>(TEXT("Vitals"));
 	Oxygen = CreateDefaultSubobject<UJamOxygenComponent>(TEXT("Oxygen"));
 	Guns = CreateDefaultSubobject<UJamWeaponsComponent>(TEXT("Guns"));
+	// Every map runs the ship's mode: the guns come from their pickups.
+	Guns->bStartWithAllWeapons = false;
 	HullTools = CreateDefaultSubobject<UJamHullToolsComponent>(TEXT("HullTools"));
 
 	// A plate struck: the armour hit cue (CC0 donors, see CREDITS.md).
@@ -1425,6 +1427,52 @@ void AJamZeroGPawn::JumpPressed()
 		LastJumpSeconds = GetWorld()->GetTimeSeconds();
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: jet exit at %.0f cm/s"), *GetName(), JetExitSpeedCm);
 	}
+}
+
+void AJamZeroGPawn::LetGoOfEverything()
+{
+	if (GrabbedBody.IsValid())
+	{
+		Release();
+	}
+	LetGoCling();
+	DetachTether();
+	GrappleTarget = nullptr;
+	if (IsClimbingLadder())
+	{
+		EndLadderClimb();
+	}
+	// The torch: its LMB release never arrives once the input is off.
+	HullTools->PrimaryReleased();
+	const TArray<FJamStrapLine>& Lines = HullTools->GetLines();
+	for (int32 Index = Lines.Num() - 1; Index >= 0; --Index)
+	{
+		if (Lines[Index].bBelt)
+		{
+			HullTools->CutLine(Index);
+		}
+	}
+	if (Guns->Scope)
+	{
+		Guns->Scope->SetHeld(false);
+		Guns->Scope->SetAimHeld(false);
+	}
+	BulletTimeReleased();
+	bAiming = false;
+	bStabilising = false;
+	ThrustInput = FVector::ZeroVector;
+}
+
+void AJamZeroGPawn::ReviveAt(const FVector& Location)
+{
+	LetGoOfEverything();
+	Body->SetWorldLocation(Location, false, nullptr, ETeleportType::TeleportPhysics);
+	Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+	Body->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+	bGrounded = false;
+	ShakeRemaining = 0.0f;
+	Vitals->Revive();
+	Oxygen->Refill(Oxygen->CapacitySeconds);
 }
 
 void AJamZeroGPawn::Tick(float DeltaSeconds)

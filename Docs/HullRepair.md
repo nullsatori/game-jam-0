@@ -44,8 +44,11 @@
 - варишь, а не берёт: зазор — дожми линией, мусор — сначала выкинь мусор из
   корпуса;
 - криво приварил — «резать», лист снова свободен;
-- смерть — новое тело в каюте; швы, вычищенный корпус и полученные стволы
-  остаются. Уровень не перезапускается.
+- смерть — та же пешка через 3 с встаёт в каюте (`PlayerStart` с тегом `Cabin`),
+  с полным здоровьем и кислородом. Остаётся всё: скафандр, стволы и патроны,
+  инструмент в руке, линии стяжки между двумя телами, швы, вычищенный корпус.
+  В момент смерти руки отпускают всё: горелка гаснет, крюк, хват, трос и
+  линия на поясе снимаются. Уровень не перезапускается.
 
 ## Классы и файлы
 
@@ -54,8 +57,9 @@
 | `Source/MindKore/JamHullTools.h/.cpp` | `UJamHullToolsComponent` (`HullTools` на пешке): стяжка (линии, подмотка, срезание) и горелка |
 | `Source/MindKore/JamShipParts.h/.cpp` | `AJamPlateSocket` — пробоина: контур, зазоры, перекрытие, шов, прихватка, герметичность |
 | `Source/MindKore/JamZeroGPawn.h/.cpp` | клавиши 4/5, ЛКМ/R/колесо для инструмента, `Cling` (ПКМ по корпусу) |
-| `Source/MindKore/JamShip.h/.cpp` | `AJamShipGameMode::RespawnInCabin`, строки HUD, проба `jam.Hull.Probe` |
-| `Source/MindKore/JamOxygen.cpp` | смерть на корабельной карте — `RespawnInCabin` вместо перезапуска уровня |
+| `Source/MindKore/JamShip.h/.cpp` | смерть: `AJamShipGameMode` слушает `UMKVitalsComponent::OnDepleted` (`HandleDeath`), через `RespawnDelaySeconds` — `RespawnInCabin`; строки HUD, проба `jam.Hull.Probe` |
+| `Source/MindKore/JamZeroGPawn.h/.cpp` | `LetGoOfEverything` (что смерть снимает), `ReviveAt` (телепорт, покой, здоровье и кислород) |
+| `Scripts/tag_cabin_start.py` | тег `Cabin` на `PlayerStart` каюты в карте, которую правят руками |
 | `Scripts/build_ship.py` | пробоины (рамка: X вдоль корпуса, Z наружу), листы 3 × 3 м |
 
 ## Как устроено
@@ -100,7 +104,7 @@
 ## Проверка
 
 `jam.Hull.Probe [индекс] [shots]` на `Lvl_Jam_Ship` (`-game -nullrhi`,
-18.10.2026, лог `hull_probe3`):
+18.10.2026, лог `hull_probe3`; строки смерти — 19.10.2026, `World_Hull1`):
 
 ```
 [torch, plate 40 cm off, junk inside]: refused: junk
@@ -115,7 +119,9 @@
 [welded again]: seam 100%, ... tacked yes, sealed yes, ... panel hull 1
 [cling +0.5 s]: speed 0 cm/s        (снайперка, держась за корпус)
 [let go, sniper +0.5 s]: speed 700 cm/s
-[after death +4.4 s]: pawn JamZeroGPawn_1 at V(X=1650.00, Z=-110.00), zone JamGravityZone_4, sniper kept
+[before death]: suit yes, pistol locked, shotgun locked, sniper unlocked, strap lines 2 (on the belt 1), torch 'Горелка: ближе', hook in, input on
+[dead +0.1 s]: HP 0, suit yes, pistol locked, shotgun locked, sniper unlocked, strap lines 1 (on the belt 0), torch '', hook off, input off
+[after death +4.3 s]: pawn JamZeroGPawn_0 (the same), at V(X=5480.00, Z=1018.00), zone JamGravityZone_0, standing, 72 cm from the Cabin start, HP 100, O2 180, suit yes, pistol locked, shotgun locked, sniper unlocked, strap lines 1 (on the belt 0), torch '', hook off, input on
 [after the respawn]: seam 100%, coverage 100%, ... sealed yes, ... panel hull 1
 [JamPlateSocket_4, plate 40 cm off, no junk]: refused: gap, seam 0%
 ```

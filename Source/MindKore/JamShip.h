@@ -7,6 +7,7 @@
 
 class UBoxComponent;
 class AVolume;
+class AJamZeroGPawn;
 
 /**
  * Turns the view relative to the pawn's gravity: the view is kept as pitch
@@ -130,7 +131,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FJamLaunchAttempt);
  * counts cargo, and ends the run when the launch lever is pulled
  * (AJamShipPanel): it broadcasts OnLaunchAttempt (the hook for the planetoid
  * boss, not built yet), then shows «Улетел» and restarts. The guns start
- * locked; pickups unlock them.
+ * locked (the pawn's default); pickups unlock them. It owns death: the
+ * player's vitals report it (OnDepleted), the mode revives the same pawn in
+ * the cabin (RespawnInCabin).
  */
 UCLASS()
 class MINDKORE_API AJamShipGameMode : public AJamZeroGGameMode
@@ -177,17 +180,28 @@ public:
 	/** The launch lever: the run is won. */
 	void EndGame();
 
+	/** Dead to awake in the cabin, s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Ship", meta = (ClampMin = "0.0"))
+	float RespawnDelaySeconds = 3.0f;
+
 	/**
-	 * Death on this map: a new body in the cabin (the player start) with the guns
-	 * it had, the world as it is - welded seams and a cleaned hull stay
-	 * (Docs/HullRepair.md). Other maps restart the level.
+	 * After death: the same pawn wakes at the PlayerStart tagged Cabin (any
+	 * PlayerStart, with a warning, when none is), with full health and air.
+	 * Everything it had stays - the suit key, the guns and their ammo, the tools,
+	 * the strap's lines - and so does the world: welded seams, a cleaned hull
+	 * (Docs/HullRepair.md).
 	 */
-	void RespawnInCabin(APlayerController* PlayerController);
+	void RespawnInCabin(AJamZeroGPawn* Pawn);
 
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void StartPlay() override;
+	/** Listens to the player's vitals: their OnDepleted is the death this mode decides. */
+	virtual void SetPlayerDefaults(APawn* PlayerPawn) override;
 
 private:
+	/** The vitals hit zero: the body goes limp and lets go of everything, the input stops; RespawnDelaySeconds later, RespawnInCabin. */
+	void HandleDeath(TWeakObjectPtr<AJamZeroGPawn> Pawn);
+
 	/** The first zone containing Location: walking zones only, or any zone. */
 	const AJamGravityZone* ZoneAt(const FVector& Location, float InsetCm, bool bWalkOnly = true) const;
 

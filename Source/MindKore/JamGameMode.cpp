@@ -210,9 +210,9 @@ void AJamZeroGHUD::DrawHUD()
 		State +=FString::Printf(TEXT("   Детали: %d/%d%s"), Dock->GetCount(), Dock->RequiredCount, Dock->IsCompleted() ? TEXT(" - готово") : TEXT(""));
 		break;
 	}
-	if (Pawn->Oxygen->IsDead())
+	if (Pawn->Vitals->IsDepleted())
 	{
-		State += TEXT("   DEAD - restarting");
+		State += TEXT("   DEAD");
 	}
 	DrawText(State, FLinearColor(0.8f, 0.8f, 0.8f), BarX, Canvas->ClipY - 48.0f, Font);
 }

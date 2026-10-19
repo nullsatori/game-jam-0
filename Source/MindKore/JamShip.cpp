@@ -25,6 +25,7 @@
 #include "MKVitals.h"
 #include "MindKore.h"
 #include "TimerManager.h"
+#include "GameFramework/PlayerStart.h"
 #include "GameFramework/Volume.h"
 #if WITH_EDITOR
 #include "Editor.h"
@@ -319,18 +320,42 @@ AJamShipGameMode::AJamShipGameMode()
 void AJamShipGameMode::StartPlay()
 {
 	Super::StartPlay();
-	// After every actor's BeginPlay (which unlocks the guns by default): the ship starts unarmed.
-	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+}
+
+void AJamShipGameMode::SetPlayerDefaults(APawn* PlayerPawn)
+{
+	Super::SetPlayerDefaults(PlayerPawn);
+	AJamZeroGPawn* Pawn = Cast<AJamZeroGPawn>(PlayerPawn);
+	if (!Pawn)
 	{
-		const APawn* Pawn = It->Get() ? It->Get()->GetPawn() : nullptr;
-		if (UJamWeaponsComponent* Guns = Pawn ? Pawn->FindComponentByClass<UJamWeaponsComponent>() : nullptr)
-		{
-			for (FJamWeapon& Weapon : Guns->Weapons)
-			{
-				Weapon.bUnlocked = false;
-			}
-		}
+		return;
 	}
+	Pawn->Vitals->OnDepleted.RemoveAll(this);
+	Pawn->Vitals->OnDepleted.AddUObject(this, &AJamShipGameMode::HandleDeath, TWeakObjectPtr<AJamZeroGPawn>(Pawn));
+}
+
+void AJamShipGameMode::HandleDeath(TWeakObjectPtr<AJamZeroGPawn> WeakPawn)
+{
+	AJamZeroGPawn* Pawn = WeakPawn.Get();
+	if (!Pawn || bEnded)
+	{
+		return;
+	}
+	UE_LOG(LogMindKore, Warning, TEXT("Ship: %s died (O2 %.0f s); waking in the cabin in %.0f s"), *Pawn->GetName(), Pawn->Oxygen->Seconds, RespawnDelaySeconds);
+	// The body goes limp at once: no torch, hook, hold or aim left running on it.
+	Pawn->LetGoOfEverything();
+	if (APlayerController* PlayerController = Cast<APlayerController>(Pawn->GetController()))
+	{
+		Pawn->DisableInput(PlayerController);
+	}
+	FTimerHandle Wake;
+	GetWorldTimerManager().SetTimer(Wake, FTimerDelegate::CreateWeakLambda(this, [this, WeakPawn]()
+	{
+		if (AJamZeroGPawn* Dead = WeakPawn.Get(); Dead && !bEnded)
+		{
+			RespawnInCabin(Dead);
+		}
+	}), FMath::Max(RespawnDelaySeconds, 0.01f), false);
 }
 
 void AJamShipGameMode::Toast(const FText& Text)
@@ -408,38 +433,34 @@ void AJamShipGameMode::EndGame()
 }
 
 
-void AJamShipGameMode::RespawnInCabin(APlayerController* PlayerController)
+void AJamShipGameMode::RespawnInCabin(AJamZeroGPawn* Pawn)
 {
-	if (!PlayerController)
+	if (!Pawn)
 	{
 		return;
 	}
-	// The guns go with you; the rest of the world (seams, the cleaned hull, what was moved) stays as it is.
-	TArray<int32> Unlocked;
-	if (AJamZeroGPawn* Old = Cast<AJamZeroGPawn>(PlayerController->GetPawn()))
+	// The same pawn, so whatever it carries stays by construction; only where it is and its health and air change.
+	const APlayerStart* Start = nullptr;
+	const APlayerStart* Any = nullptr;
+	for (TActorIterator<APlayerStart> It(GetWorld()); It && !Start; ++It)
 	{
-		for (int32 Index = 0; Index < 8; ++Index)
-		{
-			if (Old->Guns->IsWeaponUnlocked(Index))
-			{
-				Unlocked.Add(Index);
-			}
-		}
-		Old->Release();
-		Old->DetachTether();
-		Old->LetGoCling();
-		PlayerController->UnPossess();
-		Old->Destroy();
+		Any = Any ? Any : *It;
+		Start = It->ActorHasTag(TEXT("Cabin")) ? *It : nullptr;
 	}
-	RestartPlayer(PlayerController);
-	if (AJamZeroGPawn* New = Cast<AJamZeroGPawn>(PlayerController->GetPawn()))
+	if (!Start)
 	{
-		for (const int32 Index : Unlocked)
-		{
-			New->Guns->UnlockWeapon(Index);
-		}
-		UE_LOG(LogMindKore, Log, TEXT("Ship: respawned in the cabin at %s, %d gun(s) kept"), *New->GetActorLocation().ToCompactString(), Unlocked.Num());
+		UE_LOG(LogMindKore, Warning, TEXT("Ship: no PlayerStart tagged Cabin in %s; waking at %s"), *GetWorld()->GetMapName(), *GetNameSafe(Any));
+		Start = Any;
 	}
+	const FTransform At = Start ? Start->GetActorTransform() : Pawn->GetActorTransform();
+	Pawn->ReviveAt(At.GetLocation());
+	if (APlayerController* PlayerController = Cast<APlayerController>(Pawn->GetController()))
+	{
+		PlayerController->SetControlRotation(FRotator(0.0f, At.Rotator().Yaw, 0.0f));
+		Pawn->EnableInput(PlayerController);
+	}
+	UE_LOG(LogMindKore, Log, TEXT("Ship: %s woke at %s (%s), guns %s"), *Pawn->GetName(), *Pawn->GetActorLocation().ToCompactString(),
+		*GetNameSafe(Start), *Pawn->Guns->Describe());
 	Toast(LOCTEXT("Respawn", "Очнулся в каюте. Швы и уборка на месте"));
 }
 
@@ -1078,7 +1099,10 @@ namespace
 	 * A plate 40 cm off the hole, the torch tried (junk inside: refused); a strap from the opposite
 	 * wall through the hole pulls it on (gaps and coverage logged); the junk is removed; the whole
 	 * contour welded (tack, seal, the panel); half cut (unsealed, still tacked), all cut (loose),
-	 * welded again; cling to the hull and fire the sniper; then death and the respawn in the cabin;
+	 * welded again; cling to the hull and fire the sniper; then the suit on, a strap line wall - plate
+	 * and one on the belt, the torch lit and the hook in, and death: the torch, the hook and the belt
+	 * line go at once, the input stops; the same pawn wakes standing in the cabin with the suit, the
+	 * guns as they were (only the sniper unlocked), the wall - plate line and the seam;
 	 * last a second plate 40 cm off the next breach: the torch must find a gap. With "shots" as the
 	 * second argument: HighResShot stills of the strapped plate and of the fresh seam (needs a real RHI).
 	 */
@@ -1310,18 +1334,64 @@ namespace
 		{
 			Pawn->Fire();
 		});
-		After(Mode, 11.6f, [Pawn]()
+		After(Mode, 11.6f, [Mode, Pawn, WeakSocket, PlateBody, Out]()
 		{
 			UE_LOG(LogMindKore, Log, TEXT("Hull probe [let go, sniper +0.5 s]: speed %.0f cm/s"), Pawn->GetBodyVelocity().Size());
+			// What death must keep and what it must drop: the suit, a strap line wall - plate and one on the belt,
+			// the torch lit, the hook in the hull.
+			for (TActorIterator<AJamSuitLocker> Locker(Mode->GetWorld()); Locker; ++Locker)
+			{
+				Locker->CompleteInteraction(Pawn);
+			}
+			FHitResult Hit;
+			const FVector From = WeakSocket->GetActorLocation() - Out * 30.0f;
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(JamHullProbe), false, Pawn);
+			Params.AddIgnoredActor(PlateBody->GetOwner());
+			if (Mode->GetWorld()->LineTraceSingleByChannel(Hit, From, From - Out * 1200.0f, ECC_Visibility, Params))
+			{
+				Pawn->HullTools->AddLine(Hit.GetComponent(), Hit.ImpactPoint, PlateBody, PlateBody->GetComponentLocation());
+				Pawn->HullTools->AddLine(Hit.GetComponent(), Hit.ImpactPoint, Pawn->Body, Pawn->Body->GetComponentLocation(), /*bBelt=*/true);
+			}
+			Pawn->HullTools->SelectTool(EJamHullTool::Welder);
+			Pawn->HullTools->PrimaryPressed();
+			Mode->Tools.AddUnique(FName(TEXT("Grapple")));
+			Pawn->ToggleGrapple();
+		});
+		const auto Kept = [Pawn]()
+		{
+			int32 Belt = 0;
+			for (const FJamStrapLine& Line : Pawn->HullTools->GetLines())
+			{
+				Belt += Line.bBelt ? 1 : 0;
+			}
+			return FString::Printf(TEXT("suit %s, pistol %s, shotgun %s, sniper %s, strap lines %d (on the belt %d), torch '%s', hook %s, input %s"),
+				MKHolderHasKey(Pawn, MKJamSuitKey()) ? TEXT("yes") : TEXT("NO"), Pawn->Guns->IsWeaponUnlocked(0) ? TEXT("unlocked") : TEXT("locked"),
+				Pawn->Guns->IsWeaponUnlocked(1) ? TEXT("unlocked") : TEXT("locked"), Pawn->Guns->IsWeaponUnlocked(2) ? TEXT("unlocked") : TEXT("locked"),
+				Pawn->HullTools->GetLines().Num(), Belt, *Pawn->HullTools->GetWeldStatus().ToString(), Pawn->GetGrappled() ? TEXT("in") : TEXT("off"),
+				Pawn->InputEnabled() ? TEXT("on") : TEXT("off"));
+		};
+		After(Mode, 11.7f, [Pawn, Kept]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [before death]: %s"), *Kept());
 			Pawn->Vitals->ApplyIncoming(100000.0f, EMKImpactKind::Blunt, /*bBlocked=*/false, FGuid());
 		});
-		After(Mode, 16.0f, [Mode, WeakSocket, Report]()
+		After(Mode, 11.8f, [Pawn, Kept]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [dead +0.1 s]: HP %.0f, %s"), Pawn->Vitals->Health, *Kept());
+		});
+		After(Mode, 16.0f, [Mode, Pawn, Kept, Report]()
 		{
 			const AJamZeroGPawn* Now = PlayerPawn(Mode->GetWorld());
 			const AJamGravityZone* Zone = Now ? Mode->ZoneOf(Now) : nullptr;
-			UE_LOG(LogMindKore, Log, TEXT("Hull probe [after death +4.4 s]: pawn %s at %s, zone %s, sniper %s"), *GetNameSafe(Now),
-				Now ? *Now->GetActorLocation().ToCompactString() : TEXT("-"), Zone ? *Zone->GetName() : TEXT("none"),
-				Now && Now->Guns->IsWeaponUnlocked(2) ? TEXT("kept") : TEXT("LOST"));
+			const AActor* Start = nullptr;
+			for (TActorIterator<APlayerStart> It(Mode->GetWorld()); It; ++It)
+			{
+				Start = It->ActorHasTag(TEXT("Cabin")) ? *It : Start;
+			}
+			UE_LOG(LogMindKore, Log, TEXT("Hull probe [after death +4.3 s]: pawn %s (%s), at %s, zone %s, %s, %.0f cm from the Cabin start, HP %.0f, O2 %.0f, %s"),
+				*GetNameSafe(Now), Now == Pawn ? TEXT("the same") : TEXT("ANOTHER"), Now ? *Now->GetActorLocation().ToCompactString() : TEXT("-"),
+				Zone ? *Zone->GetName() : TEXT("none"), Now && Now->IsGrounded() ? TEXT("standing") : TEXT("NOT standing"),
+				Start && Now ? FVector::Dist(Start->GetActorLocation(), Now->GetActorLocation()) : -1.0, Pawn->Vitals->Health, Pawn->Oxygen->Seconds, *Kept());
 			Report(TEXT("after the respawn"));
 		});
 		if (!Spare)
@@ -1350,7 +1420,7 @@ namespace
 
 	FAutoConsoleCommandWithWorldAndArgs GHullProbe(
 		TEXT("jam.Hull.Probe"),
-		TEXT("jam.Hull.Probe [Index]: hull repair logic on one breach - strap, junk, weld, tack, seal, cut, cling, death and respawn."),
+		TEXT("jam.Hull.Probe [Index]: hull repair logic on one breach - strap, junk, weld, tack, seal, cut, cling, death and the revival in the cabin (what it keeps and drops)."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunHullProbe));
 
 	/** jam.Ship.PlanetShots: two stills standing on the planetoid (top and side). */
