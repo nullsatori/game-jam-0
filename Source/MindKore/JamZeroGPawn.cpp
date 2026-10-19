@@ -416,7 +416,10 @@ void AJamZeroGPawn::SetHands(EJamHands NewHands, EJamHullTool NewTool)
 		}
 		if (!ClingTarget.IsValid()) // holding on, the arm is on the hold, not on the body
 		{
-			HandOverArmCarry();
+			// Dropped, not handed over: the steps leave out the held body's own gravity (and the floor under the
+			// pawn), so here it is the frame's sag, not a velocity - handed over, a throw left its preview path
+			// (jam.Gravity.Probe, cabin / planetoid: 3.75 / 8.16 cm off, 1.36 / 4.93 before the steps).
+			ArmCarry = FVector::ZeroVector;
 		}
 		GrabbedBody = nullptr;
 		break;
@@ -585,7 +588,7 @@ bool AJamZeroGPawn::Cling(UPrimitiveComponent* Target, const FVector& Point)
 		return false;
 	}
 	// The hand takes the point; the velocity is kept - the arm catches it (UpdateArm).
-	HandOverArmCarry(); // a held body's arm ends here (the arm goes to the hold)
+	ArmCarry = FVector::ZeroVector; // a held body's arm ends here (the arm goes to the hold); dropped as on a release
 	SetMode(EJamMoveMode::Hang);
 	ClingTarget = Target;
 	HandLocal = Target->GetComponentTransform().InverseTransformPosition(Point);
@@ -843,14 +846,9 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 
 void AJamZeroGPawn::HandOverArmCarry()
 {
-	// The hand lets go mid-frame of the arm's steps: the velocity they ended with, not the frame's chord. The
-	// pawn's share at once (a respawn's zero velocity right after still wins), the held body's as an impulse.
+	// The hand lets go of a hold mid-frame of the arm's steps: the velocity they ended with, not the frame's
+	// chord - at once, so a respawn's zero velocity right after still wins. (A held body's carry is dropped: SetHands.)
 	Body->SetPhysicsLinearVelocity(ArmCarry / Body->GetMass(), /*bAddToCurrent=*/true);
-	UPrimitiveComponent* Target = ClingTarget.IsValid() ? ClingTarget.Get() : GrabbedBody.Get();
-	if (Target && Target->IsSimulatingPhysics())
-	{
-		Target->AddImpulseAtLocation(-ArmCarry, GetHandLocation());
-	}
 	ArmCarry = FVector::ZeroVector;
 }
 

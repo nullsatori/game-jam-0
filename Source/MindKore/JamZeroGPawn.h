@@ -760,7 +760,7 @@ protected:
 	/** The reach the arm pulls to now, cm. */
 	float ArmRestCm = 0.0f;
 	/** The arm's steps end a tick faster than the velocity Chaos moves the body on (UpdateArm): the difference, as
-	 * the pawn's impulse (kg cm/s), goes into the next tick, or to the bodies when the hand lets go (HandOverArmCarry). */
+	 * the pawn's impulse (kg cm/s), goes into the next tick, or to the pawn when the hand lets go of a hold (HandOverArmCarry). */
 	FVector ArmCarry = FVector::ZeroVector;
 	void UpdateArm(float DeltaSeconds);
 	void HandOverArmCarry();
