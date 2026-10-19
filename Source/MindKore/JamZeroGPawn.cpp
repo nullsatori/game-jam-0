@@ -993,7 +993,8 @@ void AJamZeroGPawn::DrawPrediction() const
 
 void AJamZeroGPawn::DrawPath(const FVector& Start, const FVector& Velocity, float RadiusCm, const AActor* Ignored, const FColor& Color) const
 {
-	// ponytail: straight segments and one reflection, drawn with debug lines
+	// ponytail: an arc under the zones' gravity (JamPredictFlight, stepped at this
+	// frame's delta as the physics steps) and one reflection, drawn with debug lines
 	// (Development builds); no spin, no drag, the other body treated as static.
 	UWorld* World = GetWorld();
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(JamPredict), /*bTraceComplex=*/false, this);
@@ -1001,49 +1002,48 @@ void AJamZeroGPawn::DrawPath(const FVector& Start, const FVector& Velocity, floa
 	{
 		Params.AddIgnoredActor(Ignored);
 	}
-	FVector Position = Start;
-	FVector Speed = Velocity;
-	float Seconds = PredictSeconds;
-	for (int32 Bounce = 0; Bounce < 2 && Speed.SizeSquared() > 1.0f; ++Bounce)
+	TArray<FJamFlightPoint> Path;
+	float HitSeconds = 0.0f;
+	const FHitResult Hit = JamPredictFlight(World, Start, Velocity, RadiusCm, PredictSeconds, World->GetDeltaSeconds(),
+		PredictRestitution, /*Bounces=*/1, Params, Path, HitSeconds);
+	// Dashes of 25 cm every 40 cm, along the whole path.
+	float Run = 0.0f;
+	for (int32 Index = 1; Index < Path.Num(); ++Index)
 	{
-		const FVector End = Position + Speed * Seconds;
-		FHitResult Hit;
-		const bool bHit = World->SweepSingleByChannel(Hit, Position, End, FQuat::Identity, ECC_PhysicsBody,
-			FCollisionShape::MakeSphere(RadiusCm), Params);
-		const FVector Stop = bHit ? FVector(Hit.Location) : End;
-		// Dashes of 25 cm every 40 cm.
-		const float Length = FVector::Dist(Position, Stop);
-		const FVector Along = (Stop - Position).GetSafeNormal();
-		for (float At = 0.0f; At < Length; At += 40.0f)
+		const FVector From = Path[Index - 1].Location;
+		const float Length = FVector::Dist(From, Path[Index].Location);
+		const FVector Along = (Path[Index].Location - From).GetSafeNormal();
+		for (float At = 0.0f; At < Length;)
 		{
-			DrawDebugLine(World, Position + Along * At, Position + Along * FMath::Min(At + 25.0f, Length), Color, false, -1.0f, 0, 2.0f);
-		}
-		if (!bHit)
-		{
-			if (Bounce == 0 && bLogNextPrediction)
+			const float Phase = FMath::Fmod(Run + At, 40.0f);
+			const float Step = FMath::Min(Phase < 25.0f ? 25.0f - Phase : 40.0f - Phase, Length - At);
+			if (Phase < 25.0f)
 			{
-				bLogNextPrediction = false;
-				UE_LOG(LogMindKore, Log, TEXT("ZeroG prediction: from (%.0f, %.0f, %.0f) at (%.0f, %.0f, %.0f) cm/s, no contact within %.1f s, ends at (%.0f, %.0f, %.0f)"),
-					Start.X, Start.Y, Start.Z, Velocity.X, Velocity.Y, Velocity.Z, PredictSeconds, End.X, End.Y, End.Z);
+				DrawDebugLine(World, From + Along * At, From + Along * (At + Step), Color, false, -1.0f, 0, 2.0f);
 			}
-			return;
+			At += Step;
 		}
-		if (Bounce == 0 && bLogNextPrediction)
+		Run += Length;
+	}
+	if (bLogNextPrediction)
+	{
+		bLogNextPrediction = false;
+		const FVector End = Path.Last().Location;
+		if (Hit.bBlockingHit)
 		{
-			bLogNextPrediction = false;
 			UE_LOG(LogMindKore, Log, TEXT("ZeroG prediction: from (%.0f, %.0f, %.0f) at %.0f cm/s, first contact %s at (%.0f, %.0f, %.0f) in %.2f s"),
 				Start.X, Start.Y, Start.Z, Velocity.Size(), *GetNameSafe(Hit.GetActor()), Hit.ImpactPoint.X, Hit.ImpactPoint.Y,
-				Hit.ImpactPoint.Z, PredictSeconds * Hit.Time);
+				Hit.ImpactPoint.Z, HitSeconds);
 		}
-		if (Bounce == 0)
+		else
 		{
-			DrawDebugSphere(World, Hit.ImpactPoint, 15.0f, 8, FColor(255, 60, 40), false, -1.0f, 0, 2.0f);
+			UE_LOG(LogMindKore, Log, TEXT("ZeroG prediction: from (%.0f, %.0f, %.0f) at (%.0f, %.0f, %.0f) cm/s, no contact within %.1f s, ends at (%.0f, %.0f, %.0f)"),
+				Start.X, Start.Y, Start.Z, Velocity.X, Velocity.Y, Velocity.Z, PredictSeconds, End.X, End.Y, End.Z);
 		}
-		const FVector Normal = Hit.ImpactNormal;
-		const FVector Into = Normal * FVector::DotProduct(Speed, Normal);
-		Speed = (Speed - Into) - Into * PredictRestitution;
-		Seconds *= 1.0f - Hit.Time;
-		Position = FVector(Hit.Location) + Normal * 0.5f;
+	}
+	if (Hit.bBlockingHit)
+	{
+		DrawDebugSphere(World, Hit.ImpactPoint, 15.0f, 8, FColor(255, 60, 40), false, -1.0f, 0, 2.0f);
 	}
 }
 

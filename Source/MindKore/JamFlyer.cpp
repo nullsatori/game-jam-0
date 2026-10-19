@@ -938,30 +938,39 @@ void AJamFlyer::Animate(float DeltaSeconds, const FVector& Velocity, const FVect
 
 void AJamFlyer::FallAsCorpse(float DeltaSeconds)
 {
-	// Gravity zones pull only the pawn (AJamShipGameMode); a corpse inside one falls the same way.
-	const AJamShipGameMode* Mode = GetWorld()->GetAuthGameMode<AJamShipGameMode>();
+	// The zones' pull (JamPullBodies) skips a body with gravity off - the flyer's, which flies
+	// itself while alive. A corpse is a loose body like any other: the zones pull it, and once
+	// it rests on the ground they put it to sleep until a hit or a grab moves it.
+	if (!Body->IsGravityEnabled())
+	{
+		Body->SetEnableGravity(true);
+	}
 	const FVector Location = Body->GetComponentLocation();
-	const AJamGravityZone* Zone = Mode ? Mode->GravityZoneAt(Location) : nullptr;
+	const FJamGravity Gravity = JamGravityAt(GetWorld(), Location);
+	const AJamGravityZone* Zone = Gravity.Zone;
 	if (!Zone)
 	{
 		return; // zero-G: it drifts
 	}
-	const FVector Down = Zone->GravityAt(Location);
-	Body->AddForce(Down * Zone->GravityCm, NAME_None, /*bAccelChange=*/true);
+	const FVector Down = Gravity.Acceleration.GetSafeNormal();
 	// The body is a sphere: without losses it rolls down the planetoid's slopes for ever. A carcass drags.
 	if (Body->GetAngularDamping() < CorpseAngularDamping)
 	{
 		Body->SetLinearDamping(CorpseLinearDamping);
 		Body->SetAngularDamping(CorpseAngularDamping);
 	}
-	// Once, for the probe and the log: at rest on the ground.
-	if (!bLanded && GetWorld()->GetTimeSeconds() - DiedSeconds > 0.5 && Body->GetPhysicsLinearVelocity().Size() < 30.0f)
+	// Once: on the ground (rolling or not).
+	if (!bLanded && GetWorld()->GetTimeSeconds() - DiedSeconds > 0.5)
 	{
 		FHitResult Ground;
 		FCollisionQueryParams Params(SCENE_QUERY_STAT(JamFlyerGround), false, this);
-		if (GetWorld()->LineTraceSingleByChannel(Ground, Location, Location + Down * 150.0f, ECC_Visibility, Params))
+		if (GetWorld()->LineTraceSingleByChannel(Ground, Location, Location + Down * (Body->GetScaledSphereRadius() + 10.0f), ECC_Visibility, Params))
 		{
 			bLanded = true;
+			// The body is a sphere: free to turn it rolls down any slope for ever. Down, it stops turning
+			// and slides to a stop on friction - then the zones put it to sleep.
+			Body->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+			Body->BodyInstance.SetDOFLock(EDOFMode::SixDOF);
 			UE_LOG(LogMindKore, Log, TEXT("Flyer %s: corpse landed on %s in %s, %.1f s after death, %.0f cm above the ground"), *GetName(),
 				*GetNameSafe(Ground.GetActor()), *GetNameSafe(Zone), float(GetWorld()->GetTimeSeconds() - DiedSeconds), Ground.Distance);
 		}
