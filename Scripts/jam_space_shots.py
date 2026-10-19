@@ -317,7 +317,9 @@ def click_times(d, pieces, clicks, pitch=-4):
     return [(p + c) * r for (_, _, p), c in zip(pieces, clicks)]
 
 
-S686 = ("231248", 2.005)
+# Each shot's onset sits 2 ms before its donor's attack (the first sample over -20 dBFS), measured
+# 19.10 (jam-sync): the earlier onsets kept 14-34 ms of room before it, so the crack came that late.
+S686 = ("231248", 2.017)
 # Clicks placed on the animation (jam-weapons-anim, 18.10), from the shot: pump back 0.26, forward 0.40
 # with CycleDelaySeconds 0.15 (owner: a snappy rack, no pause mid-stroke); bolt up 0.35, back 0.63,
 # forward 0.87, down 1.09 with 0.25. Pieces: (donor start, end, place before the pitch); clicks: each
@@ -343,29 +345,29 @@ SOUNDS = {
     # (SM_Jam_Master) the pistol sits at -16.5 LUFS: its burst may sum over 0 dBFS, the limiter holds it.
     # pistol: A the 9mm; B heavier and longer; C MindKore's revolver in the same build
     "Shot_Pistol_A_9mm": dict(lufs=-19.5, gr=6, psat=(3, -8), reverb=(1.5, -3),
-                        layers=shot("427592", 0.105, 1.0, -2, 2500, -3, 1500, -12, (90, 38, 0.15, -1), b_len=0.2)),
+                        layers=shot("427592", 0.123, 1.0, -2, 2500, -3, 1500, -12, (90, 38, 0.15, -1), b_len=0.2)),
     "Shot_Pistol_B_heavy": dict(lufs=-19.5, gr=7, psat=(4, -6), reverb=(2.0, -2),
-                                layers=shot("427592", 0.105, 1.0, -2, 2200, -4, 1300, -14, (85, 34, 0.25, 0),
+                                layers=shot("427592", 0.123, 1.0, -2, 2200, -4, 1300, -14, (85, 34, 0.25, 0),
                                             rumble=(-12, -6), b_len=0.25)),
     "Shot_Pistol_C_revolver": dict(game="Shot_Pistol", lufs=-16.5, gr=6, psat=(3, -8), reverb=(1.5, -3),
                                    layers=shot(*S686, 1.0, -2, 2500, -3, 1500, -12, (90, 38, 0.15, -1), b_len=0.2)),
     # shotgun: A the 20 gauge; B an explosion (rumble, longer sub, longer tail); C the 686's body under it
     "Shot_Shotgun_A_20ga": dict(lufs=-13, gr=7, psat=(3, -6), reverb=(2.6, -2),
-                         layers=shot("427595", 0.025, 1.37, -3, 2200, -4, 1100, -12, (80, 34, 0.3, 0))),
+                         layers=shot("427595", 0.057, 1.37, -3, 2200, -4, 1100, -12, (80, 34, 0.3, 0))),
     "Shot_Shotgun_B_blast": dict(lufs=-12.5, gr=8, psat=(4, -4), reverb=(3.2, -1),
-                                 layers=shot("427595", 0.025, 1.37, -3, 2000, -5, 1000, -14, (75, 30, 0.4, 1),
+                                 layers=shot("427595", 0.057, 1.37, -3, 2000, -5, 1000, -14, (75, 30, 0.4, 1),
                                              rumble=(-12, -4))),
     "Shot_Shotgun_C_mixed": dict(game="Shot_Shotgun", lufs=-13.5, gr=7, psat=(3, -6), reverb=(2.6, -2),
-                                 layers=shot("427595", 0.025, 1.37, -3, 2200, -4, 1100, -10, (80, 34, 0.3, 0),
+                                 layers=shot("427595", 0.057, 1.37, -3, 2200, -4, 1100, -10, (80, 34, 0.3, 0),
                                              body_from=S686)),
     # SV-98: A the Lee Enfield; B the Sauer 404; C deeper and longer still
     "Shot_SV98_A_enfield": dict(lufs=-13.5, gr=7, psat=(3, -6), reverb=(3.4, -1),
-                      layers=shot("450853", 0.005, 1.39, -3, 2000, -5, 850, -12, (70, 30, 0.5, -1), rumble=(-12, -5))),
+                      layers=shot("450853", 0.025, 1.39, -3, 2000, -5, 850, -12, (70, 30, 0.5, -1), rumble=(-12, -5))),
     "Shot_SV98_B_sauer": dict(lufs=-13, gr=7, psat=(3, -6), reverb=(3.4, -1),
                               layers=shot("431834", 0.505, 1.5, -3, 2000, -5, 850, -12, (70, 30, 0.5, 1),
                                           rumble=(-12, -5))),
     "Shot_SV98_C_deep": dict(game="Shot_SV98", lufs=-12.5, gr=8, psat=(4, -4), reverb=(4.2, 0),
-                             layers=shot("450853", 0.005, 1.39, -4, 1600, -6, 750, -15, (60, 28, 0.7, 0),
+                             layers=shot("450853", 0.025, 1.39, -4, 1600, -6, 750, -15, (60, 28, 0.7, 0),
                                          rumble=(-14, -3))),
     # pump: back then forward (heavy). A the clean rack sample (default), B v1's Mossberg
     "Pump_Shotgun": dict(game=True, **mech(*PUMP_A, heavy=[1])),
@@ -394,7 +396,7 @@ SEQUENCES = {
 }
 # in-game delay of each cycle after its shot (JamWeapons.cpp CycleDelaySeconds)
 CYCLE_MOCKS = {"Shotgun": ("Shot_Shotgun_C_mixed", "Pump_Shotgun", 0.15), "SV98": ("Shot_SV98_C_deep", "Bolt_SV98", 0.25)}
-DRY = {"427592": (0.105, 1.0), "427595": (0.025, 1.37), "450853": (0.005, 1.39), "231248": (2.005, 1.0),
+DRY = {"427592": (0.123, 1.0), "427595": (0.057, 1.37), "450853": (0.025, 1.39), "231248": (2.017, 1.0),
        "431834": (0.505, 1.5)}
 
 
