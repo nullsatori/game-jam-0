@@ -457,6 +457,11 @@ void UJamWeaponsComponent::BindInput(UEnhancedInputComponent& Input, UInputMappi
 
 void UJamWeaponsComponent::SelectStep(int32 Step)
 {
+	// The wheel is bound twice: with a hull tool in hand it reels the strap (AJamZeroGPawn), not the guns.
+	if (const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>(); Tools && Tools->GetTool() != EJamHullTool::None)
+	{
+		return;
+	}
 	// The next unlocked gun in the wheel's direction.
 	const int32 Count = Weapons.Num();
 	for (int32 Tries = 1; Tries <= Count; ++Tries)
