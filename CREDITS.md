@@ -140,6 +140,39 @@ played pitched down) and of the rasp under the flyer's screeches
 (`Scripts/jam_flyer_sounds.py`). Gushy Impacts (TILE_SFX, above) gives the
 flyer its wet layers: the gurgle of the death cry, the splat of a hit, the tear of the bite.
 
+### Switching guns: holster and sling
+
+`/Game/JamArt/Audio/Weapons/SW_Jam_Stow_*`, `SW_Jam_Draw_*` — layered from the
+Freesound HQ previews below (cut into single events, pitched down, muffled, an
+octave-down copy and a synthesised sub under the knocks, the mechanisms' reverb,
+compressed and limited) by `Scripts/jam_switch_foley.py` (19.10.2026). All
+[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/), checked on each
+sound's own Freesound page on 19.10.2026. The originals need a login, so the
+pages' HQ previews (mp3) were used.
+
+- **EQUIPTact_Leather Revolver Holster Equip_HvD_OwSFX** — **Hano_van_Dalen**
+  ([Freesound 767308](https://freesound.org/s/767308/)): the leather slide and
+  the seat of `SW_Jam_Stow_Pistol`.
+- **GUNHndl_Revolver Removal from Leather Holster_HvD_OwSFX** — **Hano_van_Dalen**
+  ([Freesound 767312](https://freesound.org/s/767312/)): the leather pull of
+  `SW_Jam_Draw_Pistol`.
+- **A pistol or revolver being holstered/unholstered; 3 takes** — **serøutōnin--deprivəd**
+  ([Freesound 755986](https://freesound.org/s/755986/)): the grip slap of
+  `SW_Jam_Draw_Pistol`.
+- **dropping submachinegun on sling** — **cambrianman**
+  ([Freesound 418330](https://freesound.org/s/418330/)): the sling swivel in
+  `SW_Jam_Stow_Shotgun`, `SW_Jam_Stow_SV98` and both long-gun draws.
+- **SVT40 (canvas backpack)** — **moneybags-anon**
+  ([Freesound 620935](https://freesound.org/s/620935/)): the stock knocking on
+  the back (stows), the wooden knock of the catch (draws).
+- **A rifle being moved around and handled w/ magazine removals** — **serøutōnin--deprivəd**
+  ([Freesound 725403](https://freesound.org/s/725403/)): the metal knock of the
+  catch in `SW_Jam_Draw_Shotgun`, `SW_Jam_Draw_SV98`.
+- **bag_strap_buckle** — **ChemiCatz** ([Freesound 744123](https://freesound.org/s/744123/)):
+  the strap sliding in the long-gun draws, the pack strap under `SW_Jam_Stow_SV98`.
+- **foley cloth rustle.wav** — **martian** ([Freesound 19291](https://freesound.org/s/19291/)):
+  the webbing rustle of the long-gun stows, the sling whip of their draws.
+
 ### The flyer (`Content/JamArt/Audio/Flyer/SW_Jam_Flyer_*`)
 
 Freesound HQ previews (the originals need a login; no account was used),
