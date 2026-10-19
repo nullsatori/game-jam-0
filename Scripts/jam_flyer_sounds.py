@@ -16,7 +16,9 @@ SW_Jam_Flyer_<Event>_<Role>.wav (32 kHz) into <out dir>; AJamFlyer plays them to
 Per event the stems are compressed together (one gain curve for all), the tail cut
 `tail` s after the body with a cos^2 fade (no click), and the sum normalised to the
 event's LUFS with the true peak (4x oversampled) at or under -1 dBTP; the stems keep
-the sum's proportions, so default layer gains of 0 dB give exactly that mix.
+the sum's proportions, so default layer gains of 0 dB give exactly that mix. Every stem is
+then cut after its own last sound (TRIM_FLOOR_DB, a 10 ms fade): a 50 ms attack no longer
+holds a voice for the whole event (the engine's voices are few, Docs/Audio.md).
 Events: Aggro (the falling call the owner picked, "Screech A"), Dive (the same call,
 rising and tight), Death, Flap, Flutter (a 2 s loop of cloth between beats), FlyBy, Hit
 (a shot into it), Bite. Unless <listen dir> is "-": each event's mixdown in vacuum and in
@@ -251,6 +253,20 @@ def render_stems(ev, seed):
     return stems, sum(stems.values())
 
 
+TRIM_FLOOR_DB = -70.0  # dBFS: the event plays at up to +12 dB (Hit 3.2 x 1.2), still under -58 dBFS
+
+
+def trim_tail(x, floor_db=TRIM_FLOOR_DB, fade=0.01):
+    """A stem cut 10 ms after its last sample above floor_db, those 10 ms faded out (cos^2).
+    The start stays: the stems of an event are aligned at their first sample."""
+    loud = np.nonzero(np.abs(x) > 10 ** (floor_db / 20))[0]
+    end = min(len(x), (loud[-1] + 1 if len(loud) else 0) + int(fade * SR))
+    y = x[:end].copy()
+    n = min(end, int(fade * SR))
+    y[end - n:] *= np.cos(np.linspace(0, np.pi / 2, n)) ** 2
+    return y
+
+
 def flutter_loop(seconds=2.0, pitch=-4, lufs=-30.0, seed=7):
     """Cloth flutter between beats: short grains of the bed-sheet recording's rustle, overlapped at
     random, pitched down, band-limited; the ends cross-faded so it loops without a seam."""
@@ -294,15 +310,19 @@ def main():
     rows = []
     for i, (name, ev) in enumerate(EVENTS.items()):
         stems, total = render_stems(ev, seed=200 + i)
+        lengths = []
         for role in ROLES:
             if role in stems and np.abs(stems[role]).max() > 1e-5:
-                jss.write(os.path.join(out_dir, f"SW_Jam_Flyer_{name}_{role}.wav"), stems[role], OUT_SR)
+                stem = trim_tail(stems[role])
+                jss.write(os.path.join(out_dir, f"SW_Jam_Flyer_{name}_{role}.wav"), stem, OUT_SR)
+                lengths.append(f"{role} {len(stem) / SR:.2f}")
         li, _ = jss.loudness(total)
         tail = len(total) / SR - body_end(total)
         shares = {r: 10 * np.log10((x ** 2).sum() / (total ** 2).sum() + 1e-12) for r, x in stems.items()}
         rows.append(f"{name} | {len(total) / SR:.2f} s, tail {tail:.2f} s | LUFS-I {li:.1f} | true peak {true_peak_db(total):.1f} dBTP | "
                     + ", ".join(f"{r} {v:+.1f} dB" for r, v in shares.items())
-                    + f" | <80/80-250/250-1k/1k-3k/>3k % {'/'.join(f'{v:.0f}' for v in jss.bands(total))}")
+                    + f" | <80/80-250/250-1k/1k-3k/>3k % {'/'.join(f'{v:.0f}' for v in jss.bands(total))}"
+                    + " | stems s: " + ", ".join(lengths))
         print(rows[-1])
         if listen:
             jss.write(os.path.join(listen, f"Flyer_{name}_vacuum.wav"), jss.filt(total, LP(4500)), SR)
