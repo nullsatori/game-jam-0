@@ -343,15 +343,16 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	{
 		return;
 	}
-	// Aim with the gun in view: up only while it is drawn, not with a hull tool in hand and not during a
-	// reload. The scope (lens, capture) belongs to the SV-98 alone.
+	// The gun shown in view, which during a switch is still the old one on its way out (review 19.10: reading
+	// CurrentWeapon dropped the aim and the gun's field of view in one frame). Aim with it only while it is the
+	// one wanted - not on its way out, not with a hull tool in hand, not during a reload; going away it lowers on
+	// its Out springs. The scope (lens, capture) belongs to the SV-98 alone.
 	const UStaticMeshComponent* Gun = Weapons->ViewModel;
-	const int32 Current = Weapons->CurrentWeapon;
-	const bool bGunInView = Gun->GetStaticMesh() && Weapons->Weapons.IsValidIndex(Current) && Aims.IsValidIndex(Current)
-		&& Gun->GetStaticMesh() == Weapons->Weapons[Current].ViewMesh;
-	const bool bScopeInView = bGunInView && Current == ScopedWeapon;
+	const int32 Shown = Weapons->GetShownWeapon();
+	const bool bGunInView = Weapons->Weapons.IsValidIndex(Shown) && Aims.IsValidIndex(Shown);
+	const bool bScopeInView = bGunInView && Shown == ScopedWeapon;
 	const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>();
-	const bool bWants = (bHeld || bHeldByHands) && bGunInView
+	const bool bWants = (bHeld || bHeldByHands) && bGunInView && Shown == Weapons->CurrentWeapon
 		&& !(Tools && Tools->GetTool() != EJamHullTool::None) && Weapons->GetReloadRemaining() <= 0.0f;
 	const float WasAlpha = Alpha;
 	// The body's velocity change this frame, in the camera's frame: the gun's inertia sways it the other way.
@@ -362,40 +363,23 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	const FQuat View = Camera->GetComponentQuat();
 	const FRotator Turned = (LastView.Inverse() * View).Rotator();
 	LastView = View;
-	const float LookLag = Aims.IsValidIndex(Current) ? Aims[Current].LookLag : 0.0f;
+	const float LookLag = Aims.IsValidIndex(Shown) ? Aims[Shown].LookLag : 0.0f;
 	LookLagTurn = DeltaTime > 0.0f
 		? (FVector(-Turned.Pitch, -Turned.Yaw, -0.5f * Turned.Yaw) * (LookLag / DeltaTime)).BoundToCube(4.0f)
 		: FVector::ZeroVector;
-	if (!bGunInView || Current != MotionWeapon)
+	if (!bGunInView || Shown != MotionWeapon)
 	{
 		// No gun, or another one: it starts from its rest pose.
-		bMoving = bAimTarget = bDrawing = false;
+		bMoving = bAimTarget = false;
 		Alpha = 0.0f;
-		MotionWeapon = bGunInView ? Current : INDEX_NONE;
-	}
-	if (bGunInView && bPendingDraw)
-	{
-		// The stand-in draw (UJamWeaponsComponent::Draw): from low and to the side, up on the Out springs.
-		bPendingDraw = false;
-		bDrawing = bMoving = true;
-		bAimTarget = false;
-		SinceSwitch = 1.0f;
-		Place = Weapons->Weapons[Current].ViewOffset.GetTranslation() + DrawFromCm;
-		Turn = DrawFromTurn;
-		PlaceVelocity = TurnVelocity = FVector::ZeroVector;
-	}
-	if (bDrawing && (!bMoving || ((Place - Weapons->Weapons[Current].ViewOffset.GetTranslation()).Size() < 0.3f
-		&& PlaceVelocity.Size() < 2.0f && Turn.Size() < 1.0f)))
-	{
-		bDrawing = false;
-		UE_LOG(LogMindKore, Log, TEXT("Scope: draw settled"));
+		MotionWeapon = bGunInView ? Shown : INDEX_NONE;
 	}
 	if (bGunInView)
 	{
 		if (!bMoving && (bWants || BodyChange.Size() * SwayPerBodyVelocity > 0.5f || LookLagTurn.Size() > 0.2f))
 		{
 			bMoving = true;
-			Place = Weapons->Weapons[Current].ViewOffset.GetTranslation();
+			Place = Weapons->Weapons[Shown].ViewOffset.GetTranslation();
 			PlaceVelocity = Turn = TurnVelocity = FVector::ZeroVector;
 		}
 		if (bMoving)
@@ -646,7 +630,7 @@ namespace
 				Pawn->Guns->UnlockWeapon(Gun);
 				Controller->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());
 			});
-			const float In = At + 2.0f; // the draw (DrawFromCm) settled first
+			const float In = At + 2.0f; // the draw settled first
 			After(In, [Scope]() { Scope->SetHeld(true); });
 			for (int32 Index = 0; Index < 25; ++Index)
 			{
@@ -870,6 +854,90 @@ namespace
 		}
 		After(At, []() { UE_LOG(LogMindKore, Log, TEXT("Aim stills: done")); });
 	}
+
+	/**
+	 * jam.Scope.SwitchStills [Gun] [To]: a switch while aimed (review 19.10: the gun snapped from the eye to the hip and
+	 * its field of view 100 -> 134 in one frame). Gun (default 2, the SV-98) raised to the eye at the living wall nearest
+	 * to 20 m and settled; then gun To (default 0) selected with the aim still held. Stills of the aimed frame and 0, 0.05,
+	 * 0.15, 0.3 s after the switch (JamScopeSwitch_<aimed|ms>.png); every tick from 0.1 s before to 0.6 s after it
+	 * logged - "Scope switch: t=.. shown=.. current=.. place=(..) - <the scope's state>". Needs a real RHI.
+	 */
+	void RunScopeSwitchStills(const TArray<FString>& Args, UWorld* World)
+	{
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AJamZeroGPawn* Pawn = Controller ? Cast<AJamZeroGPawn>(Controller->GetPawn()) : nullptr;
+		UJamScopeComponent* Scope = Pawn ? Pawn->FindComponentByClass<UJamScopeComponent>() : nullptr;
+		const int32 Gun = Args.Num() > 0 ? FCString::Atoi(*Args[0]) : 2;
+		const int32 To = Args.Num() > 1 ? FCString::Atoi(*Args[1]) : 0;
+		if (!Scope || !Pawn->Guns->Weapons.IsValidIndex(Gun) || !Pawn->Guns->Weapons.IsValidIndex(To))
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Scope switch: needs the AJamZeroGPawn and two guns"));
+			return;
+		}
+		FVector Target = Pawn->GetActorLocation() + FVector(2000.0f, 0.0f, 0.0f);
+		float Best = TNumericLimits<float>::Max();
+		for (TActorIterator<AJamLivingWall> It(World); It; ++It)
+		{
+			const float Error = FMath::Abs(FVector::Dist(It->GetActorLocation(), Pawn->GetActorLocation()) - 2000.0f);
+			if (Error < Best)
+			{
+				Best = Error;
+				Target = It->GetActorLocation();
+			}
+		}
+		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
+		{
+			FTimerHandle Handle;
+			Pawn->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(Pawn, MoveTemp(Step)), Seconds, false);
+		};
+		const auto Still = [Controller, Scope](const FString& Name)
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Scope switch: still %s - %s"), *Name, *Scope->Describe());
+			Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=JamScopeSwitch_%s"), *Name));
+		};
+		After(6.0f, [Pawn, Controller, Target, Scope, Gun, To]()
+		{
+			Pawn->Guns->UnlockWeapon(To);
+			Pawn->Guns->UnlockWeapon(Gun);
+			Pawn->Guns->FinishSwitch();
+			Pawn->Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+			Controller->SetControlRotation((Target - Pawn->Camera->GetComponentLocation()).Rotation());
+			Scope->SetHeld(true);
+		});
+		After(8.5f, [Still]() { Still(TEXT("aimed")); });
+		TSharedRef<double> SwitchAt = MakeShared<double>(0.0);
+		After(9.0f, [Pawn, Still, SwitchAt, To]()
+		{
+			*SwitchAt = Pawn->GetWorld()->GetTimeSeconds();
+			Pawn->Guns->SelectWeapon(To);
+			Still(TEXT("0000"));
+		});
+		for (const float Late : { 0.05f, 0.15f, 0.3f })
+		{
+			After(9.0f + Late, [Still, Late]() { Still(FString::Printf(TEXT("%04d"), FMath::RoundToInt(Late * 1000.0f))); });
+		}
+		After(8.9f, [Pawn, Scope, SwitchAt]()
+		{
+			FTimerHandle Every;
+			Pawn->GetWorldTimerManager().SetTimer(Every, FTimerDelegate::CreateWeakLambda(Pawn, [Pawn, Scope, SwitchAt]()
+			{
+				const double Now = Pawn->GetWorld()->GetTimeSeconds();
+				const float T = *SwitchAt > 0.0 ? float(Now - *SwitchAt) : -0.1f;
+				if (T > 0.6f)
+				{
+					return;
+				}
+				UE_LOG(LogMindKore, Log, TEXT("Scope switch: t=%.3f shown=%d current=%d place=%s - %s"), T, Pawn->Guns->GetShownWeapon(), Pawn->Guns->CurrentWeapon,
+					*Pawn->Guns->ViewModel->GetRelativeLocation().ToCompactString(), *Scope->Describe());
+			}), 0.001f, true);
+		});
+		After(10.0f, [Scope]() { Scope->SetHeld(false); UE_LOG(LogMindKore, Log, TEXT("Scope switch: done")); });
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GScopeSwitchStills(
+		TEXT("jam.Scope.SwitchStills"),
+		TEXT("jam.Scope.SwitchStills [Gun] [To]: aimed with Gun (2), then To (0) selected with the aim held - stills and a per-tick log of the aim and the gun's field of view (HighResShot; needs a real RHI)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunScopeSwitchStills));
 
 	FAutoConsoleCommandWithWorldAndArgs GAimStills(
 		TEXT("jam.Scope.AimStills"),

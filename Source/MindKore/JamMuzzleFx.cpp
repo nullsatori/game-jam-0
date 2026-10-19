@@ -132,6 +132,12 @@ void UJamMuzzleFxComponent::BeginPlay()
 	{
 		return;
 	}
+	// The flash rides the gun in view as the weapons component poses it this frame (TickComponent reads
+	// FlashGunMesh's transform): that component ticks first, as for the scope.
+	if (UJamWeaponsComponent* Weapons = GetOwner()->FindComponentByClass<UJamWeaponsComponent>())
+	{
+		AddTickPrerequisiteComponent(Weapons);
+	}
 	const auto Make = [this, Camera](const TCHAR* Name, UMaterialInterface* Material, int32 DataFloats)
 	{
 		UInstancedStaticMeshComponent* Sprites = NewObject<UInstancedStaticMeshComponent>(GetOwner(), Name);

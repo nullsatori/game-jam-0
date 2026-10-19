@@ -6,6 +6,7 @@
 #include "JamScope.h"
 #include "JamWeapons.generated.h"
 
+class UAudioComponent;
 class UEnhancedInputComponent;
 class UInputAction;
 class UInputMappingContext;
@@ -202,8 +203,9 @@ struct FJamWeapon
 
 	/**
 	 * The magazine, on ViewMesh in its frame, moved by MagTravelCm x MagTravel (seconds
-	 * since the reload began). At MagEjectSeconds it leaves as a loose body in the world;
-	 * the fresh one shows from MagInSeconds and the curve brings it home.
+	 * since the reload began). At MagEjectSeconds it leaves as a loose body in the world,
+	 * its rounds with it (Ammo 0); the fresh one shows from MagInSeconds, the curve brings
+	 * it home and at MagInSoundSeconds, the seat, it is filled from Reserve.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Reload")
 	TObjectPtr<UStaticMesh> MagMesh = nullptr;
@@ -331,6 +333,7 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
 	TObjectPtr<USoundBase> MagInSound = nullptr;
 
+	/** The seat: MagInSound plays and the rounds count (a magazine gun; a round-by-round one counts at ShellSeatSeconds). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound", meta = (ClampMin = "0.0"))
 	float MagInSoundSeconds = 0.0f;
 
@@ -444,6 +447,19 @@ struct FJamWeapon
 
 	/** Seconds from a shot until the gun is home: the last key of ActionTravel / ActionTurn / ActionBody (0 without them). */
 	float GetActionCycleSeconds() const;
+
+	/**
+	 * Runtime, per gun (review 19.10: one clock for all guns let the SV-98's bolt hold the pistol's trigger):
+	 * seconds into this gun's last cycle. It runs only while the gun is in hand and wanted - drawn or being
+	 * drawn - and stands still while it is put away or unarmed, so an abandoned cycle freezes where it was,
+	 * its sound stopped, and finishes when the gun comes back: the pump, its sound and its case come together.
+	 */
+	float SinceShot = 1000.0f;
+	float PrevSinceShot = 1000.0f;
+	/** SinceShot from which it fires again: its cycle (or FireInterval) after a shot, FireInterval after a dry click. */
+	float FireReadySince = 0.0f;
+	/** The hammer / pump / bolt sound playing, stopped when the cycle freezes and picked up from its place after. */
+	TWeakObjectPtr<UAudioComponent> MechanismSound;
 };
 
 /**
@@ -581,7 +597,7 @@ public:
 	void TracePose(int32 Weapon, bool bReload, int32 Shells, float Seconds, float Step, TArray<FVector>& OutPlace, TArray<FVector>& OutTurn,
 		int32 SwitchPhase = 0) const;
 
-	/** The SV-98's scope (JamScope.h): made in BindInput, it raises the rifle to the eye through UpdateViewModel. */
+	/** Every gun's aim and the SV-98's scope (JamScope.h): made in BindInput; UpdateViewModel takes the shown gun's aimed pose from it (AimPose). */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	TObjectPtr<UJamScopeComponent> Scope = nullptr;
 
@@ -636,9 +652,9 @@ public:
 	void Rearm();
 
 	/**
-	 * A gun coming back into hand out of unarmed (Rearm, a selection): drawn along its own path
-	 * (JamWeaponParts.cpp - the pistol from the right-hip holster, the shotgun over the right
-	 * shoulder, the SV-98 over the left). Fire waits for IsDrawing.
+	 * A gun coming back into hand out of unarmed (Rearm, a selection): logged. The draw itself is
+	 * UpdateSwitch's (JamWeaponParts.cpp), as for any switch - the gun, wanted again, comes in from
+	 * away along its own path. Fire waits for IsDrawing.
 	 */
 	void Draw();
 
@@ -660,6 +676,9 @@ public:
 
 	/** Spent cases thrown since play began (probes: a switch throws none). */
 	int32 GetCasesThrown() const { return CasesThrown; }
+
+	/** Cycle sounds (pump, bolt) played since play began (probes). */
+	int32 GetCycleSounds() const { return CycleSoundsPlayed; }
 
 
 	/** Seconds left of a reload; 0 when not reloading. */
@@ -711,7 +730,9 @@ public:
 	/** The magazine on ViewMesh at Time into a reload (the one path its place and turn take). */
 	static FTransform GetMagPose(const FJamWeapon& Weapon, float Time);
 private:
-	/** Events crossed since the last tick: the case out, the magazine let go, a round counted, the sounds. */
+	/** The shot's events the running gun's cycle clock crossed this frame: its case, hammer and cycle sound. */
+	void UpdateCycleEvents();
+	/** Reload events crossed since the last tick: the magazine let go and seated, a round counted, their sounds. */
 	void UpdatePartEvents(float DeltaTime);
 	void SpawnDebris(UStaticMesh* Mesh, const FTransform& Where, const FVector& Velocity, const FVector& SpinDegPerSec, float MassKg);
 
@@ -720,8 +741,8 @@ private:
 	double ReloadStartSeconds = 0.0;
 	/** Rounds this reload loads one by one (ShellMesh guns). */
 	int32 ShellsPlanned = 0;
-	float PrevSinceShot = 1000.0f;
 	int32 CasesThrown = 0;
+	int32 CycleSoundsPlayed = 0;
 	float PrevReloadTime = -1.0f;
 
 	struct FPoseState
@@ -763,14 +784,20 @@ private:
 	float KickAttackLeft = 0.0f;
 	float SettlePitch = 0.0f;
 	float SettleYaw = 0.0f;
-	/** Seconds since the gun in view last fired: drives its kick and its moving part's cycle. */
-	float SinceShotSeconds = 1000.0f;
+	/** Seconds since the last shot, for the kick in view (the parts' cycle runs on FJamWeapon::SinceShot). */
+	float SinceKickSeconds = 1000.0f;
 	int32 ShownWeapon = INDEX_NONE;
-	/** The pending CycleSound of the last shot; a switch cancels it. */
-	FTimerHandle CycleTimer;
+	/** The gun whose cycle clock runs: the shown one while drawn or being drawn, else none. */
+	int32 CycleWeapon = INDEX_NONE;
+	/**
+	 * Gun.MechanismSound, Into seconds into its file: 0 on its crossing (a long frame plays it late rather than
+	 * skip its click), mid-way when a frozen cycle picks up again.
+	 */
+	void PlayMechanismSound(FJamWeapon& Gun, USoundBase* Sound, float Into);
 
-	double NextShotSeconds = 0.0;
 	double ReloadEndSeconds = 0.0;
+	/** R pressed during the shot's cycle: the reload starts when it is through (a shot or a switch drops it). */
+	bool bReloadQueued = false;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UInputAction>> InputActions;

@@ -1,6 +1,7 @@
 #include "JamWeapons.h"
 
 #include "Camera/CameraComponent.h"
+#include "Components/AudioComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -285,12 +286,16 @@ void UJamWeaponsComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	UpdatePartEvents(DeltaTime);
+	// An R pressed during the shot's cycle, now through.
+	if (bReloadQueued && Weapons.IsValidIndex(CurrentWeapon) && Weapons[CurrentWeapon].SinceShot >= Weapons[CurrentWeapon].FireReadySince)
+	{
+		bReloadQueued = false;
+		Reload();
+	}
+	// The rounds were counted on the way (UpdatePartEvents: the magazine's seat, each round's); the end only frees the gun.
 	if (ReloadEndSeconds > 0.0 && GetWorld()->GetTimeSeconds() >= ReloadEndSeconds && Weapons.IsValidIndex(CurrentWeapon))
 	{
-		FJamWeapon& Weapon = Weapons[CurrentWeapon];
-		const int32 Moved = FMath::Min(Weapon.MagazineSize - Weapon.Ammo, Weapon.Reserve);
-		Weapon.Ammo += Moved;
-		Weapon.Reserve -= Moved;
+		const FJamWeapon& Weapon = Weapons[CurrentWeapon];
 		ReloadEndSeconds = 0.0;
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s reloaded, %d/%d"), *GetNameSafe(GetOwner()), *Weapon.Name.ToString(), Weapon.Ammo, Weapon.Reserve);
 	}
@@ -376,25 +381,56 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	// draws the next (JamWeaponParts.cpp). The gun shown is the one on its way, not yet the current one.
 	const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>();
 	const FJamWeapon* Weapon = UpdateSwitch(DeltaTime, Tools && Tools->GetTool() != EJamHullTool::None, PoseSwitch);
+	// The cycle's clock runs for the gun in hand and wanted (drawn or being drawn); a gun put away keeps its cycle
+	// where it was, its sound stopped, and picks it up again when it is back (owner 19.10: «механика не врёт»).
+	const int32 Running = SwitchStage == ESwitch::Drawn || SwitchStage == ESwitch::Draw ? ShownWeapon : INDEX_NONE;
+	if (Running != CycleWeapon)
+	{
+		// Only a cycle still running freezes: a finished one's reverb tail plays out and is not picked up again.
+		if (Weapons.IsValidIndex(CycleWeapon) && Weapons[CycleWeapon].SinceShot < Weapons[CycleWeapon].GetActionCycleSeconds())
+		{
+			if (UAudioComponent* Sound = Weapons[CycleWeapon].MechanismSound.Get())
+			{
+				Sound->Stop();
+			}
+		}
+		if (Weapons.IsValidIndex(Running) && Weapons[Running].SinceShot < Weapons[Running].GetActionCycleSeconds())
+		{
+			FJamWeapon& Gun = Weapons[Running];
+			for (const TPair<USoundBase*, float> Each : { TPair<USoundBase*, float>(Gun.HammerSound, Gun.HammerSoundSeconds),
+				TPair<USoundBase*, float>(Gun.CycleSound, Gun.CycleDelaySeconds) })
+			{
+				if (Each.Key && Each.Value <= Gun.SinceShot && Gun.SinceShot < Each.Value + Each.Key->GetDuration())
+				{
+					PlayMechanismSound(Gun, Each.Key, Gun.SinceShot - Each.Value);
+				}
+			}
+		}
+		CycleWeapon = Running;
+	}
+	if (Weapons.IsValidIndex(Running))
+	{
+		Weapons[Running].SinceShot += DeltaTime;
+	}
 	if (!Weapon)
 	{
 		UpdateParts(nullptr, 0.0f);
 		return;
 	}
-	SinceShotSeconds += DeltaTime;
+	SinceKickSeconds += DeltaTime;
 	const float PoseAt = CVarPoseAt.GetValueOnGameThread();
-	const float Since = PoseAt >= 0.0f ? PoseAt : SinceShotSeconds;
+	const float Since = PoseAt >= 0.0f ? PoseAt : Weapon->SinceShot;
 	// Back along the view, the muzzle up and a little roll, about the grip (the
 	// meshes' origin); the rise turns about the camera's right axis whichever
 	// way the mesh itself faces. Springs back at ViewKickReturnRate.
-	// Aimed through the scope (JamScope.h), the rifle rests at the eye and kicks less.
+	// Aimed (JamScope.h), the gun rests at the eye and kicks less.
 	FTransform Offset = Weapon->ViewOffset;
 	float KickScale = 1.0f;
 	if (Scope)
 	{
 		Scope->AimPose(ShownWeapon, Offset, KickScale);
 	}
-	const float Kick = KickScale * FMath::Exp(-ViewKickReturnRate * Since);
+	const float Kick = KickScale * FMath::Exp(-ViewKickReturnRate * (PoseAt >= 0.0f ? PoseAt : SinceKickSeconds));
 	const FQuat Rise = FRotator(Weapon->ViewKickRiseDeg * Kick, 0.0f, -0.3f * Weapon->ViewKickRiseDeg * Kick).Quaternion();
 	// The whole gun's pose in the cycle and the reload: a mass on springs (JamWeaponParts.cpp).
 	UpdatePose(*Weapon, DeltaTime);
@@ -407,6 +443,7 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 		Weapon->ActionPivot + FVector(Weapon->ActionTravelCm * EvalCycle(Weapon->ActionTravel, Since), 0.0f, 0.0f),
 		FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Weapon->ActionTurnDeg * EvalCycle(Weapon->ActionTurn, Since))));
 	UpdateParts(Weapon, Since);
+	UpdateCycleEvents();
 }
 
 FTransform UJamWeaponsComponent::GetMuzzleTransform() const
@@ -457,6 +494,11 @@ void UJamWeaponsComponent::BindInput(UEnhancedInputComponent& Input, UInputMappi
 
 void UJamWeaponsComponent::SelectStep(int32 Step)
 {
+	// The wheel is bound twice: with a hull tool in hand it reels the strap (AJamZeroGPawn), not the guns.
+	if (const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>(); Tools && Tools->GetTool() != EJamHullTool::None)
+	{
+		return;
+	}
 	// The next unlocked gun in the wheel's direction.
 	const int32 Count = Weapons.Num();
 	for (int32 Tries = 1; Tries <= Count; ++Tries)
@@ -489,8 +531,8 @@ void UJamWeaponsComponent::Holster()
 		return;
 	}
 	bHolstered = true;
-	ReloadEndSeconds = 0.0; // as a switch: the reload and the last gun's cycle are abandoned
-	GetWorld()->GetTimerManager().ClearTimer(CycleTimer);
+	bReloadQueued = false;
+	ReloadEndSeconds = 0.0; // as a switch: the reload is abandoned, the gun's cycle freezes (UpdateViewModel)
 	ClearView(); // gone this frame, no put-away (JamWeaponParts.cpp)
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: unarmed"), *GetNameSafe(GetOwner()));
 }
@@ -508,10 +550,9 @@ void UJamWeaponsComponent::Rearm()
 
 void UJamWeaponsComponent::Draw()
 {
-	// The draw (owner 19.10): with the gun wanted again, the switch (UJamWeaponsComponent::UpdateSwitch,
-	// JamWeaponParts.cpp) brings it in from away along its own path - the pistol from the right-hip
-	// holster, the shotgun over the right shoulder, the SV-98 over the left - on the pose springs;
-	// it fires once drawn and settled (IsDrawing).
+	// Only the log line: with the gun wanted again, UpdateSwitch (JamWeaponParts.cpp) draws it in from away
+	// along its own path - the pistol from the right-hip holster, the shotgun over the right shoulder, the
+	// SV-98 over the left - on the pose springs; it fires once drawn and settled (IsDrawing).
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: draw %s"), *GetNameSafe(GetOwner()), Weapons.IsValidIndex(CurrentWeapon) ? *Weapons[CurrentWeapon].Name.ToString() : TEXT("-"));
 }
 
@@ -522,8 +563,8 @@ bool UJamWeaponsComponent::IsDrawing() const
 
 void UJamWeaponsComponent::SelectWeapon(int32 Index)
 {
-	// Out of unarmed (the same gun or another): drawn. A plain switch is not a draw here - the anim
-	// thread's switching (put away, draw) owns that.
+	// Out of unarmed (the same gun or another): drawn. Any switch is UpdateSwitch's: it puts the shown
+	// gun away and draws the current one.
 	const bool bFromUnarmed = bHolstered && IsWeaponUnlocked(Index);
 	if (bFromUnarmed && Index == CurrentWeapon)
 	{
@@ -539,8 +580,8 @@ void UJamWeaponsComponent::SelectWeapon(int32 Index)
 		return;
 	}
 	CurrentWeapon = Index;
-	ReloadEndSeconds = 0.0; // A switch abandons a reload and the last gun's cycle.
-	GetWorld()->GetTimerManager().ClearTimer(CycleTimer);
+	bReloadQueued = false;
+	ReloadEndSeconds = 0.0; // A switch abandons a reload; the last gun's cycle freezes until it is back (UpdateViewModel).
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s (%d/%d)"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString(),
 		Weapons[Index].Ammo, Weapons[Index].Reserve);
 	if (bFromUnarmed)
@@ -576,6 +617,13 @@ void UJamWeaponsComponent::Reload()
 	{
 		return;
 	}
+	// Not over the shot's cycle (review 19.10: R right after a shot ran the bolt and the magazine at once):
+	// it waits for the cycle's end (TickComponent).
+	if (Weapon->SinceShot < Weapon->FireReadySince)
+	{
+		bReloadQueued = true;
+		return;
+	}
 	const float Seconds = StartReloadTimeline(*Weapon);
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: reloading %s, %.2f s"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString(), Seconds);
 }
@@ -584,28 +632,32 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 {
 	OutRecoil = FVector::ZeroVector;
 	FJamWeapon* Weapon = !bHolstered && IsWeaponUnlocked(CurrentWeapon) ? &Weapons[CurrentWeapon] : nullptr;
-	const double Now = GetWorld()->GetTimeSeconds();
-	if (Weapon && Weapon->ShellMesh && Weapon->Ammo > 0 && GetReloadRemaining() > 0.0f)
-	{
-		ReloadEndSeconds = 0.0; // round-by-round loading breaks off for a shot
-	}
-	// Not before the gun is drawn and has settled (IsDrawing).
-	if (!Weapon || Now < NextShotSeconds || GetReloadRemaining() > 0.0f || IsDrawing())
+	// Round-by-round loading breaks off for a shot - once the shot is sure (review 19.10: it broke off before the
+	// checks below, and a refused shot lost both).
+	const bool bBreakLoading = Weapon && Weapon->ShellMesh && Weapon->Ammo > 0 && GetReloadRemaining() > 0.0f;
+	// Not before the gun is drawn and has settled (IsDrawing), nor before its own cycle is through.
+	if (!Weapon || Weapon->SinceShot < Weapon->FireReadySince || (GetReloadRemaining() > 0.0f && !bBreakLoading) || IsDrawing())
 	{
 		return false;
+	}
+	if (bBreakLoading)
+	{
+		ReloadEndSeconds = 0.0;
 	}
 	if (Weapon->Ammo <= 0)
 	{
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s is empty"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString());
-		// The dry click, once per interval while the trigger is held (no reserve: no reload to stop it).
-		NextShotSeconds = Now + Weapon->FireInterval;
+		// The dry click, once per interval while the trigger is held (no reserve: no reload to stop it); the
+		// reload starts first, the cycle being through, so it does not wait out the click's interval.
 		UGameplayStatics::PlaySound2D(this, Weapon->EmptySound);
 		Reload();
+		Weapon->FireReadySince = Weapon->SinceShot + Weapon->FireInterval;
 		return false;
 	}
 	--Weapon->Ammo;
+	bReloadQueued = false; // the trigger won over a waiting R
 	// Not before the slide, the pump or the bolt is home again.
-	NextShotSeconds = Now + FMath::Max(Weapon->FireInterval, Weapon->GetActionCycleSeconds());
+	Weapon->FireReadySince = FMath::Max(Weapon->FireInterval, Weapon->GetActionCycleSeconds());
 	// One kick per shot, whatever the pellets do. Guns cost no oxygen.
 	OutRecoil = -Direction * Weapon->RecoilImpulse;
 	const float Yaw = Weapon->KickYawDeg * (FMath::RandBool() ? 1.0f : -1.0f);
@@ -614,18 +666,11 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	KickAttackLeft = RecoilAttackSeconds;
 	SettlePitch += Weapon->KickPitchDeg * RecoilSettleFraction;
 	SettleYaw += Yaw * RecoilSettleFraction;
-	SinceShotSeconds = 0.0f;
-	PrevSinceShot = -KINDA_SMALL_NUMBER; // a new shot: its case and hammer (UpdatePartEvents)
+	SinceKickSeconds = 0.0f;
+	Weapon->SinceShot = 0.0f;
+	Weapon->PrevSinceShot = -KINDA_SMALL_NUMBER; // a new shot: its case, hammer and cycle sound (UpdatePartEvents)
 	// A slight pitch spread so a held trigger does not repeat one sample.
 	UGameplayStatics::PlaySound2D(this, Weapon->ShotSound, 1.0f, FMath::FRandRange(0.97f, 1.03f));
-	if (USoundBase* Cycle = Weapon->CycleSound)
-	{
-		GetWorld()->GetTimerManager().SetTimer(CycleTimer, FTimerDelegate::CreateWeakLambda(this, [this, Cycle]()
-		{
-			UGameplayStatics::PlaySound2D(this, Cycle);
-			UE_LOG(LogMindKore, Log, TEXT("Weapon %s: cycle %s"), *GetNameSafe(GetOwner()), *Cycle->GetName());
-		}), FMath::Max(Weapon->CycleDelaySeconds, KINDA_SMALL_NUMBER), false);
-	}
 	const FVector Muzzle = GetMuzzleTransform().GetLocation();
 	if (UJamMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UJamMuzzleFxComponent>())
 	{
