@@ -343,15 +343,16 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	{
 		return;
 	}
-	// Aim with the gun in view: up only while it is drawn, not with a hull tool in hand and not during a
-	// reload. The scope (lens, capture) belongs to the SV-98 alone.
+	// The gun shown in view, which during a switch is still the old one on its way out (review 19.10: reading
+	// CurrentWeapon dropped the aim and the gun's field of view in one frame). Aim with it only while it is the
+	// one wanted - not on its way out, not with a hull tool in hand, not during a reload; going away it lowers on
+	// its Out springs. The scope (lens, capture) belongs to the SV-98 alone.
 	const UStaticMeshComponent* Gun = Weapons->ViewModel;
-	const int32 Current = Weapons->CurrentWeapon;
-	const bool bGunInView = Gun->GetStaticMesh() && Weapons->Weapons.IsValidIndex(Current) && Aims.IsValidIndex(Current)
-		&& Gun->GetStaticMesh() == Weapons->Weapons[Current].ViewMesh;
-	const bool bScopeInView = bGunInView && Current == ScopedWeapon;
+	const int32 Shown = Weapons->GetShownWeapon();
+	const bool bGunInView = Weapons->Weapons.IsValidIndex(Shown) && Aims.IsValidIndex(Shown);
+	const bool bScopeInView = bGunInView && Shown == ScopedWeapon;
 	const UJamHullToolsComponent* Tools = GetOwner()->FindComponentByClass<UJamHullToolsComponent>();
-	const bool bWants = (bHeld || bHeldByHands) && bGunInView
+	const bool bWants = (bHeld || bHeldByHands) && bGunInView && Shown == Weapons->CurrentWeapon
 		&& !(Tools && Tools->GetTool() != EJamHullTool::None) && Weapons->GetReloadRemaining() <= 0.0f;
 	const float WasAlpha = Alpha;
 	// The body's velocity change this frame, in the camera's frame: the gun's inertia sways it the other way.
@@ -362,23 +363,23 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	const FQuat View = Camera->GetComponentQuat();
 	const FRotator Turned = (LastView.Inverse() * View).Rotator();
 	LastView = View;
-	const float LookLag = Aims.IsValidIndex(Current) ? Aims[Current].LookLag : 0.0f;
+	const float LookLag = Aims.IsValidIndex(Shown) ? Aims[Shown].LookLag : 0.0f;
 	LookLagTurn = DeltaTime > 0.0f
 		? (FVector(-Turned.Pitch, -Turned.Yaw, -0.5f * Turned.Yaw) * (LookLag / DeltaTime)).BoundToCube(4.0f)
 		: FVector::ZeroVector;
-	if (!bGunInView || Current != MotionWeapon)
+	if (!bGunInView || Shown != MotionWeapon)
 	{
 		// No gun, or another one: it starts from its rest pose.
 		bMoving = bAimTarget = false;
 		Alpha = 0.0f;
-		MotionWeapon = bGunInView ? Current : INDEX_NONE;
+		MotionWeapon = bGunInView ? Shown : INDEX_NONE;
 	}
 	if (bGunInView)
 	{
 		if (!bMoving && (bWants || BodyChange.Size() * SwayPerBodyVelocity > 0.5f || LookLagTurn.Size() > 0.2f))
 		{
 			bMoving = true;
-			Place = Weapons->Weapons[Current].ViewOffset.GetTranslation();
+			Place = Weapons->Weapons[Shown].ViewOffset.GetTranslation();
 			PlaceVelocity = Turn = TurnVelocity = FVector::ZeroVector;
 		}
 		if (bMoving)

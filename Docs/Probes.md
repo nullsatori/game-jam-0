@@ -60,6 +60,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `jam.Weapons.Fx [space]` | вспышка покадрово и дым за 3 с |
 | `jam.Weapons.Smoke [space]` | объёмный дым: облако, второй выстрел сквозь него, пролёт; затем `ProfileGPU` |
 | `jam.Scope.Shots`, `jam.Scope.AimFrames`, `jam.Scope.AimStills` | оптика СВ-98, подъём к глазу всех стволов, подбор глаза и поля зрения |
+| `jam.Scope.SwitchStills [ствол] [на какой]` | смена ствола у глаза: кадры прицела и 0 / 0.05 / 0.15 / 0.3 с после смены, в лог каждый тик — доля прицела и поле зрения ствола |
 | `jam.Wall.Shots [Name]` | живая стена до и после дробовика |
 | `jam.Flyer.Shots`, `jam.Flyer.BiteShot`, `jam.Flyer.CorpseShot` | летун, кровь на визоре, труп на планетоиде |
 | `jam.Ship.Shots`, `jam.Ship.PlanetShots`, `jam.Ship.CaveShots` | корабль, планетоид, кратеры и пещеры |
