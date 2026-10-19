@@ -666,7 +666,8 @@ namespace
 	/**
 	 * jam.Gravity.Stills (Lvl_Jam_Ship, needs a real RHI): in the cabin the
 	 * pawn holds a 10 kg box and aims (Left Shift: the predicted arc), then
-	 * throws it; HighResShot while aiming, in flight and after it lands.
+	 * throws it; Shot (not HighResShot: it leaves out the debug lines of the
+	 * arc) while aiming, in flight and after it lands.
 	 */
 	void RunGravityStills(UWorld* World)
 	{
@@ -678,15 +679,40 @@ namespace
 		}
 		const FRotator View(12.0f, 0.0f, 0.0f);
 		Controller->SetControlRotation(View);
-		AMKPhysicsProp* Box = SpawnBox(World, Pawn->Camera->GetComponentLocation() + View.Vector() * 150.0f, 30.0f, 10.0f);
+		// Held low and to the right where it was taken, so the arc does not hide behind the box.
+		Pawn->bHoldInFront = false;
+		const FRotationMatrix Axes(View);
+		AMKPhysicsProp* Box = SpawnBox(World, Pawn->Camera->GetComponentLocation() + Axes.GetUnitAxis(EAxis::X) * 110.0f
+			+ Axes.GetUnitAxis(EAxis::Y) * 45.0f - Axes.GetUnitAxis(EAxis::Z) * 45.0f, 30.0f, 10.0f);
 		Pawn->Grab(Box->Body, Box->Body->GetComponentLocation());
 		After(World, 1.2f, [World]() { PlayerPawn(World)->ProbeAim(true); });
 		After(World, 2.5f, [World, Controller]()
 		{
 			UE_LOG(LogMindKore, Log, TEXT("Gravity stills: aiming, the arc drawn"));
-			Controller->ConsoleCommand(TEXT("HighResShot 1"));
+			// Where the path's points land on the screen (the debug lines are drawn through them).
+			AJamZeroGPawn* Pawn = PlayerPawn(World);
+			if (UPrimitiveComponent* Held = Pawn->GetGrabbed())
+			{
+				const float MassKg = Held->GetMass();
+				const FVector Velocity = Held->GetPhysicsLinearVelocity()
+					+ Pawn->GetControlRotation().Vector() * FMath::Min(Pawn->ThrowImpulse, MassKg * Pawn->MaxThrowSpeedCm) / MassKg;
+				FCollisionQueryParams Params(SCENE_QUERY_STAT(JamGravityStills), false, Pawn);
+				Params.AddIgnoredActor(Held->GetOwner());
+				TArray<FJamFlightPoint> Path;
+				float HitSeconds = 0.0f;
+				JamPredictFlight(World, Held->GetComponentLocation(), Velocity, Held->Bounds.SphereRadius, Pawn->PredictSeconds,
+					World->GetDeltaSeconds(), Pawn->PredictRestitution, 1, Params, Path, HitSeconds);
+				for (const FJamFlightPoint& Point : Path)
+				{
+					FVector2D Screen(-1.0, -1.0);
+					Controller->ProjectWorldLocationToScreen(Point.Location, Screen);
+					UE_LOG(LogMindKore, Log, TEXT("Gravity stills: path %.2f s at %s, screen (%.0f, %.0f)"), Point.Seconds,
+						*Point.Location.ToCompactString(), Screen.X, Screen.Y);
+				}
+			}
+			Controller->ConsoleCommand(TEXT("Shot"));
 		});
-		After(World, 3.5f, [World]()
+		After(World, 3.6f, [World]()
 		{
 			AJamZeroGPawn* Pawn = PlayerPawn(World);
 			Pawn->ProbeAim(false);
@@ -695,19 +721,19 @@ namespace
 		After(World, 3.75f, [World, Controller, Box]()
 		{
 			UE_LOG(LogMindKore, Log, TEXT("Gravity stills: in flight, box at %s"), *Box->GetActorLocation().ToCompactString());
-			Controller->ConsoleCommand(TEXT("HighResShot 1"));
+			Controller->ConsoleCommand(TEXT("Shot"));
 		});
 		After(World, 6.0f, [World, Controller, Box]()
 		{
 			UE_LOG(LogMindKore, Log, TEXT("Gravity stills: landed, %s"), *Describe(Box->Body));
-			Controller->ConsoleCommand(TEXT("HighResShot 1"));
+			Controller->ConsoleCommand(TEXT("Shot"));
 		});
 		After(World, 8.0f, []() { UE_LOG(LogMindKore, Log, TEXT("Gravity stills: done")); });
 	}
 
 	FAutoConsoleCommandWithWorld GGravityStills(
 		TEXT("jam.Gravity.Stills"),
-		TEXT("Rendered stills of a throw in the cabin: aiming with the predicted arc, in flight, landed (HighResShot; needs a real RHI)."),
+		TEXT("Rendered stills of a throw in the cabin: aiming with the predicted arc, in flight, landed (Shot; needs a real RHI)."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunGravityStills));
 
 	FAutoConsoleCommandWithWorld GGravityProbe(
