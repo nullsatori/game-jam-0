@@ -5,10 +5,12 @@
 
 #include "JamWeapons.h"
 
+#include "AudioMixerBlueprintLibrary.h"
 #include "Camera/CameraComponent.h"
 #include "Components/AudioComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Containers/Ticker.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
@@ -16,8 +18,12 @@
 #include "EngineUtils.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
+#include "JamFlyer.h"
 #include "JamHullTools.h"
 #include "GameFramework/PlayerController.h"
+#include "HAL/PlatformTime.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "JamLivingWall.h"
 #include "JamZeroGPawn.h"
 #include "Kismet/GameplayStatics.h"
@@ -119,6 +125,9 @@ void UJamWeaponsComponent::SetupWeaponParts()
 	static ConstructorHelpers::FObjectFinder<USoundBase> DrawShotgun(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Draw_Shotgun.SW_Jam_Draw_Shotgun"));
 	static ConstructorHelpers::FObjectFinder<USoundBase> StowSV98(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Stow_SV98.SW_Jam_Stow_SV98"));
 	static ConstructorHelpers::FObjectFinder<USoundBase> DrawSV98(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Draw_SV98.SW_Jam_Draw_SV98"));
+	// The USP's slide stop: a Glock 17's slide released, cut in two (Scripts/jam_slide_sounds.py).
+	static ConstructorHelpers::FObjectFinder<USoundBase> SlideRelease(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_SlideRelease_Pistol.SW_Jam_SlideRelease_Pistol"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> SlideHome(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_SlideHome_Pistol.SW_Jam_SlideHome_Pistol"));
 
 	// --- USP ---
 	FJamWeapon& Pistol = Weapons[0];
@@ -196,7 +205,7 @@ void UJamWeaponsComponent::SetupWeaponParts()
 	Pistol.SlideLockHammer = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.012f, 1.0f, 150.0f, 0.0f }, { 0.016f, 1.0f, 0.0f, -80.0f },
 		{ 0.035f, -0.55f, -20.0f, 0.0f }, { 0.05f, -0.55f, 0.0f, 0.0f }, { 0.068f, -0.5f, 3.0f, 0.0f }, { 0.08f, -0.5f, 0.0f, 0.0f } });
 	// The empty reload: the magazine out and in as the tactical one (seated at 0.86 s); the gun stays up,
-	// rolling a little further onto the thumb, which finds the slide stop (0.895 s, the click's touch) and
+	// rolling a little further onto the thumb, which finds the slide stop (0.895 s) and
 	// presses it down at 0.975 s: the slide creeps out of the notch and the spring throws it home, faster and
 	// faster - 3.5 cm in 25 ms (at 60 fps one frame shows it mid-way), into battery at 1.0 s at ~3.2 m/s -
 	// with a double knock (5% at +14 ms, 1.5% at +36 ms, so a 60 fps frame catches each), settled at 1.05 s,
@@ -212,15 +221,15 @@ void UJamWeaponsComponent::SetupWeaponParts()
 	// The thumb pressing the stop on the frame's left (the gun dips and rolls into it), the slam (forward, muzzle down, a twist).
 	Pistol.SlideReleaseKicks = { { 0.94f, FVector(0.0f, 0.0f, -15.0f), FRotator(0.0f, 0.0f, -20.0f) },
 		{ 1.0f, FVector(80.0f, 0.0f, 20.0f), FRotator(-150.0f, 15.0f, -35.0f) } };
-	// No new recordings (owner 19.10: reuse the pistol's donors). The 1911 hammer take's two ticks, 90 ms apart in
-	// SW_Jam_Hammer_Pistol (0.03 and 0.12 s into the file): the thumb touching the stop, then the stop going down
-	// as the slide runs (0.985 s; started at the seat's frame, so a release-only reload plays it too). The Glock magazine slap (SW_Jam_MagIn_Pistol, its click 0.026 s into the
-	// file) 12% higher - brighter, smaller - lands on the slam at 1.0 s: the seat's hard knock with its sub.
-	Pistol.SlideReleaseSound = Pistol.HammerSound;
-	Pistol.SlideReleaseSoundSeconds = 0.865f;
-	Pistol.SlideHomeSound = Pistol.MagInSound;
-	Pistol.SlideHomeSoundPitch = 1.12f;
-	Pistol.SlideHomeSoundSeconds = 1.0f - 0.026f / 1.12f;
+	// One take of a Glock 17's slide released by its stop (Scripts/jam_slide_sounds.py), cut where the slide runs:
+	// the lever's click with the slide leaving the notch (its loudest tick 16.7 ms into SW_Jam_SlideRelease_Pistol)
+	// on the release at 0.975 s, the slam (4.8 ms into SW_Jam_SlideHome_Pistol) on the key home at 1.0 s - the
+	// donor's 44 ms run played as the curve's 25 ms. Both start after the seat (0.86 s), where the release-only
+	// reload starts, so it plays them too. The thumb finding the stop (0.895 s) is silent.
+	Pistol.SlideReleaseSound = SlideRelease.Object;
+	Pistol.SlideReleaseSoundSeconds = 0.975f - 0.0167f;
+	Pistol.SlideHomeSound = SlideHome.Object;
+	Pistol.SlideHomeSoundSeconds = 1.0f - 0.0048f;
 
 	// Away to the holster on the right hip: a small lift first, then down and right, the
 	// muzzle tipping down ahead of the grip, faster and faster into the holster (gone at
@@ -2087,9 +2096,11 @@ namespace
 		After(7.6f + 1.065f, [Guns, Probe, Check, Shown]()
 		{
 			const FJamWeapon& Usp = Guns->Weapons[0];
-			Check(FString::Printf(TEXT("empty reload - slide released %.3f s in (expected %.2f), slide now %.4f, %d/%d (expected %d/%d)"), Probe->ReleasedAt,
+			// Released on the first frame at or after its key: up to a frame late (at 30 fps the frames around it are 0.967 and 1.0).
+			const float Frame = FMath::Max(1.0f / 60.0f, Guns->GetWorld()->GetDeltaSeconds());
+			Check(FString::Printf(TEXT("empty reload - slide released %.3f s in (expected %.3f, within a frame), slide now %.4f, %d/%d (expected %d/%d)"), Probe->ReleasedAt,
 				Usp.SlideReleaseSeconds, Shown().X, Usp.Ammo, Usp.Reserve, Usp.MagazineSize, Probe->Reserve - Usp.MagazineSize),
-				!Usp.bSlideLocked && FMath::Abs(Probe->ReleasedAt - Usp.SlideReleaseSeconds) < 1.0f / 60.0f + 0.001f && FMath::Abs(Shown().X) < 0.001f
+				!Usp.bSlideLocked && FMath::Abs(Probe->ReleasedAt - Usp.SlideReleaseSeconds) < Frame + 0.001f && FMath::Abs(Shown().X) < 0.001f
 				&& Usp.Ammo == Usp.MagazineSize && Usp.Reserve == Probe->Reserve - Usp.MagazineSize && Guns->GetReloadRemaining() <= 0.0f);
 		});
 		After(7.6f + 1.08f, [Probe, Shoot, Check]()
@@ -2172,6 +2183,112 @@ namespace
 		TEXT("jam.Weapons.SlideProbe"),
 		TEXT("The USP's slide stop live: locked open on the last round, a dead trigger, switches, the empty reload's release, the tactical reload unchanged (PASS / FAIL)."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunSlideProbe));
+
+	/**
+	 * jam.Weapons.SlideTake: the USP's slide stop recorded for listening (the master submix, 9 s, to
+	 * Saved/Clips/SlideTake.wav): the last shot locking the slide open (1.0 s), the empty reload with its release
+	 * (R at 2.5 s), the last shot again (5.0 s), a magazine put in the locked gun (as by a reload cut after the
+	 * seat) and R: the release only (6.6 s). Every frame goes to Saved/Clips/SlideTake.csv (platform and game
+	 * seconds, seconds into the reload, the slide's share shown) and each action's platform time to the log, so a
+	 * sound's onset in the wav can be set against the frame it was started on. Needs sound: run with
+	 * -ini:Engine:[Audio]:UnfocusedVolumeMultiplier=1.0 (a background window records silence).
+	 */
+	void RunSlideTake(UWorld* World)
+	{
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AJamZeroGPawn* Pawn = Controller ? Cast<AJamZeroGPawn>(Controller->GetPawn()) : nullptr;
+		if (!Pawn)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Slide take: needs the AJamZeroGPawn"));
+			return;
+		}
+		if (IConsoleVariable* Var = IConsoleManager::Get().FindConsoleVariable(TEXT("au.NeverDisableSubmixes")))
+		{
+			Var->Set(1, ECVF_SetByCode);
+		}
+		for (TActorIterator<AJamFlyer> It(World); It; ++It)
+		{
+			It->Destroy(); // nothing else makes sound
+		}
+		UJamWeaponsComponent* Guns = Pawn->Guns;
+		Guns->UnlockWeapon(0);
+		Guns->SelectWeapon(0);
+		Guns->FinishSwitch();
+		struct FTake
+		{
+			double ReloadAt = -1.0; // world seconds of R
+			float ReloadFrom = 0.0f;
+			TArray<FString> Rows;
+			bool bDone = false;
+		};
+		TSharedRef<FTake> Take = MakeShared<FTake>();
+		Take->Rows.Add(TEXT("platform_s,game_s,reload_s,since_shot,slide,locked"));
+		const auto Mark = [Pawn](const TCHAR* What)
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Slide take: %s at platform %.4f s, game %.4f s"), What, FPlatformTime::Seconds(), Pawn->GetWorld()->GetTimeSeconds());
+		};
+		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
+		{
+			FTimerHandle Handle;
+			Pawn->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(Pawn, MoveTemp(Step)), Seconds, false);
+		};
+		const auto Shoot = [Pawn, Guns, Mark]()
+		{
+			Guns->Weapons[0].Ammo = 1;
+			Mark(TEXT("the last shot"));
+			const bool bFired = Pawn->Fire();
+			Pawn->Body->SetPhysicsLinearVelocity(FVector::ZeroVector); // stay put
+			UE_LOG(LogMindKore, Log, TEXT("Slide take: %s -> %s, locked %d"), bFired ? TEXT("fired") : TEXT("REFUSED"), *Guns->Describe(),
+				Guns->Weapons[0].bSlideLocked ? 1 : 0);
+		};
+		const auto Reload = [Pawn, Guns, Take, Mark](float From)
+		{
+			Take->ReloadAt = Pawn->GetWorld()->GetTimeSeconds();
+			Take->ReloadFrom = From;
+			Mark(From > 0.0f ? TEXT("R, the release only") : TEXT("R, the empty reload"));
+			Guns->Reload();
+			UE_LOG(LogMindKore, Log, TEXT("Slide take: %.3f s to go"), Guns->GetReloadRemaining());
+		};
+		UAudioMixerBlueprintLibrary::StartRecordingOutput(World, 9.0f);
+		Mark(TEXT("recording started"));
+		TWeakObjectPtr<UWorld> WeakWorld(World);
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakWorld, Pawn, Guns, Take](float)
+		{
+			if (!WeakWorld.IsValid() || Take->bDone)
+			{
+				return false;
+			}
+			const FJamWeapon& Usp = Guns->Weapons[0];
+			const double Now = WeakWorld->GetTimeSeconds();
+			const float Reload = Take->ReloadAt >= 0.0 && Guns->GetReloadRemaining() > 0.0f ? float(Now - Take->ReloadAt) + Take->ReloadFrom : -1.0f;
+			Take->Rows.Add(FString::Printf(TEXT("%.6f,%.6f,%.4f,%.4f,%.4f,%d"), FPlatformTime::Seconds(), Now, Reload, FMath::Min(Usp.SinceShot, 99.0f),
+				Guns->ActionInView->GetRelativeLocation().X / Usp.ActionTravelCm, Usp.bSlideLocked ? 1 : 0));
+			return true;
+		}));
+		After(1.0f, Shoot);
+		After(2.5f, [Reload]() { Reload(0.0f); });
+		After(5.0f, Shoot);
+		After(6.5f, [Guns, Mark]()
+		{
+			FJamWeapon& Usp = Guns->Weapons[0];
+			Usp.Ammo = Usp.MagazineSize; // a magazine seated in the locked gun: an empty reload cut after the seat
+			Mark(TEXT("a magazine in the locked gun"));
+		});
+		After(6.6f, [Guns, Reload]() { Reload(Guns->Weapons[0].MagInSoundSeconds); });
+		After(9.0f, [WeakWorld, Take]()
+		{
+			const FString Dir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("Clips"));
+			UAudioMixerBlueprintLibrary::StopRecordingOutput(WeakWorld.Get(), EAudioRecordingExportType::WavFile, TEXT("SlideTake"), Dir);
+			Take->bDone = true;
+			FFileHelper::SaveStringArrayToFile(Take->Rows, *(Dir / TEXT("SlideTake.csv")));
+			UE_LOG(LogMindKore, Log, TEXT("Slide take: done - %s/SlideTake.wav, %d frames in SlideTake.csv"), *Dir, Take->Rows.Num() - 1);
+		});
+	}
+
+	FAutoConsoleCommandWithWorld GSlideTake(
+		TEXT("jam.Weapons.SlideTake"),
+		TEXT("The USP's slide stop recorded for listening: the last shot, the empty reload with the release, the release only (Saved/Clips/SlideTake.wav and .csv)."),
+		FConsoleCommandWithWorldDelegate::CreateStatic(&RunSlideTake));
 
 	FAutoConsoleCommandWithWorld GSwitchProbe(
 		TEXT("jam.Weapons.SwitchProbe"),

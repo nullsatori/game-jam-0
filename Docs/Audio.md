@@ -14,6 +14,7 @@
 | Что | Как делается | Где описано |
 |---|---|---|
 | Выстрелы, затворы, помпа, курок, магазины | `Scripts/jam_space_shots.py`: слои transient / mid / body / sub / rumble / tail, тёмный ревер, компрессор, лимитер −1 dBFS; в игре вариант C | [RecoilWeapons-Sound](RecoilWeapons-Sound.md) |
+| Затворная задержка USP (щелчок рычага, удар затвора) | `Scripts/jam_slide_sounds.py`: дубль сброса затвора Glock 17, разрезанный на два звука, тем же шаблоном механизмов | [RecoilWeapons-Sound](RecoilWeapons-Sound.md#затворная-задержка-usp-2010-ветка-jam-slide-sound) |
 | Летуны: визг аггро и пике, взмахи, шелест, пролёт, попадание, укус, смерть | `Scripts/jam_flyer_sounds.py`: моно-стемы по ролям (Attack, Body, Character, Sub, Tail), вариация на каждом проигрывании в `UJamFlyerAudio` | [Flyers — Звук](Flyers.md) |
 | Шаги и падения на мясе (планетоид, живые стены) | доноры MindKore `SC_MK_Hit_Torso` / `SC_MK_Hit_Limb` на пешке: шаг каждые 130 см, высота ×0.4–0.55, громкость 0.35 | `AJamZeroGPawn` (`FleshStepSound`, `FleshCrashSound`) |
 | Смена оружия (кобура, ремень) | `Scripts/jam_switch_foley.py`: записанные доноры (кожа кобуры, ремень, антабка, стук приклада), тот же тракт «через скафандр», что у механизмов; `SW_Jam_Stow_*` / `SW_Jam_Draw_*`, разброс громкости и высоты на каждом проигрывании | [RecoilWeapons-Pose — Смена оружия](RecoilWeapons-Pose.md#смена-оружия-убрать-и-достать) |
