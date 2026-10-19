@@ -444,7 +444,9 @@ void AJamFlyerHabitat::Alert(AJamFlyer* Caller)
 		CascadeStartedSeconds = Now;
 		CascadeLastSeconds = Now;
 		CascadeWoken = 0;
+		CascadeDone.Reset();
 	}
+	CascadeDone.Add(Caller);
 	Callers.AddUnique(Caller);
 	if (!GetWorldTimerManager().IsTimerActive(CascadeTimer))
 	{
@@ -465,7 +467,7 @@ void AJamFlyerHabitat::CascadeStep()
 	for (const TWeakObjectPtr<AJamFlyer>& Weak : Flock)
 	{
 		AJamFlyer* Other = Weak.Get();
-		if (!Other || Other->GetState() == EJamFlyerState::Dead || Other->IsHunting())
+		if (!Other || Other->GetState() == EJamFlyerState::Dead || Other->IsHunting() || CascadeDone.Contains(Weak))
 		{
 			continue;
 		}
@@ -490,6 +492,7 @@ void AJamFlyerHabitat::CascadeStep()
 	const FVector At = Next->GetActorLocation();
 	++CascadeWoken;
 	CascadeLastSeconds = Now;
+	CascadeDone.Add(Next);
 	Next->Aggro(*FString::Printf(TEXT("woken by %s's screech, step %d at +%.2f s"), *GetNameSafe(From), CascadeWoken, float(Now - CascadeStartedSeconds)));
 	// The row: the clinging ones next to it unfold with it, silently (the wing snap), and call on too.
 	if (bClinging)
@@ -500,6 +503,7 @@ void AJamFlyerHabitat::CascadeStep()
 			if (Other && Other->GetState() == EJamFlyerState::Roost && FVector::Dist(Other->GetActorLocation(), At) < RoostRowCm)
 			{
 				++CascadeWoken;
+				CascadeDone.Add(Weak);
 				Other->Aggro(*FString::Printf(TEXT("unfolds in %s's row"), *Next->GetName()), /*bScreech=*/false);
 			}
 		}

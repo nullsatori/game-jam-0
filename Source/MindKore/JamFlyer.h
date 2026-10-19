@@ -282,6 +282,8 @@ private:
 	TArray<TWeakObjectPtr<AJamFlyer>> Flock;
 	TArray<FJamRoostSpot> Spots;
 	TArray<TWeakObjectPtr<AJamFlyer>> Callers;
+	/** Woken by the current cascade: each at most once, or one that cannot hunt (the player past its leash) is re-woken every step with a screech. */
+	TSet<TWeakObjectPtr<AJamFlyer>> CascadeDone;
 	FTimerHandle CascadeTimer;
 	FTimerHandle PulseTimer;
 	EJamFlockMood Mood = EJamFlockMood::Curious;
