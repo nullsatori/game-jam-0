@@ -75,7 +75,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `jam.Weapons.SwitchFrames` | убрать и достать каждый ствол, кадры через 33 мс |
 | `jam.Wall.BlastFrames [См]` | выстрел дробовика в стену с 10 м, кадр каждый кадр 0.5 с (`JamBlast_<кадр>_<мс>.png`; с `-UseFixedTimeStep -FPS=60`) |
 | `jam.Weapons.Fx [space]` | вспышка покадрово и дым за 3 с |
-| `jam.Weapons.Smoke [space]` | объёмный дым: облако, второй выстрел сквозь него, пролёт; затем `ProfileGPU` |
+| `jam.Weapons.Smoke [budget]` | дым в мире на `Lvl_Jam_Range` (с `-UseFixedTimeStep -FPS=60`): пешком в зале — дробовик и второй выстрел сквозь облако; вис на якоре — СВ-98 и второй; очередь пистолета в невесомости; СВ-98 — лента «облако на месте, тело уплывает» и возврат сквозь облако; кадры от глаза и со стороны, в лог — облака против дула каждые 0.25 с. `budget` — три облака дробовика на стенде `jam.Weapons.Fx` и `ProfileGPU` ([RecoilWeapons-Fx](RecoilWeapons-Fx.md#честная-физика-ветка-jam-smoke-world-1910)) |
 | `jam.Scope.Shots`, `jam.Scope.AimFrames`, `jam.Scope.AimStills` | оптика СВ-98, подъём к глазу всех стволов, подбор глаза и поля зрения |
 | `jam.Scope.SwitchStills [ствол] [на какой]` | смена ствола у глаза: кадры прицела и 0 / 0.05 / 0.15 / 0.3 с после смены, в лог каждый тик — доля прицела и поле зрения ствола |
 | `jam.Wall.Shots [Name]` | живая стена до и после дробовика |
