@@ -791,6 +791,11 @@ namespace
 			}
 			Pawn->Fire();
 			LogState(TEXT("pistol taken, one shot"), Pawn);
+			for (TActorIterator<AJamToolPickup> Tool(Mode->GetWorld()); Tool; ++Tool)
+			{
+				Tool->CompleteInteraction(Pawn);
+			}
+			UE_LOG(LogMindKore, Log, TEXT("Ship probe [tool pickups taken]: the grapple %s"), Mode->Tools.Contains(MKJamGrappleTool()) ? TEXT("unlocked") : TEXT("NOT unlocked"));
 			const AJamGravityZone* Shell = PlanetShell(Mode->GetWorld());
 			if (!Shell)
 			{
