@@ -284,13 +284,13 @@ namespace
 		World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(World, MoveTemp(Step)), Seconds, false);
 	}
 
-	AJamZeroGPawn* PlayerPawn(const UWorld* World)
+	AJamZeroGPawn* GravityProbePawn(const UWorld* World)
 	{
 		const APlayerController* PlayerController = World->GetFirstPlayerController();
 		return PlayerController ? Cast<AJamZeroGPawn>(PlayerController->GetPawn()) : nullptr;
 	}
 
-	void Teleport(AActor* Actor, const FVector& Location)
+	void GravityProbeTeleport(AActor* Actor, const FVector& Location)
 	{
 		if (UPrimitiveComponent* Root = Cast<UPrimitiveComponent>(Actor->GetRootComponent()); Root && Root->IsSimulatingPhysics())
 		{
@@ -348,18 +348,18 @@ namespace
 	 */
 	void ProbeThrow(UWorld* World, const FString Label, float PitchDeg, TFunction<void()> Next)
 	{
-		AJamZeroGPawn* Pawn = PlayerPawn(World);
+		AJamZeroGPawn* Pawn = GravityProbePawn(World);
 		const FRotator View(PitchDeg, Pawn->GetControlRotation().Yaw, 0.0f);
 		World->GetFirstPlayerController()->SetControlRotation(View);
 		AMKPhysicsProp* Box = SpawnBox(World, Pawn->Camera->GetComponentLocation() + View.Vector() * 150.0f, 30.0f, 10.0f);
 		Pawn->Grab(Box->Body, Box->Body->GetComponentLocation());
 		After(World, 1.2f, [World, Label, Next, Box]()
 		{
-			AJamZeroGPawn* Pawn = PlayerPawn(World);
+			AJamZeroGPawn* Pawn = GravityProbePawn(World);
 			Pawn->ProbeAim(true); // the pawn's own path logs its first contact this frame
 			After(World, 0.1f, [World, Label, Next, Box]()
 			{
-				AJamZeroGPawn* Pawn = PlayerPawn(World);
+				AJamZeroGPawn* Pawn = GravityProbePawn(World);
 				Pawn->ProbeAim(false);
 				UPrimitiveComponent* Held = Pawn->GetGrabbed();
 				if (Held != Box->Body)
@@ -465,7 +465,7 @@ namespace
 			Home = It->InnerRadiusCm > 0.0f ? *It : nullptr;
 		}
 		AJamFlyer* Flyer = Home && !Home->GetFlock().IsEmpty() ? Home->GetFlock()[0].Get() : nullptr;
-		AJamZeroGPawn* Pawn = PlayerPawn(World);
+		AJamZeroGPawn* Pawn = GravityProbePawn(World);
 		if (!Flyer)
 		{
 			UE_LOG(LogMindKore, Warning, TEXT("Gravity probe [corpse]: no flyer round a planetoid"));
@@ -475,7 +475,7 @@ namespace
 		// 3 m up and 4 m aside of the pawn standing on the planetoid, killed by a round as a gun delivers it.
 		const FVector Up = -JamGravityAt(World, Pawn->GetActorLocation()).Acceleration.GetSafeNormal();
 		const FVector Side = FVector::CrossProduct(Up, FVector::ForwardVector).GetSafeNormal();
-		Teleport(Flyer, Pawn->GetActorLocation() + Side * 400.0f + Up * 300.0f);
+		GravityProbeTeleport(Flyer, Pawn->GetActorLocation() + Side * 400.0f + Up * 300.0f);
 		FMKResolvedImpact Kill;
 		Kill.ShotId = FGuid::NewGuid();
 		Kill.Kind = EMKImpactKind::Round;
@@ -560,7 +560,7 @@ namespace
 	 */
 	void RunGravityProbe(UWorld* World)
 	{
-		AJamZeroGPawn* Pawn = PlayerPawn(World);
+		AJamZeroGPawn* Pawn = GravityProbePawn(World);
 		if (!Pawn || !World->GetAuthGameMode<AJamShipGameMode>())
 		{
 			UE_LOG(LogMindKore, Warning, TEXT("Gravity probe: needs AJamShipGameMode and the zero-G pawn"));
@@ -574,7 +574,7 @@ namespace
 			{
 				if (Start->ActorHasTag(TEXT("Cabin")))
 				{
-					Teleport(Pawn, Start->GetActorLocation());
+					GravityProbeTeleport(Pawn, Start->GetActorLocation());
 				}
 			}
 		}
@@ -594,7 +594,7 @@ namespace
 		Pawn->Fire();
 		After(World, 0.4f, [World, Before, StartBodies]()
 		{
-			AJamZeroGPawn* Pawn = PlayerPawn(World);
+			AJamZeroGPawn* Pawn = GravityProbePawn(World);
 			UStaticMeshComponent* Casing = nullptr;
 			for (TActorIterator<AStaticMeshActor> It(World); It && !Casing; ++It)
 			{
@@ -623,7 +623,7 @@ namespace
 					ProbeLoad(World, Floor + FVector(-200.0f, 0.0f, 0.0f), 64, [World, StartBodies]()
 					{
 						// The planetoid: 3 m under the walking ball's top, fall, land, throw.
-						AJamZeroGPawn* Pawn = PlayerPawn(World);
+						AJamZeroGPawn* Pawn = GravityProbePawn(World);
 						const AJamGravityZone* Shell = nullptr;
 						for (TActorIterator<AJamGravityZone> It(World); It; ++It)
 						{
@@ -634,10 +634,10 @@ namespace
 							UE_LOG(LogMindKore, Warning, TEXT("Gravity probe: no planetoid"));
 							return;
 						}
-						Teleport(Pawn, Shell->GetActorLocation() + FVector::UpVector * (Shell->SphereRadiusCm - 300.0f));
+						GravityProbeTeleport(Pawn, Shell->GetActorLocation() + FVector::UpVector * (Shell->SphereRadiusCm - 300.0f));
 						After(World, 4.0f, [World, StartBodies]()
 						{
-							AJamZeroGPawn* Pawn = PlayerPawn(World);
+							AJamZeroGPawn* Pawn = GravityProbePawn(World);
 							UE_LOG(LogMindKore, Log, TEXT("Gravity probe [on the planetoid]: pawn at %s, %s"), *Pawn->GetActorLocation().ToCompactString(),
 								Pawn->IsGrounded() ? TEXT("on the ground") : TEXT("NOT on the ground"));
 							ProbeThrow(World, TEXT("planetoid"), 25.0f, [World, StartBodies]()
@@ -671,7 +671,7 @@ namespace
 	 */
 	void RunGravityStills(UWorld* World)
 	{
-		AJamZeroGPawn* Pawn = PlayerPawn(World);
+		AJamZeroGPawn* Pawn = GravityProbePawn(World);
 		APlayerController* Controller = World->GetFirstPlayerController();
 		if (!Pawn || !Controller)
 		{
@@ -685,12 +685,12 @@ namespace
 		AMKPhysicsProp* Box = SpawnBox(World, Pawn->Camera->GetComponentLocation() + Axes.GetUnitAxis(EAxis::X) * 110.0f
 			+ Axes.GetUnitAxis(EAxis::Y) * 45.0f - Axes.GetUnitAxis(EAxis::Z) * 45.0f, 30.0f, 10.0f);
 		Pawn->Grab(Box->Body, Box->Body->GetComponentLocation());
-		After(World, 1.2f, [World]() { PlayerPawn(World)->ProbeAim(true); });
+		After(World, 1.2f, [World]() { GravityProbePawn(World)->ProbeAim(true); });
 		After(World, 2.5f, [World, Controller]()
 		{
 			UE_LOG(LogMindKore, Log, TEXT("Gravity stills: aiming, the arc drawn"));
 			// Where the path's points land on the screen (the debug lines are drawn through them).
-			AJamZeroGPawn* Pawn = PlayerPawn(World);
+			AJamZeroGPawn* Pawn = GravityProbePawn(World);
 			if (UPrimitiveComponent* Held = Pawn->GetGrabbed())
 			{
 				const float MassKg = Held->GetMass();
@@ -714,7 +714,7 @@ namespace
 		});
 		After(World, 3.6f, [World]()
 		{
-			AJamZeroGPawn* Pawn = PlayerPawn(World);
+			AJamZeroGPawn* Pawn = GravityProbePawn(World);
 			Pawn->ProbeAim(false);
 			Pawn->ThrowHeld();
 		});
