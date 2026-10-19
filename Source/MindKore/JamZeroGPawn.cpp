@@ -332,9 +332,58 @@ void AJamZeroGPawn::Lift(const FInputActionValue& Value)
 	ThrustInput.Z += Value.Get<float>();
 }
 
+// --- movement mode -------------------------------------------------------------
+
+const FJamMoveRules& AJamZeroGPawn::Allows() const
+{
+	// One row per EJamMoveMode:               fire   use    grapple jump   thrusters
+	static const FJamMoveRules Rules[] = {
+		/* Float: Space is the up thruster */  { true, true,  true,  false, true },
+		/* Walk */                              { true, true,  true,  true,  false },
+		/* Ladder: Space pushes off it */       { true, false, false, true,  false },
+		/* Hang: the keys are the arm */        { true, true,  true,  false, false },
+	};
+	return Rules[uint8(MoveMode)];
+}
+
+void AJamZeroGPawn::SetMode(EJamMoveMode NewMode)
+{
+	if (NewMode == MoveMode)
+	{
+		return;
+	}
+	const EJamMoveMode OldMode = MoveMode;
+	switch (OldMode)
+	{
+	case EJamMoveMode::Walk:
+		bGrounded = false;
+		break;
+	case EJamMoveMode::Ladder:
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: off %s"), *GetName(), *GetNameSafe(ActiveLadder));
+		ActiveLadder = nullptr;
+		bLadderMounting = false;
+		LadderCooldownUntil = GetWorld()->GetTimeSeconds() + 0.3;
+		RestoreLadderBodyRadius();
+		break;
+	case EJamMoveMode::Hang:
+		ClingTarget = nullptr;
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: let go at %.0f cm/s"), GetBodyVelocity().Size());
+		break;
+	default:
+		break;
+	}
+	MoveMode = NewMode;
+	UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: %s -> %s"), *GetName(), *UEnum::GetDisplayValueAsText(OldMode).ToString(),
+		*UEnum::GetDisplayValueAsText(NewMode).ToString());
+	if (NewMode == EJamMoveMode::Walk)
+	{
+		bGrounded = false;
+	}
+}
+
 void AJamZeroGPawn::Use()
 {
-	if (IsClimbingLadder())
+	if (!Allows().bUse)
 	{
 		return;
 	}
@@ -379,6 +428,7 @@ bool AJamZeroGPawn::Cling(UPrimitiveComponent* Target, const FVector& Point)
 		return false;
 	}
 	// The hand takes the point; the velocity is kept - the arm catches it (UpdateArm).
+	SetMode(EJamMoveMode::Hang);
 	ClingTarget = Target;
 	HandLocal = Target->GetComponentTransform().InverseTransformPosition(Point);
 	ArmRestCm = FMath::Max(ArmMinCm, float(FVector::Dist(ShoulderLocation(), Point)));
@@ -389,10 +439,9 @@ bool AJamZeroGPawn::Cling(UPrimitiveComponent* Target, const FVector& Point)
 
 void AJamZeroGPawn::LetGoCling()
 {
-	if (ClingTarget.IsValid() || ClingTarget.IsStale())
+	if (MoveMode == EJamMoveMode::Hang)
 	{
-		ClingTarget = nullptr;
-		UE_LOG(LogMindKore, Log, TEXT("ZeroG cling: let go at %.0f cm/s"), GetBodyVelocity().Size());
+		SetMode(FreeMode()); // the exit lets go of the hold
 	}
 }
 
@@ -523,7 +572,7 @@ void AJamZeroGPawn::UpdateArm(float DeltaSeconds)
 
 EJamRmbAction AJamZeroGPawn::GetRmbAction() const
 {
-	if (IsClimbingLadder())
+	if (!Allows().bUse)
 	{
 		return EJamRmbAction::None;
 	}
@@ -608,6 +657,12 @@ void AJamZeroGPawn::ToggleGrapple()
 	if (!HasGrapple())
 	{
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG grapple: not taken yet"));
+		return;
+	}
+	if (!Allows().bGrapple)
+	{
+		// The ladder holds the body still: a hook would only tug at it (and a hooked body does not take a ladder).
+		UE_LOG(LogMindKore, Log, TEXT("ZeroG grapple: not from the ladder"));
 		return;
 	}
 	FHitResult Hit;
@@ -1069,7 +1124,7 @@ void AJamZeroGPawn::ApplyThrusters(float DeltaSeconds)
 {
 	const FVector Input = ThrustInput.GetClampedToMaxSize(1.0f);
 	ThrustInput = FVector::ZeroVector;
-	if (!bThrustersEnabled || DeltaSeconds <= 0.0f)
+	if (!bThrustersEnabled || !Allows().bThrusters || DeltaSeconds <= 0.0f)
 	{
 		return;
 	}
@@ -1116,6 +1171,11 @@ void AJamZeroGPawn::SetGravity(const FVector& Direction, float StrengthCm, bool 
 	if (bWas != IsInGravity())
 	{
 		bGrounded = false;
+		// Free hands follow the zone; a hold or a ladder is left by its own rules.
+		if (MoveMode == EJamMoveMode::Float || MoveMode == EJamMoveMode::Walk)
+		{
+			SetMode(FreeMode());
+		}
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: %s at %s, %.0f cm/s"), *GetName(), IsInGravity() ? TEXT("gravity on (walking)") : TEXT("gravity off (zero-G)"),
 			*GetActorLocation().ToCompactString(), GetBodyVelocity().Size());
 	}
@@ -1240,6 +1300,8 @@ void AJamZeroGPawn::Walk(float DeltaSeconds)
 
 void AJamZeroGPawn::BeginLadderClimb(AJamLadder* Ladder)
 {
+	// Entering Ladder: what the mode needs the ladder for (SetMode leaves Walk).
+	SetMode(EJamMoveMode::Ladder);
 	ActiveLadder = Ladder;
 	if (!bRestoreLadderRadius)
 	{
@@ -1279,14 +1341,10 @@ void AJamZeroGPawn::PlayRung(float Volume)
 
 void AJamZeroGPawn::EndLadderClimb()
 {
-	if (ActiveLadder)
+	if (MoveMode == EJamMoveMode::Ladder)
 	{
-		UE_LOG(LogMindKore, Log, TEXT("ZeroG pawn %s: off %s"), *GetName(), *ActiveLadder->GetName());
+		SetMode(FreeMode()); // the exit: off the ladder, the cooldown, the body's radius back
 	}
-	ActiveLadder = nullptr;
-	bLadderMounting = false;
-	LadderCooldownUntil = GetWorld()->GetTimeSeconds() + 0.3;
-	RestoreLadderBodyRadius();
 }
 
 void AJamZeroGPawn::RestoreLadderBodyRadius()
@@ -1431,7 +1489,11 @@ void AJamZeroGPawn::ClimbLadder(float DeltaSeconds)
 
 void AJamZeroGPawn::JumpPressed()
 {
-	if (IsClimbingLadder())
+	if (!Allows().bJump)
+	{
+		return; // Zero-G: Space is the up thruster (Lift); holding on, it is the arm (UpdateArm), never a jump or the jet exit.
+	}
+	if (MoveMode == EJamMoveMode::Ladder)
 	{
 		const FVector Away = ActiveLadder->GetActorTransform().TransformVectorNoScale(FVector(0, -1, 0));
 		const FVector Up = IsInGravity() ? -GravityDirection : FVector::UpVector;
@@ -1441,10 +1503,6 @@ void AJamZeroGPawn::JumpPressed()
 		Body->SetPhysicsLinearVelocity(Away * JumpSpeedCm * 0.6f + Up * JumpSpeedCm * 0.35f);
 		LastJumpSeconds = GetWorld()->GetTimeSeconds();
 		return;
-	}
-	if (!IsInGravity() || IsClinging())
-	{
-		return; // Zero-G: Space is the up thruster (Lift); holding on, it is the arm (UpdateArm), never a jump or the jet exit.
 	}
 	const FVector Up = -GravityDirection;
 	const FVector Velocity = GetBodyVelocity();
@@ -1544,9 +1602,10 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 		UE_LOG(LogMindKore, Log, TEXT("ZeroG grab: a gun drawn - letting go"));
 		Release();
 	}
+	// The hand: on the hold (Hang) or on a held loose body (in any mode).
 	UpdateArm(DeltaSeconds);
 	UpdateDust();
-	if (!IsClimbingLadder() && IsInGravity() && !IsClinging() && GetWorld()->GetTimeSeconds() >= LadderCooldownUntil
+	if (MoveMode == EJamMoveMode::Walk && GetWorld()->GetTimeSeconds() >= LadderCooldownUntil
 		&& !GrabbedBody.IsValid() && !TetheredBody.IsValid() && !GrappleTarget.IsValid())
 	{
 		FVector Move = ViewDirection() * ThrustInput.X + Camera->GetRightVector() * ThrustInput.Y;
@@ -1571,19 +1630,25 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 			}
 		}
 	}
-	if (IsClimbingLadder())
+	switch (MoveMode)
 	{
-		ClimbLadder(DeltaSeconds);
-	}
-	else if (IsInGravity())
-	{
-		Walk(DeltaSeconds);
-	}
-	else
-	{
+	case EJamMoveMode::Float:
 		ApplyThrusters(DeltaSeconds);
+		break;
+	case EJamMoveMode::Walk:
+		Walk(DeltaSeconds);
+		break;
+	case EJamMoveMode::Ladder:
+		ClimbLadder(DeltaSeconds);
+		break;
+	case EJamMoveMode::Hang:
+		// The arm (UpdateArm) holds the body and took the keys; gravity still pulls, nothing walks,
+		// brakes or snaps it to the ground (Walk used to, and fought the arm with the feet on the floor).
+		ThrustInput = FVector::ZeroVector;
+		Body->AddForce(GravityDirection * GravityStrengthCm, NAME_None, /*bAccelChange=*/true);
+		break;
 	}
-	if (!IsClimbingLadder())
+	if (MoveMode != EJamMoveMode::Ladder)
 	{
 		RestoreLadderBodyRadius();
 	}
@@ -1621,7 +1686,7 @@ void AJamZeroGPawn::KickCamera(float AmplitudeCm)
 bool AJamZeroGPawn::Fire()
 {
 	FVector Recoil;
-	if (!Guns->Fire(ViewLocation(), ViewDirection(), Recoil))
+	if (!Allows().bFire || !Guns->Fire(ViewLocation(), ViewDirection(), Recoil))
 	{
 		return false;
 	}

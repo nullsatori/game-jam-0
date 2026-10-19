@@ -44,6 +44,37 @@ enum class EJamRmbAction : uint8
 };
 
 /**
+ * How the body moves now (AJamZeroGPawn::SetMode, one case each in Tick).
+ * What each mode lets the hands and keys do is one table, AJamZeroGPawn::Allows.
+ */
+UENUM(BlueprintType)
+enum class EJamMoveMode : uint8
+{
+	/** Zero-G: momentum is kept; WASD, Space and Ctrl are the thrusters, X the stabiliser. */
+	Float,
+	/** A gravity zone: gravity pulls, WASD walks on the ground, Space jumps. */
+	Walk,
+	/** On a ladder's rungs (gravity only): the keys climb, the body moves by sweeps. */
+	Ladder,
+	/** Holding on to a fixed thing (Cling): the keys are the arm; gravity still pulls, nothing walks. */
+	Hang,
+};
+
+/** What a movement mode allows (AJamZeroGPawn::Allows). */
+struct FJamMoveRules
+{
+	bool bFire = true;
+	/** RMB: aim, grab, let go, hold on. */
+	bool bUse = true;
+	/** Left Alt hooks (letting go is always allowed). */
+	bool bGrapple = true;
+	/** Space as a jump: off the ground, the jet exit, off the ladder. */
+	bool bJump = false;
+	/** WASD, Space/Ctrl and X as the thrusters and the stabiliser. */
+	bool bThrusters = false;
+};
+
+/**
  * The zero-G player: a simulated sphere with its rotation locked, gravity
  * off and no damping, so momentum is kept until something changes it. The
  * camera follows the control rotation (free look in zero-G turns only the view).
@@ -555,6 +586,12 @@ public:
 	/** Gravity here (unit direction, cm/s^2), set every tick by AJamShipGameMode; zero strength = zero-G. */
 	void SetGravity(const FVector& Direction, float StrengthCm, bool bRadial);
 
+	UFUNCTION(BlueprintPure, Category = "Jam|ZeroG")
+	EJamMoveMode GetMoveMode() const { return MoveMode; }
+
+	/** What the current mode allows. */
+	const FJamMoveRules& Allows() const;
+
 	UFUNCTION(BlueprintPure, Category = "Jam|Ladder")
 	bool IsClimbingLadder() const { return ActiveLadder != nullptr; }
 
@@ -657,6 +694,11 @@ private:
 	void DrawTether() const;
 	void BulletTimePressed();
 	void BulletTimeReleased();
+	EJamMoveMode MoveMode = EJamMoveMode::Float;
+	/** Float or Walk, by the gravity here: where the hands-free body goes back to. */
+	EJamMoveMode FreeMode() const { return IsInGravity() ? EJamMoveMode::Walk : EJamMoveMode::Float; }
+	/** Leaves the current mode (its exit) and enters NewMode (its enter). */
+	void SetMode(EJamMoveMode NewMode);
 	void ApplyThrusters(float DeltaSeconds);
 	void Walk(float DeltaSeconds);
 	void ClimbLadder(float DeltaSeconds);
