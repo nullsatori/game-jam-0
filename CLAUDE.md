@@ -1,7 +1,15 @@
 # game-jam-0 — правила для агентов
 
-Игра на UE 5.8, модуль MindKore. Документация — [README](README.md) и `Docs/`,
-проверки — [Docs/Probes.md](Docs/Probes.md).
+Игра на UE 5.8, модуль MindKore. Вход — [README](README.md), системы и правила
+документирования — [Docs/README.md](Docs/README.md), клавиши —
+[Docs/Controls.md](Docs/Controls.md), проверки — [Docs/Probes.md](Docs/Probes.md).
+Нетехнический дизайн и лор — [Docs/Vision](Docs/Vision/README.md): принципы и
+целевое прохождение — [MVP](Docs/Vision/MVP.md), связи механик —
+[Progression](Docs/Vision/Progression.md). Реализация и настройка — на технических
+страницах в `Docs/`; в дизайн-документах код и параметры компонентов не дублировать.
+Исторические планы и сверки — в `Docs/Archive/`; они не задают текущие требования.
+Изменил поведение — обнови
+страницу системы в том же изменении; параметры и таблицы клавиш не дублировать.
 
 **Баги и регрессии** — в [KNOWN_ISSUES.md](KNOWN_ISSUES.md): нашёл и не
 исправил — строка в «Открыто»; исправил — строка в «Закрыто» с коммитом.
