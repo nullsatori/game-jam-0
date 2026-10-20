@@ -28,6 +28,8 @@ struct FJamDebugRow
 	/** Group: Param.Group; section: its title. */
 	FString Header;
 	FString Label;
+	/** The unit column («см/с»); empty: the parameter's own Units. */
+	FString Unit;
 	FJamDebugParam Param;
 	/** Group: how many parameters it has (shown or not), and their keys (for its changed count). */
 	int32 Count = 0;
@@ -70,7 +72,7 @@ private:
 	TSharedRef<SWidget> MakeTabButton(const FString& Name);
 	TSharedRef<SWidget> MakeGroupHeader(TSharedPtr<FJamDebugRow> Row);
 	/** A parameter's editor: a spin box for numbers, a check box for bools, text for the rest; the changed mark and the star. */
-	TSharedRef<SWidget> MakeParamLine(const FJamDebugParam& Param, const FString& Label);
+	TSharedRef<SWidget> MakeParamLine(const FJamDebugParam& Param, const FString& Label, const FString& Unit = FString());
 	TSharedRef<SWidget> MakeKeyLine(const FString& Key, const FString& Label);
 	TSharedRef<ITableRow> MakeRow(TSharedPtr<FJamDebugRow> Row, const TSharedRef<STableViewBase>& Table);
 	void Rebuild();
@@ -78,6 +80,9 @@ private:
 	void RebuildPinned();
 	void ToggleGroup(const FString& Group);
 	void SaveGroups() const;
+	/** The status line in words («Длина руки → 90 см»), and how visible it still is (a receipt fades, an error stays). */
+	FString MenuStatusText(const FString& Status) const;
+	float StatusAlpha() const;
 	/** The menu's own scale on top of the engine's DPI curve: never under the floor that keeps it readable at 720p. */
 	float MenuScale() const;
 	/** Keeps the panel off the game HUD, which is drawn in pixels at the left (lamps at the top, O2 and HP at the bottom). */
@@ -109,6 +114,9 @@ private:
 	TArray<FString> PinnedShown;
 	TSharedPtr<SVerticalBox> SkippedBox;
 	int32 SeenSkipped = -1;
+	FString StatusSeen;
+	FString StatusShown;
+	double StatusAt = 0.0;
 
 	FString EditKey;
 	FString EditBefore;

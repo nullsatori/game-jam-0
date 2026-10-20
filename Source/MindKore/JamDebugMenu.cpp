@@ -575,13 +575,174 @@ namespace
 		return UE_ARRAY_COUNT(MenuSections);
 	}
 
-	/**
-	 * A readable name and unit: the table's, else the editor's DisplayName, else the property name split into words with
-	 * its unit suffix turned into a unit (ArmPullCmS -> "Arm Pull", "см/с").
-	 */
-	void MenuHumanName(const FJamDebugParam& Param, FString& OutLabel, FString& OutUnit)
+	// Short Russian names of the fields people tune most, by owner kind ("Weapon" stands for every Weapon[...]):
+	// the arm, grab, walk, thrusters and view of the pawn, every gun's recoil and kick, the flyer's flight and hunt.
+	// Docs/DebugMenu.md, «Оформление». The rest falls back to MenuHumanName's rule.
+	const FJamMenuName MenuFieldNames[] = {
+		{ TEXT("Pawn.LookSensitivity"), TEXT(""), TEXT("Чувствительность мыши"), TEXT("") },
+		{ TEXT("Pawn.ArmLengthCm"), TEXT(""), TEXT("Длина руки"), TEXT("см") },
+		{ TEXT("Pawn.ArmMinCm"), TEXT(""), TEXT("Рука, подтянут до"), TEXT("см") },
+		{ TEXT("Pawn.ArmStiffness"), TEXT(""), TEXT("Жёсткость руки"), TEXT("рад/с") },
+		{ TEXT("Pawn.ArmDampingRatio"), TEXT(""), TEXT("Демпфирование руки"), TEXT("") },
+		{ TEXT("Pawn.ArmPullCmS"), TEXT(""), TEXT("Подтягивание"), TEXT("см/с") },
+		{ TEXT("Pawn.ArmRelaxCmS"), TEXT(""), TEXT("Возврат руки"), TEXT("см/с") },
+		{ TEXT("Pawn.SwingAccelCm"), TEXT(""), TEXT("Раскачка"), TEXT("см/с²") },
+		{ TEXT("Pawn.SwingMaxSpeedCm"), TEXT(""), TEXT("Раскачка, предел"), TEXT("см/с") },
+		{ TEXT("Pawn.SwingDampAccelCm"), TEXT(""), TEXT("Гашение раскачки"), TEXT("см/с²") },
+		{ TEXT("Pawn.SwingDampRate"), TEXT(""), TEXT("Гашение раскачки, темп"), TEXT("1/с") },
+		{ TEXT("Pawn.HoldSteerStiffness"), TEXT(""), TEXT("Тело в руке, жёсткость"), TEXT("") },
+		{ TEXT("Pawn.ArmTugMinAccelCm"), TEXT(""), TEXT("Рывок руки, порог"), TEXT("см/с²") },
+		{ TEXT("Pawn.ArmTugCmPer1000"), TEXT(""), TEXT("Рывок руки, тряска"), TEXT("см/1000") },
+		{ TEXT("Pawn.HeadClearanceCm"), TEXT(""), TEXT("Зазор головы"), TEXT("см") },
+		{ TEXT("Pawn.GrabReachCm"), TEXT(""), TEXT("Дальность хвата"), TEXT("см") },
+		{ TEXT("Pawn.MaxGrabMassKg"), TEXT(""), TEXT("Хват, макс. масса"), TEXT("кг") },
+		{ TEXT("Pawn.HoldDistanceCm"), TEXT(""), TEXT("Держать на расстоянии"), TEXT("см") },
+		{ TEXT("Pawn.bHoldInFront"), TEXT(""), TEXT("Держать перед собой"), TEXT("") },
+		{ TEXT("Pawn.ThrowImpulse"), TEXT(""), TEXT("Бросок, импульс"), TEXT("кг·см/с") },
+		{ TEXT("Pawn.MaxThrowSpeedCm"), TEXT(""), TEXT("Бросок, предел"), TEXT("см/с") },
+		{ TEXT("Pawn.bThrustersEnabled"), TEXT(""), TEXT("Маневровые включены"), TEXT("") },
+		{ TEXT("Pawn.ThrustAccelCm"), TEXT(""), TEXT("Маневровые, разгон"), TEXT("см/с²") },
+		{ TEXT("Pawn.ThrustMaxSpeedCm"), TEXT(""), TEXT("Маневровые, предел"), TEXT("см/с") },
+		{ TEXT("Pawn.StabiliserAccelCm"), TEXT(""), TEXT("Стабилизатор"), TEXT("см/с²") },
+		{ TEXT("Pawn.StabiliserRate"), TEXT(""), TEXT("Стабилизатор, темп"), TEXT("1/с") },
+		{ TEXT("Pawn.WalkSpeedCm"), TEXT(""), TEXT("Ходьба"), TEXT("см/с") },
+		{ TEXT("Pawn.WalkAccelCm"), TEXT(""), TEXT("Ходьба, разгон"), TEXT("см/с²") },
+		{ TEXT("Pawn.WalkBrakingCm"), TEXT(""), TEXT("Ходьба, торможение"), TEXT("см/с²") },
+		{ TEXT("Pawn.AirAccelCm"), TEXT(""), TEXT("Управление в воздухе"), TEXT("см/с²") },
+		{ TEXT("Pawn.LaunchThresholdCm"), TEXT(""), TEXT("Порог отрыва от пола"), TEXT("см/с") },
+		{ TEXT("Pawn.JumpSpeedCm"), TEXT(""), TEXT("Прыжок"), TEXT("см/с") },
+		{ TEXT("Pawn.JetExitSpeedCm"), TEXT(""), TEXT("Прыжок с планетоида"), TEXT("см/с") },
+		{ TEXT("Pawn.GroundProbeCm"), TEXT(""), TEXT("Поиск пола"), TEXT("см") },
+		{ TEXT("Pawn.MaxGroundAngleDeg"), TEXT(""), TEXT("Пол, макс. уклон"), TEXT("°") },
+		{ TEXT("Pawn.EyeHeightCm"), TEXT(""), TEXT("Высота глаз"), TEXT("см") },
+		{ TEXT("Pawn.EyeRiseRate"), TEXT(""), TEXT("Подъём глаз, темп"), TEXT("1/с") },
+		{ TEXT("Pawn.GroundFeedbackMinSpeedCm"), TEXT(""), TEXT("Удар о пол от"), TEXT("см/с") },
+		{ TEXT("Pawn.StepCm"), TEXT(""), TEXT("Шаг"), TEXT("см") },
+		{ TEXT("Pawn.StepVolume"), TEXT(""), TEXT("Громкость шага"), TEXT("") },
+		{ TEXT("Pawn.FleshPitchRange"), TEXT(""), TEXT("Шаг по плоти, тон"), TEXT("") },
+		{ TEXT("Pawn.bFreeBodyRotation"), TEXT(""), TEXT("Свободный поворот"), TEXT("") },
+		{ TEXT("Pawn.CameraFOV"), TEXT(""), TEXT("FOV"), TEXT("°") },
+		{ TEXT("Pawn.bLensDistortion"), TEXT(""), TEXT("Линза бодикама"), TEXT("") },
+		{ TEXT("Pawn.DustCount"), TEXT(""), TEXT("Пыль, пылинок"), TEXT("") },
+		{ TEXT("Pawn.DustCubeCm"), TEXT(""), TEXT("Пыль, куб"), TEXT("см") },
+		{ TEXT("Pawn.DustSpeckCm"), TEXT(""), TEXT("Пыль, пылинка"), TEXT("см") },
+		{ TEXT("Pawn.EyeRadiusCm"), TEXT(""), TEXT("Радиус глаза"), TEXT("см") },
+		{ TEXT("Pawn.RollRateDegPerSec"), TEXT(""), TEXT("Крен Q/E"), TEXT("°/с") },
+		{ TEXT("Pawn.RecoilShakeCmPer10000"), TEXT(""), TEXT("Тряска от отдачи"), TEXT("см/10000") },
+		{ TEXT("Weapon.Name"), TEXT(""), TEXT("Имя"), TEXT("") },
+		{ TEXT("Weapon.RecoilImpulse"), TEXT(""), TEXT("Отдача, импульс"), TEXT("кг·см/с") },
+		{ TEXT("Weapon.KickPitchDeg"), TEXT(""), TEXT("Подброс вверх"), TEXT("°") },
+		{ TEXT("Weapon.KickYawDeg"), TEXT(""), TEXT("Увод вбок"), TEXT("°") },
+		{ TEXT("Weapon.ViewKickBackCm"), TEXT(""), TEXT("Ствол в кадре назад"), TEXT("см") },
+		{ TEXT("Weapon.ViewKickRiseDeg"), TEXT(""), TEXT("Ствол в кадре вверх"), TEXT("°") },
+		{ TEXT("Weapon.Damage"), TEXT(""), TEXT("Урон"), TEXT("") },
+		{ TEXT("Weapon.FireInterval"), TEXT(""), TEXT("Интервал выстрела"), TEXT("с") },
+		{ TEXT("Weapon.MagazineSize"), TEXT(""), TEXT("Магазин"), TEXT("") },
+		{ TEXT("Weapon.Reserve"), TEXT(""), TEXT("Запас"), TEXT("") },
+		{ TEXT("Weapon.ReloadSeconds"), TEXT(""), TEXT("Перезарядка"), TEXT("с") },
+		{ TEXT("Weapon.Pellets"), TEXT(""), TEXT("Дробин"), TEXT("") },
+		{ TEXT("Weapon.SpreadDeg"), TEXT(""), TEXT("Разброс"), TEXT("°") },
+		{ TEXT("Weapon.HitImpulse"), TEXT(""), TEXT("Толчок попадания"), TEXT("кг·см/с") },
+		{ TEXT("Weapon.RangeCm"), TEXT(""), TEXT("Дальность"), TEXT("см") },
+		{ TEXT("Weapon.bAutomatic"), TEXT(""), TEXT("Автоматический"), TEXT("") },
+		{ TEXT("Weapon.ProjectileSpeed"), TEXT(""), TEXT("Скорость пули"), TEXT("см/с") },
+		{ TEXT("Weapon.bUnlocked"), TEXT(""), TEXT("Доступен"), TEXT("") },
+		{ TEXT("Weapon.Ammo"), TEXT(""), TEXT("Патронов в магазине"), TEXT("") },
+		{ TEXT("Pawn.Guns.RecoilAttackSeconds"), TEXT(""), TEXT("Отдача, нарастание"), TEXT("с") },
+		{ TEXT("Pawn.Guns.RecoilSettleFraction"), TEXT(""), TEXT("Отдача, доля возврата"), TEXT("") },
+		{ TEXT("Pawn.Guns.RecoilRecoverDegPerSec"), TEXT(""), TEXT("Отдача, скорость возврата"), TEXT("°/с") },
+		{ TEXT("Pawn.Guns.ViewKickReturnRate"), TEXT(""), TEXT("Возврат ствола в кадре"), TEXT("1/с") },
+		{ TEXT("Flyer.MassKg"), TEXT(""), TEXT("Масса"), TEXT("кг") },
+		{ TEXT("Flyer.CruiseSpeedCm"), TEXT(""), TEXT("Крейсерская"), TEXT("см/с") },
+		{ TEXT("Flyer.CircleSpeedCm"), TEXT(""), TEXT("Кружение"), TEXT("см/с") },
+		{ TEXT("Flyer.DiveSpeedCm"), TEXT(""), TEXT("Пике"), TEXT("см/с") },
+		{ TEXT("Flyer.WanderAccelCm"), TEXT(""), TEXT("Блуждание, разгон"), TEXT("см/с²") },
+		{ TEXT("Flyer.HuntAccelCm"), TEXT(""), TEXT("Охота, разгон"), TEXT("см/с²") },
+		{ TEXT("Flyer.DiveAccelScale"), TEXT(""), TEXT("Пике, разгон"), TEXT("×") },
+		{ TEXT("Flyer.SteerSeconds"), TEXT(""), TEXT("Поворот за"), TEXT("с") },
+		{ TEXT("Flyer.WanderArriveCm"), TEXT(""), TEXT("Блуждание, цель достигнута"), TEXT("см") },
+		{ TEXT("Flyer.WanderRetargetSeconds"), TEXT(""), TEXT("Блуждание, новая цель"), TEXT("с") },
+		{ TEXT("Flyer.WanderReachCm"), TEXT(""), TEXT("Блуждание, дальность цели"), TEXT("см") },
+		{ TEXT("Flyer.ShellClearanceCm"), TEXT(""), TEXT("Отступ от стенок"), TEXT("см") },
+		{ TEXT("Flyer.SwoopChance"), TEXT(""), TEXT("Доля бросков"), TEXT("") },
+		{ TEXT("Flyer.SwoopSpeedScale"), TEXT(""), TEXT("Бросок, скорость"), TEXT("×") },
+		{ TEXT("Flyer.WanderSpeedScale"), TEXT(""), TEXT("Блуждание, скорость"), TEXT("×") },
+		{ TEXT("Flyer.SentrySpeedScale"), TEXT(""), TEXT("Часовые, скорость"), TEXT("×") },
+		{ TEXT("Flyer.MaxWanderTurnDeg"), TEXT(""), TEXT("Блуждание, поворот"), TEXT("°") },
+		{ TEXT("Flyer.WanderBobCm"), TEXT(""), TEXT("Блуждание, покачивание"), TEXT("см/с") },
+		{ TEXT("Flyer.AvoidSeconds"), TEXT(""), TEXT("Обход, упреждение"), TEXT("с") },
+		{ TEXT("Flyer.AvoidRadiusCm"), TEXT(""), TEXT("Обход, радиус"), TEXT("см") },
+		{ TEXT("Flyer.AvoidExtraCm"), TEXT(""), TEXT("Обход, запас"), TEXT("см") },
+		{ TEXT("Flyer.SeparationCm"), TEXT(""), TEXT("Дистанция в стае"), TEXT("см") },
+		{ TEXT("Flyer.SeparationPushCm"), TEXT(""), TEXT("Расталкивание"), TEXT("см/с") },
+		{ TEXT("Flyer.SightRangeCm"), TEXT(""), TEXT("Дальность зрения"), TEXT("см") },
+		{ TEXT("Flyer.SightHalfAngleDeg"), TEXT(""), TEXT("Угол зрения"), TEXT("°") },
+		{ TEXT("Flyer.SenseSeconds"), TEXT(""), TEXT("Проверка зрения"), TEXT("с") },
+		{ TEXT("Flyer.LoseSightSeconds"), TEXT(""), TEXT("Потеря цели"), TEXT("с") },
+		{ TEXT("Flyer.CalmSeconds"), TEXT(""), TEXT("Успокоение"), TEXT("с") },
+		{ TEXT("Flyer.AimProvokeSeconds"), TEXT(""), TEXT("Злит прицел через"), TEXT("с") },
+		{ TEXT("Flyer.AimConeDeg"), TEXT(""), TEXT("Конус прицела"), TEXT("°") },
+		{ TEXT("Flyer.RejoinQuietSeconds"), TEXT(""), TEXT("Тишина до возврата"), TEXT("с") },
+		{ TEXT("Flyer.CircleRadiusCm"), TEXT(""), TEXT("Кружение, радиус"), TEXT("см") },
+		{ TEXT("Flyer.CircleTightRadiusCm"), TEXT(""), TEXT("Петля, радиус"), TEXT("см") },
+		{ TEXT("Flyer.CircleTightenSeconds"), TEXT(""), TEXT("Петля, за"), TEXT("с") },
+		{ TEXT("Flyer.CircleRadiusJitter"), TEXT(""), TEXT("Кружение, разброс радиуса"), TEXT("") },
+		{ TEXT("Flyer.CircleHeightCm"), TEXT(""), TEXT("Кружение, высота"), TEXT("см") },
+		{ TEXT("Flyer.CircleGain"), TEXT(""), TEXT("Кружение, притяжение"), TEXT("1/с") },
+		{ TEXT("Flyer.CircleBobCm"), TEXT(""), TEXT("Кружение, покачивание"), TEXT("см") },
+		{ TEXT("Flyer.CircleSeconds"), TEXT(""), TEXT("Кружение до атаки"), TEXT("с") },
+		{ TEXT("Flyer.CircleAgainSeconds"), TEXT(""), TEXT("Ещё круг"), TEXT("с") },
+		{ TEXT("Flyer.MaxDiveSeconds"), TEXT(""), TEXT("Пике, не дольше"), TEXT("с") },
+		{ TEXT("Flyer.DiveLeadSeconds"), TEXT(""), TEXT("Пике, упреждение"), TEXT("с") },
+		{ TEXT("Flyer.OvershootCm"), TEXT(""), TEXT("Пролёт мимо"), TEXT("см") },
+		{ TEXT("Flyer.RetreatSeconds"), TEXT(""), TEXT("Отход"), TEXT("с") },
+		{ TEXT("Flyer.RetreatSpeedScale"), TEXT(""), TEXT("Отход, скорость"), TEXT("×") },
+		{ TEXT("Flyer.RetreatClimb"), TEXT(""), TEXT("Отход, набор высоты"), TEXT("") },
+		{ TEXT("Flyer.FeintChance"), TEXT(""), TEXT("Доля ложных атак"), TEXT("") },
+		{ TEXT("Flyer.FeintMissCm"), TEXT(""), TEXT("Ложная атака, мимо на"), TEXT("см") },
+		{ TEXT("Flyer.FeintSpeedCm"), TEXT(""), TEXT("Ложная атака, скорость"), TEXT("см/с") },
+		{ TEXT("Flyer.BiteReachCm"), TEXT(""), TEXT("Укус, дальность"), TEXT("см") },
+		{ TEXT("Flyer.BiteDamage"), TEXT(""), TEXT("Укус, урон"), TEXT("") },
+		{ TEXT("Flyer.BiteImpulse"), TEXT(""), TEXT("Укус, толчок"), TEXT("кг·см/с") },
+		{ TEXT("Flyer.BiteBounceBackCm"), TEXT(""), TEXT("Отскок назад"), TEXT("см/с") },
+		{ TEXT("Flyer.BiteBounceUpCm"), TEXT(""), TEXT("Отскок вверх"), TEXT("см/с") },
+		{ TEXT("Flyer.MaxHealth"), TEXT(""), TEXT("Здоровье"), TEXT("") },
+		{ TEXT("Flyer.CorpseLinearDamping"), TEXT(""), TEXT("Труп, торможение"), TEXT("") },
+		{ TEXT("Flyer.CorpseAngularDamping"), TEXT(""), TEXT("Труп, вращение"), TEXT("") },
+		{ TEXT("Flyer.BiteShakeCm"), TEXT(""), TEXT("Укус, тряска камеры"), TEXT("см") },
+		{ TEXT("Flyer.BiteVisorBlood"), TEXT(""), TEXT("Укус, кровь на визоре"), TEXT("") },
+	};
+
+	/** The field table's name: "Weapon[Пистолет].KickPitchDeg" is looked up as "Weapon.KickPitchDeg". */
+	const FJamMenuName* MenuFieldOf(const FJamDebugParam& Param)
 	{
-		if (const FJamMenuName* Name = MenuNameOf(Param.Key))
+		if (!Param.Property)
+		{
+			return nullptr;
+		}
+		const FString Kind = Param.Owner.StartsWith(TEXT("Weapon[")) ? FString(TEXT("Weapon")) : Param.Owner;
+		const FString Key = Kind + TEXT(".") + Param.Property->GetName();
+		for (const FJamMenuName& Name : MenuFieldNames)
+		{
+			if (Key == Name.Key)
+			{
+				return &Name;
+			}
+		}
+		return nullptr;
+	}
+
+	/**
+	 * A readable name and unit. Pinned (the overlay, «Главное»): the pin table first («Пистолет» under «Отдача»).
+	 * Then the field table, then the editor's DisplayName, then the rule: the property name split into words, its unit
+	 * suffix turned into a unit (Deg -> °, Cm -> см, a speed or an acceleration in Cm -> см/с or см/с², CmS -> см/с,
+	 * Seconds -> с, Kg -> кг; Per1000 / Per10000 stay in the unit as "/1000").
+	 */
+	void MenuHumanName(const FJamDebugParam& Param, bool bPinned, FString& OutLabel, FString& OutUnit)
+	{
+		const FJamMenuName* Name = bPinned ? MenuNameOf(Param.Key) : nullptr;
+		Name = Name ? Name : MenuFieldOf(Param);
+		if (Name)
 		{
 			OutLabel = Name->Label;
 			OutUnit = Name->Unit;
@@ -600,40 +761,75 @@ namespace
 			return;
 		}
 #endif
-		OutLabel = FName::NameToDisplayString(Param.Property->GetName(), Param.Property->IsA<FBoolProperty>());
+		FString Words = Param.Property->GetName();
+		Words.RemoveFromStart(TEXT("b"), ESearchCase::CaseSensitive);
+		// "Per10000": a rate per so much of something - it stays in the unit, honestly.
+		FString Per;
+		const int32 PerAt = Words.Find(TEXT("Per"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+		if (PerAt != INDEX_NONE && Words.Len() > PerAt + 3 && FChar::IsDigit(Words[PerAt + 3]))
+		{
+			Per = TEXT("/") + Words.Mid(PerAt + 3);
+			Words.LeftInline(PerAt);
+		}
 		static const TPair<const TCHAR*, const TCHAR*> Suffixes[] = {
-			{ TEXT(" Cm S"), TEXT("см/с") }, { TEXT(" Cm"), TEXT("см") }, { TEXT(" Deg"), TEXT("°") }, { TEXT(" Seconds"), TEXT("с") },
-			{ TEXT(" Ms"), TEXT("мс") }, { TEXT(" Kg"), TEXT("кг") }, { TEXT(" Hz"), TEXT("Гц") },
+			{ TEXT("DegPerSec"), TEXT("°/с") }, { TEXT("CmS"), TEXT("см/с") }, { TEXT("Cm"), TEXT("см") }, { TEXT("Deg"), TEXT("°") },
+			{ TEXT("Seconds"), TEXT("с") }, { TEXT("Ms"), TEXT("мс") }, { TEXT("Kg"), TEXT("кг") }, { TEXT("Hz"), TEXT("Гц") },
 		};
 		for (const TPair<const TCHAR*, const TCHAR*>& Suffix : Suffixes)
 		{
-			if (OutLabel.EndsWith(Suffix.Key, ESearchCase::CaseSensitive))
+			if (Words.EndsWith(Suffix.Key, ESearchCase::CaseSensitive) && Words.Len() > FCString::Strlen(Suffix.Key))
 			{
-				OutLabel.LeftChopInline(FCString::Strlen(Suffix.Key));
+				Words.LeftChopInline(FCString::Strlen(Suffix.Key));
 				OutUnit = Suffix.Value;
+				// The project writes speeds and accelerations in "Cm" too.
+				if (OutUnit == TEXT("см") && Per.IsEmpty())
+				{
+					OutUnit = Words.EndsWith(TEXT("Accel")) ? TEXT("см/с²") : Words.EndsWith(TEXT("Speed")) ? TEXT("см/с") : OutUnit;
+				}
 				break;
 			}
 		}
+		OutUnit += Per;
+		OutLabel = FName::NameToDisplayString(Words, false);
 	}
 
-	// Category words of the groups in Russian ("Pawn · ZeroG|Arm" reads «Рука»), in the order the tabs list them: the
-	// most tuned first (arm, movement, view; a gun's recoil). Anything else keeps its word and goes after.
+	// Category words of the groups in Russian ("Pawn · ZeroG|Arm" reads «Рука»), every word the project uses, in the
+	// order the tabs list them: the most tuned first (arm, movement, view; a gun's recoil). Pawn components' names
+	// (Pawn.Oxygen) are looked up here too.
 	const TPair<const TCHAR*, const TCHAR*> MenuGroupWords[] = {
 		{ TEXT("Arm"), TEXT("Рука") }, { TEXT("Grab"), TEXT("Хват") }, { TEXT("Walk"), TEXT("Ходьба") }, { TEXT("Thrusters"), TEXT("Маневровые") },
-		{ TEXT("ZeroG"), TEXT("Невесомость") }, { TEXT("View"), TEXT("Взгляд") }, { TEXT("Hands"), TEXT("Руки") }, { TEXT("Push"), TEXT("Толчок") },
-		{ TEXT("Grapple"), TEXT("Кошка") }, { TEXT("Tether"), TEXT("Трос") }, { TEXT("Body"), TEXT("Тело") }, { TEXT("Crash"), TEXT("Удары") },
-		{ TEXT("Oxygen"), TEXT("Кислород") }, { TEXT("Vitals"), TEXT("Здоровье") }, { TEXT("Recoil"), TEXT("Отдача") }, { TEXT("Weapon"), TEXT("Ствол") },
-		{ TEXT("Action"), TEXT("Цикл") }, { TEXT("Reload"), TEXT("Перезарядка") }, { TEXT("Switch"), TEXT("Смена") }, { TEXT("SlideLock"), TEXT("Затворная задержка") },
-		{ TEXT("Pose"), TEXT("Поза") }, { TEXT("Parts"), TEXT("Детали") }, { TEXT("Tracer"), TEXT("Трассеры") }, { TEXT("Weapons"), TEXT("Стволы") },
-		{ TEXT("Scope"), TEXT("Прицел") }, { TEXT("Aim"), TEXT("Наведение") }, { TEXT("Sights"), TEXT("Мушка") }, { TEXT("Motion"), TEXT("Качание") },
-		{ TEXT("Hunt"), TEXT("Охота") }, { TEXT("Flight"), TEXT("Полёт") }, { TEXT("Flock"), TEXT("Стая") }, { TEXT("Hearing"), TEXT("Слух") },
-		{ TEXT("Hit"), TEXT("Попадания") }, { TEXT("Roost"), TEXT("Насест") }, { TEXT("Look"), TEXT("Вид") }, { TEXT("Ladder"), TEXT("Лестница") },
-		{ TEXT("Prediction"), TEXT("Прогноз") }, { TEXT("Input"), TEXT("Ввод") }, { TEXT("BulletTime"), TEXT("Замедление") }, { TEXT("Sound"), TEXT("Звук") },
-		{ TEXT("Strap"), TEXT("Стяжка") }, { TEXT("Welder"), TEXT("Сварка") }, { TEXT("Projector"), TEXT("Проектор") }, { TEXT("Ship"), TEXT("Корабль") },
-		{ TEXT("Jam"), TEXT("Общее") },
+		{ TEXT("ZeroG"), TEXT("Невесомость") }, { TEXT("View"), TEXT("Взгляд") }, { TEXT("Input"), TEXT("Ввод") }, { TEXT("Hands"), TEXT("Руки") },
+		{ TEXT("Push"), TEXT("Толчок") }, { TEXT("Grapple"), TEXT("Кошка") }, { TEXT("Tether"), TEXT("Трос") }, { TEXT("Body"), TEXT("Тело") },
+		{ TEXT("Crash"), TEXT("Удары") }, { TEXT("Oxygen"), TEXT("Кислород") }, { TEXT("Vitals"), TEXT("Здоровье") },
+		{ TEXT("Recoil"), TEXT("Отдача") }, { TEXT("Weapon"), TEXT("Ствол") }, { TEXT("Action"), TEXT("Цикл") }, { TEXT("Reload"), TEXT("Перезарядка") },
+		{ TEXT("Switch"), TEXT("Смена") }, { TEXT("SlideLock"), TEXT("Затворная задержка") }, { TEXT("Pose"), TEXT("Поза") }, { TEXT("Parts"), TEXT("Детали") },
+		{ TEXT("Tracer"), TEXT("Трассеры") }, { TEXT("Weapons"), TEXT("Стволы") }, { TEXT("Guns"), TEXT("Стволы") }, { TEXT("Fire"), TEXT("Огонь") },
+		{ TEXT("MuzzleFx"), TEXT("Вспышка") }, { TEXT("Scope"), TEXT("Прицел") }, { TEXT("Aim"), TEXT("Наведение") }, { TEXT("Sights"), TEXT("Мушка") },
+		{ TEXT("Motion"), TEXT("Качание") },
+		{ TEXT("Flight"), TEXT("Полёт") }, { TEXT("Hunt"), TEXT("Охота") }, { TEXT("Flock"), TEXT("Стая") }, { TEXT("Hearing"), TEXT("Слух") },
+		{ TEXT("Hit"), TEXT("Попадания") }, { TEXT("Flinch"), TEXT("Вздрагивание") }, { TEXT("Roost"), TEXT("Насест") }, { TEXT("Look"), TEXT("Вид") },
+		{ TEXT("Ladder"), TEXT("Лестница") }, { TEXT("Noise"), TEXT("Шум") },
+		{ TEXT("Interaction"), TEXT("Взаимодействие") }, { TEXT("Keyring"), TEXT("Ключи") }, { TEXT("Keys"), TEXT("Ключи") }, { TEXT("Key"), TEXT("Ключ") },
+		{ TEXT("Camera"), TEXT("Камера") }, { TEXT("Dust"), TEXT("Пыль") }, { TEXT("VisorBlood"), TEXT("Кровь на визоре") },
+		{ TEXT("HullTools"), TEXT("Инструменты ремонта") }, { TEXT("Strap"), TEXT("Стяжка") }, { TEXT("Welder"), TEXT("Сварка") }, { TEXT("Weld"), TEXT("Сварка") },
+		{ TEXT("WeldProjector"), TEXT("Проектор сварки") }, { TEXT("Projector"), TEXT("Проектор") }, { TEXT("Appear"), TEXT("Появление") },
+		{ TEXT("Dash"), TEXT("Пунктир") }, { TEXT("Plate"), TEXT("Лист") }, { TEXT("Text"), TEXT("Надпись") },
+		{ TEXT("Prediction"), TEXT("Прогноз") }, { TEXT("BulletTime"), TEXT("Замедление") }, { TEXT("Sound"), TEXT("Звук") }, { TEXT("Audio"), TEXT("Звук") },
+		{ TEXT("Volume"), TEXT("Громкость") }, { TEXT("Limiter"), TEXT("Лимитер") }, { TEXT("Feedback"), TEXT("Отклик") }, { TEXT("Visual"), TEXT("Вид") },
+		{ TEXT("Ship"), TEXT("Корабль") }, { TEXT("Walker"), TEXT("Пешеход") }, { TEXT("World"), TEXT("Мир") }, { TEXT("System"), TEXT("Система") },
+		{ TEXT("LivingWall"), TEXT("Живая стена") }, { TEXT("Regrow"), TEXT("Отрастание") }, { TEXT("Nerves"), TEXT("Нервы") }, { TEXT("Tear"), TEXT("Разрыв") },
+		{ TEXT("ThinSpots"), TEXT("Тонкие места") }, { TEXT("Squeeze"), TEXT("Сжатие") }, { TEXT("Rock"), TEXT("Камень") },
+		{ TEXT("Glass"), TEXT("Стекло") }, { TEXT("Debris"), TEXT("Обломки") }, { TEXT("Impact"), TEXT("Удар") }, { TEXT("HitZones"), TEXT("Зоны попадания") },
+		{ TEXT("HitZone"), TEXT("Зона попадания") }, { TEXT("Targets"), TEXT("Цели") }, { TEXT("Target"), TEXT("Мишень") }, { TEXT("Dummy"), TEXT("Манекен") },
+		{ TEXT("Collision"), TEXT("Коллизия") }, { TEXT("Shape"), TEXT("Форма") }, { TEXT("Prop"), TEXT("Предмет") }, { TEXT("Carry"), TEXT("Переноска") },
+		{ TEXT("Handle"), TEXT("Ручка") }, { TEXT("Pickup"), TEXT("Подбор") }, { TEXT("Dock"), TEXT("Док") }, { TEXT("Cart"), TEXT("Тележка") },
+		{ TEXT("Door"), TEXT("Дверь") }, { TEXT("Gate"), TEXT("Ворота") }, { TEXT("Lift"), TEXT("Лифт") }, { TEXT("Shelf"), TEXT("Полка") },
+		{ TEXT("Fastener"), TEXT("Крепёж") }, { TEXT("Appliance"), TEXT("Прибор") }, { TEXT("Access"), TEXT("Доступ") }, { TEXT("Lamp"), TEXT("Лампа") },
+		{ TEXT("Indicator"), TEXT("Индикатор") }, { TEXT("Light"), TEXT("Свет") }, { TEXT("Debug"), TEXT("Отладка") },
+		{ TEXT("Jam"), TEXT("Общее") }, { TEXT("MindKore"), TEXT("Общее") },
 	};
 
-	/** The group's last word: "Pawn · ZeroG|Arm" -> "Arm", "Flyer" -> "Flyer". */
+	/** The group's last word: "Pawn · ZeroG|Arm" -> "Arm", "Pawn.Oxygen" -> "Oxygen", "Flyer" -> "Flyer". */
 	FString MenuGroupWord(const FString& Group)
 	{
 		int32 At = INDEX_NONE;
@@ -643,7 +839,9 @@ namespace
 			return Group.Mid(At + 1);
 		}
 		const int32 Dot = Group.Find(TEXT(" · "), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
-		return Dot == INDEX_NONE ? Group : Group.Mid(Dot + 3);
+		FString Word = Dot == INDEX_NONE ? Group : Group.Mid(Dot + 3);
+		Word.RemoveFromStart(TEXT("Pawn."));
+		return Word;
 	}
 
 	int32 MenuGroupRank(const FString& Group)
@@ -659,11 +857,12 @@ namespace
 		return UE_ARRAY_COUNT(MenuGroupWords);
 	}
 
-	/** «Рука», «Пистолет · Отдача», «Насест Flyers_Belt · Стая», «Зона Gravity_Cabin». */
+	/** «Рука», «Пистолет · Отдача», «Насест Flyers_Belt · Стая», «Зона Gravity_Cabin», «Кислород». */
 	FString MenuGroupTitle(const FString& Group, const FString& Owner)
 	{
 		const FString Word = MenuGroupWord(Group);
-		FString Title = Word;
+		// A word the table lacks still reads as words, not as an identifier.
+		FString Title = FName::NameToDisplayString(Word, false);
 		for (const TPair<const TCHAR*, const TCHAR*>& Pair : MenuGroupWords)
 		{
 			if (Word == Pair.Key)
@@ -684,7 +883,7 @@ namespace
 		{
 			Who = TEXT("Зона ") + Owner.Mid(5).LeftChop(1);
 		}
-		else if (Owner == TEXT("World"))
+		else if (Owner == TEXT("World") && Group != Owner)
 		{
 			Who = TEXT("Мир");
 		}
@@ -692,11 +891,25 @@ namespace
 		{
 			Who = TEXT("Летун");
 		}
+		else if (Owner == TEXT("Pawn") && Group == Owner)
+		{
+			Who = TEXT("Пешка");
+		}
 		if (Who.IsEmpty() || Group == Owner)
 		{
 			return Who.IsEmpty() ? Title : Who;
 		}
 		return Who + TEXT(" · ") + Title;
+	}
+
+	/** A value as the rows show it: 90.000000 -> 90, True -> вкл. */
+	FString MenuValueText(const FString& Value)
+	{
+		if (Value == TEXT("True") || Value == TEXT("False"))
+		{
+			return Value == TEXT("True") ? TEXT("вкл") : TEXT("выкл");
+		}
+		return Value.IsNumeric() ? FString::Printf(TEXT("%g"), FCString::Atod(*Value)) : Value;
 	}
 
 	// --- small pieces --------------------------------------------------------------------------------------------
@@ -877,6 +1090,47 @@ void SJamDebugMenu::Construct(const FArguments& InArgs)
 	RebuildPinned();
 }
 
+float SJamDebugMenu::StatusAlpha() const
+{
+	const UJamDebugSubsystem* D = Debug.Get();
+	if (!D || StatusShown.IsEmpty())
+	{
+		return 0.0f;
+	}
+	// An error stays until the next message; the rest is a receipt: 4 s, then a second to fade.
+	return D->bStatusError ? 1.0f : FMath::Clamp(5.0f - float(FPlatformTime::Seconds() - StatusAt), 0.0f, 1.0f);
+}
+
+FString SJamDebugMenu::MenuStatusText(const FString& Status) const
+{
+	// "Pawn.ArmLengthCm = 90.000000 (было 70.000000)" (jam.Debug.Set / Get) reads «Длина руки → 90 см (было 70)».
+	FString Key, Rest;
+	const UJamDebugSubsystem* D = Debug.Get();
+	if (!D || !Status.Split(TEXT(" = "), &Key, &Rest) || Key.Contains(TEXT(" ")))
+	{
+		return Status;
+	}
+	TArray<FJamDebugParam> Params;
+	D->ListParams(Params);
+	const FJamDebugParam* Param = Params.FindByPredicate([&Key](const FJamDebugParam& Each) { return Each.Key == Key; });
+	if (!Param)
+	{
+		return Status;
+	}
+	FString Value = Rest, Was;
+	if (Rest.Split(TEXT(" (было "), &Value, &Was))
+	{
+		Was.RemoveFromEnd(TEXT(")"));
+	}
+	FString Label, Unit;
+	MenuHumanName(*Param, false, Label, Unit);
+	const auto WithUnit = [&Unit](const FString& Text)
+	{
+		return Unit == TEXT("×") ? TEXT("×") + MenuValueText(Text) : Unit.IsEmpty() ? MenuValueText(Text) : MenuValueText(Text) + TEXT(" ") + Unit;
+	};
+	return FString::Printf(TEXT("%s → %s%s"), *Label, *WithUnit(Value), Was.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" (было %s)"), *WithUnit(Was)));
+}
+
 float SJamDebugMenu::MenuScale() const
 {
 	return FMath::Max(1.0f, MenuMinScale / FMath::Max(ViewScale, 0.01f));
@@ -1021,22 +1275,23 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 						]
 					]
 				]
-				// The config's operations, then the edits': one quiet toolbar (the design's [Экспорт] [Импорт] [Сохранить] [Сбросить]).
-				+ SVerticalBox::Slot().AutoHeight().Padding(-4.0f, 5.0f, 0.0f, 0.0f)
+				// The config's operations at the left, the edits' at the right, a hairline between: one quiet toolbar
+				// that fits the frame (the design's [Экспорт] [Импорт] [Сохранить] [Сбросить]); tooltips say the rest.
+				+ SVerticalBox::Slot().AutoHeight().Padding(-4.0f, 5.0f, -4.0f, 0.0f)
 				[
 					SNew(SHorizontalBox)
 					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("Экспорт"), TEXT("в Saved/JamDebug/Presets и в буфер"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->ExportToFile(FString()); } })]
 					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("Импорт"), TEXT("из буфера"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->Import(TEXT("clipboard")); } })]
 					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("Сохранить"), TEXT("в ассет /Game/Jam/Debug/Presets (в сборке - экспорт)"), [this]() { FString Message; if (UJamDebugSubsystem* D = Debug.Get()) { D->SaveToAsset(FString(), Message); } })]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Fill).Padding(4.0f, 5.0f)
+					+ SHorizontalBox::Slot().FillWidth(1.0f).HAlign(HAlign_Center).VAlign(VAlign_Fill).Padding(0.0f, 5.0f)
 					[
 						SNew(SBox).WidthOverride(1.0f)[SNew(SImage).Image(MenuWhite()).ColorAndOpacity(MenuHair)]
 					]
-					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("Сбросить"), TEXT("всё"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->Reset(TEXT("all")); } },
+					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("Сброс"), TEXT("сбросить всё"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->Reset(TEXT("all")); } },
 						TAttribute<bool>::CreateLambda([this]() { const UJamDebugSubsystem* D = Debug.Get(); return D && D->GetChangedCount() > 0; }))]
-					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("Отменить"), TEXT("Ctrl+Z"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->Undo(); } },
+					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("Отмена"), TEXT("отменить, Ctrl+Z"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->Undo(); } },
 						TAttribute<bool>::CreateLambda([this]() { const UJamDebugSubsystem* D = Debug.Get(); return D && D->CanUndo(); }))]
-					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("Повторить"), TEXT("Ctrl+Y"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->Redo(); } },
+					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("Повтор"), TEXT("повторить, Ctrl+Y"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->Redo(); } },
 						TAttribute<bool>::CreateLambda([this]() { const UJamDebugSubsystem* D = Debug.Get(); return D && D->CanRedo(); }))]
 				]
 				// The last action's result; an import's skipped keys under it.
@@ -1045,9 +1300,13 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 					SNew(STextBlock)
 					.Font(MenuFont())
 					.AutoWrapText(true)
-					.Visibility_Lambda([this]() { const UJamDebugSubsystem* D = Debug.Get(); return D && !D->Status.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed; })
-					.ColorAndOpacity_Lambda([this]() { const UJamDebugSubsystem* D = Debug.Get(); return FSlateColor(D && D->bStatusError ? MenuError : MenuDim); })
-					.Text_Lambda([this]() { const UJamDebugSubsystem* D = Debug.Get(); return MenuText_(D ? D->Status : FString()); })
+					.Visibility_Lambda([this]() { return StatusAlpha() > 0.0f ? EVisibility::Visible : EVisibility::Collapsed; })
+					.ColorAndOpacity_Lambda([this]()
+					{
+						const UJamDebugSubsystem* D = Debug.Get();
+						return FSlateColor((D && D->bStatusError ? MenuError : MenuDim).CopyWithNewOpacity(StatusAlpha()));
+					})
+					.Text_Lambda([this]() { return MenuText_(StatusShown); })
 				]
 				+ SVerticalBox::Slot().AutoHeight()
 				[
@@ -1434,7 +1693,7 @@ TSharedRef<SWidget> SJamDebugMenu::MakeKeyLine(const FString& Key, const FString
 	return SNew(STextBlock).Font(MenuFont()).ColorAndOpacity(MenuError).Text(MenuText_(TEXT("нет параметра ") + Key));
 }
 
-TSharedRef<SWidget> SJamDebugMenu::MakeParamLine(const FJamDebugParam& Param, const FString& Label)
+TSharedRef<SWidget> SJamDebugMenu::MakeParamLine(const FJamDebugParam& Param, const FString& Label, const FString& InUnit)
 {
 	const FJamMenuLook& Look = FJamMenuLook::Get();
 	const FString Key = Param.Key;
@@ -1528,21 +1787,33 @@ TSharedRef<SWidget> SJamDebugMenu::MakeParamLine(const FJamDebugParam& Param, co
 		Tip += FString::Printf(TEXT("\n[%s .. %s]"), Param.Min.IsSet() ? *FString::SanitizeFloat(Param.Min.GetValue()) : TEXT(""),
 			Param.Max.IsSet() ? *FString::SanitizeFloat(Param.Max.GetValue()) : TEXT(""));
 	}
-	FString Unit = Param.Units;
-	if (const FJamMenuName* Name = MenuNameOf(Key))
-	{
-		Unit = Name->Unit;
-	}
+	const FString Unit = InUnit.IsEmpty() ? Param.Units : InUnit;
+	const FText Highlight = MenuText_(Search);
 	return SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
 		[
-			SNew(STextBlock)
-			.Font(MenuFont())
-			.Text(MenuText_(Label))
-			.ToolTipText(MenuText_(Tip))
-			.HighlightText_Lambda([this]() { return MenuText_(Search); })
-			.HighlightShape(&FJamMenuLook::Get().Highlight).HighlightColor(MenuCore)
-			.ColorAndOpacity_Lambda([Weak, Key]() { return FSlateColor(Weak.IsValid() && Weak->IsChanged(Key) ? MenuChanged : MenuText); })
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(STextBlock)
+				.Font(MenuFont())
+				.Text(MenuText_(Label))
+				.ToolTipText(MenuText_(Tip))
+				.HighlightText(Highlight)
+				.HighlightShape(&FJamMenuLook::Get().Highlight).HighlightColor(MenuCore)
+				.ColorAndOpacity_Lambda([Weak, Key]() { return FSlateColor(Weak.IsValid() && Weak->IsChanged(Key) ? MenuChanged : MenuText); })
+			]
+			// A search also matches keys: the property name (the key without its owner, which heads the group), muted, under the name.
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(STextBlock)
+				.Visibility(Search.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+				.Font(MenuFont(TypeCaption))
+				.ColorAndOpacity(MenuDim)
+				.Text(MenuText_(Param.Property ? Param.Property->GetName() : Key))
+				.HighlightText(Highlight)
+				.HighlightShape(&FJamMenuLook::Get().Highlight).HighlightColor(MenuCore)
+			]
 		]
 		+ SHorizontalBox::Slot().FillWidth(0.4f).VAlign(VAlign_Center)
 		[
@@ -1551,7 +1822,7 @@ TSharedRef<SWidget> SJamDebugMenu::MakeParamLine(const FJamDebugParam& Param, co
 		// Units at the body size: label, value and unit share one baseline.
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(4.0f, 0.0f, 0.0f, 0.0f)
 		[
-			SNew(SBox).WidthOverride(46.0f)
+			SNew(SBox).WidthOverride(56.0f)
 			[
 				SNew(STextBlock).Font(MenuFont()).ColorAndOpacity(MenuDim).Text(MenuText_(Unit))
 			]
@@ -1714,7 +1985,7 @@ TSharedRef<ITableRow> SJamDebugMenu::MakeRow(TSharedPtr<FJamDebugRow> Row, const
 		.Style(&Look.Row)
 		.Padding(FMargin(bInGroup ? 14.0f : 0.0f, 2.0f, 6.0f, 2.0f))
 		[
-			MakeParamLine(Row->Param, Row->Label)
+			MakeParamLine(Row->Param, Row->Label, Row->Unit)
 		];
 }
 
@@ -1751,14 +2022,14 @@ void SJamDebugMenu::Rebuild()
 		const auto Label = [](const FJamDebugParam& Param)
 		{
 			FString Name, Unit;
-			MenuHumanName(Param, Name, Unit);
-			return MenuNameOf(Param.Key) ? Name : Param.Property->GetName();
+			MenuHumanName(Param, false, Name, Unit);
+			return Name;
 		};
-		const auto Add = [this](const FJamDebugParam& Param, const FString& Text)
+		const auto Add = [this](const FJamDebugParam& Param, bool bPinned)
 		{
 			const TSharedPtr<FJamDebugRow> Row = MakeShared<FJamDebugRow>();
 			Row->Param = Param;
-			Row->Label = Text;
+			MenuHumanName(Param, bPinned, Row->Label, Row->Unit);
 			Rows.Add(Row);
 		};
 		if (Search.IsEmpty() && Tab == TEXT("Главное"))
@@ -1785,9 +2056,7 @@ void SJamDebugMenu::Rebuild()
 					Header->Header = Section;
 					Rows.Add(Header);
 				}
-				FString Name, Unit;
-				MenuHumanName(*Param, Name, Unit);
-				Add(*Param, Name);
+				Add(*Param, true);
 			}
 		}
 		else
@@ -1848,7 +2117,7 @@ void SJamDebugMenu::Rebuild()
 					Algo::StableSortBy(Group.Params, [](const FJamDebugParam* Param) { return Param->Property->GetName().Contains(TEXT("Recoil")) ? 0 : 1; });
 					for (const FJamDebugParam* Param : Group.Params)
 					{
-						Add(*Param, Label(*Param));
+						Add(*Param, false);
 					}
 				}
 			}
@@ -2028,7 +2297,7 @@ void SJamDebugMenu::RebuildPinned()
 			];
 		}
 		FString Label, Unit;
-		MenuHumanName(Param, Label, Unit);
+		MenuHumanName(Param, true, Label, Unit);
 		const bool bTimes = Unit == TEXT("×");
 		const auto Changed = [Weak, Key]() { return Weak.IsValid() && Weak->IsChanged(Key); };
 		PinnedBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
@@ -2124,6 +2393,12 @@ void SJamDebugMenu::Tick(const FGeometry& AllottedGeometry, const double InCurre
 	if (DebugMenu->GetPins() != PinnedShown)
 	{
 		RebuildPinned();
+	}
+	if (DebugMenu->Status != StatusSeen)
+	{
+		StatusSeen = DebugMenu->Status;
+		StatusShown = MenuStatusText(StatusSeen);
+		StatusAt = FPlatformTime::Seconds();
 	}
 	// The sticky header: the last group header at or above the top row, once it has scrolled off.
 	if (List.IsValid() && StickyBox.IsValid())
