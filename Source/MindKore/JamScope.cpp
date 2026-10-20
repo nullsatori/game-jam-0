@@ -96,7 +96,7 @@ float UJamScopeComponent::GetCaptureFieldOfView() const
 	// The eyepiece's half-angle as drawn: atan(R / relief) in the gun's own field
 	// of view, carried into the world's - tan scales by tan(world/2) / tan(gun/2).
 	// The picture in it spans Magnification times less of the world.
-	const float WorldTan = FMath::Tan(FMath::DegreesToRadians(WorldFieldOfView * 0.5f));
+	const float WorldTan = FMath::Tan(FMath::DegreesToRadians(Camera->FieldOfView * 0.5f));
 	const FJamGunAim& Aim = Aims[ScopedWeapon];
 	const float GunTan = FMath::Tan(FMath::DegreesToRadians(Aim.GunFieldOfView * 0.5f));
 	const float LensTan = LensRadiusCm / Aim.EyeCm * WorldTan / GunTan;
@@ -217,8 +217,6 @@ bool UJamScopeComponent::Build()
 	{
 		return false;
 	}
-	// The bodycam's field, as the pawn set it on BeginPlay (JamApplyBodycamLens).
-	WorldFieldOfView = Camera->FieldOfView;
 	// The weapons component ticks first: it poses the gun with the last tick's
 	// alpha (AimPose), and the lens then reads the gun where it is drawn this frame.
 	AddTickPrerequisiteComponent(Weapons);
@@ -386,10 +384,16 @@ void UJamScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		Dot->SetVisibility(bDotsInView);
 	}
 	Capture->bCaptureEveryFrame = bScopeInView && Alpha > 0.01f; // not for a draw's overshoot toward the eye
+	if (Capture->bCaptureEveryFrame)
+	{
+		// The bodycam's field and the gun's aim are live (the debug menu edits them): the eyepiece follows.
+		Capture->FOVAngle = GetCaptureFieldOfView();
+	}
 	if (Alpha > 0.0f || WasAlpha > 0.0f)
 	{
 		// The world keeps the bodycam's field (owner: no zoom outside the scope);
 		// only the gun narrows its own, coming up large to the eye.
+		const float WorldFieldOfView = Camera->FieldOfView;
 		Camera->SetEnableFirstPersonFieldOfView(Alpha > 0.0f);
 		Camera->SetFirstPersonFieldOfView(FMath::Lerp(WorldFieldOfView, Aims.IsValidIndex(MotionWeapon) ? Aims[MotionWeapon].GunFieldOfView : WorldFieldOfView, Alpha));
 	}

@@ -1907,6 +1907,12 @@ void AJamZeroGPawn::Tick(float DeltaSeconds)
 		? FMath::VRand() * ShakeAmplitude * (ShakeRemaining / FMath::Max(ShakeSeconds, 0.01f))
 		: FVector::ZeroVector;
 	Camera->SetRelativeLocation(Body->GetComponentTransform().InverseTransformVectorNoScale(EyeShownOffset + Shake));
+	// The bodycam's field follows CameraFOV live (the debug menu edits it). The pawn is its only writer; the
+	// scope narrows only the gun's own first-person field and reads this one from the camera.
+	if (Camera->FieldOfView != CameraFOV)
+	{
+		Camera->SetFieldOfView(CameraFOV);
+	}
 	RefreshGrabCandidate();
 	// The hand: on the hold (Hang) or on a held loose body (in any mode).
 	UpdateArm(DeltaSeconds);

@@ -303,6 +303,4 @@ private:
 	/** The view's turn last tick, and the gun's lag behind it (pitch, yaw, roll, degrees) this tick. */
 	FQuat LastView = FQuat::Identity;
 	FVector LookLagTurn = FVector::ZeroVector;
-	/** The camera's (world's) field of view when the scope was built. */
-	float WorldFieldOfView = 134.0f;
 };

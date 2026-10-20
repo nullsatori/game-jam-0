@@ -2,6 +2,7 @@
 // on Lvl_Jam_Ship (everything) and Lvl_Jam_ZeroG (no gravity zones: that part says SKIP).
 // Every check is one line "Debug probe [<name>]: PASS|FAIL ..."; the last line is "Debug probe: done".
 
+#include "Camera/CameraComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/SphereComponent.h"
 #include "Engine/StaticMesh.h"
@@ -427,7 +428,23 @@ namespace
 		Debug->Reset(TEXT("all"));
 		DebugProbeCompareDefaults(TEXT("class defaults untouched after edits and reset"));
 
-		DebugProbeAfter(World, 0.2f, [World]() { DebugProbeGravity(World); });
+		// A live edit reaches what reads it: the camera follows the pawn's CameraFOV on its next tick (it was set once on BeginPlay).
+		const float FovOriginal = Pawn->CameraFOV;
+		Debug->SetValue(TEXT("Pawn.CameraFOV"), TEXT("100"));
+		DebugProbeAfter(World, 0.1f, [World, FovOriginal]()
+		{
+			UJamDebugSubsystem* Debug = UJamDebugSubsystem::Get(World);
+			AJamZeroGPawn* Pawn = DebugProbePawn(World);
+			const float Edited = Pawn->Camera->FieldOfView;
+			Debug->Reset(TEXT("Pawn.CameraFOV"));
+			DebugProbeAfter(World, 0.1f, [World, Edited, FovOriginal]()
+			{
+				const float Back = DebugProbePawn(World)->Camera->FieldOfView;
+				DebugProbeCheck(TEXT("camera FOV live"), Edited == 100.0f && Back == FovOriginal,
+					FString::Printf(TEXT("edited %.1f, after reset %.1f (was %.1f)"), Edited, Back, FovOriginal));
+				DebugProbeGravity(World);
+			});
+		});
 	}
 
 	FAutoConsoleCommandWithWorld GJamDebugProbe(TEXT("jam.Debug.Probe"),
