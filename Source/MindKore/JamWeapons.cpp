@@ -21,6 +21,8 @@
 #include "MKImpactDelivery.h"
 #include "MindKore.h"
 #include "Sound/SoundBase.h"
+#include "Sound/SoundEffectSource.h"
+#include "Sound/SoundSubmix.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -118,6 +120,15 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	static ConstructorHelpers::FObjectFinder<USoundBase> SniperMagOut(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_MagOut_SV98.SW_Jam_MagOut_SV98"));
 	static ConstructorHelpers::FObjectFinder<USoundBase> SniperMagIn(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_MagIn_SV98.SW_Jam_MagIn_SV98"));
 	static ConstructorHelpers::FObjectFinder<USoundBase> ShotgunShell(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_Shell_Shotgun.SW_Jam_Shell_Shotgun"));
+	// In air (Docs/RecoilWeapons-Sound.md, «В воздухе»): each shot's crack (Scripts/jam_air_sounds.py), the cabin's
+	// short metal room and the mechanisms' lift of the highs (Scripts/jam_air_audio.py).
+	static ConstructorHelpers::FObjectFinder<USoundBase> PistolAir(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_ShotAir_Pistol.SW_Jam_ShotAir_Pistol"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> ShotgunAir(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_ShotAir_Shotgun.SW_Jam_ShotAir_Shotgun"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> SniperAir(TEXT("/Game/JamArt/Audio/Weapons/SW_Jam_ShotAir_SV98.SW_Jam_ShotAir_SV98"));
+	static ConstructorHelpers::FObjectFinder<USoundSubmixBase> CabinReverb(TEXT("/Game/JamArt/Audio/Mix/SM_Jam_CabinReverb.SM_Jam_CabinReverb"));
+	static ConstructorHelpers::FObjectFinder<USoundEffectSourcePresetChain> GunAirLift(TEXT("/Game/JamArt/Audio/Mix/SEC_Jam_GunAirLift.SEC_Jam_GunAirLift"));
+	AirReverb = CabinReverb.Object;
+	AirLift = GunAirLift.Object;
 	FJamWeapon Pistol;
 	Pistol.Name = NSLOCTEXT("JamZeroG", "Pistol", "Пистолет");
 	Pistol.Damage = 25.0f;
@@ -129,6 +140,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Pistol.RecoilImpulse = 4000.0f;
 	Pistol.HitImpulse = 3000.0f;
 	Pistol.ShotSound = PistolShot.Object;
+	Pistol.ShotAirSound = PistolAir.Object;
 	Pistol.EmptySound = PistolEmpty.Object;
 	Pistol.HammerSound = PistolHammer.Object;
 	Pistol.MagOutSound = PistolMagOut.Object;
@@ -164,6 +176,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Shotgun.HitImpulse = 4000.0f;
 	Shotgun.RangeCm = 3000.0f;
 	Shotgun.ShotSound = ShotgunShot.Object;
+	Shotgun.ShotAirSound = ShotgunAir.Object;
 	Shotgun.CycleSound = ShotgunPump.Object;
 	Shotgun.CycleDelaySeconds = 0.15f; // the pump's clicks at 0.26 and 0.40 s after the shot, as its animation
 	Shotgun.EmptySound = ShotgunEmpty.Object;
@@ -205,6 +218,7 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Sniper.HitImpulse = 60000.0f;
 	Sniper.RangeCm = 15000.0f;
 	Sniper.ShotSound = SniperShot.Object;
+	Sniper.ShotAirSound = SniperAir.Object;
 	Sniper.CycleSound = SniperBolt.Object;
 	Sniper.CycleDelaySeconds = 0.25f; // the bolt's clicks at 0.35, 0.63, 0.87, 1.09 s after the shot
 	Sniper.EmptySound = SniperEmpty.Object;
@@ -647,7 +661,7 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s is empty"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString());
 		// The dry click, once per interval while the trigger is held (no reserve: no reload to stop it); the
 		// reload starts first, the cycle being through, so it does not wait out the click's interval.
-		UGameplayStatics::PlaySound2D(this, Weapon->EmptySound);
+		PlayGunSound(Weapon->EmptySound);
 		Reload();
 		Weapon->FireReadySince = Weapon->SinceShot + Weapon->FireInterval;
 		return false;
@@ -670,7 +684,7 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	Weapon->SinceShot = 0.0f;
 	Weapon->PrevSinceShot = -KINDA_SMALL_NUMBER; // a new shot: its case, hammer and cycle sound (UpdatePartEvents)
 	// A slight pitch spread so a held trigger does not repeat one sample.
-	UGameplayStatics::PlaySound2D(this, Weapon->ShotSound, 1.0f, FMath::FRandRange(0.97f, 1.03f));
+	PlayShotSound(*Weapon, FMath::FRandRange(0.97f, 1.03f));
 	const FTransform MuzzleTransform = GetMuzzleTransform();
 	const FVector Muzzle = MuzzleTransform.GetLocation();
 	AJamFlyerHabitat::ReportNoise(this, Muzzle, nullptr, TEXT("a shot")); // flyers hear it only through air

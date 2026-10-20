@@ -46,6 +46,9 @@ public class MindKore : ModuleRules
 			"ApplicationCore",
 			"Json",
 			"AssetRegistry",
+			// The cabin's convolution reverb: UJamAudioTools fills its impulse response asset (the plugin
+			// is enabled by default in UE 5.8, so it needs no .uproject entry).
+			"Synthesis",
 		});
 	}
 }

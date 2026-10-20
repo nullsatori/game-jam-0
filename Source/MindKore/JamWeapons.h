@@ -11,6 +11,8 @@ class UJamScopeComponent;
 class UMaterialInterface;
 class UMKImpactDataAsset;
 class USoundBase;
+class USoundEffectSourcePresetChain;
+class USoundSubmixBase;
 class UStaticMesh;
 class UStaticMeshComponent;
 
@@ -481,6 +483,13 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
 	TObjectPtr<USoundBase> ShotSound = nullptr;
 
+	/**
+	 * In air only (UJamWeaponsComponent::PlayShotSound), over ShotSound at its pitch: the crack the suit cuts -
+	 * the donor's first milliseconds with their highs (Scripts/jam_air_sounds.py).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
+	TObjectPtr<USoundBase> ShotAirSound = nullptr;
+
 	/** The pump or bolt cycling after a shot, 2D, CycleDelaySeconds after it; none: no cycle (the pistol). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
 	TObjectPtr<USoundBase> CycleSound = nullptr;
@@ -557,6 +566,20 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons")
 	TObjectPtr<UMKImpactDataAsset> ImpactData = nullptr;
+
+	/**
+	 * Air (Docs/RecoilWeapons-Sound.md, «В воздухе»): while the owner breathes (IsInAir) every gun sound is also sent
+	 * here at AirReverbSend - SM_Jam_CabinReverb, a short metal room. A sound keeps the medium it started in.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Air")
+	TObjectPtr<USoundSubmixBase> AirReverb = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Air", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float AirReverbSend = 0.3f;
+
+	/** In air every sound but the shot (mechanisms, magazines, the slide stop, holster and sling) plays through this: a light lift of the highs. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Air")
+	TObjectPtr<USoundEffectSourcePresetChain> AirLift = nullptr;
 
 	/** The tracer: this mesh (the engine sphere) stretched along the flight, in this material (MindKore's M_MK_Tracer). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Tracer")
@@ -730,6 +753,16 @@ public:
 	/** Cycle sounds (pump, bolt) played since play began (probes). */
 	int32 GetCycleSounds() const { return CycleSoundsPlayed; }
 
+	/**
+	 * The one place the guns read the medium: the owner breathes (UJamOxygenComponent::IsBreathable, which the game
+	 * mode sets each tick from JamAirZoneAt - the flyers read the same). No oxygen component: vacuum.
+	 */
+	bool IsInAir() const;
+
+	/** Gun sounds started since play began in air / in vacuum, a shot's crack included (probes). */
+	int32 GetSoundsInAir() const { return SoundsInAir; }
+	int32 GetSoundsInVacuum() const { return SoundsInVacuum; }
+
 
 	/** Seconds left of a reload; 0 when not reloading. */
 	float GetReloadRemaining() const;
@@ -853,6 +886,17 @@ private:
 	 * skip its click), mid-way when a frozen cycle picks up again.
 	 */
 	void PlayMechanismSound(FJamWeapon& Gun, USoundBase* Sound, float Into);
+	/**
+	 * Every gun sound but the shot starts here, 2D: in air with the lift (AirLift) and the room's send. Null
+	 * Sound: nothing. The medium is read once, at the start, and kept for the sound's whole length.
+	 */
+	UAudioComponent* PlayGunSound(USoundBase* Sound, float Volume = 1.0f, float Pitch = 1.0f, float StartSeconds = 0.0f);
+	/** The shot: ShotSound as it is; in air ShotAirSound over it at the same pitch, both into the room. */
+	void PlayShotSound(const FJamWeapon& Weapon, float Pitch);
+	/** Starts one sound 2D in the medium given (no send or lift in vacuum), counted. */
+	UAudioComponent* StartGunSound(USoundBase* Sound, float Volume, float Pitch, float StartSeconds, bool bAir, bool bLift);
+	int32 SoundsInAir = 0;
+	int32 SoundsInVacuum = 0;
 
 	double ReloadEndSeconds = 0.0;
 	/** R pressed during the shot's cycle: the reload starts when it is through (a shot or a switch drops it). */

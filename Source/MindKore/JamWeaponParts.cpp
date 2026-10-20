@@ -20,6 +20,7 @@
 #include "InputAction.h"
 #include "JamFlyer.h"
 #include "JamHullTools.h"
+#include "JamOxygen.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/FileHelper.h"
@@ -29,6 +30,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "MindKore.h"
 #include "Sound/SoundBase.h"
+#include "Sound/SoundEffectSource.h"
+#include "Sound/SoundSubmix.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -812,7 +815,7 @@ const FJamWeapon* UJamWeaponsComponent::UpdateSwitch(float DeltaTime, bool bHand
 	{
 		if (Sound)
 		{
-			UGameplayStatics::PlaySound2D(this, Sound, FMath::FRandRange(0.85f, 1.0f), FMath::FRandRange(0.95f, 1.05f));
+			PlayGunSound(Sound, FMath::FRandRange(0.85f, 1.0f), FMath::FRandRange(0.95f, 1.05f));
 			UE_LOG(LogMindKore, Log, TEXT("Weapon %s: switch sound %s"), *GetNameSafe(GetOwner()), *Sound->GetName());
 		}
 	};
@@ -946,9 +949,51 @@ void UJamWeaponsComponent::UpdateParts(const FJamWeapon* Weapon, float SinceShot
 	SetPart(ShellInView, Weapon->ShellMesh, bShell);
 }
 
+bool UJamWeaponsComponent::IsInAir() const
+{
+	const UJamOxygenComponent* Oxygen = GetOwner() ? GetOwner()->FindComponentByClass<UJamOxygenComponent>() : nullptr;
+	return Oxygen && Oxygen->IsBreathable();
+}
+
+UAudioComponent* UJamWeaponsComponent::StartGunSound(USoundBase* Sound, float Volume, float Pitch, float StartSeconds, bool bAir, bool bLift)
+{
+	UAudioComponent* Audio = Sound ? UGameplayStatics::CreateSound2D(this, Sound, Volume, Pitch) : nullptr;
+	if (!Audio)
+	{
+		return nullptr;
+	}
+	if (bAir && AirReverb)
+	{
+		Audio->SetSubmixSend(AirReverb, AirReverbSend);
+	}
+	if (bAir && bLift && AirLift)
+	{
+		Audio->SetSourceEffectChain(AirLift);
+	}
+	Audio->Play(StartSeconds);
+	++(bAir ? SoundsInAir : SoundsInVacuum);
+	return Audio;
+}
+
+UAudioComponent* UJamWeaponsComponent::PlayGunSound(USoundBase* Sound, float Volume, float Pitch, float StartSeconds)
+{
+	return StartGunSound(Sound, Volume, Pitch, StartSeconds, IsInAir(), /*bLift=*/true);
+}
+
+void UJamWeaponsComponent::PlayShotSound(const FJamWeapon& Weapon, float Pitch)
+{
+	// A tail already playing keeps its medium: the room's tail is ~0.5 s, and no one crosses the airlock (two doors) that fast.
+	const bool bAir = IsInAir();
+	StartGunSound(Weapon.ShotSound, 1.0f, Pitch, 0.0f, bAir, /*bLift=*/false);
+	if (bAir)
+	{
+		StartGunSound(Weapon.ShotAirSound, 1.0f, Pitch, 0.0f, bAir, /*bLift=*/false);
+	}
+}
+
 void UJamWeaponsComponent::PlayMechanismSound(FJamWeapon& Gun, USoundBase* Sound, float Into)
 {
-	Gun.MechanismSound = UGameplayStatics::SpawnSound2D(this, Sound, 1.0f, 1.0f, Into);
+	Gun.MechanismSound = PlayGunSound(Sound, 1.0f, 1.0f, Into);
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s %s from %.3f s"), *GetNameSafe(GetOwner()), Sound == Gun.CycleSound ? TEXT("cycle") : TEXT("sound"),
 		*Sound->GetName(), Into);
 }
@@ -1016,7 +1061,7 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 	{
 		if (Sound)
 		{
-			UGameplayStatics::PlaySound2D(this, Sound);
+			PlayGunSound(Sound);
 			UE_LOG(LogMindKore, Log, TEXT("Weapon %s: sound %s"), *GetNameSafe(GetOwner()), *Sound->GetName());
 		}
 	};
@@ -1076,7 +1121,7 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 		}
 		if (Weapon.SlideHomeSound && Crossed(PrevReloadTime, Time, Weapon.SlideHomeSoundSeconds))
 		{
-			UGameplayStatics::PlaySound2D(this, Weapon.SlideHomeSound, 1.0f, Weapon.SlideHomeSoundPitch);
+			PlayGunSound(Weapon.SlideHomeSound, 1.0f, Weapon.SlideHomeSoundPitch);
 			UE_LOG(LogMindKore, Log, TEXT("Weapon %s: sound %s at pitch %.2f (the slide home)"), *GetNameSafe(GetOwner()), *Weapon.SlideHomeSound->GetName(),
 				Weapon.SlideHomeSoundPitch);
 		}
