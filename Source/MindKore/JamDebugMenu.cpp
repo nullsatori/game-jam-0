@@ -16,6 +16,10 @@
 #include "Misc/App.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Fonts/FontMeasure.h"
+#include "Internationalization/FastDecimalFormat.h"
+#include "Rendering/SlateRenderer.h"
+#include "Widgets/Input/NumericTypeInterface.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/SlateTypes.h"
@@ -64,8 +68,21 @@ namespace
 	constexpr float MenuToolLinesMinPx = 900.0f;
 	constexpr float MenuLeftPx = 16.0f;
 	// The engine's DPI curve gives 0.67 at 720p: the panel's text was 9 px there (KNOWN_ISSUES B6). The menu never
-	// goes under 1: its small type keeps its pixel size at 720p and grows with the curve above 1080p.
+	// goes under 1: its small type keeps its pixel size at 720p and grows with the curve above 1080p, in quarter steps
+	// (1, 1.25, 1.5...) so that the 4-unit grid below stays on whole pixels.
 	constexpr float MenuMinScale = 1.0f;
+
+	// The vertical rhythm (Docs/DebugMenu.md, «Оформление»): every line box, row and gap is a whole number of 4-unit
+	// steps; text sits on a baseline a fixed distance above its box's bottom, whatever its size.
+	constexpr float GridRow = 24.0f;      // a parameter, a chip row, the search, the toolbar, a button row
+	constexpr float GridRowTwo = 36.0f;   // a search result: the name and the property under it
+	constexpr float GridLine = 16.0f;     // a line of body text, wrapped ones too; the overlay's rows
+	constexpr float GridCaption = 12.0f;  // a line of caption text
+	constexpr float GridHeader = 24.0f;   // the header line
+	constexpr float GridTab = 28.0f;      // the tab bar, its underline at the bottom
+	constexpr float GridSection = 24.0f;  // a section label with its hairline
+	constexpr float GridGroup = 32.0f;    // a group header with its hairline
+	constexpr float GridBaseline = 8.0f;  // the header's and the group's baseline above the box's bottom
 
 	// «Главное» is the landing view: the quick system controls and the pinned parameters («Закреплено» is its old name).
 	const TArray<FString> MenuTabs = { TEXT("Главное"), TEXT("Система"), TEXT("Мир"), TEXT("Игрок"), TEXT("Оружие"), TEXT("Враги"), TEXT("Пресеты") };
@@ -86,8 +103,69 @@ namespace
 		Font.LetterSpacing = 200;
 		return Font;
 	}
+	/**
+	 * How far under Font's baseline its line box ends, in layout units: text of different sizes in one row shares a
+	 * baseline when the smaller one is lifted by the difference. Measured at x100 so the font's own rounding does not show.
+	 */
+	float MenuDescent(const FSlateFontInfo& Font)
+	{
+		if (!FSlateApplication::IsInitialized())
+		{
+			return 0.0f;
+		}
+		return -float(FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->GetBaseline(Font, 100.0f)) / 100.0f;
+	}
+
+	/** Line height for wrapped text in Font: exactly Units a line (a percentage of the font's own line height). */
+	float MenuLineHeight(const FSlateFontInfo& Font, float Units)
+	{
+		if (!FSlateApplication::IsInitialized())
+		{
+			return 1.0f;
+		}
+		const float Own = float(FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->GetMaxCharacterHeight(Font, 100.0f)) / 100.0f;
+		return Own > 0.0f ? Units / Own : 1.0f;
+	}
+
+	/** Text in a line box Height units tall, its baseline Baseline units above the box's bottom. */
+	TSharedRef<SWidget> MenuOnLine(float Height, float Baseline, const FSlateFontInfo& Font, const TSharedRef<SWidget>& Text)
+	{
+		return SNew(SBox).HeightOverride(Height).VAlign(VAlign_Bottom).Padding(FMargin(0.0f, 0.0f, 0.0f, Baseline - MenuDescent(Font)))[Text];
+	}
+
+	/** Any row: a fixed height, its content centred on the row line. */
+	TSharedRef<SWidget> MenuRow(float Height, const TSharedRef<SWidget>& Content)
+	{
+		return SNew(SBox).HeightOverride(Height).VAlign(VAlign_Center)[Content];
+	}
+
 	const FSlateBrush* MenuWhite() { return FCoreStyle::Get().GetBrush("WhiteBrush"); }
 	FText MenuText_(const FString& Text) { return FText::FromString(Text); }
+
+	/**
+	 * A number as the menu shows it everywhere: a point, whatever the culture (as the exports and the console), and no
+	 * trailing zeros (90, 0.7, 2500). Six decimals at most, so a shown value commits back unchanged.
+	 */
+	FString MenuNumber(double Value)
+	{
+		const FNumberFormattingOptions Options = FNumberFormattingOptions().SetUseGrouping(false).SetMinimumFractionalDigits(0).SetMaximumFractionalDigits(6);
+		return FastDecimalFormat::NumberToString(Value, FastDecimalFormat::GetCultureAgnosticFormattingRules(), Options);
+	}
+
+	/** The spin boxes' numbers: shown by MenuNumber; typed with a point or a comma, either way (and still as an expression). */
+	class FJamMenuNumbers : public TDefaultNumericTypeInterface<double>
+	{
+	public:
+		virtual FString ToString(const double& Value) const override
+		{
+			return MenuNumber(Value);
+		}
+
+		virtual TOptional<double> FromString(const FString& InString, const double& InExistingValue) override
+		{
+			return TDefaultNumericTypeInterface<double>::FromString(InString.Replace(TEXT(","), TEXT(".")), InExistingValue);
+		}
+	};
 
 	/** The widget styles, built once: hairline outlines, square corners, quiet hover, no gloss. */
 	struct FJamMenuLook
@@ -233,8 +311,10 @@ namespace
 			BareField.BackgroundImageNormal = None;
 			BareField.BackgroundImageHovered = Flat(Tint(MenuAccent, 0.07f));
 			BareField.BackgroundImageReadOnly = None;
-			BareField.Padding = FMargin(4.0f, 2.0f);
-			BareField.ForegroundColor = MenuCore;
+			// No vertical padding: its text sits on the header's baseline (MakePanel).
+			BareField.Padding = FMargin(4.0f, 0.0f);
+			// Muted: the name is a caption to the title; its hint («без имени») comes out at about Dim.
+			BareField.ForegroundColor = MenuText.CopyWithNewOpacity(0.7f);
 
 			Search = Core.GetWidgetStyle<FSearchBoxStyle>("SearchBox");
 			Search.TextBoxStyle = Field;
@@ -412,22 +492,33 @@ namespace
 #include "DeviceFont/MKDeviceFontData.inl"
 	};
 
-	/** A word in MK Pribor N, cell by cell on whole pixels (a cell never smears between pixels), tracked out like the projector's readout. */
+	/**
+	 * A word in MK Pribor N, cell by cell on whole pixels, tracked out a whole cell like the projector's readout. A cell is
+	 * 2 px up to menu scale 1.25, then 2 px a whole step (3 at 1.5, 4 at 2): never a fraction, never smeared. With a
+	 * LineHeight it fills that line box and puts the capitals' bottom Baseline units above the box's bottom, on a pixel.
+	 */
 	class SJamPribor : public SLeafWidget
 	{
 	public:
-		SLATE_BEGIN_ARGS(SJamPribor) : _Cell(1.6f), _Track(1), _Color(MenuCore) {}
+		SLATE_BEGIN_ARGS(SJamPribor) : _Track(1), _Color(MenuCore), _LineHeight(0.0f), _Baseline(0.0f) {}
 			SLATE_ARGUMENT(FString, Text)
-			SLATE_ARGUMENT(float, Cell)
 			SLATE_ARGUMENT(int32, Track)
 			SLATE_ARGUMENT(FLinearColor, Color)
+			SLATE_ARGUMENT(float, LineHeight)
+			SLATE_ARGUMENT(float, Baseline)
 		SLATE_END_ARGS()
+
+		static int32 CellPixels(float Scale)
+		{
+			return FMath::Max(2, FMath::FloorToInt32(Scale * 4.0f + 0.01f) / 2);
+		}
 
 		void Construct(const FArguments& InArgs)
 		{
-			Cell = InArgs._Cell;
 			Track = InArgs._Track;
 			Color = InArgs._Color;
+			LineHeight = InArgs._LineHeight;
+			Baseline = InArgs._Baseline;
 			for (const TCHAR Char : InArgs._Text)
 			{
 				const int32 Index = Algo::BinarySearchBy(MenuGlyphs, uint16(Char), &FJamMenuGlyph::Code);
@@ -440,9 +531,9 @@ namespace
 
 		virtual FVector2D ComputeDesiredSize(float) const override
 		{
-			// The cell as painted last frame (snapped to whole pixels), so the word never runs past its box.
-			const float Unit = FMath::Max(1.0f, FMath::CeilToFloat(Cell * PaintScale - 0.05f)) / PaintScale;
-			return FVector2D(Cells * Unit, Rows * Unit);
+			// The cell as painted last frame, so the word never runs past its box.
+			const float Unit = CellPixels(PaintScale) / PaintScale;
+			return FVector2D(Cells * Unit, LineHeight > 0.0f ? LineHeight : Rows * Unit);
 		}
 
 		virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& Geometry, const FSlateRect&, FSlateWindowElementList& Out, int32 Layer,
@@ -450,7 +541,10 @@ namespace
 		{
 			const float Scale = FMath::Max(Geometry.Scale, 0.01f);
 			PaintScale = Scale;
-			const float Unit = FMath::Max(1.0f, FMath::CeilToFloat(Cell * Scale - 0.05f)) / Scale;
+			const float Unit = CellPixels(Scale) / Scale;
+			// The capitals are rows 1..7 of the table; row 8 is the descender (Д, Щ).
+			const float CapsBottom = LineHeight > 0.0f ? FMath::RoundToFloat((LineHeight - Baseline) * Scale) / Scale : Caps * Unit;
+			const float Top = CapsBottom - Caps * Unit;
 			const int64 Tick = MenuClockTick(Args);
 			int32 Pen = 0;
 			int32 Run = 0;
@@ -474,7 +568,7 @@ namespace
 						// The projector's shimmer, kept faint: a run of cells 10 % dimmer or not, per tick.
 						const float Level = 0.9f + 0.1f * MenuHash(Tick, ++Run);
 						FSlateDrawElement::MakeBox(Out, Layer, Geometry.ToPaintGeometry(FVector2f((End - Bit) * Unit, Unit),
-							FSlateLayoutTransform(FVector2f((Pen + Bit) * Unit, Row * Unit))), MenuWhite(), ESlateDrawEffect::None, Color.CopyWithNewOpacity(Color.A * Level));
+							FSlateLayoutTransform(FVector2f((Pen + Bit) * Unit, Top + Row * Unit))), MenuWhite(), ESlateDrawEffect::None, Color.CopyWithNewOpacity(Color.A * Level));
 						Bit = End;
 					}
 				}
@@ -486,14 +580,15 @@ namespace
 	private:
 		// Rows 1..8 of the ten: the first is the line gap, the last is under the lowest descender.
 		static constexpr int32 Rows = 8;
+		static constexpr int32 Caps = 7;
 		TArray<const FJamMenuGlyph*> Glyphs;
 		int32 Cells = 0;
-		float Cell = 1.7f;
 		int32 Track = 1;
 		FLinearColor Color;
+		float LineHeight = 0.0f;
+		float Baseline = 0.0f;
 		mutable float PaintScale = 1.0f;
 	};
-
 
 	FString MenuNumberText(double Value, bool bInteger)
 	{
@@ -909,7 +1004,7 @@ namespace
 		{
 			return Value == TEXT("True") ? TEXT("вкл") : TEXT("выкл");
 		}
-		return Value.IsNumeric() ? FString::Printf(TEXT("%g"), FCString::Atod(*Value)) : Value;
+		return Value.IsNumeric() ? MenuNumber(FCString::Atod(*Value)) : Value;
 	}
 
 	// --- small pieces --------------------------------------------------------------------------------------------
@@ -919,21 +1014,21 @@ namespace
 		return SNew(SBox).HeightOverride(1.0f)[SNew(SImage).Image(MenuWhite()).ColorAndOpacity(Color)];
 	}
 
-	/** A section's label (capitals, tracked out) with a hairline under it; Right is an optional action at its end. */
+	/** A section's label (capitals, tracked out) on its baseline, a hairline under it: GridSection units in all. */
 	TSharedRef<SWidget> MenuSection(const FString& Title, TSharedPtr<SWidget> Right = nullptr)
 	{
 		TSharedRef<SHorizontalBox> Line = SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Bottom).Padding(0.0f, 0.0f, 0.0f, 4.0f)
+			+ SHorizontalBox::Slot().FillWidth(1.0f)
 			[
 				// FText::ToUpper, not FString's: that one leaves Cyrillic as it is.
-				SNew(STextBlock).Font(MenuLabel()).ColorAndOpacity(MenuAccent).AutoWrapText(true).Text(MenuText_(Title).ToUpper())
+				MenuOnLine(GridSection - 1.0f, 6.0f, MenuLabel(), SNew(STextBlock).Font(MenuLabel()).ColorAndOpacity(MenuAccent).Text(MenuText_(Title).ToUpper()))
 			];
 		if (Right.IsValid())
 		{
-			Line->AddSlot().AutoWidth().VAlign(VAlign_Bottom).Padding(8.0f, 0.0f, 0.0f, 2.0f)[Right.ToSharedRef()];
+			Line->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)[Right.ToSharedRef()];
 		}
 		return SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()[Line]
+			+ SVerticalBox::Slot().AutoHeight()[SNew(SBox).HeightOverride(GridSection - 1.0f)[Line]]
 			+ SVerticalBox::Slot().AutoHeight()[MenuHairline()];
 	}
 
@@ -1133,7 +1228,9 @@ FString SJamDebugMenu::MenuStatusText(const FString& Status) const
 
 float SJamDebugMenu::MenuScale() const
 {
-	return FMath::Max(1.0f, MenuMinScale / FMath::Max(ViewScale, 0.01f));
+	const float View = FMath::Max(ViewScale, 0.01f);
+	const float Menu = FMath::Max(MenuMinScale, FMath::FloorToFloat(View * 4.0f + 0.01f) / 4.0f);
+	return Menu / View;
 }
 
 FMargin SJamDebugMenu::HudClearance() const
@@ -1160,45 +1257,41 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 			.BorderImage(MenuWhite())
 			.BorderBackgroundColor(MenuInk)
 			.Clipping(EWidgetClipping::ClipToBounds)
-			.Padding(FMargin(14.0f, 12.0f, 14.0f, 9.0f))
+			.Padding(FMargin(14.0f, 12.0f, 14.0f, 12.0f))
 			[
 				SNew(SVerticalBox)
-				// One line: the instrument's name in the projector's letters, «ТЕСТ» and the config's name (typed in place,
-				// it exports with it), how far the config is from the original.
+				// One line box on one baseline: the projector's letters «ОТЛАДКА» (the capitals' bottom is the baseline),
+				// the config's name (typed in place, it exports with it; the watermark says «ТЕСТ»), and how far the config
+				// is from the original, right-aligned.
 				+ SVerticalBox::Slot().AutoHeight()
 				[
 					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					+ SHorizontalBox::Slot().AutoWidth()
 					[
-						SNew(SJamPribor).Text(TEXT("ОТЛАДКА")).Color(MenuCore)
+						SNew(SJamPribor).Text(TEXT("ОТЛАДКА")).Color(MenuCore).LineHeight(GridHeader).Baseline(GridBaseline)
 					]
-					+ SHorizontalBox::Slot().AutoWidth().Padding(12.0f, 2.0f, 10.0f, 2.0f)
+					+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(12.0f, 0.0f, 8.0f, 0.0f)
 					[
-						SNew(SBox).WidthOverride(1.0f)[SNew(SImage).Image(MenuWhite()).ColorAndOpacity(MenuHair)]
-					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 2.0f, 0.0f)
-					[
-						SNew(STextBlock).Font(MenuLabel()).ColorAndOpacity(MenuDim).Text(MenuText_(TEXT("ТЕСТ")))
-					]
-					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-					[
-						SNew(SEditableTextBox)
-						.Style(&Look.BareField)
-						.Font(MenuMedium(TypeHeading))
-						.HintText(MenuText_(TEXT("без имени")))
-						.ToolTipText(MenuText_(TEXT("имя конфига для экспорта")))
-						.Text_Lambda([this]() { const UJamDebugSubsystem* DebugMenu = Debug.Get(); return MenuText_(DebugMenu ? DebugMenu->GetConfigName() : FString()); })
-						.OnTextCommitted_Lambda([this](const FText& Text, ETextCommit::Type)
-						{
-							if (UJamDebugSubsystem* DebugMenu = Debug.Get())
+						SNew(SBox).HeightOverride(GridHeader).VAlign(VAlign_Bottom).Padding(FMargin(0.0f, 0.0f, 0.0f, GridBaseline - MenuDescent(MenuFont())))
+						[
+							SNew(SEditableTextBox)
+							.Style(&Look.BareField)
+							.Font(MenuFont())
+							.HintText(MenuText_(TEXT("без имени")))
+							.ToolTipText(MenuText_(TEXT("имя конфига для экспорта")))
+							.Text_Lambda([this]() { const UJamDebugSubsystem* DebugMenu = Debug.Get(); return MenuText_(DebugMenu ? DebugMenu->GetConfigName() : FString()); })
+							.OnTextCommitted_Lambda([this](const FText& Text, ETextCommit::Type)
 							{
-								DebugMenu->SetConfigName(Text.ToString());
-							}
-						})
+								if (UJamDebugSubsystem* DebugMenu = Debug.Get())
+								{
+									DebugMenu->SetConfigName(Text.ToString());
+								}
+							})
+						]
 					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+					+ SHorizontalBox::Slot().AutoWidth()
 					[
-						SNew(STextBlock).Font(MenuFont(TypeCaption))
+						MenuOnLine(GridHeader, GridBaseline, MenuFont(TypeCaption), SNew(STextBlock).Font(MenuFont(TypeCaption))
 						.ColorAndOpacity_Lambda([this]()
 						{
 							const UJamDebugSubsystem* DebugMenu = Debug.Get();
@@ -1208,11 +1301,11 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 						{
 							const UJamDebugSubsystem* DebugMenu = Debug.Get();
 							return MenuText_(FString::Printf(TEXT("изменено %d"), DebugMenu ? DebugMenu->GetChangedCount() : 0));
-						})
+						}))
 					]
 				]
 				// The last session's config: offered, never applied by itself.
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f).HAlign(HAlign_Left)
+				+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left)
 				[
 					SNew(SButton)
 					.ButtonStyle(&Look.Button)
@@ -1237,13 +1330,15 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 						})
 					]
 				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 9.0f)
+				+ SVerticalBox::Slot().AutoHeight()
 				[
-					SNew(SJamDash)
+					MenuRow(GridLine, SNew(SJamDash))
 				]
 				// Search first: six hundred parameters are not scrolled through. It looks through every tab.
 				+ SVerticalBox::Slot().AutoHeight()
 				[
+					SNew(SBox).HeightOverride(GridRow)
+					[
 					SNew(SHorizontalBox)
 					+ SHorizontalBox::Slot().FillWidth(1.0f)
 					[
@@ -1274,11 +1369,14 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 							]
 						]
 					]
+					]
 				]
 				// The config's operations at the left, the edits' at the right, a hairline between: one quiet toolbar
 				// that fits the frame (the design's [Экспорт] [Импорт] [Сохранить] [Сбросить]); tooltips say the rest.
-				+ SVerticalBox::Slot().AutoHeight().Padding(-4.0f, 5.0f, -4.0f, 0.0f)
+				+ SVerticalBox::Slot().AutoHeight().Padding(-4.0f, 4.0f, -4.0f, 0.0f)
 				[
+					SNew(SBox).HeightOverride(GridRow)
+					[
 					SNew(SHorizontalBox)
 					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("Экспорт"), TEXT("в Saved/JamDebug/Presets и в буфер"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->ExportToFile(FString()); } })]
 					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("Импорт"), TEXT("из буфера"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->Import(TEXT("clipboard")); } })]
@@ -1293,12 +1391,14 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 						TAttribute<bool>::CreateLambda([this]() { const UJamDebugSubsystem* D = Debug.Get(); return D && D->CanUndo(); }))]
 					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("Повтор"), TEXT("повторить, Ctrl+Y"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->Redo(); } },
 						TAttribute<bool>::CreateLambda([this]() { const UJamDebugSubsystem* D = Debug.Get(); return D && D->CanRedo(); }))]
+					]
 				]
 				// The last action's result; an import's skipped keys under it.
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
 				[
 					SNew(STextBlock)
 					.Font(MenuFont())
+					.LineHeightPercentage(MenuLineHeight(MenuFont(), GridLine))
 					.AutoWrapText(true)
 					.Visibility_Lambda([this]() { return StatusAlpha() > 0.0f ? EVisibility::Visible : EVisibility::Collapsed; })
 					.ColorAndOpacity_Lambda([this]()
@@ -1312,14 +1412,12 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 				[
 					SAssignNew(SkippedBox, SVerticalBox)
 				]
-				// The tabs: a row of words over the body, the open one lit and underlined.
-				+ SVerticalBox::Slot().AutoHeight().Padding(-6.0f, 10.0f, 0.0f, 0.0f)
+				// The tabs: a row of words over the body, the open one lit and underlined on the bar's hairline.
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 8.0f)
 				[
-					Tabs
-				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
-				[
-					MenuHairline()
+					SNew(SOverlay)
+					+ SOverlay::Slot().VAlign(VAlign_Bottom)[MenuHairline()]
+					+ SOverlay::Slot().Padding(-6.0f, 0.0f, 0.0f, 0.0f)[Tabs]
 				]
 				+ SVerticalBox::Slot().FillHeight(1.0f)
 				[
@@ -1346,10 +1444,11 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 							]
 						]
 						// The World tab: the gravity the pawn gets now, and from what.
-						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
 						[
 							SNew(STextBlock)
 							.Font(MenuFont(TypeCaption))
+							.LineHeightPercentage(MenuLineHeight(MenuFont(TypeCaption), GridCaption))
 							.ColorAndOpacity(MenuDim)
 							.AutoWrapText(true)
 							.Visibility_Lambda([this]() { return Search.IsEmpty() && Tab == TEXT("Мир") ? EVisibility::Visible : EVisibility::Collapsed; })
@@ -1377,13 +1476,14 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 							})
 						]
 						// The search: what it looks through and how much it found.
-						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 2.0f)
+						+ SVerticalBox::Slot().AutoHeight()
 						[
-							SNew(STextBlock)
-							.Font(MenuLabel())
-							.ColorAndOpacity(MenuAccent)
+							SNew(SBox)
 							.Visibility_Lambda([this]() { return !Search.IsEmpty() && Found > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
-							.Text_Lambda([this]() { return MenuText_(FString::Printf(TEXT("ПОИСК ПО ВСЕМ ВКЛАДКАМ · НАЙДЕНО %d"), Found)); })
+							[
+								MenuOnLine(GridLine, 4.0f, MenuLabel(), SNew(STextBlock).Font(MenuLabel()).ColorAndOpacity(MenuAccent)
+								.Text_Lambda([this]() { return MenuText_(FString::Printf(TEXT("ПОИСК ПО ВСЕМ ВКЛАДКАМ · НАЙДЕНО %d"), Found)); }))
+							]
 						]
 						+ SVerticalBox::Slot().FillHeight(1.0f)
 						[
@@ -1402,10 +1502,11 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 								SAssignNew(StickyBox, SBox).Visibility(EVisibility::Collapsed)
 							]
 							// Nothing to show: say why, and what the search looks through.
-							+ SOverlay::Slot().VAlign(VAlign_Top).Padding(0.0f, 12.0f, 8.0f, 0.0f)
+							+ SOverlay::Slot().VAlign(VAlign_Top).Padding(0.0f, 8.0f, 8.0f, 0.0f)
 							[
 								SNew(STextBlock)
 								.Font(MenuFont())
+								.LineHeightPercentage(MenuLineHeight(MenuFont(), GridLine))
 								.ColorAndOpacity(MenuDim)
 								.AutoWrapText(true)
 								.Visibility_Lambda([this]() { return Rows.IsEmpty() && Tab != TEXT("Главное") ? EVisibility::HitTestInvisible : EVisibility::Collapsed; })
@@ -1420,7 +1521,7 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 						]
 						+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f).HAlign(HAlign_Left)
 						[
-							SNew(SBox)
+							SNew(SBox).HeightOverride(GridRow).VAlign(VAlign_Center)
 							// Only when the pins differ from the default list.
 							.Visibility_Lambda([this]()
 							{
@@ -1438,13 +1539,13 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 						+ SScrollBox::Slot().Padding(0.0f, 0.0f, 8.0f, 0.0f)[SAssignNew(PresetBox, SVerticalBox)]
 					]
 				]
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 5.0f)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
 				[
 					MenuHairline()
 				]
 				+ SVerticalBox::Slot().AutoHeight()
 				[
-					SNew(STextBlock).Font(MenuFont(TypeCaption)).ColorAndOpacity(MenuDim).Text_Lambda([this]()
+					MenuOnLine(GridLine - 1.0f, 3.0f, MenuFont(TypeCaption), SNew(STextBlock).Font(MenuFont(TypeCaption)).ColorAndOpacity(MenuDim).Text_Lambda([this]()
 					{
 						const UJamDebugSubsystem* D = Debug.Get();
 						float Fps = 0.0f, Ms = 0.0f, MaxMs = 0.0f;
@@ -1454,7 +1555,7 @@ TSharedRef<SWidget> SJamDebugMenu::MakePanel()
 						}
 						return MenuText_(FString::Printf(TEXT("%s  ·  %s  ·  %.1f FPS  ·  Разработка"), *UJamDebugSubsystem::GetBuildHash(),
 							*MenuMapName(D ? D->GetGameInstance()->GetWorld() : nullptr), Fps));
-					})
+					}))
 				]
 			]
 		]
@@ -1473,9 +1574,9 @@ TSharedRef<SWidget> SJamDebugMenu::MakeTabButton(const FString& Name)
 		.OnCheckStateChanged_Lambda([this, Name](ECheckBoxState) { ShowTab(Name); })
 		[
 			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(6.0f, 4.0f, 6.0f, 5.0f)
+			+ SVerticalBox::Slot().AutoHeight().Padding(6.0f, 0.0f)
 			[
-				SNew(STextBlock).Font(MenuMedium()).ColorAndOpacity(FSlateColor::UseForeground()).Text(MenuText_(Name))
+				MenuOnLine(GridTab - 2.0f, GridBaseline, MenuMedium(), SNew(STextBlock).Font(MenuMedium()).ColorAndOpacity(FSlateColor::UseForeground()).Text(MenuText_(Name)))
 			]
 			// The open tab's underline, on the bar's hairline.
 			+ SVerticalBox::Slot().AutoHeight()
@@ -1495,7 +1596,7 @@ TSharedRef<SWidget> SJamDebugMenu::MakeChoices(const FString& Key, const TArray<
 	for (const TPair<FString, double>& Option : Options)
 	{
 		const double Value = Option.Value;
-		Row->AddSlot()
+		Row->AddSlot().VAlign(VAlign_Center)
 		[
 			SNew(SCheckBox)
 			.Style(&FJamMenuLook::Get().Chip)
@@ -1519,15 +1620,15 @@ TSharedRef<SWidget> SJamDebugMenu::MakeChoices(const FString& Key, const TArray<
 			]
 		];
 	}
-	return Row;
+	return MenuRow(GridRow, Row);
 }
 
 TSharedRef<SWidget> SJamDebugMenu::MakeQuickControls()
 {
 	const TWeakObjectPtr<UJamDebugSubsystem> Weak = Debug;
 	return SNew(SVerticalBox)
-		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)[MenuSection(TEXT("Система"))]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)[MenuSection(TEXT("Система"))]
+		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(0.42f).VAlign(VAlign_Center)
@@ -1539,10 +1640,12 @@ TSharedRef<SWidget> SJamDebugMenu::MakeQuickControls()
 				MakeChoices(TEXT("System.FpsLimit"), { { TEXT("30"), 30.0 }, { TEXT("60"), 60.0 }, { TEXT("144"), 144.0 }, { TEXT("нет"), 0.0 } })
 			]
 		]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[MakeKeyLine(TEXT("System.Vsync"), TEXT("Vsync"))]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f)[MakeKeyLine(TEXT("System.TimeScale"), TEXT("Скорость игры"))]
-		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
+		+ SVerticalBox::Slot().AutoHeight()[MakeKeyLine(TEXT("System.Vsync"), TEXT("Vsync"))]
+		+ SVerticalBox::Slot().AutoHeight()[MakeKeyLine(TEXT("System.TimeScale"), TEXT("Скорость игры"))]
+		+ SVerticalBox::Slot().AutoHeight()
 		[
+			SNew(SBox).HeightOverride(GridRow)
+			[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 			[
@@ -1569,6 +1672,7 @@ TSharedRef<SWidget> SJamDebugMenu::MakeQuickControls()
 					return MenuText_(FString::Printf(TEXT("%.0f FPS · %.1f мс · время ×%.2f"), Fps, Ms, Settings ? Settings->GetEffectiveTimeDilation() : 1.0f));
 				})
 			]
+			]
 		];
 }
 
@@ -1578,23 +1682,24 @@ TSharedRef<SWidget> SJamDebugMenu::MakeSystemTab()
 	const TWeakObjectPtr<UJamDebugSubsystem> Weak = Debug;
 	const auto Section = [&Box](const FString& Title)
 	{
-		Box->AddSlot().AutoHeight().Padding(0.0f, Box->NumSlots() == 0 ? 0.0f : 14.0f, 0.0f, 6.0f)[MenuSection(Title)];
+		Box->AddSlot().AutoHeight().Padding(0.0f, Box->NumSlots() == 0 ? 0.0f : 16.0f, 0.0f, 4.0f)[MenuSection(Title)];
 	};
 	// What is measured, next to what is set (principle 8).
 	const auto Note = [&Box](TFunction<FString()> Text)
 	{
-		Box->AddSlot().AutoHeight().Padding(0.0f, 3.0f)
+		Box->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
 		[
-			SNew(STextBlock).Font(MenuFont(TypeCaption)).ColorAndOpacity(MenuDim).AutoWrapText(true).Text_Lambda([Text]() { return MenuText_(Text()); })
+			SNew(STextBlock).Font(MenuFont(TypeCaption)).LineHeightPercentage(MenuLineHeight(MenuFont(TypeCaption), GridCaption))
+			.ColorAndOpacity(MenuDim).AutoWrapText(true).Text_Lambda([Text]() { return MenuText_(Text()); })
 		];
 	};
 	const auto Choices = [this, &Box](const FString& Key, const TArray<TPair<FString, double>>& Options)
 	{
-		Box->AddSlot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 4.0f)[MakeChoices(Key, Options)];
+		Box->AddSlot().AutoHeight()[MakeChoices(Key, Options)];
 	};
 	const auto Line = [this, &Box](const FString& Key, const FString& Label)
 	{
-		Box->AddSlot().AutoHeight().Padding(0.0f, 2.0f)[MakeKeyLine(Key, Label)];
+		Box->AddSlot().AutoHeight()[MakeKeyLine(Key, Label)];
 	};
 	const auto CVar = [](const TCHAR* Name) { const IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Name); return Variable ? Variable->GetFloat() : -1.0f; };
 
@@ -1652,7 +1757,7 @@ TSharedRef<SWidget> SJamDebugMenu::MakeSystemTab()
 		];
 		Row->AddSlot()[MenuButton(TEXT("шаг на кадр"), [Weak]() { if (UJamDebugSubsystem* D = Weak.Get()) { D->StepFrame(); } },
 			TAttribute<bool>::CreateLambda([Weak]() { return Weak.IsValid() && Weak->IsPaused(); }))];
-		Box->AddSlot().AutoHeight().Padding(0.0f, 4.0f)[Row];
+		Box->AddSlot().AutoHeight()[MenuRow(GridRow, Row)];
 	}
 	Note([Weak]()
 	{
@@ -1671,7 +1776,7 @@ TSharedRef<SWidget> SJamDebugMenu::MakeSystemTab()
 		}
 		return FString::Printf(TEXT("%.1f FPS · кадр %.2f мс · dt игры за 5 с:"), Fps, Ms);
 	});
-	Box->AddSlot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 8.0f)[SNew(SJamDtGraph).Debug(Weak)];
+	Box->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)[SNew(SJamDtGraph).Debug(Weak)];
 	return Box;
 }
 
@@ -1704,8 +1809,10 @@ TSharedRef<SWidget> SJamDebugMenu::MakeParamLine(const FJamDebugParam& Param, co
 	{
 		// A number: drag or type; with a known range the box is a slider.
 		const bool bInteger = Numeric->IsInteger();
+		static const TSharedPtr<INumericTypeInterface<double>> Numbers = MakeShared<FJamMenuNumbers>();
 		Editor = SNew(SSpinBox<double>)
 			.Style(&Look.Spin)
+			.TypeInterface(Numbers)
 			.Font(MenuMono())
 			.MinValue(Param.Min)
 			.MaxValue(Param.Max)
@@ -1784,12 +1891,14 @@ TSharedRef<SWidget> SJamDebugMenu::MakeParamLine(const FJamDebugParam& Param, co
 	}
 	if (Param.Min.IsSet() || Param.Max.IsSet())
 	{
-		Tip += FString::Printf(TEXT("\n[%s .. %s]"), Param.Min.IsSet() ? *FString::SanitizeFloat(Param.Min.GetValue()) : TEXT(""),
-			Param.Max.IsSet() ? *FString::SanitizeFloat(Param.Max.GetValue()) : TEXT(""));
+		Tip += FString::Printf(TEXT("\n[%s .. %s]"), Param.Min.IsSet() ? *MenuNumber(Param.Min.GetValue()) : TEXT(""),
+			Param.Max.IsSet() ? *MenuNumber(Param.Max.GetValue()) : TEXT(""));
 	}
 	const FString Unit = InUnit.IsEmpty() ? Param.Units : InUnit;
 	const FText Highlight = MenuText_(Search);
-	return SNew(SHorizontalBox)
+	return SNew(SBox).HeightOverride(Search.IsEmpty() ? GridRow : GridRowTwo)
+	[
+	SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
 		[
 			SNew(SVerticalBox)
@@ -1856,7 +1965,8 @@ TSharedRef<SWidget> SJamDebugMenu::MakeParamLine(const FJamDebugParam& Param, co
 				.ColorAndOpacity_Lambda([Weak, Key]() { return FSlateColor(Weak.IsValid() && Weak->IsPinned(Key) ? MenuCore : MenuDim.CopyWithNewOpacity(0.7f)); })
 				.Text_Lambda([Weak, Key]() { return MenuText_(Weak.IsValid() && Weak->IsPinned(Key) ? TEXT("★") : TEXT("☆")); })
 			]
-		];
+		]
+	];
 }
 
 TSharedRef<SWidget> SJamDebugMenu::MakeGroupHeader(TSharedPtr<FJamDebugRow> Row)
@@ -1899,40 +2009,44 @@ TSharedRef<SWidget> SJamDebugMenu::MakeGroupHeader(TSharedPtr<FJamDebugRow> Row)
 			SNew(SBorder)
 			.BorderImage(MenuWhite())
 			.BorderBackgroundColor(MenuInk.CopyWithNewOpacity(1.0f))
-			.Padding(FMargin(0.0f, 7.0f, 0.0f, 0.0f))
+			.Padding(0.0f)
 			[
 				SNew(SVerticalBox)
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 5.0f)
+				+ SVerticalBox::Slot().AutoHeight()
 				[
 					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f, 0.0f, 8.0f, 0.0f)
+					// The arrow's cells (rows 2-6, 7 px over their own baseline) sit at the lower-case letters' middle: its baseline 3 units under the text's.
+					+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f, 0.0f, 8.0f, 0.0f)
 					[
-						SNew(SJamPribor).Text(bOpen ? TEXT("▾") : TEXT("▸")).Cell(1.3f).Color(bOpen ? MenuAccent : MenuDim)
+						SNew(SJamPribor).Text(bOpen ? TEXT("▾") : TEXT("▸")).Color(bOpen ? MenuAccent : MenuDim).LineHeight(GridGroup - 1.0f).Baseline(GridBaseline - 3.0f)
 					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					+ SHorizontalBox::Slot().AutoWidth()
 					[
-						SNew(STextBlock).Font(MenuMedium(TypeHeading)).ColorAndOpacity(bOpen ? MenuCore : MenuText)
+						MenuOnLine(GridGroup - 1.0f, GridBaseline, MenuMedium(TypeHeading), SNew(STextBlock).Font(MenuMedium(TypeHeading)).ColorAndOpacity(bOpen ? MenuCore : MenuText)
 						.Text(MenuText_(MenuGroupTitle(Group, Owner)))
 						.HighlightText_Lambda([this]() { return MenuText_(Search); })
-			.HighlightShape(&FJamMenuLook::Get().Highlight).HighlightColor(MenuCore)
+						.HighlightShape(&FJamMenuLook::Get().Highlight).HighlightColor(MenuCore))
 					]
 					// The owner path, muted: where this lives in the code and the config keys.
-					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(8.0f, 1.0f, 6.0f, 0.0f)
+					+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(8.0f, 0.0f, 6.0f, 0.0f)
 					[
-						SNew(STextBlock).Font(MenuFont(TypeCaption)).ColorAndOpacity(MenuDim).Clipping(EWidgetClipping::ClipToBounds)
+						MenuOnLine(GridGroup - 1.0f, GridBaseline, MenuFont(TypeCaption), SNew(STextBlock).Font(MenuFont(TypeCaption)).ColorAndOpacity(MenuDim).Clipping(EWidgetClipping::ClipToBounds)
 						.Text(MenuText_(Group.Replace(TEXT("|"), TEXT(" / "))))
 						.HighlightText_Lambda([this]() { return MenuText_(Search); })
-			.HighlightShape(&FJamMenuLook::Get().Highlight).HighlightColor(MenuCore)
+						.HighlightShape(&FJamMenuLook::Get().Highlight).HighlightColor(MenuCore))
 					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 6.0f, 0.0f)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 6.0f, 0.0f)
 					[
-						SNew(STextBlock).Font(MenuMono(TypeCaption)).ColorAndOpacity(MenuChanged)
+						SNew(SBox)
 						.Visibility_Lambda([ChangedIn]() { return ChangedIn() > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
-						.Text_Lambda([ChangedIn]() { return MenuText_(FString::Printf(TEXT("● %d"), ChangedIn())); })
+						[
+							MenuOnLine(GridGroup - 1.0f, GridBaseline, MenuMono(TypeCaption), SNew(STextBlock).Font(MenuMono(TypeCaption)).ColorAndOpacity(MenuChanged)
+							.Text_Lambda([ChangedIn]() { return MenuText_(FString::Printf(TEXT("● %d"), ChangedIn())); }))
+						]
 					]
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 4.0f, 0.0f)
 					[
-						SNew(STextBlock).Font(MenuMono(TypeCaption)).ColorAndOpacity(MenuDim).Text(MenuText_(FString::FromInt(Row->Count)))
+						MenuOnLine(GridGroup - 1.0f, GridBaseline, MenuMono(TypeCaption), SNew(STextBlock).Font(MenuMono(TypeCaption)).ColorAndOpacity(MenuDim).Text(MenuText_(FString::FromInt(Row->Count))))
 					]
 					// Only a group with changes offers its reset, and it resets that group only.
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -1974,7 +2088,7 @@ TSharedRef<ITableRow> SJamDebugMenu::MakeRow(TSharedPtr<FJamDebugRow> Row, const
 	{
 		return SNew(STableRow<TSharedPtr<FJamDebugRow>>, Table)
 			.Style(&Look.Row)
-			.Padding(FMargin(0.0f, 12.0f, 6.0f, 5.0f))
+			.Padding(FMargin(0.0f, 8.0f, 6.0f, 0.0f))
 			[
 				MenuSection(Row->Header)
 			];
@@ -1983,7 +2097,7 @@ TSharedRef<ITableRow> SJamDebugMenu::MakeRow(TSharedPtr<FJamDebugRow> Row, const
 	const bool bInGroup = Search.IsEmpty() ? Tab != TEXT("Главное") : true;
 	return SNew(STableRow<TSharedPtr<FJamDebugRow>>, Table)
 		.Style(&Look.Row)
-		.Padding(FMargin(bInGroup ? 14.0f : 0.0f, 2.0f, 6.0f, 2.0f))
+		.Padding(FMargin(bInGroup ? 14.0f : 0.0f, 0.0f, 6.0f, 0.0f))
 		[
 			MakeParamLine(Row->Param, Row->Label, Row->Unit)
 		];
@@ -2182,13 +2296,13 @@ void SJamDebugMenu::RebuildPresets()
 	}
 	PresetBox->ClearChildren();
 	const TWeakObjectPtr<UJamDebugSubsystem> Weak = Debug;
-	PresetBox->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
+	PresetBox->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
 	[
 		MenuSection(TEXT("Пресеты"), MenuTool(TEXT("обновить"), TEXT("перечитать список"), [this]() { RebuildPresets(); }))
 	];
 	PresetBox->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
 	[
-		SNew(STextBlock).Font(MenuFont(TypeCaption)).ColorAndOpacity(MenuDim).AutoWrapText(true)
+		SNew(STextBlock).Font(MenuFont(TypeCaption)).LineHeightPercentage(MenuLineHeight(MenuFont(TypeCaption), GridCaption)).ColorAndOpacity(MenuDim).AutoWrapText(true)
 		.Text(MenuText_(TEXT("Встроенные - ассеты в /Game/Jam/Debug/Presets, свои - JSON в Saved/JamDebug/Presets. «Применить» заменяет текущий конфиг, «поверх» добавляет к нему.")))
 	];
 	TArray<FJamDebugPreset> Presets;
@@ -2196,8 +2310,10 @@ void SJamDebugMenu::RebuildPresets()
 	for (const FJamDebugPreset& Preset : Presets)
 	{
 		const FString Name = Preset.Name;
-		PresetBox->AddSlot().AutoHeight().Padding(0.0f, 3.0f)
+		PresetBox->AddSlot().AutoHeight()
 		[
+			SNew(SBox).HeightOverride(GridRow)
+			[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 			[
@@ -2207,8 +2323,9 @@ void SJamDebugMenu::RebuildPresets()
 			[
 				SNew(STextBlock).Font(MenuFont(TypeCaption)).ColorAndOpacity(MenuDim).Text(MenuText_(Preset.bAsset ? TEXT("ассет") : TEXT("JSON")))
 			]
-			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 4.0f, 0.0f)[MenuButton(TEXT("применить"), [Weak, Name]() { if (UJamDebugSubsystem* D = Weak.Get()) { D->Import(Name, true); } })]
-			+ SHorizontalBox::Slot().AutoWidth()[MenuButton(TEXT("поверх"), [Weak, Name]() { if (UJamDebugSubsystem* D = Weak.Get()) { D->Import(Name, false); } })]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)[MenuButton(TEXT("применить"), [Weak, Name]() { if (UJamDebugSubsystem* D = Weak.Get()) { D->Import(Name, true); } })]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[MenuButton(TEXT("поверх"), [Weak, Name]() { if (UJamDebugSubsystem* D = Weak.Get()) { D->Import(Name, false); } })]
+			]
 		];
 	}
 }
@@ -2224,12 +2341,12 @@ TSharedRef<SWidget> SJamDebugMenu::MakePinned()
 				SNew(SBorder)
 				.BorderImage(MenuWhite())
 				.BorderBackgroundColor(MenuInkPinned)
-				.Padding(FMargin(12.0f, 9.0f, 12.0f, 9.0f))
+				.Padding(FMargin(12.0f, 8.0f, 12.0f, 8.0f))
 				[
 					SNew(SVerticalBox)
 					+ SVerticalBox::Slot().AutoHeight()
 					[
-						SNew(STextBlock).Font(MenuMono()).ColorAndOpacity(MenuCore).Text_Lambda([Weak]()
+						MenuRow(GridLine, SNew(STextBlock).Font(MenuMono()).ColorAndOpacity(MenuCore).Text_Lambda([Weak]()
 						{
 							float Fps = 0.0f, Ms = 0.0f, MaxMs = 0.0f;
 							const UWorld* World = Weak.IsValid() ? Weak->GetGameInstance()->GetWorld() : nullptr;
@@ -2240,19 +2357,19 @@ TSharedRef<SWidget> SJamDebugMenu::MakePinned()
 							}
 							return MenuText_(FString::Printf(TEXT("%.0f FPS  %.1f мс  ×%.2f%s"), Fps, Ms, Settings ? Settings->GetEffectiveTimeDilation() : 1.0f,
 								Weak.IsValid() && Weak->IsPaused() ? TEXT("  пауза") : TEXT("")));
-						})
+						}))
 					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 7.0f, 0.0f, 2.0f)
+					+ SVerticalBox::Slot().AutoHeight()
 					[
-						SNew(SJamDash)
+						MenuRow(GridCaption, SNew(SJamDash))
 					]
 					+ SVerticalBox::Slot().AutoHeight()
 					[
 						SAssignNew(PinnedBox, SVerticalBox)
 					]
-					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
 					[
-						SNew(STextBlock).Font(MenuFont(TypeCaption)).ColorAndOpacity(MenuDim).Text(MenuText_(TEXT("F6 — меню  ·  Shift+F6 — скрыть")))
+						MenuOnLine(GridLine, 4.0f, MenuFont(TypeCaption), SNew(STextBlock).Font(MenuFont(TypeCaption)).ColorAndOpacity(MenuDim).Text(MenuText_(TEXT("F6 — меню  ·  Shift+F6 — скрыть"))))
 					]
 				]
 			]
@@ -2291,17 +2408,19 @@ void SJamDebugMenu::RebuildPinned()
 		if (MenuSectionOf(Param) != Section)
 		{
 			Section = MenuSectionOf(Param);
-			PinnedBox->AddSlot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 1.0f)
+			PinnedBox->AddSlot().AutoHeight()
 			[
-				SNew(STextBlock).Font(MenuLabel()).ColorAndOpacity(MenuAccent).Text(MenuText_(Section).ToUpper())
+				MenuOnLine(20.0f, 4.0f, MenuLabel(), SNew(STextBlock).Font(MenuLabel()).ColorAndOpacity(MenuAccent).Text(MenuText_(Section).ToUpper()))
 			];
 		}
 		FString Label, Unit;
 		MenuHumanName(Param, true, Label, Unit);
 		const bool bTimes = Unit == TEXT("×");
 		const auto Changed = [Weak, Key]() { return Weak.IsValid() && Weak->IsChanged(Key); };
-		PinnedBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+		PinnedBox->AddSlot().AutoHeight()
 		[
+			SNew(SBox).HeightOverride(GridLine)
+			[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 			[
@@ -2323,7 +2442,7 @@ void SJamDebugMenu::RebuildPinned()
 					}
 					if (Weak->GetNumber(Key, Number))
 					{
-						return MenuText_(bTimes ? FString::Printf(TEXT("×%g"), Number) : FString::Printf(TEXT("%g"), Number));
+						return MenuText_(bTimes ? TEXT("×") + MenuNumber(Number) : MenuNumber(Number));
 					}
 					return MenuText_(Weak->GetValue(Key, Value) ? Value : FString(TEXT("нет")));
 				})
@@ -2334,6 +2453,7 @@ void SJamDebugMenu::RebuildPinned()
 				[
 					SNew(STextBlock).Font(MenuFont()).ColorAndOpacity(MenuDim).Text(MenuText_(bTimes ? FString() : Unit))
 				]
+			]
 			]
 		];
 	}
@@ -2355,17 +2475,17 @@ TSharedRef<SWidget> SJamDebugMenu::MakeWatermark()
 			[
 				SNew(SBox).WidthOverride(2.0f)[SNew(SImage).Image(MenuWhite()).ColorAndOpacity(MenuChanged)]
 			]
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(10.0f, 6.0f, 8.0f, 6.0f)
+			+ SHorizontalBox::Slot().AutoWidth().Padding(10.0f, 4.0f, 8.0f, 4.0f)
 			[
-				SNew(SJamPribor).Text(TEXT("ТЕСТ")).Color(MenuChanged)
+				SNew(SJamPribor).Text(TEXT("ТЕСТ")).Color(MenuChanged).LineHeight(GridHeader).Baseline(GridBaseline)
 			]
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 6.0f, 12.0f, 6.0f)
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 4.0f, 12.0f, 4.0f)
 			[
-				SNew(STextBlock).Font(MenuMono()).ColorAndOpacity(MenuChanged).Text_Lambda([Weak]()
+				MenuOnLine(GridHeader, GridBaseline, MenuMono(), SNew(STextBlock).Font(MenuMono()).ColorAndOpacity(MenuChanged).Text_Lambda([Weak]()
 				{
 					return Weak.IsValid() ? MenuText_(FString::Printf(TEXT("%s · изменено %d · %s"),
 						Weak->GetConfigName().IsEmpty() ? TEXT("без имени") : *Weak->GetConfigName(), Weak->GetChangedCount(), *UJamDebugSubsystem::GetBuildHash())) : FText::GetEmpty();
-				})
+				}))
 			]
 		];
 }
@@ -2432,34 +2552,38 @@ void SJamDebugMenu::Tick(const FGeometry& AllottedGeometry, const double InCurre
 		if (SeenSkipped > 0)
 		{
 			TSharedRef<SVerticalBox> Lines = SNew(SVerticalBox)
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
+				+ SVerticalBox::Slot().AutoHeight()
 				[
+					SNew(SBox).HeightOverride(GridRow)
+					[
 					SNew(SHorizontalBox)
 					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 					[
 						SNew(STextBlock).Font(MenuLabel()).ColorAndOpacity(MenuError).Text(MenuText_(FString::Printf(TEXT("ПРОПУЩЕНО ПРИ ИМПОРТЕ · %d"), SeenSkipped)))
 					]
-					+ SHorizontalBox::Slot().AutoWidth()[MenuTool(TEXT("скрыть"), TEXT("убрать список"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->LastSkipped.Reset(); } })]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[MenuTool(TEXT("скрыть"), TEXT("убрать список"), [this]() { if (UJamDebugSubsystem* D = Debug.Get()) { D->LastSkipped.Reset(); } })]
+					]
 				];
 			TSharedRef<SVerticalBox> Keys = SNew(SVerticalBox);
 			for (const FString& Skipped : DebugMenu->LastSkipped)
 			{
-				Keys->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+				Keys->AddSlot().AutoHeight()
 				[
-					SNew(STextBlock).Font(MenuFont(TypeCaption)).ColorAndOpacity(MenuError.CopyWithNewOpacity(0.9f)).AutoWrapText(true).Text(MenuText_(Skipped))
+					SNew(STextBlock).Font(MenuFont(TypeCaption)).LineHeightPercentage(MenuLineHeight(MenuFont(TypeCaption), GridCaption))
+					.ColorAndOpacity(MenuError.CopyWithNewOpacity(0.9f)).AutoWrapText(true).Text(MenuText_(Skipped))
 				];
 			}
 			// A long list scrolls in place and leaves the parameters their room.
 			Lines->AddSlot().AutoHeight()
 			[
-				SNew(SBox).MaxDesiredHeight(64.0f)
+				SNew(SBox).MaxDesiredHeight(5.0f * GridCaption)
 				[
 					SNew(SScrollBox).ScrollBarStyle(&FJamMenuLook::Get().Scroll).ScrollBarThickness(FVector2f(3.0f, 3.0f)) + SScrollBox::Slot()[Keys]
 				]
 			];
 			SkippedBox->AddSlot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
 			[
-				SNew(SBorder).BorderImage(MenuWhite()).BorderBackgroundColor(MenuError.CopyWithNewOpacity(0.07f)).Padding(FMargin(10.0f, 6.0f, 6.0f, 8.0f))
+				SNew(SBorder).BorderImage(MenuWhite()).BorderBackgroundColor(MenuError.CopyWithNewOpacity(0.07f)).Padding(FMargin(10.0f, 0.0f, 6.0f, 8.0f))
 				[
 					Lines
 				]
