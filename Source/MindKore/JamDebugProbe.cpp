@@ -437,8 +437,9 @@ namespace
 
 	/**
 	 * jam.Debug.Shots (needs a real RHI): the menu as the player sees it, "Shot showui" (Slate included) of
-	 * the System tab, the parameter list with a changed and a pinned row, an import's skipped list, and
-	 * the pinned overlay over the game; the watermark is in every frame from the second on.
+	 * the landing view («Главное»), the Player tab with its groups folded, one group open with a changed and
+	 * a pinned row, a search across the tabs, an import's skipped list, and the pinned overlay over the game;
+	 * the watermark is in every frame with a change. Folds every group at the end (Saved/JamDebug/OpenGroups.txt).
 	 */
 	void RunDebugShots(UWorld* World)
 	{
@@ -455,16 +456,20 @@ namespace
 		};
 		Debug->Reset(TEXT("all"));
 		Console(TEXT("DisableAllScreenMessages")); // the engine's on-screen warnings cover the panel
-		Console(TEXT("jam.Debug.Menu Система"));
-		DebugProbeAfter(World, 2.0f, [Shot]() { Shot(TEXT("system tab")); });
-		DebugProbeAfter(World, 3.0f, [Console]()
+		Console(TEXT("jam.Debug.Menu Главное"));
+		DebugProbeAfter(World, 2.0f, [Shot]() { Shot(TEXT("landing view")); });
+		DebugProbeAfter(World, 2.5f, [Console]()
 		{
 			Console(TEXT("jam.Debug.Set Pawn.ArmLengthCm 90"));
 			Console(TEXT("jam.Debug.Menu Игрок"));
-			Console(TEXT("jam.Debug.Search Arm"));
+			Console(TEXT("jam.Debug.Group none"));
 		});
-		DebugProbeAfter(World, 4.5f, [Shot]() { Shot(TEXT("parameters: ArmLengthCm changed and pinned")); });
-		DebugProbeAfter(World, 5.5f, [World, Console]()
+		DebugProbeAfter(World, 3.5f, [Shot]() { Shot(TEXT("Player tab, groups folded")); });
+		DebugProbeAfter(World, 4.0f, [Console]() { Console(TEXT("jam.Debug.Group Arm")); });
+		DebugProbeAfter(World, 5.0f, [Shot]() { Shot(TEXT("one group open: ArmLengthCm changed and pinned")); });
+		DebugProbeAfter(World, 5.5f, [Console]() { Console(TEXT("jam.Debug.Search Recoil")); });
+		DebugProbeAfter(World, 6.5f, [Shot]() { Shot(TEXT("search across the tabs")); });
+		DebugProbeAfter(World, 7.0f, [World, Console]()
 		{
 			Console(TEXT("jam.Debug.Menu Мир"));
 			if (UJamDebugSubsystem* Debug = UJamDebugSubsystem::Get(World))
@@ -474,21 +479,22 @@ namespace
 				Debug->Say(TEXT("импорт «чужой конфиг»: см. пропущено"), true);
 			}
 		});
-		DebugProbeAfter(World, 7.0f, [Shot]() { Shot(TEXT("import: skipped list, World tab")); });
-		DebugProbeAfter(World, 8.0f, [Console]() { Console(TEXT("jam.Debug.Menu pin")); });
-		DebugProbeAfter(World, 9.5f, [Shot]() { Shot(TEXT("pinned overlay over the game")); });
-		DebugProbeAfter(World, 11.0f, [World]()
+		DebugProbeAfter(World, 8.5f, [Shot]() { Shot(TEXT("import: skipped list, World tab")); });
+		DebugProbeAfter(World, 9.0f, [Console]() { Console(TEXT("jam.Debug.Menu pin")); });
+		DebugProbeAfter(World, 10.5f, [Shot]() { Shot(TEXT("pinned overlay over the game")); });
+		DebugProbeAfter(World, 12.0f, [World, Console]()
 		{
 			if (UJamDebugSubsystem* Debug = UJamDebugSubsystem::Get(World))
 			{
 				Debug->Reset(TEXT("all"));
 				Debug->SetMode(EJamDebugMode::Closed);
 			}
+			Console(TEXT("jam.Debug.Group none"));
 			UE_LOG(LogMindKore, Log, TEXT("Debug shots: done"));
 		});
 	}
 
 	FAutoConsoleCommandWithWorld GJamDebugShots(TEXT("jam.Debug.Shots"),
-		TEXT("Debug menu frames (real RHI): System tab, parameters with a changed and a pinned row, an import's skipped list, the pinned overlay; Saved/Screenshots."),
+		TEXT("Debug menu frames (real RHI): the landing view, a tab with folded groups, one open group with a changed and a pinned row, a search, an import's skipped list, the pinned overlay; Saved/Screenshots."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunDebugShots));
 }

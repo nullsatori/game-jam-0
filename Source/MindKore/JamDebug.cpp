@@ -1602,7 +1602,7 @@ namespace
 	}
 
 	FAutoConsoleCommandWithWorldAndArgs GJamDebugMenu(TEXT("jam.Debug.Menu"),
-		TEXT("Debug menu (F6): toggle; or open on a tab (Система, Мир, Игрок, Оружие, Враги, Пресеты, Закреплено), 'pin' (Shift+F6), 'close'."),
+		TEXT("Debug menu (F6): toggle; or open on a tab (Главное, Система, Мир, Игрок, Оружие, Враги, Пресеты; Закреплено = Главное), 'pin' (Shift+F6), 'close'."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
 		{
 			if (UJamDebugSubsystem* Debug = JamDebugFor(World))
@@ -1646,6 +1646,17 @@ namespace
 				{
 					Debug->GetMenu()->SetSearch(FString::Join(Args, TEXT(" ")));
 				}
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GJamDebugGroup(TEXT("jam.Debug.Group"),
+		TEXT("Debug menu: open the groups of the current tab whose name has this text; 'all' opens them all, 'none' folds every group (remembered in Saved/JamDebug/OpenGroups.txt)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			UJamDebugSubsystem* Debug = JamDebugFor(World);
+			if (Debug && Debug->GetMenu().IsValid() && !Args.IsEmpty())
+			{
+				Debug->GetMenu()->SetGroups(FString::Join(Args, TEXT(" ")));
 			}
 		}));
 

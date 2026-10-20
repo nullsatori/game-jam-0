@@ -4,6 +4,7 @@
 #include "JamDebug.h"
 #include "Widgets/SCompoundWidget.h"
 
+class SBox;
 class SEditableTextBox;
 class ITableRow;
 class SSearchBox;
@@ -12,19 +13,32 @@ class SVerticalBox;
 class SWidgetSwitcher;
 template <typename ItemType> class SListView;
 
-/** A line of the parameter list: a group header or a parameter. */
+/** A line of the parameter list. */
 struct FJamDebugRow
 {
-	/** Not empty: a group header (Param.Owner is the group's owner, for its reset). */
+	enum class EKind : uint8
+	{
+		Param,
+		/** A group of a tab (Param.Group), folded or open; Param.Owner is its owner, for its reset. */
+		Group,
+		/** A section label of «Главное» (Мир, Взгляд, Рука...). */
+		Section,
+	};
+	EKind Kind = EKind::Param;
+	/** Group: Param.Group; section: its title. */
 	FString Header;
 	FString Label;
 	FJamDebugParam Param;
+	/** Group: how many parameters it has (shown or not), and their keys (for its changed count). */
+	int32 Count = 0;
+	TArray<FString> Keys;
 };
 
 /**
  * The debug menu's widget (Docs/DebugMenu.md, «Раскладка»), one per game viewport: the panel (F6),
  * the pinned overlay (Shift+F6) and the watermark. It only draws and forwards: every value is read
- * from and written through UJamDebugSubsystem.
+ * from and written through UJamDebugSubsystem. Which groups are open is the widget's own, per user
+ * (Saved/JamDebug/OpenGroups.txt).
  */
 class SJamDebugMenu : public SCompoundWidget
 {
@@ -42,13 +56,19 @@ public:
 	void ShowTab(const FString& Name);
 	void SetSearch(const FString& Text);
 	void ToggleChangedOnly();
+	/** Opens the groups of the tab whose name has this text; "all" opens every one, "none" folds every group. */
+	void SetGroups(const FString& Text);
 
 private:
 	TSharedRef<SWidget> MakePanel();
 	TSharedRef<SWidget> MakePinned();
 	TSharedRef<SWidget> MakeWatermark();
 	TSharedRef<SWidget> MakeSystemTab();
+	/** «Главное»: the FPS cap, vsync, game speed and pause above the pinned parameters. */
+	TSharedRef<SWidget> MakeQuickControls();
+	TSharedRef<SWidget> MakeChoices(const FString& Key, const TArray<TPair<FString, double>>& Options);
 	TSharedRef<SWidget> MakeTabButton(const FString& Name);
+	TSharedRef<SWidget> MakeGroupHeader(TSharedPtr<FJamDebugRow> Row);
 	/** A parameter's editor: a spin box for numbers, a check box for bools, text for the rest; the changed mark and the star. */
 	TSharedRef<SWidget> MakeParamLine(const FJamDebugParam& Param, const FString& Label);
 	TSharedRef<SWidget> MakeKeyLine(const FString& Key, const FString& Label);
@@ -56,22 +76,34 @@ private:
 	void Rebuild();
 	void RebuildPresets();
 	void RebuildPinned();
+	void ToggleGroup(const FString& Group);
+	void SaveGroups() const;
+	/** The menu's own scale on top of the engine's DPI curve: never under the floor that keeps it readable at 720p. */
+	float MenuScale() const;
+	/** Keeps the panel off the game HUD, which is drawn in pixels at the left (lamps at the top, O2 and HP at the bottom). */
+	FMargin HudClearance() const;
 	/** A spin box change is written at once; its undo step is recorded when the edit settles. */
 	void EditNumber(const FString& Key, const FString& Value);
 	void FlushEdit();
 
 	TWeakObjectPtr<UJamDebugSubsystem> Debug;
-	FString Tab = TEXT("Система");
+	FString Tab = TEXT("Главное");
 	FString Search;
 	bool bChangedOnly = false;
 	int32 SeenGeneration = -1;
 	int32 SeenChanged = -1;
 	TArray<FString> SeenPins;
+	/** Parameters the search found (rows that are not headers). */
+	int32 Found = 0;
 
 	TSharedPtr<SSearchBox> SearchBox;
 	TSharedPtr<SWidgetSwitcher> Body;
 	TSharedPtr<SListView<TSharedPtr<FJamDebugRow>>> List;
 	TArray<TSharedPtr<FJamDebugRow>> Rows;
+	TSet<FString> OpenGroups;
+	/** The group whose header has scrolled off the top: its copy stays pinned there. */
+	TSharedPtr<FJamDebugRow> Sticky;
+	TSharedPtr<SBox> StickyBox;
 	TSharedPtr<SVerticalBox> PresetBox;
 	TSharedPtr<SVerticalBox> PinnedBox;
 	TArray<FString> PinnedShown;
@@ -83,4 +115,8 @@ private:
 	double EditAt = 0.0;
 	bool bDragging = false;
 	bool bFocusPending = false;
+
+	/** The viewport's DPI scale and height in pixels, from the last tick. */
+	float ViewScale = 1.0f;
+	float ViewHeight = 720.0f;
 };
