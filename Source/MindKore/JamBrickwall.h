@@ -54,6 +54,12 @@ private:
 	float Gain = 1.0f;
 };
 
+/**
+ * The least gain the brickwall applied since the last call (1: it never acted), and starts over: how hard it
+ * held what came through, for probes (jam.Weapons.AirTake). Measures only; the effect is the same without it.
+ */
+MINDKORE_API float JamBrickwallTakeLeastGain();
+
 UCLASS(ClassGroup = AudioSourceEffect, meta = (BlueprintSpawnableComponent))
 class MINDKORE_API UJamBrickwallPreset : public USoundEffectSubmixPreset
 {

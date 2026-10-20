@@ -99,6 +99,11 @@ Freesound 863729, turned out CC BY 4.0 there and was not used).
 - **gun lee enfield 303 rifle clean shot.wav** — **kyles**
   ([Freesound 450853](https://freesound.org/people/kyles/sounds/450853/)):
   `SW_Jam_Shot_SV98`.
+- The air layers `SW_Jam_ShotAir_Pistol`, `SW_Jam_ShotAir_Shotgun`, `SW_Jam_ShotAir_SV98`
+  (heard in air only) are the first milliseconds of the same three shot donors
+  above — 231248, 427595, 450853 — high-passed, saturated and cut short by
+  `Scripts/jam_air_sounds.py` (20.10.2026); no new donor. The cabin's impulse
+  response `IR_Jam_Cabin` is seeded noise, no recording.
 - **Shotgun Rack Sample.wav** — **Krovi**
   ([Freesound 613801](https://freesound.org/people/Krovi/sounds/613801/)):
   `SW_Jam_Pump_Shotgun`.

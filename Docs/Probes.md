@@ -103,6 +103,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `jam.Flyer.Views <файл> [blind]`, `jam.Flyer.Portraits [Count] [Habitat]`, `jam.Flyer.WakeStrip [x y z tx ty tz]`, `jam.Flyer.WallShots` | кадры по списку видов; висящие сбоку; лента пробуждения насеста через 0.25 с; стена кричит и стая идёт |
 | `jam.Flyer.MixCheck [DistanceCm] [noatt] [shotgun]` (1000 см) | выстрел и попадание по летуну отдельно, для сравнения громкости |
 | `jam.Audio.LimiterProbe [Gain]` | цепочка мастер-сабмикса и запись выхода под очередь выстрелов |
+| `jam.Weapons.AirTake [B\|sync]` | свои стволы в воздухе и в вакууме (`Lvl_Jam_Ship`, рендер не нужен: `-nullrhi` без `-nosound`, с `UnfocusedVolumeMultiplier=1.0`): сначала пешка идёт от старта каюты через шлюз на 3 м наружу, и на каждом шаге среда стволов (`IsInAir`) должна совпасть с воздухом зоны (`JamAirZoneAt`) — `PASS` / `FAIL`; затем одна и та же последовательность в каюте и снаружи (пистолет, очередь, дробовик с помпой, СВ-98 с затвором, последний патрон и пустая перезарядка, смены, щелчок отдельно), на каждый счётный выстрел — проверка, в какой среде он начался; запись мастера `Saved/Clips/AirTake_A.wav` (`B` — комната летунов, `AirTake_B.wav`; `sync` — 16 одиночных выстрелов пистолета по очереди в каюте и снаружи, `AirTake_sync.wav`), в лог — время каждого события и наименьшее усиление брикволла за окно. Итог — `Air take: N checks, F failed`, конец — `Air take: done`; разбор записи — `Scripts/jam_air_reduce.py <wav> <лог>` ([RecoilWeapons-Sound](RecoilWeapons-Sound.md#в-воздухе-2010-ветка-jam-air-sound)) |
 
 Консольные переменные и служебные команды:
 
@@ -119,7 +120,7 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 ## Какие пробы гонять
 
 Только те, которые правка может сломать: смена оружия — `SwitchProbe` и
-`RmbProbe`; затвор, курок и перезарядка пистолета — `SlideProbe`; руки и их клавиши — `Hands.Probe`; отдача и движение — `ZeroG.Probe`; хват и рука — `Hang.Probe`, `Hull.Probe`,
+`RmbProbe`; звук стволов в воздухе — `AirTake`; затвор, курок и перезарядка пистолета — `SlideProbe`; руки и их клавиши — `Hands.Probe`; отдача и движение — `ZeroG.Probe`; хват и рука — `Hang.Probe`, `Hull.Probe`,
 `RmbProbe`; стены — `Wall.Probe`; корабль и обшивка — `Ship.Probe` и `Hull.Probe`;
 лестница — `Ladder.Probe` и `Ship.Probe`; режим движения, ходьба и отдача взгляда — `Move.Probe`; гравитация тел — `Gravity.Probe`; летуны — `Flyer.Probe`, `Flyer.RoostProbe`, `Flyer.EncounterProbe`. Для правок только арта хватит кадров.
 

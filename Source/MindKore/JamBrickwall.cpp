@@ -1,5 +1,17 @@
 #include "JamBrickwall.h"
 
+#include <atomic>
+
+namespace
+{
+	std::atomic<float> GLeastGain{ 1.0f };
+}
+
+float JamBrickwallTakeLeastGain()
+{
+	return GLeastGain.exchange(1.0f);
+}
+
 void FJamBrickwall::Init(const FSoundEffectSubmixInitData& InitData)
 {
 	SampleRate = InitData.SampleRate > 0.0f ? InitData.SampleRate : 48000.0f;
@@ -35,6 +47,7 @@ void FJamBrickwall::OnProcessAudio(const FSoundEffectSubmixInputData& InData, FS
 	const float* In = InData.AudioBuffer->GetData();
 	float* Out = OutData.AudioBuffer->GetData();
 	const int32 Window = Lookahead + 1;
+	float Least = 1.0f;
 	for (int32 Frame = 0; Frame < InData.NumFrames; ++Frame)
 	{
 		const float* Frame_In = In + Frame * Channels;
@@ -60,6 +73,7 @@ void FJamBrickwall::OnProcessAudio(const FSoundEffectSubmixInputData& InData, FS
 			}
 		}
 		Gain = FMath::Min(Allowed, 1.0f - (1.0f - Gain) * ReleaseCoef);
+		Least = FMath::Min(Least, Gain);
 		// The delayed frame goes out (the clamp only guards float rounding: Gain <= its need).
 		const float* Oldest = Delay.GetData() + Head * Channels;
 		float* Frame_Out = Out + Frame * Channels;
@@ -68,5 +82,8 @@ void FJamBrickwall::OnProcessAudio(const FSoundEffectSubmixInputData& InData, FS
 			Frame_Out[Channel] = FMath::Clamp(Oldest[Channel] * Gain, -Ceiling, Ceiling);
 		}
 		Head = (Head + 1) % Window;
+	}
+	for (float Seen = GLeastGain.load(std::memory_order_relaxed); Least < Seen && !GLeastGain.compare_exchange_weak(Seen, Least);)
+	{
 	}
 }
