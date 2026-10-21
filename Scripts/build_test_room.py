@@ -350,6 +350,11 @@ for path, loc, name in ((MK + "Household/BP_MK_Microwave", V(90, 430, 90), "Appl
     a.set_actor_label(name)
 label_text("8 APPLIANCES", V(120, 530, 200), 0)
 
+# Preserve the playable RMB93/Nixie station when regenerating this test map.
+import runpy
+from pathlib import Path
+runpy.run_path(str(Path(__file__).with_name('jam_nixie_test_room.py')))['place']()
+
 # --- save ---------------------------------------------------------------------------
 world = ues.get_editor_world()
 assert world.get_outer().get_path_name() == MAP

@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "JamLivingWall.h"
 #include "JamMuzzleFx.h"
+#include "JamNixieCounter.h"
 #include "JamScope.h"
 #include "JamShip.h"
 #include "JamZeroGPawn.h"
@@ -539,6 +540,51 @@ void UJamWeaponsComponent::UnlockWeapon(int32 Index)
 	UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s unlocked"), *GetNameSafe(GetOwner()), *Weapons[Index].Name.ToString());
 }
 
+bool UJamWeaponsComponent::ApplyPickupWeapon(int32 Index, const FJamWeapon& Definition)
+{
+	if (!Weapons.IsValidIndex(Index) || !Definition.ViewMesh || Definition.MagazineSize < 0) return false;
+	// A definition may come from this slot; copy it before clearing its old runtime state.
+	FJamWeapon Fresh = Definition;
+	Fresh.Ammo = Fresh.MagazineSize;
+	Fresh.bUnlocked = false;
+	Fresh.bSlideLocked = false;
+	Fresh.SinceShot = Fresh.PrevSinceShot = 1000.0f;
+	Fresh.FireReadySince = 0.0f;
+	Fresh.MechanismSound.Reset();
+	if (UAudioComponent* Sound = Weapons[Index].MechanismSound.Get()) Sound->Stop();
+	if (CurrentWeapon == Index || ShownWeapon == Index) Holster(true);
+	if (CycleWeapon == Index) CycleWeapon = INDEX_NONE;
+	Weapons[Index] = MoveTemp(Fresh);
+	return true;
+}
+
+void UJamWeaponsComponent::SetViewMeshes(const FJamWeapon* Weapon)
+{
+	// Release before changing the asset: an old counter override must never leak to another gun.
+	if (AmmoCounter)
+	{
+		AmmoCounter->ReleaseBinding();
+		AmmoCounter->SetCounterEnabled(false);
+	}
+	ViewModel->SetStaticMesh(Weapon ? Weapon->ViewMesh.Get() : nullptr);
+	ActionInView->SetStaticMesh(Weapon ? Weapon->ActionMesh.Get() : nullptr);
+	if (!Weapon || Weapon->NixieMaterialSlot < 0) return;
+	if (!AmmoCounter)
+	{
+		AmmoCounter = NewObject<UJamNixieCounterComponent>(GetOwner(), TEXT("WeaponAmmoCounter"));
+		AmmoCounter->MaterialSlots.Reset(); // Register/BeginPlay must not bind the pawn's root mesh.
+		AmmoCounter->RegisterComponent();
+	}
+	AmmoCounter->SetDigit(Weapon->Ammo);
+	AmmoCounter->SetCounterEnabled(true);
+	AmmoCounter->BindMesh(ViewModel, { Weapon->NixieMaterialSlot });
+}
+
+void UJamWeaponsComponent::UpdateCounterAmmo()
+{
+	if (AmmoCounter && Weapons.IsValidIndex(ShownWeapon)) AmmoCounter->SetDigit(Weapons[ShownWeapon].Ammo);
+}
+
 void UJamWeaponsComponent::Holster(bool bAtOnce)
 {
 	bReloadQueued = false;
@@ -667,6 +713,7 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 		return false;
 	}
 	--Weapon->Ammo;
+	UpdateCounterAmmo();
 	// The last round: the empty magazine's follower lifts the slide stop, and this stroke ends locked open (SlideLockTravel).
 	Weapon->bSlideLocked = Weapon->Ammo == 0 && Weapon->CanLockOpen();
 	bReloadQueued = false; // the trigger won over a waiting R

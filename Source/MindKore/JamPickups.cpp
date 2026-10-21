@@ -76,6 +76,9 @@ bool AJamWeaponPickup::Give(AActor* Hand)
 	{
 		return false;
 	}
+	if (bOverrideAim && (!Guns->Scope || !Guns->Scope->Aims.IsValidIndex(WeaponIndex))) return false;
+	if (bOverrideWeapon && !Guns->ApplyPickupWeapon(WeaponIndex, WeaponOverride)) return false;
+	if (bOverrideAim) Guns->Scope->Aims[WeaponIndex] = AimOverride;
 	Guns->UnlockWeapon(WeaponIndex);
 	// Taken while holding a body: the body is let go and the new gun drawn (a hull tool in hand stays).
 	if (AJamZeroGPawn* Pawn = Cast<AJamZeroGPawn>(Hand); Pawn && Pawn->GetHands() == EJamHands::Held)

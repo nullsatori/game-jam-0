@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "MKInteractable.h"
 #include "MKPhysicsProp.h"
+#include "JamWeapons.h"
 #include "JamPickups.generated.h"
 
 class UStaticMeshComponent;
@@ -59,6 +60,20 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup", meta = (ClampMin = "0"))
 	int32 WeaponIndex = 0;
+
+	/** Optional replacement for this pickup only; ordinary unlock pickups keep the pawn's defaults. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup|Weapon")
+	bool bOverrideWeapon = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup|Weapon", meta = (EditCondition = "bOverrideWeapon"))
+	FJamWeapon WeaponOverride;
+
+	/** Use the existing gun's aim settings as a starting point, then adjust the new mesh's sight line. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup|Weapon")
+	bool bOverrideAim = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup|Weapon", meta = (EditCondition = "bOverrideAim"))
+	FJamGunAim AimOverride;
 
 protected:
 	virtual FText RefusalFor(const AActor* Hand) const override;
