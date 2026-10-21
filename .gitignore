@@ -14,3 +14,6 @@ Plugins/UE_MCP_Bridge/
 Plugins/VibeUE/
 .idea/
 __pycache__/
+
+# Local planning scratchpad; shared tasks live on the board (Docs/Workflow.md).
+/Docs/Planning/MVP-Backlog.md
