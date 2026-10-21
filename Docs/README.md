@@ -44,6 +44,7 @@
 | [RecoilWeapons-Aim](RecoilWeapons-Aim.md) | прицеливание, «без оружия», оптика СВ-98 |
 | [RecoilWeapons-Fx](RecoilWeapons-Fx.md) | вспышка и пороховой дым |
 | [RecoilWeapons-Sound](RecoilWeapons-Sound.md) | звук стволов, лимитер на мастере, синхрон |
+| [RecoilWeapons-Rmb93](RecoilWeapons-Rmb93.md) | Рысь: цикл вперёд, крышка окна на шарнире, дым из кожуха |
 | [Animation](Animation.md) | подход к анимации от первого лица |
 
 **Враги, мир, звук**

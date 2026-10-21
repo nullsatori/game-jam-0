@@ -299,7 +299,9 @@ void UJamWeaponsComponent::BeginPlay()
 		ActionInView->RegisterComponent();
 		MakePartComponents(*ViewModel);
 		// Muzzle flash (on the gun in view) and powder smoke (in the world): JamMuzzleFx.h.
-		NewObject<UJamMuzzleFxComponent>(GetOwner(), TEXT("MuzzleFx"))->RegisterComponent();
+		UJamMuzzleFxComponent* Fx = NewObject<UJamMuzzleFxComponent>(GetOwner(), TEXT("MuzzleFx"));
+		Fx->RegisterComponent();
+		MuzzleFx = Fx;
 	}
 	// Every gun's aim and the SV-98's scope; it builds itself once the gun in view exists (UJamScopeComponent::Build).
 	Scope = NewObject<UJamScopeComponent>(GetOwner(), TEXT("Scope"));
@@ -464,6 +466,7 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	if (!Weapon)
 	{
 		UpdateParts(nullptr, 0.0f);
+		LidTrackFrames = 0; // the lid's motion is tracked afresh when a gun is back in view
 		return;
 	}
 	SinceKickSeconds += DeltaTime;
@@ -483,9 +486,12 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 	const FQuat Rise = FRotator(Weapon->ViewKickRiseDeg * Kick, 0.0f, -0.3f * Weapon->ViewKickRiseDeg * Kick).Quaternion();
 	// The whole gun's pose in the cycle and the reload: a mass on springs (JamWeaponParts.cpp).
 	UpdatePose(*Weapon, DeltaTime);
-	Offset.SetRotation(Rise * FRotator(Pose.Turn.X, Pose.Turn.Y, Pose.Turn.Z).Quaternion() * Offset.GetRotation());
-	Offset.AddToTranslation(Pose.Place);
-	Offset.AddToTranslation(FVector(-Weapon->ViewKickBackCm * Kick, 0.0f, 0.0f));
+	// The gun as its springs hold it, without the drawn kick: the frame the lid swings in (the kick reaches it as ShotSpeedDeg).
+	FTransform Steady = Offset;
+	Steady.SetRotation(FRotator(Pose.Turn.X, Pose.Turn.Y, Pose.Turn.Z).Quaternion() * Offset.GetRotation());
+	Steady.AddToTranslation(Pose.Place);
+	Offset.SetRotation(Rise * Steady.GetRotation());
+	Offset.SetTranslation(Steady.GetTranslation() + FVector(-Weapon->ViewKickBackCm * Kick, 0.0f, 0.0f));
 	ViewModel->SetRelativeTransform(Offset);
 	// The moving part runs its cycle along/about the gun's own X (or stands locked open, or runs home on its release).
 	ActionInView->SetRelativeLocationAndRotation(
@@ -493,6 +499,13 @@ void UJamWeaponsComponent::UpdateViewModel(float DeltaTime)
 		FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Weapon->ActionTurnDeg * EvalCycle(Weapon->ActionTurn, Since))));
 	UpdateParts(Weapon, Since);
 	UpdateCycleEvents();
+	// The RMB-93's lid and shroud (JamWeaponLid.cpp); nothing for a gun without them.
+	FJamWeapon& Shown = Weapons[ShownWeapon];
+	if (Shown.Lid.Mesh || Shown.PortSmoke.Ports.Num() > 0)
+	{
+		UpdateLid(Shown, Steady * ViewModel->GetAttachParent()->GetComponentTransform(), DeltaTime);
+		UpdatePortSmoke(Shown, DeltaTime);
+	}
 }
 
 FTransform UJamWeaponsComponent::GetMuzzleTransform() const
@@ -551,6 +564,10 @@ bool UJamWeaponsComponent::ApplyPickupWeapon(int32 Index, const FJamWeapon& Defi
 	Fresh.SinceShot = Fresh.PrevSinceShot = 1000.0f;
 	Fresh.FireReadySince = 0.0f;
 	Fresh.MechanismSound.Reset();
+	Fresh.Lid.State = EJamLidState::Latched;
+	Fresh.Lid.Angle = Fresh.Lid.Speed = 0.0f;
+	Fresh.Lid.bHeldClear = false;
+	Fresh.PortSmoke.Heat = Fresh.PortSmoke.SeepCarry = 0.0f;
 	if (UAudioComponent* Sound = Weapons[Index].MechanismSound.Get()) Sound->Stop();
 	if (CurrentWeapon == Index || ShownWeapon == Index) Holster(true);
 	if (CycleWeapon == Index) CycleWeapon = INDEX_NONE;
@@ -661,7 +678,10 @@ void UJamWeaponsComponent::Reload()
 	FJamWeapon* Weapon = GetWeapon() ? &Weapons[CurrentWeapon] : nullptr;
 	// A magazine seated in a locked gun (an empty reload cut between the seat and the release) needs only the slide stop.
 	const bool bReleaseOnly = Weapon && Weapon->bSlideLocked && Weapon->Ammo > 0;
-	if (!Weapon || !IsWeaponReady() || (!bReleaseOnly && (Weapon->Ammo >= Weapon->MagazineSize || Weapon->Reserve <= 0)) || GetReloadRemaining() > 0.0f)
+	// A loading lid left open (a reload broken off by a shot) is shut by a reload even with nothing to load (JamWeaponLid.cpp).
+	const bool bLidOnly = Weapon && Weapon->Lid.Mesh && Weapon->Lid.State == EJamLidState::Free;
+	if (!Weapon || !IsWeaponReady() || (!bReleaseOnly && !bLidOnly && (Weapon->Ammo >= Weapon->MagazineSize || Weapon->Reserve <= 0))
+		|| GetReloadRemaining() > 0.0f)
 	{
 		return;
 	}
@@ -740,6 +760,9 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 		// Before the kick (the caller adds OutRecoil): the smoke takes the gun's velocity at the shot.
 		Fx->Shot(CurrentWeapon, MuzzleTransform, ViewModel);
 	}
+	// The RMB-93: its open lid jerked by the kick, its shroud's holes puffing (JamWeaponLid.cpp).
+	bLidShot = Weapon->Lid.Mesh != nullptr;
+	PortSmokeShot(*Weapon);
 	for (int32 Pellet = 0; Pellet < Weapon->Pellets; ++Pellet)
 	{
 		const FVector PelletDirection = Weapon->SpreadDeg > 0.0f
