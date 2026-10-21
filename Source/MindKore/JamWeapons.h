@@ -916,3 +916,12 @@ private:
 	/** R pressed during the shot's cycle: the reload starts when it is through (a shot or a switch drops it). */
 	bool bReloadQueued = false;
 };
+
+/**
+ * The RMB-93 «Рысь» in the pump shotgun's slot (JamRmb93.cpp): built from the pump shotgun's
+ * definition with its own meshes, pump travel and Nixie counter. A pickup with Gun = Rmb93 puts it in.
+ */
+MINDKORE_API FJamWeapon JamMakeRmb93(const FJamWeapon& PumpShotgun);
+
+/** The RMB-93's sight line on the pump shotgun's aim (its springs kept). */
+MINDKORE_API FJamGunAim JamMakeRmb93Aim(const FJamGunAim& PumpAim);

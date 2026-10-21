@@ -20,7 +20,8 @@ and a back corridor. The stations sit along the partition and in the hall:
 The player is the game's one pawn (AJamZeroGPawn) under the ship's mode
 (AJamShipGameMode): a gravity zone over the room lets it walk, with the same
 controls as everywhere (F interacts, RMB grabs, Q/E roll); the three gun
-pickups stand by the start. World gravity stays normal for the props.
+pickups stand by the start, the RMB-93's on a stand beside them and a Nixie
+display by the partition (jam_nixie_test_room.py). World gravity stays normal for the props.
 
 Every number is centimetres. The script deletes an existing map first and
 asserts the editor world is the new one before it spawns anything (a failed

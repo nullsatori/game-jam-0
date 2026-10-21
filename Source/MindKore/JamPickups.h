@@ -49,7 +49,21 @@ protected:
 	virtual bool Give(AActor* Hand) { return false; }
 };
 
-/** Unlocks a gun (0 pistol, 1 shotgun, 2 sniper) in the UJamWeaponsComponent of whoever takes it: the zero-G pawn or a walker. */
+/** Which gun a weapon pickup hands over in its slot. */
+UENUM(BlueprintType)
+enum class EJamPickupGun : uint8
+{
+	/** The slot's own gun, as the pawn has it: the pickup only unlocks it. */
+	Slot UMETA(DisplayName = "Как в слоте"),
+	/** The RMB-93 «Рысь» (JamMakeRmb93) in place of the pump shotgun, with a full magazine. */
+	Rmb93 UMETA(DisplayName = "Рысь (RMB-93)"),
+};
+
+/**
+ * Unlocks a gun (0 pistol, 1 shotgun, 2 sniper) in the UJamWeaponsComponent of whoever takes it:
+ * the zero-G pawn or a walker. Gun = Rmb93 first puts the RMB-93 into the slot (built in code from
+ * the pump shotgun's defaults, so tuning it never needs the map rebuilt).
+ */
 UCLASS()
 class MINDKORE_API AJamWeaponPickup : public AJamPickupBase
 {
@@ -61,23 +75,23 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup", meta = (ClampMin = "0"))
 	int32 WeaponIndex = 0;
 
-	/** Optional replacement for this pickup only; ordinary unlock pickups keep the pawn's defaults. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup|Weapon")
-	bool bOverrideWeapon = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup|Weapon", meta = (EditCondition = "bOverrideWeapon"))
-	FJamWeapon WeaponOverride;
-
-	/** Use the existing gun's aim settings as a starting point, then adjust the new mesh's sight line. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup|Weapon")
-	bool bOverrideAim = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup|Weapon", meta = (EditCondition = "bOverrideAim"))
-	FJamGunAim AimOverride;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Pickup")
+	EJamPickupGun Gun = EJamPickupGun::Slot;
 
 protected:
+	virtual void BeginPlay() override;
 	virtual FText RefusalFor(const AActor* Hand) const override;
 	virtual bool Give(AActor* Hand) override;
+
+private:
+	/** Gun = Rmb93: its definition and aim, built at BeginPlay so the meshes load with the level, not on F. */
+	UPROPERTY(Transient)
+	FJamWeapon Replacement;
+
+	UPROPERTY(Transient)
+	FJamGunAim ReplacementAim;
+
+	bool bHasReplacement = false;
 };
 
 /** Unlocks a tool by name (a flag in AJamShipGameMode::Tools): MKJamGrappleTool lets Left Alt hook (AJamZeroGPawn). */

@@ -1,4 +1,4 @@
-"""Place the Nixie station and configure the existing test-room shotgun pickup.
+"""Place the Nixie station and the RMB-93 pickup in the test room.
 
 Run place() in Lvl_Jam_TestRoom, then save that level. Also called by its builder.
 Only these named test actors are changed; repeated runs do not add duplicates.
@@ -34,33 +34,21 @@ def place():
         a.get_component_by_class(unreal.StaticMeshComponent).set_static_mesh(unreal.load_asset('/Engine/BasicShapes/Cube'))
         return a
 
-    pickup=find('Pickup_SHOTGUN')
-    assert pickup and isinstance(pickup,unreal.JamWeaponPickup)
-    defaults=unreal.get_default_object(unreal.JamZeroGPawn)
-    guns=defaults.get_editor_property('guns')
-    definition=guns.get_editor_property('weapons')[1]
-    original_mesh=definition.get_editor_property('view_mesh')
-    definition.set_editor_property('name',unreal.Text('Рысь / RMB93'))
-    definition.set_editor_property('view_mesh',unreal.load_asset(WEAPON+'ViewBody'))
-    definition.set_editor_property('action_mesh',unreal.load_asset(WEAPON+'Action'))
-    definition.set_editor_property('action_pivot',unreal.Vector())
-    definition.set_editor_property('action_travel_cm',5.5)
-    definition.set_editor_property('nixie_material_slot',1)
-    pickup.set_editor_property('weapon_override',definition)
-    pickup.set_editor_property('override_weapon',True)
-    aim=unreal.get_default_object(unreal.JamScopeComponent).get_editor_property('aims')[1]
-    aim.set_editor_property('sight_rear_cm',unreal.Vector(11.5,0,7.4))
-    aim.set_editor_property('sight_front_cm',unreal.Vector(51.5,0,7.4))
-    pickup.set_editor_property('aim_override',aim)
-    pickup.set_editor_property('override_aim',True)
-    pickup.set_editor_property('action_label',unreal.Text('Взять Рысь / RMB93'))
+    # Its own pickup beside the three guns; the plain shotgun's stays as it is. The RMB-93 itself is
+    # defined in code (JamMakeRmb93): the pickup only says which gun, so tuning it never needs this map rebuilt.
+    pickup=spawn('Pickup_RMB93',unreal.JamWeaponPickup,(1360,120,110.3),(1,1,1),unreal.Rotator(yaw=90))
+    pickup.set_editor_property('weapon_index',1)
+    pickup.set_editor_property('gun',unreal.JamPickupGun.RMB93)
+    pickup.set_editor_property('action_label',unreal.Text('Взять Рысь'))
     pickup.get_editor_property('mesh').set_static_mesh(unreal.load_asset(WEAPON+'World'))
-    pickup.set_actor_scale3d(unreal.Vector(1,1,1))
-    pickup.set_actor_location(unreal.Vector(1120,120,110.3),False,False)
-    pickup.set_actor_rotation(unreal.Rotator(yaw=90),False)
-    pickup.set_folder_path('Tests/Nixie_RMB93')
-    assert guns.get_editor_property('weapons')[1].get_editor_property('view_mesh')==original_mesh, 'CDO changed'
-    stand('RMB93_InspectionStand',(1120,140,50),(.9,.6,1))
+    stand('RMB93_InspectionStand',(1360,140,50),(.9,.6,1))
+    # Labelled like the three guns beside it (build_test_room.label_text).
+    tag=spawn('Label_RMB-93',unreal.TextRenderActor,(1360,120,160),(1,1,1),unreal.Rotator(yaw=90))
+    tag_text=tag.get_editor_property('text_render')
+    tag_text.set_editor_property('text',unreal.Text('RMB-93'))
+    tag_text.set_editor_property('world_size',18.0)
+    tag_text.set_editor_property('horizontal_alignment',unreal.HorizTextAligment.EHTA_CENTER)
+    tag_text.set_editor_property('text_render_color',unreal.Color(r=200,g=200,b=170,a=255))
 
     bp=unreal.EditorAssetLibrary.load_blueprint_class('/Game/JamArt/Materials/Instruments/Nixie/BP_Jam_NixieDisplay')
     assert bp
@@ -74,5 +62,4 @@ def place():
     text.set_editor_property('text',unreal.Text('NIXIE'))
     text.set_editor_property('world_size',8.0)
     text.set_editor_property('horizontal_alignment',unreal.HorizTextAligment.EHTA_CENTER)
-    return {'map':MAP,'pickup':pickup.get_path_name(),'display':display.get_path_name(),
-            'weapon_slot':1,'pump_travel_cm':5.5,'counter_slot':1,'default_weapon_unchanged':True}
+    return {'map':MAP,'pickup':pickup.get_path_name(),'display':display.get_path_name()}

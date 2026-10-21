@@ -55,37 +55,29 @@ namespace
 		State->SavedAims = Guns->Scope->Aims;
 		State->SavedCurrent = Guns->CurrentWeapon;
 		const UStaticMesh* DefaultShotgun = GetDefault<UJamWeaponsComponent>()->Weapons[1].ViewMesh;
-		FActorSpawnParameters Spawn;
-		Spawn.ObjectFlags |= RF_Transient;
-		const auto Pickup = [World, Spawn, Pawn](int32 Index, const FJamWeapon* Definition, const FJamGunAim* Aim)
+		// Deferred: Gun and WeaponIndex must be set before BeginPlay builds the replacement.
+		const auto Pickup = [World, Pawn](int32 Index, EJamPickupGun Gun)
 		{
-			AJamWeaponPickup* Item = World->SpawnActor<AJamWeaponPickup>(Spawn);
+			AJamWeaponPickup* Item = World->SpawnActorDeferred<AJamWeaponPickup>(AJamWeaponPickup::StaticClass(), FTransform::Identity);
+			Item->SetFlags(RF_Transient);
+			Item->WeaponIndex = Index;
+			Item->Gun = Gun;
+			Item->FinishSpawning(FTransform::Identity);
 			Item->SetActorEnableCollision(false);
 			Item->SetActorHiddenInGame(true);
-			Item->WeaponIndex = Index;
-			Item->bOverrideWeapon = Definition != nullptr;
-			if (Definition) Item->WeaponOverride = *Definition;
-			Item->bOverrideAim = Aim != nullptr;
-			if (Aim) Item->AimOverride = *Aim;
 			Item->CompleteInteraction(Pawn);
 			const bool Taken = Item->bTaken;
 			Item->Destroy();
 			return Taken;
 		};
-		State->Check(!Pickup(99, nullptr, nullptr), TEXT("invalid pickup index is not consumed"));
-		State->Check(Pickup(0, nullptr, nullptr) && Guns->Weapons[0].ViewMesh == State->SavedWeapons[0].ViewMesh,
+		State->Check(!Pickup(99, EJamPickupGun::Slot), TEXT("invalid pickup index is not consumed"));
+		State->Check(Pickup(0, EJamPickupGun::Slot) && Guns->Weapons[0].ViewMesh == State->SavedWeapons[0].ViewMesh,
 			TEXT("ordinary pickup keeps existing weapon definition"));
-		FJamWeapon Definition = GetDefault<UJamWeaponsComponent>()->Weapons[1];
-		Definition.Name = FText::FromString(TEXT("RMB-93 probe"));
-		Definition.ViewMesh = Body;
-		Definition.ActionMesh = Action;
-		Definition.ActionPivot = FVector::ZeroVector;
-		Definition.ActionTravelCm = 5.5f;
-		Definition.NixieMaterialSlot = 1;
-		FJamGunAim Aim = Guns->Scope->Aims[1];
-		Aim.SightRearCm = FVector(11.5, 0, 7.4);
-		Aim.SightFrontCm = FVector(51.5, 0, 7.4);
-		State->Check(Pickup(1, &Definition, &Aim), TEXT("new weapon pickup is consumed successfully"));
+		const FJamWeapon Definition = JamMakeRmb93(GetDefault<UJamWeaponsComponent>()->Weapons[1]);
+		const FJamGunAim Aim = JamMakeRmb93Aim(GetDefault<UJamScopeComponent>()->Aims[1]);
+		State->Check(Definition.ViewMesh == Body && Definition.ActionMesh == Action && Definition.NixieMaterialSlot == 1,
+			TEXT("JamMakeRmb93 builds on the production RMB93 meshes"));
+		State->Check(Pickup(1, EJamPickupGun::Rmb93), TEXT("RMB-93 pickup is consumed successfully"));
 		Guns->FinishSwitch();
 		State->Check(Guns->ViewModel->GetStaticMesh() == Body && Guns->ActionInView->GetStaticMesh() == Action,
 			TEXT("pickup installs production fixed body and separate forward pump in hands"));
@@ -122,18 +114,20 @@ namespace
 				Current->Rearm();
 				Current->FinishSwitch();
 				State->Check(State->Shows(6), TEXT("rearm binds counter again"));
-				State->Check(Pickup(1, &Definition, nullptr) && Current->GetShownWeapon() == INDEX_NONE,
+				State->Check(Pickup(1, EJamPickupGun::Rmb93) && Current->GetShownWeapon() == INDEX_NONE,
 					TEXT("same-slot replacement forces redraw instead of leaving old mesh"));
 				Current->FinishSwitch();
 				State->Check(State->Shows(6), TEXT("same-slot replacement starts full and binds fresh display"));
 				FJamWeapon BadSlot = Definition;
 				BadSlot.NixieMaterialSlot = 99;
-				Pickup(1, &BadSlot, nullptr);
+				Current->ApplyPickupWeapon(1, BadSlot);
+				Current->UnlockWeapon(1);
 				Current->FinishSwitch();
 				State->Check(Current->AmmoCounter->GetBoundMaterialCount() == 0, TEXT("invalid material slot does not leave a stale display"));
 				FJamWeapon MissingMaterial = GetDefault<UJamWeaponsComponent>()->Weapons[1];
 				MissingMaterial.NixieMaterialSlot = 0;
-				Pickup(1, &MissingMaterial, nullptr);
+				Current->ApplyPickupWeapon(1, MissingMaterial);
+				Current->UnlockWeapon(1);
 				Current->FinishSwitch();
 				State->Check(Current->AmmoCounter->GetBoundMaterialCount() == 0, TEXT("non-Nixie material is skipped safely"));
 				State->Check(GetDefault<UJamWeaponsComponent>()->Weapons[1].ViewMesh == DefaultShotgun
