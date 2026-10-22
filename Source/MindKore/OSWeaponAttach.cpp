@@ -201,9 +201,11 @@ FOSSeatPose OSSeatPoseAt(const FOSAttachment& A, const FOSWeaponMount& Mount, bo
 
 TArray<FOSAttachment> OSMakeAttachments()
 {
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cylinder(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> UspMag(TEXT("/Game/OSArt/Meshes/Weapons/SM_OS_USP_Mag.SM_OS_USP_Mag"));
+	// The modules' meshes (Scripts/os_attachments.py): centimetres, centred, lens at +X; the suppressor along Z.
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> LaserMesh(TEXT("/Game/OSArt/Meshes/Weapons/SM_OS_Attach_Laser.SM_OS_Attach_Laser"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> TorchMesh(TEXT("/Game/OSArt/Meshes/Weapons/SM_OS_Attach_Torch.SM_OS_Attach_Torch"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SuppressorMesh(TEXT("/Game/OSArt/Meshes/Weapons/SM_OS_Attach_Suppressor.SM_OS_Attach_Suppressor"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> UspMagLong(TEXT("/Game/OSArt/Meshes/Weapons/SM_OS_USP_MagLong.SM_OS_USP_MagLong"));
 	// Stand-ins until the Foley pass (the addendum): the USP's magazine for the stop, its slide stop for the rail's click,
 	// the dry click for the detents and the switch, the holster's leather for the pouch, the hammer for the latch.
 	static ConstructorHelpers::FObjectFinder<USoundBase> Pouch(TEXT("/Game/OSArt/Audio/Weapons/SW_OS_Draw_Pistol.SW_OS_Draw_Pistol"));
@@ -214,7 +216,6 @@ TArray<FOSAttachment> OSMakeAttachments()
 
 	FOSAttachment Rail;
 	Rail.MountType = EOSMountType::Rail;
-	Rail.Mesh = Cube.Object;
 	Rail.bHasSwitch = true;
 	Rail.PouchSound = Pouch.Object;
 	Rail.RailClick = Click.Object;
@@ -235,7 +236,8 @@ TArray<FOSAttachment> OSMakeAttachments()
 	Laser.Name = LOCTEXT("LaserName", "ЛЦУ");
 	Laser.Description = LOCTEXT("LaserText", "ТОЧКА ТУДА, КУДА СМОТРИШЬ");
 	Laser.Fits = { TEXT("Pistol"), TEXT("Rmb93") };
-	Laser.SeatOffset = FTransform(FQuat::Identity, FVector(0.0f, 0.0f, -0.7f), FVector(0.032f, 0.016f, 0.014f));
+	Laser.Mesh = LaserMesh.Object;
+	Laser.SeatOffset = FTransform(FVector(0.0f, 0.0f, -0.7f));
 	Laser.bLaser = true;
 	Laser.LensOffsetCm = FVector(1.62f, 0.0f, -0.7f);
 
@@ -245,7 +247,8 @@ TArray<FOSAttachment> OSMakeAttachments()
 	Torch.Name = LOCTEXT("TorchName", "ФОНАРЬ");
 	Torch.Description = LOCTEXT("TorchText", "СВЕТ ВДОЛЬ СТВОЛА");
 	Torch.Fits = { TEXT("Pistol"), TEXT("Shotgun"), TEXT("Rmb93") };
-	Torch.SeatOffset = FTransform(FQuat::Identity, FVector(0.0f, 0.0f, -1.0f), FVector(0.03f, 0.02f, 0.02f));
+	Torch.Mesh = TorchMesh.Object;
+	Torch.SeatOffset = FTransform(FVector(0.0f, 0.0f, -1.0f));
 	Torch.TorchCandelas = 6000.0f;
 	Torch.TorchConeDeg = 16.0f;
 	Torch.TorchRangeCm = 1500.0f;
@@ -258,10 +261,10 @@ TArray<FOSAttachment> OSMakeAttachments()
 	Suppressor.Name = LOCTEXT("SuppressorName", "ГЛУШИТЕЛЬ");
 	Suppressor.Description = LOCTEXT("SuppressorText", "ТИШЕ, БЕЗ ВСПЫШКИ");
 	Suppressor.MountType = EOSMountType::Muzzle;
-	Suppressor.Mesh = Cylinder.Object;
+	Suppressor.Mesh = SuppressorMesh.Object;
 	Suppressor.bHasSwitch = false;
 	Suppressor.Fits = { TEXT("Pistol") };
-	Suppressor.SeatOffset = FTransform(FRotator(90.0f, 0.0f, 0.0f), FVector(6.0f, 0.0f, 0.0f), FVector(0.026f, 0.026f, 0.12f));
+	Suppressor.SeatOffset = FTransform(FRotator(90.0f, 0.0f, 0.0f), FVector(6.0f, 0.0f, 0.0f));
 	Suppressor.PouchOffsetCm = FVector(10.0f, 6.0f, -12.0f);
 	Suppressor.TightenKick = { 0.0f, FVector(15.0f, 0.0f, 0.0f), FRotator(0.0f, 0.0f, 25.0f) };
 	Suppressor.ShotSoundOverride = TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/OSArt/Audio/Weapons/SW_OS_Shot_Pistol_Suppressed.SW_OS_Shot_Pistol_Suppressed")));
@@ -270,7 +273,7 @@ TArray<FOSAttachment> OSMakeAttachments()
 	Suppressor.MuzzleSmokeScale = 1.5f;
 	Suppressor.MuzzleOffsetCm = 12.0f;
 
-	// Магазин 20 (owner 22.10 14:16, 14:19): the stock mesh longer by 3 cm until the PC's; clear, the rounds inside.
+	// Магазин 20 (owner 22.10 14:16, 14:19): the stock magazine 3 cm longer down the well (SM_OS_USP_MagLong); clear, the rounds inside.
 	FOSAttachment BigMag;
 	BigMag.Id = TEXT("BigMag");
 	BigMag.Name = LOCTEXT("BigMagName", "МАГАЗИН 20");
@@ -278,7 +281,7 @@ TArray<FOSAttachment> OSMakeAttachments()
 	BigMag.MountType = EOSMountType::Magazine;
 	BigMag.Fits = { TEXT("Pistol") };
 	BigMag.MagazineSizeOverride = 20;
-	BigMag.MagMeshOverride = UspMag.Object;
+	BigMag.MagMeshOverride = UspMagLong.Object;
 	BigMag.MagExtraCm = 3.0f;
 	BigMag.bClearMagazine = true;
 	BigMag.ClearMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/Materials/Weapons/M_OS_ClearMag.M_OS_ClearMag")));
@@ -541,7 +544,7 @@ void UOSWeaponsComponent::SwapMagazine(FOSWeapon& Weapon, FName Id)
 	}
 	const int32 Size = Attachment && Attachment->MagazineSizeOverride > 0 ? Attachment->MagazineSizeOverride : Weapon.StockMagazineSize;
 	Weapon.MagMesh = Attachment && Attachment->MagMeshOverride ? Attachment->MagMeshOverride.Get() : Weapon.StockMagMesh.Get();
-	// Longer by MagExtraCm: the way out of the well too, and the mesh stretched along it until the PC's own mesh.
+	// Longer by MagExtraCm: the way out of the well too; an override that is the stock mesh is stretched along it.
 	const float Stock = Weapon.StockMagTravelCm.Size();
 	const float Extra = Attachment ? Attachment->MagExtraCm : 0.0f;
 	Weapon.MagTravelCm = Stock > 0.0f ? Weapon.StockMagTravelCm * ((Stock + Extra) / Stock) : Weapon.StockMagTravelCm;
@@ -1056,7 +1059,7 @@ void UOSWeaponsComponent::UpdateModules(const FOSWeapon* Weapon)
 		{
 			ClearMagId = NAME_None;
 			ClearMagRounds = -1;
-			MagInView->SetMaterial(0, nullptr); // the stock mesh's own again
+			MagInView->EmptyOverrideMaterials(); // the stock mesh's own again
 		}
 		if (bClearMag && (ClearMagRounds != Weapon->Ammo || ClearMagId != Mag->Id))
 		{
@@ -1109,7 +1112,8 @@ void UOSWeaponsComponent::UpdateClearMagazine()
 	}
 	ClearMagRounds = Weapon.Ammo;
 	ClearMagId = Mag->Id;
-	// The magazine's body is stretched along the well (MagStretch); its insides are not: they sit in the stock's frame.
+	// A body stretched along the well (MagStretch: an override that is the stock mesh) leaves its insides in the stock's
+	// frame; BigMag's own SM_OS_USP_MagLong is not stretched (MagStretch 1).
 	const FTransform Unstretch = MagStretchAbout(Weapon.MagPivot, 1.0f / FMath::Max(Weapon.MagStretch, 0.01f));
 	for (USceneComponent* Inside : { static_cast<USceneComponent*>(RoundsInView.Get()), static_cast<USceneComponent*>(FollowerInView.Get()),
 		static_cast<USceneComponent*>(SpringInView.Get()) })
@@ -1130,17 +1134,22 @@ void UOSWeaponsComponent::UpdateClearMagazine()
 			ClearMagMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/EngineMaterials/Widget3DPassThrough_Translucent.Widget3DPassThrough_Translucent"));
 		}
 	}
-	if (ClearMagMaterial && MagInView->GetMaterial(0) != ClearMagMaterial)
+	// Every slot: the body and the floor plate are the same smoky polymer (the owner's reference, 14:19).
+	for (int32 Slot = 0; ClearMagMaterial && Slot < MagInView->GetNumMaterials(); ++Slot)
 	{
-		MagInView->SetMaterial(0, ClearMagMaterial);
+		if (MagInView->GetMaterial(Slot) != ClearMagMaterial)
+		{
+			MagInView->SetMaterial(Slot, ClearMagMaterial);
+		}
 	}
-	// A staggered double stack down the well from the lips: 9.3 mm a row, the rows 2 mm either side (owner 22.10 14:19).
+	// A staggered double stack down the well from the lips, 5.2 mm a round: twenty fill SM_OS_USP_MagLong to its foot, so
+	// the last ones show below the grip (owner 22.10 14:19, the reference); the rows 2 mm either side.
 	const FVector Down = Weapon.StockMagTravelCm.IsNearlyZero() ? FVector(0.0f, 0.0f, -1.0f) : Weapon.StockMagTravelCm.GetSafeNormal();
 	const FVector Across(0.0f, 1.0f, 0.0f);
 	// The rounds lie across the well, along the bore, bullets toward the muzzle (the USP's -X).
 	const FVector Along = FVector::CrossProduct(Across, Down).GetSafeNormal();
 	const FQuat Lying = FQuat::FindBetweenNormals(FVector::UpVector, -Along);
-	constexpr float Pitch = 0.465f, Lips = 0.6f;
+	constexpr float Pitch = 0.52f, Lips = 0.6f;
 	const int32 Capacity = FMath::Max(Weapon.MagazineSize, 1);
 	TArray<FTransform> Stack;
 	Stack.Reserve(Weapon.Ammo);
@@ -1153,7 +1162,7 @@ void UOSWeaponsComponent::UpdateClearMagazine()
 	RoundsInView->AddInstances(Stack, /*bShouldReturnIndices=*/false);
 	// The follower under the last round; the spring from it to the floor, as long as the free space.
 	const float FollowerDepth = Lips + Weapon.Ammo * Pitch + 0.3f;
-	const float Floor = Lips + Capacity * Pitch + 1.5f;
+	const float Floor = Lips + Capacity * Pitch + 0.6f;
 	FollowerInView->SetRelativeTransform(FTransform(FQuat::FindBetweenNormals(FVector::UpVector, -Down), Weapon.MagPivot + Down * FollowerDepth,
 		FVector(0.022f, 0.009f, 0.003f)) * Unstretch);
 	const float SpringLength = FMath::Max(Floor - FollowerDepth, 0.2f);
