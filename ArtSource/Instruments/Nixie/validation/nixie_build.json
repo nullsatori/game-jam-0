@@ -1,0 +1,44 @@
+{
+  "material": "/Game/JamArt/Materials/Instruments/Nixie/M_Jam_Nixie.M_Jam_Nixie",
+  "instance": "/Game/JamArt/Materials/Instruments/Nixie/MI_Jam_Nixie_RMB93.MI_Jam_Nixie_RMB93",
+  "shader": "UE SDF layered nixie v3",
+  "compile_errors": [],
+  "parameters": {
+    "SP_DigitIndex": 4.0,
+    "SP_CounterEnabled": 1.0,
+    "SP_DepthCm": 0.11,
+    "SP_FaceWidthCm": 2.4,
+    "SP_FaceHeightCm": 1.8,
+    "SP_GhostStrength": 0.01,
+    "SP_CoreIntensity": 2.8,
+    "SP_DischargeIntensity": 1.5,
+    "SP_HaloIntensity": 0.24,
+    "SP_FlickerStrength": 0.006,
+    "SP_GlassCurvature": 0.1,
+    "SP_ClearCoat": 0.2,
+    "SP_ClearCoatRoughness": 0.025,
+    "SP_InternalRadiance": 1.6,
+    "SP_GlassEchoStrength": 0.09,
+    "SP_EdgeRadiance": 0.7,
+    "SP_CavityRoughness": 0.65,
+    "SP_SegmentFlickerStrength": 0.05,
+    "SP_SegmentFlickerRate": 5.0,
+    "SP_SegmentFlickerScale": 18.0,
+    "SP_FlickerPhase": 0.0,
+    "SP_MinCorePixels": 0.85
+  },
+  "textures": {
+    "Masks": "/Game/JamArt/Materials/Instruments/Nixie/Textures/T_Jam_Nixie_Masks.T_Jam_Nixie_Masks",
+    "BackColor": "/Game/JamArt/Materials/Instruments/Nixie/Textures/T_Jam_Nixie_BackColor.T_Jam_Nixie_BackColor",
+    "Normal": "/Game/JamArt/Materials/Instruments/Nixie/Textures/T_Jam_Nixie_Normal.T_Jam_Nixie_Normal",
+    "ORM": "/Game/JamArt/Materials/Instruments/Nixie/Textures/T_Jam_Nixie_ORM.T_Jam_Nixie_ORM",
+    "Atlas": "/Game/JamArt/Materials/Instruments/Nixie/Textures/T_Jam_Nixie_Distance.T_Jam_Nixie_Distance"
+  },
+  "shader_sha256": "085ce19598c647d4b163e42c8271f8f004298cc77b49aa9c96e8c6c01856cfda",
+  "clearcoat_bottom_normal_cvar": 0,
+  "limitations": [
+    "Opaque virtual optical depth; no transparent shell or ray-marched volume",
+    "One curved optical normal; substrate specular suppressed, outer clearcoat supplies reflection",
+    "Runtime binding belongs to UJamNixieCounterComponent; material generation replaces no game weapon"
+  ]
+}

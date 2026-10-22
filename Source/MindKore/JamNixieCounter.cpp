@@ -2,6 +2,7 @@
 
 #include "Components/MeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Engine/World.h"
 #include "MindKore.h"
 
 namespace
@@ -9,6 +10,9 @@ namespace
 	const FName DigitParameter(TEXT("SP_DigitIndex"));
 	const FName EnabledParameter(TEXT("SP_CounterEnabled"));
 	const FName FlickerPhaseParameter(TEXT("SP_FlickerPhase"));
+	const FName PrevDigitParameter(TEXT("SP_PrevDigit"));
+	const FName ChangeTimeParameter(TEXT("SP_ChangeTime"));
+	const FName PowerTimeParameter(TEXT("SP_PowerTime"));
 
 	int32 SafeDigit(int32 Value) { return Value >= 0 && Value <= 9 ? Value : 10; }
 }
@@ -40,7 +44,10 @@ void UJamNixieCounterComponent::SetDigit(int32 Value)
 {
 	const int32 SafeValue = SafeDigit(Value);
 	if (Digit == SafeValue) return;
+	// A dark tube has nothing to fade; a lit one leaves its old cathode glowing for a few ms.
+	PrevDigit = bCounterEnabled ? Digit : 10;
 	Digit = SafeValue;
+	ChangeTime = Now();
 	ApplyState();
 }
 
@@ -48,7 +55,15 @@ void UJamNixieCounterComponent::SetCounterEnabled(bool bEnabled)
 {
 	if (bCounterEnabled == bEnabled) return;
 	bCounterEnabled = bEnabled;
+	PowerTime = Now();
 	ApplyState();
+}
+
+double UJamNixieCounterComponent::Now() const
+{
+	// The material's Time node is the same world clock (paused and dilated with the world).
+	const UWorld* World = GetWorld();
+	return World ? World->GetTimeSeconds() : 0.0;
 }
 
 void UJamNixieCounterComponent::ApplyState()
@@ -57,6 +72,10 @@ void UJamNixieCounterComponent::ApplyState()
 	{
 		Binding.Instance->SetScalarParameterValue(DigitParameter, float(Digit));
 		Binding.Instance->SetScalarParameterValue(EnabledParameter, bCounterEnabled ? 1.0f : 0.0f);
+		if (!Binding.bHasClocks) continue;
+		Binding.Instance->SetScalarParameterValue(PrevDigitParameter, float(PrevDigit));
+		Binding.Instance->SetScalarParameterValue(ChangeTimeParameter, float(ChangeTime));
+		Binding.Instance->SetScalarParameterValue(PowerTimeParameter, float(PowerTime));
 	}
 }
 
@@ -111,6 +130,9 @@ int32 UJamNixieCounterComponent::BindMesh(UMeshComponent* Mesh, const TArray<int
 		Binding.Slot = Slot;
 		Binding.OriginalOverride = Mesh->OverrideMaterials.IsValidIndex(Slot) ? Mesh->OverrideMaterials[Slot].Get() : nullptr;
 		Binding.Instance = Instance;
+		Binding.bHasClocks = Material->GetScalarParameterValue(FMaterialParameterInfo(ChangeTimeParameter), Unused)
+			&& Material->GetScalarParameterValue(FMaterialParameterInfo(PowerTimeParameter), Unused)
+			&& Material->GetScalarParameterValue(FMaterialParameterInfo(PrevDigitParameter), Unused);
 		Mesh->SetMaterial(Slot, Instance);
 	}
 	ApplyState();
@@ -268,6 +290,35 @@ namespace
 		A->DestroyComponent();
 		Check(MeshA->GetMaterial(0) == Material, TEXT("component destruction restores original material"));
 		Check(!B->PrimaryComponentTick.bCanEverTick, TEXT("no component Tick"));
+		{
+			// v5 event clocks: one stamp per event, in world seconds, nothing per frame.
+			const double T0 = World->GetTimeSeconds();
+			B->BindMesh(MeshB, { 0 });
+			B->SetCounterEnabled(true);
+			B->SetDigit(5);
+			B->SetDigit(2);
+			const double Stamp = B->GetChangeTime();
+			Check(B->GetPreviousDigit() == 5 && FMath::IsNearlyEqual(Stamp, T0, 1e-6),
+				TEXT("digit change stamps world time and remembers the lit digit"));
+			B->SetDigit(2);
+			Check(B->GetChangeTime() == Stamp && B->GetPreviousDigit() == 5, TEXT("same digit again restarts nothing"));
+			B->SetCounterEnabled(false);
+			Check(FMath::IsNearlyEqual(B->GetPowerTime(), T0, 1e-6), TEXT("power switch stamps world time"));
+			B->SetDigit(7);
+			Check(B->GetPreviousDigit() == 10, TEXT("a change while dark leaves no afterglow"));
+			B->SetCounterEnabled(true);
+			float ChangeParam = 0.0f;
+			UMaterialInstanceDynamic* BMID = Cast<UMaterialInstanceDynamic>(MeshB->GetMaterial(0));
+			const bool bClocks = BMID && BMID->GetScalarParameterValue(FMaterialParameterInfo(ChangeTimeParameter), ChangeParam);
+			if (bClocks)
+			{
+				Check(FMath::IsNearlyEqual(double(ChangeParam), B->GetChangeTime(), 1e-3) && Scalar(BMID, PrevDigitParameter, 10.0f)
+					&& Scalar(BMID, PowerTimeParameter, float(B->GetPowerTime())), TEXT("clocks reach the bound material"));
+				UE_LOG(LogMindKore, Log, TEXT("Nixie probe: clocks world=%.4f change=%.4f power=%.4f prev=%d"),
+					T0, B->GetChangeTime(), B->GetPowerTime(), B->GetPreviousDigit());
+			}
+			else UE_LOG(LogMindKore, Log, TEXT("Nixie probe: material has no v5 clocks - transitions are not animated."));
+		}
 		Check(Scalar(Material, DigitParameter, OriginalDigit) && Scalar(Material, EnabledParameter, OriginalEnabled),
 			TEXT("shared material defaults unchanged"));
 		if (bHasPhase) Check(Scalar(Material, FlickerPhaseParameter, OriginalPhase), TEXT("shared flicker phase unchanged"));

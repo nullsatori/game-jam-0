@@ -1,0 +1,851 @@
+{
+  "schema_version": "2.0",
+  "art_revision": "v02_manufacturing_finish_pressed_receiver",
+  "asset_id": "Jam_RMB93",
+  "date": "2026-10-21",
+  "repository": "https://github.com/nullsatori/game-jam-0",
+  "inspected_commit": "defb0cbdb2f34585408a9b02996c594ffa3c6b8c",
+  "engine": "UE 5.8",
+  "platform": "Windows",
+  "delivery_status": {
+    "brief": "complete",
+    "reference_blockout": "exterior_only",
+    "production_mesh": "editable_native_and_exports_delivered",
+    "production_textures": "9_png_delivered",
+    "unreal_import": "isolated_preview_import_verified",
+    "runtime_acceptance": "UE_PIE_visual_verified_component_probe_pass_cooked_and_hand_animation_not_accepted",
+    "visual_art_acceptance": "independent_art_review_8_0_user_acceptance_pending"
+  },
+  "geometry": {
+    "unit_after_import": "centimeter",
+    "ue_axes": {
+      "forward": "+X",
+      "right": "+Y",
+      "up": "+Z",
+      "counter_side": "upper_rear_chamfer"
+    },
+    "preview_blender_axes": {
+      "forward": "+X",
+      "left": "+Y",
+      "up": "+Z"
+    },
+    "origin": "trigger_finger_contact_point",
+    "common_origin_for_parts": true,
+    "export_pose": "closed_action_folded_stock",
+    "length_cm_initial_art_target": 66,
+    "length_is_measured_reference": false,
+    "silhouette_reference": "accepted_short_concept_then_live_user_changes",
+    "folded_length_to_height_target": 3.66,
+    "folded_length_to_height_tolerance": 0.15,
+    "height_cm_initial_art_target": 18.05,
+    "exposed_front_length_fraction_target": 0.38,
+    "lod0_triangle_target": [
+      6000,
+      9000
+    ],
+    "lod_triangle_hard_limits_total_assembly": [
+      12000,
+      5000,
+      2000
+    ],
+    "nanite": false,
+    "unique_material_count": 2,
+    "cylinder_side_guideline": [
+      10,
+      12
+    ],
+    "uv_channel": 0,
+    "uv_tiles": 1,
+    "udim": false,
+    "mirror_receiver_uv": false,
+    "body_dilation_pixels_at_2048": 16,
+    "body_island_gap_pixels_at_2048": 12.2875,
+    "triangulate_before_bake": true,
+    "tangent_basis": "MikkTSpace",
+    "viewmodel_collision": false,
+    "world_collision": "simple_convex_hulls",
+    "meshes": [
+      {
+        "file": "SM_Jam_RMB93_Body.fbx",
+        "slots": [
+          "Body"
+        ],
+        "role": "stationary_receiver_grip_upper_tube"
+      },
+      {
+        "file": "SM_Jam_RMB93_Action.fbx",
+        "slots": [
+          "Body"
+        ],
+        "role": "lower_barrel_and_foreend"
+      },
+      {
+        "file": "SM_Jam_RMB93_Counter.fbx",
+        "slots": [
+          "Counter"
+        ],
+        "role": "opaque_recessed_counter_surface",
+        "parent": "Body"
+      },
+      {
+        "file": "SM_Jam_RMB93_World.fbx",
+        "slots": [
+          "Body",
+          "Counter"
+        ],
+        "role": "closed_pose_combined_world_asset"
+      },
+      {
+        "file": "SM_Jam_RMB93_Stock.fbx",
+        "slots": [
+          "Body"
+        ],
+        "role": "separate_articulation_for_reload_preview"
+      },
+      {
+        "file": "SM_Jam_RMB93_LoadingLid.fbx",
+        "slots": [
+          "Body"
+        ],
+        "role": "separate_articulation_for_reload_preview"
+      }
+    ],
+    "locators": [
+      "Muzzle",
+      "Grip_R",
+      "Grip_L",
+      "Counter_Center",
+      "Stock_Hinge",
+      "LoadingLid_Hinge",
+      "Shell_Insert",
+      "Eject_Art"
+    ],
+    "locator_transforms": "measure_from_final_mesh",
+    "grip_l_parent": "Action",
+    "right_side_counter": false,
+    "right_side_mirrored_lever": false,
+    "counter_side": "upper_rear_chamfer",
+    "counter_position_blender_m": [
+      -0.03,
+      0,
+      0.056
+    ],
+    "counter_normal_blender": [
+      -0.8,
+      0,
+      0.6
+    ],
+    "mesh_triangles": 11846,
+    "editable_parts": 47,
+    "export_assemblies": [
+      "Body",
+      "Action",
+      "Stock",
+      "LoadingLid",
+      "Counter"
+    ],
+    "lod1_lod2_status": "not_delivered",
+    "collision_status": "not_created",
+    "unreal_axes_verified": true,
+    "ue_import_notes": {
+      "force_front_x_axis": true,
+      "import_rotation_yaw": 90,
+      "remove_degenerates": false,
+      "recompute_normals": false,
+      "recompute_tangents": true,
+      "tangent_basis": "MikkTSpace",
+      "evidence_scope": "isolated R4_11846 preview import, exact 11846 triangles"
+    },
+    "body_island_gap_note": "Measured margin benchmark at4096:24.575px; previous32px was an initial target, superseded by .003packing."
+  },
+  "texture_defaults": {
+    "format": "PNG",
+    "bits_per_channel": 8,
+    "channels": "RGB",
+    "alpha": false,
+    "address_u": "Clamp",
+    "address_v": "Clamp",
+    "mipmaps": true,
+    "body_and_action_share_set": true,
+    "same_final_uv_and_bake_required": true
+  },
+  "textures": [
+    {
+      "name": "T_Jam_RMB93_BC",
+      "size": [
+        4096,
+        4096
+      ],
+      "semantics": [
+        "BaseColor.R",
+        "BaseColor.G",
+        "BaseColor.B"
+      ],
+      "srgb": true,
+      "compression": "Default",
+      "sampler": "Color",
+      "group": "Weapon",
+      "runtime_baseline": true
+    },
+    {
+      "name": "T_Jam_RMB93_N",
+      "size": [
+        4096,
+        4096
+      ],
+      "semantics": [
+        "Normal.X",
+        "Normal.Y",
+        "Normal.Z"
+      ],
+      "normal_convention": "DirectX_Y-",
+      "flip_green": false,
+      "srgb": false,
+      "compression": "Normalmap",
+      "sampler": "Normal",
+      "group": "WeaponNormalMap",
+      "runtime_baseline": true
+    },
+    {
+      "name": "T_Jam_RMB93_ORM",
+      "size": [
+        4096,
+        4096
+      ],
+      "semantics": [
+        "AmbientOcclusion",
+        "Roughness",
+        "Metallic"
+      ],
+      "srgb": false,
+      "compression": "Masks",
+      "sampler": "Masks",
+      "group": "WeaponSpecular",
+      "runtime_baseline": true
+    },
+    {
+      "name": "T_Jam_RMB93_Masks",
+      "size": [
+        1024,
+        1024
+      ],
+      "semantics": [
+        "ExposedMetalWear",
+        "Dirt",
+        "ReservedAccent_CurrentlyZero"
+      ],
+      "srgb": false,
+      "compression": "Masks",
+      "sampler": "Masks",
+      "group": "WeaponSpecular",
+      "runtime_baseline": false,
+      "delivery_required": true
+    },
+    {
+      "name": "T_Jam_RMB93_Counter_BC",
+      "size": [
+        512,
+        512
+      ],
+      "semantics": [
+        "BaseColor.R",
+        "BaseColor.G",
+        "BaseColor.B"
+      ],
+      "srgb": true,
+      "compression": "Default",
+      "sampler": "Color",
+      "group": "Weapon",
+      "runtime_baseline": true
+    },
+    {
+      "name": "T_Jam_RMB93_Counter_N",
+      "size": [
+        512,
+        512
+      ],
+      "semantics": [
+        "Normal.X",
+        "Normal.Y",
+        "Normal.Z"
+      ],
+      "normal_convention": "DirectX_Y-",
+      "flip_green": false,
+      "srgb": false,
+      "compression": "Normalmap",
+      "sampler": "Normal",
+      "group": "WeaponNormalMap",
+      "runtime_baseline": true
+    },
+    {
+      "name": "T_Jam_RMB93_Counter_ORM",
+      "size": [
+        512,
+        512
+      ],
+      "semantics": [
+        "AmbientOcclusion",
+        "Roughness",
+        "Metallic"
+      ],
+      "srgb": false,
+      "compression": "Masks",
+      "sampler": "Masks",
+      "group": "WeaponSpecular",
+      "runtime_baseline": true
+    },
+    {
+      "name": "T_Jam_RMB93_Counter_Masks",
+      "size": [
+        512,
+        512
+      ],
+      "semantics": [
+        "EmissiveAperture",
+        "InactiveWireContours",
+        "GlassDirt"
+      ],
+      "srgb": false,
+      "compression": "Masks",
+      "sampler": "Masks",
+      "group": "WeaponSpecular",
+      "runtime_baseline": true
+    },
+    {
+      "name": "T_Jam_RMB93_DigitAtlas_M",
+      "size": [
+        1024,
+        1024
+      ],
+      "semantics": [
+        "HotCathodeCore",
+        "OrangeGasDischarge",
+        "SoftLocalHalo"
+      ],
+      "srgb": false,
+      "compression": "Masks",
+      "sampler": "Masks",
+      "group": "WeaponSpecular",
+      "mip_gen": "SimpleAverage",
+      "filter": "Bilinear",
+      "lod_bias": 0,
+      "resident_in_first_person": true,
+      "runtime_baseline": true
+    }
+  ],
+  "materials": {
+    "Body": {
+      "master": "M_Jam_RMB93_Body",
+      "instance": "MI_Jam_RMB93_Body",
+      "blend": "Opaque",
+      "shading": "DefaultLit",
+      "two_sided": false
+    },
+    "Counter": {
+      "master": "M_Jam_RMB93_Counter",
+      "instance": "MI_Jam_RMB93_Counter",
+      "blend": "Opaque",
+      "shading": "DefaultLit",
+      "two_sided": false,
+      "per_weapon_dynamic_instance": true
+    }
+  },
+  "counter": {
+    "uv0_origin": "top_left_as_seen_from_outside_rear_display",
+    "uv0_u": "screen_right",
+    "uv0_v": "screen_down",
+    "atlas": {
+      "grid": [
+        4,
+        4
+      ],
+      "size": [
+        1024,
+        1024
+      ],
+      "cell_size": [
+        256,
+        256
+      ],
+      "order": "row_major_top_left",
+      "cells": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "OFF",
+        "RESERVED",
+        "RESERVED",
+        "RESERVED",
+        "RESERVED",
+        "RESERVED"
+      ],
+      "off_index": 10,
+      "reserved_indices": [
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "off_and_reserved_rgb": [
+        0,
+        0,
+        0
+      ],
+      "black_gutter_pixels": 16,
+      "content_pixel_bounds_inclusive": [
+        16,
+        239
+      ],
+      "wire_width_initial_pixels": [
+        4,
+        6
+      ],
+      "discharge_width_initial_pixels": [
+        10,
+        16
+      ],
+      "halo_extent_initial_pixels": [
+        24,
+        40
+      ],
+      "uv_formula": "(cell * 256 + 16.5 + saturate(UV0) * 223.0) / 1024.0",
+      "glyph_style": "gas_discharge_wire_contours_not_seven_segment"
+    },
+    "parameters": [
+      {
+        "name": "SP_DigitIndex",
+        "type": "scalar_integer",
+        "preview_default": 4,
+        "game_default": "from_Ammo",
+        "valid_runtime_digits": [
+          0,
+          9
+        ],
+        "blank": 10
+      },
+      {
+        "name": "SP_CounterEnabled",
+        "type": "scalar",
+        "default": 1,
+        "range": [
+          0,
+          1
+        ]
+      },
+      {
+        "name": "VP_EmissiveColor",
+        "type": "linear_rgb_vector",
+        "default": [
+          1.0,
+          0.32,
+          0.055
+        ],
+        "affects": "atlas_R_core"
+      },
+      {
+        "name": "SP_EmissiveIntensity",
+        "type": "scalar",
+        "default": 5.0,
+        "minimum": 0,
+        "initial_tuning_range": [
+          2,
+          8
+        ]
+      },
+      {
+        "name": "VP_DischargeColor",
+        "type": "linear_rgb_vector",
+        "default": [
+          1.0,
+          0.1,
+          0.006
+        ],
+        "affects": "atlas_G_discharge"
+      },
+      {
+        "name": "SP_DischargeStrength",
+        "type": "scalar",
+        "default": 0.55,
+        "minimum": 0
+      },
+      {
+        "name": "VP_HaloColor",
+        "type": "linear_rgb_vector",
+        "default": [
+          1.0,
+          0.045,
+          0.003
+        ],
+        "affects": "atlas_B_halo"
+      },
+      {
+        "name": "SP_HaloStrength",
+        "type": "scalar",
+        "default": 0.12,
+        "minimum": 0
+      },
+      {
+        "name": "SP_GhostStrength",
+        "type": "scalar",
+        "default": 0.06,
+        "range": [
+          0,
+          0.15
+        ],
+        "affects": "BaseColor_only"
+      }
+    ],
+    "emissive_formula": "Aperture * saturate(Enabled) * max(Intensity,0) * (CoreR * CoreColorLinear + DischargeG * DischargeColorLinear * max(DischargeStrength,0) + HaloB * HaloColorLinear * max(HaloStrength,0))",
+    "visual_identity": {
+      "reference": "recessed_nixie_instrument_clock",
+      "core": "thin_warm_bright_filament",
+      "discharge": "orange_envelope_follows_filament",
+      "halo": "soft_red_amber_falloff_no_hard_outline",
+      "inactive_layers": "dark_stacked_cathodes_in_mask_G",
+      "background": "sparse_anode_mesh_in_Counter_BC",
+      "glass": "subtle_curved_normal_and_roughness_reflection",
+      "requires_bloom_for_identity": false,
+      "preview_geometry_is_production_requirement": false
+    },
+    "data_source": "FJamWeapon::Ammo",
+    "current_magazine_capacity": 6,
+    "add_chamber_round": false,
+    "update": "after_gameplay_Ammo_mutation_and_before_show",
+    "empty_state": {
+      "index": 0,
+      "enabled": 1
+    },
+    "off_state": {
+      "index": 10,
+      "enabled": 0
+    },
+    "invalid_ammo_state": {
+      "index": 10,
+      "enabled": 0,
+      "diagnostic_required": true
+    },
+    "material_parameter_collection_for_ammo": false,
+    "random_digits_during_transition": false,
+    "point_light_required": false,
+    "inactive_wire_emissive": false,
+    "placement_revision": "upper_rear_chamfer_facing_player_supersedes_left_wall",
+    "glyph_art_revision": "4_matrix_equal_height_preserved_aspect_approved_4",
+    "hot_wire_width_px_range": [
+      1.61,
+      2.99
+    ],
+    "readability_status": "atlas_mips_verified_ADS_TAA_not_accepted",
+    "viewer_shader": {
+      "inactive_layers": 4,
+      "source": "viewer/nixie.js",
+      "revision": "layered-nixie-v2",
+      "glass_depth_cm": 0.11,
+      "contract": "viewer/README.md",
+      "parameter_values_override_static_preview": true,
+      "ue_implemented": false
+    },
+    "art_revision": 5,
+    "glyph_four_update": "Removed the upturned right crossbar endpoint at explicit user request; all other paths unchanged."
+  },
+  "acceptance": {
+    "all_views_same_scene": true,
+    "screen_test_resolution": [
+      1920,
+      1080
+    ],
+    "minimum_digit_height_pixels_normal_pose": 24,
+    "minimum_active_stroke_pixels": 2,
+    "check_mip_levels": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "required_digit_states": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "OFF"
+    ],
+    "lighting_tests": [
+      "fixed_exposure_neutral",
+      "game_corridor_bloom_off",
+      "game_corridor_bloom_on"
+    ],
+    "behavior_tests": [
+      "shot",
+      "empty_click",
+      "per_round_reload",
+      "interrupted_reload",
+      "weapon_switch",
+      "two_independent_instances"
+    ],
+    "persistence_test": "reopen_saved_assets",
+    "runtime_test": "cooked_Windows_gameplay_AA_and_exposure"
+  },
+  "future_delivery_roots": {
+    "sources": "ArtSource/Weapons/RMB93/v02",
+    "ue_meshes": "/Game/JamArt/Meshes/Weapons/RMB93",
+    "ue_textures": "/Game/JamArt/Textures/Weapons/RMB93",
+    "ue_materials": "/Game/JamArt/Materials/Weapons/RMB93"
+  },
+  "source_package": "ArtSource/Weapons/RMB93/v02",
+  "verification": "ArtSource/Weapons/RMB93/v02/roundtrip_validation.json",
+  "composite_finish": {
+    "source": "material_sources/CharcoalPhenolic_Source.png",
+    "method": "image-led compressed charcoal resin/fiber; correlated BC, roughness and shallow normal; local contact burnishing",
+    "source_is_measured_scan": false,
+    "grain_field_m": {
+      "shell": 0.065,
+      "insert": 0.045
+    },
+    "normal_detail_m": {
+      "shell": 5.5e-05,
+      "insert": 0.00012
+    },
+    "authored_normal_flow": "planar caps and tangent bevel rings on grip, guard and counter rim; preserve custom normals during triangulation",
+    "visual_review": {
+      "score": 8.1,
+      "previous_score": 7.8,
+      "highest_fully_passed_tier": 3,
+      "user_acceptance": "pending",
+      "ue_acceptance": "not_performed",
+      "revision_note": "Historical local review. Current manufacturing finish supersedes the historical source material; see manufacturing_finish."
+    }
+  },
+  "control_art_design": {
+    "source": "source/control_geometry.py",
+    "material_source": "source/production_finish.py",
+    "parts": [
+      "Trigger_guard",
+      "Trigger",
+      "Left_control_seat",
+      "Left_control_lever",
+      "Left_control_pivot",
+      "Left_small_pin"
+    ],
+    "triangles": 1016,
+    "assembly": "Body",
+    "finish": "blued steel; sparse directional handling scuffs on contact regions, dark lever seating seam; no uniform rust",
+    "wear_mask": "Body Masks R; baked alongside correlated BaseColor and Roughness",
+    "custom_normals": "preserve through final triangulation and export",
+    "detail_view": "viewer button viewControls",
+    "animation_status": "exterior art only; no internal mechanism or finger animation",
+    "visual_review": {
+      "scope": "control_cluster_and_local_handling_wear_only",
+      "score": 8.1,
+      "previous_score": 7.8,
+      "highest_fully_passed_tier": 3,
+      "user_acceptance": "pending",
+      "ue_acceptance": "not_performed",
+      "remaining_polish": "minor close-up silhouette facets; deliberately restrained handling wear",
+      "revision_note": "Historical local review. Current manufacturing finish supersedes the historical source material; see manufacturing_finish."
+    }
+  },
+  "stock_art_design": {
+    "source": "source/stock_geometry.py",
+    "frame": "two tapered stamped C-profile arms; open center",
+    "contact_shoe": "upright open-bottom horseshoe in folded pose; rolled steel backing with exposed seating ledge; crowned molded rubber contact pad, rounded free ends, three shallow channels per leg",
+    "pad_source_material": "Source_Finish_rubber; neutral charcoal, metallic 0, roughness .76-.84 with localized contact polish; shared Body atlas",
+    "stock_triangles": 1938,
+    "visual_review": {
+      "scope": "stock_buttplate_and_pad_only",
+      "score": 8.1,
+      "previous_score": 6.8,
+      "highest_fully_passed_tier": 3,
+      "user_acceptance": "pending",
+      "remaining_polish": "minor end-cap facets and subtle microfinish at extreme close-up",
+      "revision_note": "Historical local review. Current manufacturing finish supersedes the historical source material; see manufacturing_finish."
+    },
+    "detail_view": "viewer button viewButtpad; follows folded, loading-access and deployed poses",
+    "old_proximal_pad": "removed",
+    "assembly": "Stock",
+    "hinge_body_parts": "unchanged",
+    "review_pose": "110-degree loading access and distinct 195-degree rearward deployment; DCC rotations negative around Y",
+    "clearance_validation": "21 samples for access and 21 for deployment against shell, both tubes, sleeve, sights, counter and loading lid",
+    "shoulder_contact_status": "visual rear-facing contact surface only; no character fitting or gameplay animation acceptance"
+  },
+  "surface_weathering": {
+    "source": "source/production_finish.py",
+    "scope": "all source steel, composite and molded rubber; display face and digit atlas preserved",
+    "layers": [
+      "role-specific manufacturing finish",
+      "edge-associated broken directional handling wear",
+      "contact polish for resin/fiber/rubber",
+      "2 mm cavity residue"
+    ],
+    "no_blanket_rust": true,
+    "baked_channels": "BC / Roughness / Metallic; Body Masks R handling wear, G cavity residue, B reserved zero",
+    "method_limit": "authored game-art finish, not a measured material scan",
+    "visual_review": {
+      "scope": "historical whole weapon before manufacturing finish",
+      "score": 6.9,
+      "highest_fully_passed_tier": 2,
+      "status": "further_material_hierarchy_work_recommended",
+      "note": "Visible wear improved, but similar mottling across materials weakens differentiation. Not comparable to earlier local-node scores.",
+      "report": "Docs/Art/RMB93/v02/ART_REVIEW_2026-10-21.txt"
+    }
+  },
+  "grip_art_design": {
+    "source": "source/grip_geometry.py",
+    "parts": 5,
+    "triangles": 888,
+    "construction": "actual side pockets; narrow dark reveal; inset rounded panel; restrained rear palm swell",
+    "materials": "dense graphite resin shell and drier compressed-fiber panel; local hand polish and scuffing",
+    "custom_normals": "preserved through triangulation and export",
+    "hand_fit": "not_performed",
+    "visual_review": "included in whole-asset review; no standalone score"
+  },
+  "manufacturing_finish": {
+    "source": "source/production_finish.py",
+    "roles": [
+      "receiver",
+      "tube",
+      "stamping",
+      "hardware",
+      "bezel",
+      "resin",
+      "traction",
+      "foreend",
+      "rubber"
+    ],
+    "runtime_materials": 2,
+    "design": "Calm image-led color, distinct roughness and normal grain, localized directional wear. No blanket rust.",
+    "source_images": [
+      "material_sources/BluedSteel_Source.png",
+      "material_sources/CharcoalPhenolic_Source.png",
+      "material_sources/Receiver_Stamp_M.png"
+    ],
+    "supersedes_material_shaders": [
+      "source/composite_material.py",
+      "source/control_material.py",
+      "source/surface_weathering.py"
+    ],
+    "uv_priority_scales": {
+      "counter_housing": 2.0,
+      "grip": 1.45,
+      "receiver_and_lid": 1.3,
+      "other": 1.0
+    },
+    "uv_pack_fraction_margin": 0.003,
+    "uv_priority_evidence": "Packing benchmark: priorities survive common scale; .003 margin yields 39.30% coverage and minimum 24.575 px island gap at 4K.",
+    "stamp": "Small baked maker/batch marking MK / 047 on the left receiver, no added runtime slot.",
+    "visual_review": {
+      "scope": "whole current R4 weapon WebGL",
+      "score": 8.0,
+      "highest_fully_passed_tier": 3,
+      "report": "Docs/Art/RMB93/v02/ART_REVIEW_PREMIUM_2026-10-21.txt",
+      "remaining": "Some long bevel highlights and individual wear patterns could be more natural; UE Nixie new scope not accepted by this art review."
+    },
+    "browser_performance": {
+      "fps": 356.083,
+      "frames": 180,
+      "resolution": [
+        1672,
+        941
+      ],
+      "scope": "WebGL receiver view; not UE measurement"
+    }
+  },
+  "joinery_refinement": {
+    "source": "source/joinery_geometry.py",
+    "details": [
+      "loading lid seating tongue and .3 mm seam",
+      "thin counter bezel plus separate black gasket",
+      "pressed stock corner shoulders and seated arm ends",
+      "rolled foreend inlay borders",
+      "24-32 segment prominent round end caps"
+    ],
+    "verification": "roundtrip_validation.json: topology, lid sweep 21 samples, foreend seating, glass/gasket/bezel separation and pinned Counter_face geometry/UV"
+  },
+  "receiver_art_design": {
+    "source": "source/receiver_geometry.py",
+    "triangles": 992,
+    "construction": "Single integral .65 mm shallow left pressed plane with 1.05 mm sloped shoulder and unequal clipped ends; original outer silhouette and control layout retained.",
+    "extra_meshes": 0,
+    "relief_is_functional_internal_geometry": false
+  },
+  "handoff_files": {
+    "modeller_sheet": "RMB93_Modeller_Sheet_v02.pdf",
+    "description": "README.md",
+    "uv_body": [
+      "UV_Body.png",
+      "UV_Body.svg"
+    ],
+    "uv_counter": [
+      "UV_Counter.png",
+      "UV_Counter.svg"
+    ],
+    "uv_notes": "UV_LAYOUTS.txt",
+    "counter_contract": "counter/SHADER_HOOKUP.md"
+  },
+  "reusable_nixie_feature": {
+    "source": "ArtSource/Instruments/Nixie",
+    "material": "/Game/JamArt/Materials/Instruments/Nixie/M_Jam_Nixie",
+    "blueprint": "/Game/JamArt/Materials/Instruments/Nixie/BP_Jam_NixieDisplay",
+    "component": "UJamNixieCounterComponent",
+    "documentation": "Docs/Nixie.md",
+    "visual_review": {
+      "score": 8.1,
+      "highest_fully_passed_tier": 3,
+      "scope": "UE PIE native ADS plus diagnostic closeups and angles, static images only",
+      "report": "Docs/Art/RMB93/v02/NIXIE_REVIEW_2026-10-21.txt",
+      "user_acceptance": "pending"
+    },
+    "component_probe": {
+      "passed": 24,
+      "failed": 0,
+      "environment": "UE5.8 NullRHI game world"
+    },
+    "build": "MKJamStarterEditor Win64 Development passed",
+    "glass": {
+      "clear_coat": 0.2,
+      "clear_coat_roughness": 0.025,
+      "geometry": "opaque virtual-depth surface, not a separate translucent shell"
+    },
+    "segment_flicker": {
+      "strength": 0.05,
+      "rate": 5,
+      "scale": 18,
+      "phase": "per component, assigned once to MID, no Tick"
+    },
+    "wire_aa": "four subpixel footprint samples of authored signed distance core",
+    "performance": {
+      "environment": "UE5.8 Development Editor PIE, RTX5080 D3D12",
+      "viewport": [
+        1996,
+        1230
+      ],
+      "frames_per_phase": 600,
+      "discarded": 30,
+      "native_gpu_median_ms": 8.3276,
+      "native_repeat_gpu_median_ms": 8.17,
+      "extra_16_lit_gpu_median_ms": 8.15,
+      "conclusion": "differences below scene noise; not an isolated shader-cost measurement",
+      "shared_distance_atlas_mib": 16
+    },
+    "limits": [
+      "existing gameplay weapon defaults unchanged",
+      "full hand/reload animation unverified",
+      "cooked and target-hardware acceptance pending"
+    ],
+    "saved_reopen_pass": true,
+    "validation_report": "ArtSource/Instruments/Nixie/validation.json",
+    "temporal_report": "ArtSource/Instruments/Nixie/validation/temporal.json"
+  }
+}

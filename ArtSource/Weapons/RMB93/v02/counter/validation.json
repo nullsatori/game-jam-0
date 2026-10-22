@@ -1,0 +1,161 @@
+{
+  "status": "texture_contract_checks_pass",
+  "art_revision": 5,
+  "revision_authority": "Explicit user request for a Matrix-inspired full numeric alphabet following approved 4, with artistic stable 1 and compact 3",
+  "approved_four_preserved": false,
+  "four_revision": "User requested removal of the upturned crossbar endpoint; all other segments retained",
+  "shared_centerline_y_bounds": [
+    45,
+    211
+  ],
+  "glyph_height_rule": "Uniform XY scaling to common cap line and baseline; aspect ratios and wire widths preserved",
+  "core_width_pixels_at_256_cell": [
+    1.61,
+    2.99
+  ],
+  "core_width_rule": "2.3 * (0.7 + 0.6 * abs(segment_dy) / segment_length)",
+  "supersedes": "v01 initial core 4-6px and discharge 10-16px art guidance only; runtime acceptance remains pending",
+  "readability_note": "At 30px glyph height, unfiltered geometric core is approximately 0.29-0.54px. The orange envelope improves apparent width; this does not pass the old 2px core requirement. Validate actual first-person AA or increase presentation size.",
+  "source": "hand_authored_vector_paths_and_native_optical_material_fields",
+  "atlas_origin": "top_left",
+  "off_index": 10,
+  "reserved_indices": [
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "black_gutter_pixels": 16,
+  "glyphs_unique": 10,
+  "normal_convention": "DirectX_Y_minus",
+  "srgb": [
+    "T_Jam_RMB93_Counter_BC"
+  ],
+  "files": [
+    {
+      "file": "T_Jam_RMB93_Counter_BC.png",
+      "size": [
+        512,
+        512
+      ],
+      "mode": "RGB",
+      "sha256": "627e47cd7ea82092acc47f648b04281a9f04b7a36e5606abf694a0e85767c89d"
+    },
+    {
+      "file": "T_Jam_RMB93_Counter_Masks.png",
+      "size": [
+        512,
+        512
+      ],
+      "mode": "RGB",
+      "sha256": "e3626b2cd37556cfe741db3ea911be3b7d503de2bd6a6b687008192902f3561a"
+    },
+    {
+      "file": "T_Jam_RMB93_Counter_N.png",
+      "size": [
+        512,
+        512
+      ],
+      "mode": "RGB",
+      "sha256": "2666db77daf6396d8a7f9988205a2cb88f1ae741e85b6a29d2d8b96ea3e4cbb0"
+    },
+    {
+      "file": "T_Jam_RMB93_Counter_ORM.png",
+      "size": [
+        512,
+        512
+      ],
+      "mode": "RGB",
+      "sha256": "57d9582e43a5bd48b636ffb13bbc9d17c121f9dbeb5e52e76d2caa6f502aa1f1"
+    },
+    {
+      "file": "T_Jam_RMB93_DigitAtlas_M.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGB",
+      "sha256": "322cbe4fcc5be016fbea3fe8604fd999a6f03acec6172d4c09e5cff6ef1a4470"
+    }
+  ],
+  "mip_checks": [
+    {
+      "level": 0,
+      "unique_active_glyphs": 10,
+      "off_and_reserved_black": true,
+      "lowest_core_peak": 214
+    },
+    {
+      "level": 1,
+      "unique_active_glyphs": 10,
+      "off_and_reserved_black": true,
+      "lowest_core_peak": 210
+    },
+    {
+      "level": 2,
+      "unique_active_glyphs": 10,
+      "off_and_reserved_black": true,
+      "lowest_core_peak": 139
+    },
+    {
+      "level": 3,
+      "unique_active_glyphs": 10,
+      "off_and_reserved_black": true,
+      "lowest_core_peak": 85
+    }
+  ],
+  "static_preview": {
+    "emission": "Counter_Emission4.png",
+    "encoding": "linear RGB; do not apply sRGB decoding",
+    "normalization_factor": 1.67,
+    "material_emissive_strength_for_contract_intensity_5": 8.35,
+    "normal": "Counter_N_OpenGL.png",
+    "atlas_sampling": "exact contract texel center formula, bilinear, aperture applied"
+  },
+  "unreal_imported": false,
+  "runtime_acceptance": false,
+  "preview": "Counter_Digit_States.png is a CPU diagnostic, not an engine screenshot",
+  "raster_core_y_bounds_at_threshold_80": [
+    [
+      43,
+      212
+    ],
+    [
+      43,
+      212
+    ],
+    [
+      43,
+      212
+    ],
+    [
+      43,
+      212
+    ],
+    [
+      44,
+      211
+    ],
+    [
+      44,
+      212
+    ],
+    [
+      43,
+      212
+    ],
+    [
+      43,
+      212
+    ],
+    [
+      43,
+      212
+    ],
+    [
+      43,
+      212
+    ]
+  ]
+}

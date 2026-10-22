@@ -42,6 +42,9 @@ main `f78a949`.
 | T3 | **Пробы без последней строки** (`ZeroG.Probe`, `Hull.Probe`, `Ship.Probe`, `ZeroG.Grapple`, `Ship.Lap/JetExit/Land`, `Wall.Seal`) идут до таймаута; итог `PASS`/`FAIL` есть не у всех. Часть ревью №28 | поиск регрессий, 20.10 |
 | T4 | **`jam.Flyer.Clip roost` и `jam.Flyer.WakeStrip` без аргументов снимают от шлюза** — 65 м до насеста на обломке | [Flyers](Docs/Flyers.md), «Ограничения» |
 | T5 | **`jam.Debug.Shots` в конце сворачивает все группы меню** — затирает `Saved/JamDebug/OpenGroups.txt` той рабочей копии, где его гоняли | [Probes](Docs/Probes.md) |
+| T6 | **Startup ошибки экспериментальных Toolsets в UE 5.8 при `-game -nullrhi`:** Python не находит `ToolsetDefinition` / `AgentSkill`; GameFeatures сообщает об отсутствующем правиле `GameFeatureData` в Asset Manager. Влияние на эти инструменты не исследовано, Engine-плагины не менялись | запуск `jam.Nixie.Probe`, 21.10; сама проба — 24 PASS, 0 FAIL; [Nixie](Docs/Nixie.md) |
+| T7 | **Исходники арта Рыси и табло только на ПК владельца:** `.blend`, FBX, PNG-текстуры, рендеры и листы моделлера из `ArtSource/` и `Docs/Art/` не в git (квота LFS); без них модель и текстуры не пересобрать | [RMB93-Art](Docs/RMB93-Art.md#что-в-git-а-что-нет), 22.10 |
+| T8 | **Текстуры Body Рыси 4096²** (BC / N / ORM, ~25 МБ в LFS) — против правила «не больше 2K». Можно ограничить Max Texture Size 2048 при импорте; вид в ADS после этого не проверен | [RMB93-Art](Docs/RMB93-Art.md), [Development](Docs/Development.md) «Git LFS», 22.10 |
 
 ## Не проверено вживую
 
@@ -66,6 +69,7 @@ main `f78a949`.
 - **Свои стволы в воздухе** (щелчок, комната каюты, подъём высоких у механизмов): A и B
   записаны в игре и измерены, но не прослушаны; громкость против летунов в воздухе вместе
   не записана ([RecoilWeapons-Sound — В воздухе](Docs/RecoilWeapons-Sound.md#в-воздухе-2010-ветка-jam-air-sound)).
+- **Табло Nixie v5** (21.10): HLSL, сборщик и компонент записаны, материал в UE не пересобран, `jam.Nixie.Probe` и кадры v5 не сняты ([Nixie](Docs/Nixie.md#проверка)).
 - **Подбор Рыси в `Lvl_Jam_TestRoom`** (21.10): `jam.Nixie.WeaponProbe` — 19 PASS, 0 FAIL на 30 / 60 / 144 FPS (NullRHI). Вид пикапа на стенде, держание, прицел и счётчик Рыси с настоящим рендером никто не видел.
 
 ## Бэклог ревью 19.10

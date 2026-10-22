@@ -1,0 +1,167 @@
+[
+  {
+    "file": "ArtSource/Weapons/RMB93/v01/blockout/build_blockout.py",
+    "bytes": 20939,
+    "sha256": "a0194c225106e4e03c2d47106b67c388b57252d94402e53b365982e040143d48"
+  },
+  {
+    "file": "ArtSource/Weapons/RMB93/v01/blockout/Jam_RMB93_Blockout_v01.blend",
+    "bytes": 149490,
+    "sha256": "0955591d5133fcc96797b4d4b91ed0a4d66ca967a5d7853afe4f5c1d7082bc17"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/asset_contract.json",
+    "bytes": 9462,
+    "sha256": "4b78602fddbccd4d0212ee67d4021c20460e6f7b328672898106a06f97b6b140"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/brief_validation.json",
+    "bytes": 4031,
+    "sha256": "375098df6f19537fb3cd4f53e62276ea54b89fb8e842fb2a2ae9efde554be021"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/DigitAtlas_Layout.svg",
+    "bytes": 6257,
+    "sha256": "298822ec183a4867c083eeb8b549683a1b1df33750051e5155c5845c8d4d922c"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/generation_prompts.json",
+    "bytes": 9636,
+    "sha256": "3a0fe5fe320c4741129a17404c675a8d6e3b15344e480c16c39cf48f7f425805"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/README.md",
+    "bytes": 35955,
+    "sha256": "e3a0159c93aa5adf7b0dfec0b0046a4105e3fcc3765f99d6c895a50d6652ed69"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/References/RMB93_Proportions_User_Reference.png",
+    "bytes": 271852,
+    "sha256": "a8f8f041480bb656cdc90dd922c9bdb343551e9beb1eea458bbfbf3639653062"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/References/RMB93_User_Reference.png",
+    "bytes": 5935937,
+    "sha256": "4f17e6c0b0b3e175acfd2222c49a731c236703877b657b5fb8925ebe4c537e7a"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/01_left.png",
+    "bytes": 631937,
+    "sha256": "a0f9edeacd5a0b615985954419fea8052bf38ca224fb657ce499492f86eb0951"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/02_right.png",
+    "bytes": 618108,
+    "sha256": "586fcdd7cc6a436e476db711e5a35b1ebba305ad706fd38ae4248376cbdd168f"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/03_top.png",
+    "bytes": 423018,
+    "sha256": "7e98545d7d8f6586ffcfe531072be985ff7ab240bc478bcda25de9852cba00cf"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/04_bottom.png",
+    "bytes": 423052,
+    "sha256": "170d042c6fc925dd2083c00b35d1ccb8f0b7ca6caa7367701f93e73f903f0daa"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/05_front.png",
+    "bytes": 448009,
+    "sha256": "6116d24f3e89d51469d10d02c9b1782c0a18cc26831765366152b3b78ea0ae46"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/06_rear.png",
+    "bytes": 447255,
+    "sha256": "d3e367b7963d9e6f20b645d1b865cbeb05eb371e876952adba7518b99a46a7ee"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/07_front_left.png",
+    "bytes": 715508,
+    "sha256": "50878ecf28a644afdcdb1b82e45c60dbffca356af415f596db8d0f39e62dd965"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/08_rear_left.png",
+    "bytes": 688171,
+    "sha256": "e2468a7e02959623931f457ccb2b389040642a3233c07fc0ed1282f7cdaee3ff"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/09_front_right.png",
+    "bytes": 672731,
+    "sha256": "a0176a1701dcd919874a72702c5057216398d10e36e1d1392b8ce1cbf9242fe5"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/10_rear_right.png",
+    "bytes": 696119,
+    "sha256": "2c4387193a2e9e2270fc691c2c8e84e09b50e01a11e77d136204c43e15259bad"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/11_counter_context.png",
+    "bytes": 1538318,
+    "sha256": "6fe16439aee8c0604104957360417ebf1afb3f44bba6a6ea898f6aa76d84c595"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/12_counter_0.png",
+    "bytes": 958206,
+    "sha256": "cd20d5d7df43e97f147807c239caef0d559aef7c3b3f5d7fbed6d673afa8035f"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/12_counter_4.png",
+    "bytes": 949540,
+    "sha256": "bfe754b5f976c1c47264f4f514a7f11a8df1c7d1310a407371eb6789858ea797"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/12_counter_6.png",
+    "bytes": 961532,
+    "sha256": "5de955246d0fb10510f97124d92b7d3dafbb61371a44bf32beb1c2d49b36835a"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/12_counter_OFF.png",
+    "bytes": 900179,
+    "sha256": "90f3ff22cfbad451e9a66fd62f3156c7baf60981db1409e6233985369ad3501c"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Renders/blockout_manifest.json",
+    "bytes": 1047,
+    "sha256": "65d6d682494e1045b07af9afb693bbea697c7503d1903d25eb271e32056e55c5"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/RMB93_Modeller_Sheet_v01.pdf",
+    "bytes": 16282587,
+    "sha256": "6d47b6a2bd5966fd65efdfb3a265cb0bb80f334fd7fcf7683afede19dde45561"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Sheets/00_Approved_Receiver.png",
+    "bytes": 2158150,
+    "sha256": "3a73749aead7e1907c3bbb7cbc3405a67dee1fea3b916ef383fd638a3d9bf751"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Sheets/01_Orthographic_Blockout.png",
+    "bytes": 532882,
+    "sha256": "02ae4824ec1928b77aff4cef75ec912de2b059bed5e019c3408eba19483c1053"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Sheets/02_Perspective_Blockout.png",
+    "bytes": 628566,
+    "sha256": "4bf5e69efcec5fd3112a271a634da0d62522f200e5680e284f0712c38cce3c52"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Sheets/03_Counter_Blockout.png",
+    "bytes": 3440333,
+    "sha256": "7d7ed407719c10115aff3c1ce61df4fcf64d4e93e613eec2584422da1154d7d9"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/Sheets/04_Nixie_Art_Target_rev02.png",
+    "bytes": 2078108,
+    "sha256": "23ef75ad711b1195b2f712f2e81f9875cb03b89a507aec64d44e200e548f801e"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/tools/build_sheet.py",
+    "bytes": 24489,
+    "sha256": "73a89efa39b4ddf7fbf08c5ab04cf32758d3e9709c0244e4ab4b005094a18514"
+  },
+  {
+    "file": "Docs/Art/RMB93/v01/tools/package_brief.py",
+    "bytes": 5843,
+    "sha256": "41af2fb4f27744bc315e1aff1ad07a78a8df4597c4de03fce091b5a4cfea6f60"
+  }
+]

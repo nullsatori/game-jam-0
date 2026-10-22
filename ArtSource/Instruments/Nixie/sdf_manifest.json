@@ -1,0 +1,63 @@
+{
+  "source": "../../Weapons/RMB93/v02/counter/build_counter.py",
+  "source_sha256": "452b7e43d1a028a1538c58c6d236aff597c0696f2d667f822d2776a04b572c56",
+  "distance_atlas_sha256": "add62d81664eed4de5f200dd5939fe858c53cfac84135cf6faa9487996be8dda",
+  "size": [
+    2048,
+    2048
+  ],
+  "encoding": {
+    "R": ".5 + signed edge distance / 16, native 256-cell pixels; positive outside",
+    "G": "Float32 Gaussian convolution of exact wire coverage, sigmas 1.5/4/8 native pixels, weights 1.8/1/.35, compressed as 1-exp(-energy)",
+    "B": "Nearest authored wire radius / 2; used only for analytic pixel coverage",
+    "A": "Distance along the wire from the lead (lowest point), per glyph 0..1; ignition front and drifting discharge patches"
+  },
+  "glyph_centerlines_and_directional_widths_preserved": true,
+  "all_centerline_y_bounds": [
+    [
+      45,
+      211
+    ],
+    [
+      45,
+      211
+    ],
+    [
+      45,
+      211
+    ],
+    [
+      45,
+      211
+    ],
+    [
+      45,
+      211
+    ],
+    [
+      45,
+      211
+    ],
+    [
+      45,
+      211
+    ],
+    [
+      45,
+      211
+    ],
+    [
+      45,
+      211
+    ],
+    [
+      45,
+      211
+    ]
+  ],
+  "off_and_reserved_distance": 8,
+  "off_and_reserved_readback_pass": true,
+  "cell_size": 512,
+  "source_cell_size": 256,
+  "runtime": "Analytic fwidth edge AA; no blur baked into core"
+}

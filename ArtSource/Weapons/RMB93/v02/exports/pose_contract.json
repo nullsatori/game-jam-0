@@ -1,0 +1,24 @@
+{
+  "pump_axis_blender": "+X",
+  "pump_travel_art_m": 0.055,
+  "travel_is_measured_real_weapon": false,
+  "stock_hinge": [
+    -0.012,
+    0,
+    0.063
+  ],
+  "stock_open_degrees_y": -110,
+  "stock_deployed_degrees_y": -195,
+  "loading_lid_hinge": [
+    0.105,
+    0,
+    0.055
+  ],
+  "loading_lid_open_degrees_y": 80,
+  "counter_location": "upper_rear_chamfer",
+  "ads_eye_m": [
+    -0.4,
+    0,
+    0.074
+  ]
+}

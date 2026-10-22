@@ -17,9 +17,15 @@ struct FJamNixieMaterialBinding
 	int32 Slot = INDEX_NONE;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInterface> OriginalOverride = nullptr;
 	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> Instance = nullptr;
+	/** The material has the v5 event clocks (SP_PrevDigit, SP_ChangeTime, SP_PowerTime). */
+	bool bHasClocks = false;
 };
 
-/** One digit on a weapon or world prop. Owns its material instances; values change by event, never by Tick. */
+/**
+ * One digit on a weapon or world prop. Owns its material instances; values change by event, never by Tick.
+ * Each change also stamps the world time into the material (v5): the shader plays the ignition, the old
+ * digit's afterglow and the power-on stutter from Time - stamp, so they look the same at any frame rate.
+ */
 UCLASS(ClassGroup = (Jam), meta = (BlueprintSpawnableComponent))
 class MINDKORE_API UJamNixieCounterComponent : public UActorComponent
 {
@@ -65,6 +71,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Jam|Nixie")
 	int32 GetBoundMaterialCount() const { return Bindings.Num(); }
 
+	/** The digit lit before the last change (10 when the tube was dark); its afterglow fades in the shader. */
+	UFUNCTION(BlueprintPure, Category = "Jam|Nixie")
+	int32 GetPreviousDigit() const { return PrevDigit; }
+
+	/** World seconds of the last digit change / power switch; far in the past until the first one. */
+	double GetChangeTime() const { return ChangeTime; }
+	double GetPowerTime() const { return PowerTime; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void OnRegister() override;
@@ -77,8 +91,13 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Jam|Nixie", meta = (AllowPrivateAccess = "true"))
 	bool bCounterEnabled = true;
 
+	int32 PrevDigit = 10;
+	double ChangeTime = -1000.0;
+	double PowerTime = -1000.0;
+
 	UPROPERTY(Transient) TObjectPtr<UMeshComponent> BoundMesh = nullptr;
 	UPROPERTY(Transient) TArray<FJamNixieMaterialBinding> Bindings;
 
 	void ApplyState();
+	double Now() const;
 };

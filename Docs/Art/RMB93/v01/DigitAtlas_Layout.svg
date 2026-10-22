@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="1180" viewBox="0 0 1120 1180">
+<rect width="1120" height="1180" fill="#f3f2ee"/>
+<text x="48" y="42" font-family="Arial" font-size="22" fill="#202827">DigitAtlas layout - 1024 x 1024 / 4 x 4 / cells 256</text>
+<rect x="48" y="70" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="64" y="86" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="74" y="112" font-family="Arial" font-size="18" fill="#a7ada7">index 0</text>
+<text x="103" y="218" font-family="Arial" font-size="70" fill="#d2a465">0</text>
+<rect x="304" y="70" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="320" y="86" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="330" y="112" font-family="Arial" font-size="18" fill="#a7ada7">index 1</text>
+<text x="359" y="218" font-family="Arial" font-size="70" fill="#d2a465">1</text>
+<rect x="560" y="70" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="576" y="86" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="586" y="112" font-family="Arial" font-size="18" fill="#a7ada7">index 2</text>
+<text x="615" y="218" font-family="Arial" font-size="70" fill="#d2a465">2</text>
+<rect x="816" y="70" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="832" y="86" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="842" y="112" font-family="Arial" font-size="18" fill="#a7ada7">index 3</text>
+<text x="871" y="218" font-family="Arial" font-size="70" fill="#d2a465">3</text>
+<rect x="48" y="326" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="64" y="342" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="74" y="368" font-family="Arial" font-size="18" fill="#a7ada7">index 4</text>
+<text x="103" y="474" font-family="Arial" font-size="70" fill="#d2a465">4</text>
+<rect x="304" y="326" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="320" y="342" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="330" y="368" font-family="Arial" font-size="18" fill="#a7ada7">index 5</text>
+<text x="359" y="474" font-family="Arial" font-size="70" fill="#d2a465">5</text>
+<rect x="560" y="326" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="576" y="342" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="586" y="368" font-family="Arial" font-size="18" fill="#a7ada7">index 6</text>
+<text x="615" y="474" font-family="Arial" font-size="70" fill="#d2a465">6</text>
+<rect x="816" y="326" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="832" y="342" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="842" y="368" font-family="Arial" font-size="18" fill="#a7ada7">index 7</text>
+<text x="871" y="474" font-family="Arial" font-size="70" fill="#d2a465">7</text>
+<rect x="48" y="582" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="64" y="598" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="74" y="624" font-family="Arial" font-size="18" fill="#a7ada7">index 8</text>
+<text x="103" y="730" font-family="Arial" font-size="70" fill="#d2a465">8</text>
+<rect x="304" y="582" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="320" y="598" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="330" y="624" font-family="Arial" font-size="18" fill="#a7ada7">index 9</text>
+<text x="359" y="730" font-family="Arial" font-size="70" fill="#d2a465">9</text>
+<rect x="560" y="582" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="576" y="598" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="586" y="624" font-family="Arial" font-size="18" fill="#a7ada7">index 10</text>
+<text x="615" y="730" font-family="Arial" font-size="25" fill="#d2a465">OFF</text>
+<rect x="816" y="582" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="832" y="598" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="842" y="624" font-family="Arial" font-size="18" fill="#a7ada7">index 11</text>
+<text x="871" y="730" font-family="Arial" font-size="25" fill="#d2a465">RESERVED</text>
+<rect x="48" y="838" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="64" y="854" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="74" y="880" font-family="Arial" font-size="18" fill="#a7ada7">index 12</text>
+<text x="103" y="986" font-family="Arial" font-size="25" fill="#d2a465">RESERVED</text>
+<rect x="304" y="838" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="320" y="854" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="330" y="880" font-family="Arial" font-size="18" fill="#a7ada7">index 13</text>
+<text x="359" y="986" font-family="Arial" font-size="25" fill="#d2a465">RESERVED</text>
+<rect x="560" y="838" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="576" y="854" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="586" y="880" font-family="Arial" font-size="18" fill="#a7ada7">index 14</text>
+<text x="615" y="986" font-family="Arial" font-size="25" fill="#d2a465">RESERVED</text>
+<rect x="816" y="838" width="256" height="256" fill="#202827" stroke="#f3f2ee"/>
+<rect x="832" y="854" width="224" height="224" fill="none" stroke="#8a918a" stroke-dasharray="5 6"/>
+<text x="842" y="880" font-family="Arial" font-size="18" fill="#a7ada7">index 15</text>
+<text x="871" y="986" font-family="Arial" font-size="25" fill="#d2a465">RESERVED</text>
+<text x="48" y="1132" font-family="Arial" font-size="18" fill="#202827">16 px black gutter. R core / G discharge / B halo. OFF + RESERVED = black.</text>
+<text x="48" y="1162" font-family="Arial" font-size="16" fill="#626967">LAYOUT DIAGRAM ONLY - do not import as a mask texture.</text>
+</svg>

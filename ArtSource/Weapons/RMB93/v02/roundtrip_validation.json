@@ -1,0 +1,1218 @@
+{
+  "status": "pass",
+  "unreal_runtime_verified": false,
+  "tests": {
+    "counter_faces_outward": {
+      "passed": true
+    },
+    "native_assemblies": {
+      "passed": true,
+      "expected": [
+        "Body",
+        "Action",
+        "Stock",
+        "LoadingLid",
+        "Counter"
+      ],
+      "actual": [
+        "Action",
+        "Body",
+        "Counter",
+        "LoadingLid",
+        "Stock"
+      ]
+    },
+    "triangle_budget": {
+      "passed": true,
+      "actual": 11846,
+      "maximum": 12000
+    },
+    "two_materials": {
+      "passed": true,
+      "actual": [
+        "Body",
+        "Counter"
+      ]
+    },
+    "uv0_finite_single_tile": {
+      "passed": true,
+      "issues": []
+    },
+    "nine_rgb_texture_contract": {
+      "passed": true,
+      "textures": [
+        {
+          "file": "T_Jam_RMB93_BC.png",
+          "size": [
+            4096,
+            4096
+          ],
+          "bits": 8,
+          "color_type": 2,
+          "valid": true
+        },
+        {
+          "file": "T_Jam_RMB93_N.png",
+          "size": [
+            4096,
+            4096
+          ],
+          "bits": 8,
+          "color_type": 2,
+          "valid": true
+        },
+        {
+          "file": "T_Jam_RMB93_ORM.png",
+          "size": [
+            4096,
+            4096
+          ],
+          "bits": 8,
+          "color_type": 2,
+          "valid": true
+        },
+        {
+          "file": "T_Jam_RMB93_Masks.png",
+          "size": [
+            1024,
+            1024
+          ],
+          "bits": 8,
+          "color_type": 2,
+          "valid": true
+        },
+        {
+          "file": "T_Jam_RMB93_Counter_BC.png",
+          "size": [
+            512,
+            512
+          ],
+          "bits": 8,
+          "color_type": 2,
+          "valid": true
+        },
+        {
+          "file": "T_Jam_RMB93_Counter_N.png",
+          "size": [
+            512,
+            512
+          ],
+          "bits": 8,
+          "color_type": 2,
+          "valid": true
+        },
+        {
+          "file": "T_Jam_RMB93_Counter_ORM.png",
+          "size": [
+            512,
+            512
+          ],
+          "bits": 8,
+          "color_type": 2,
+          "valid": true
+        },
+        {
+          "file": "T_Jam_RMB93_Counter_Masks.png",
+          "size": [
+            512,
+            512
+          ],
+          "bits": 8,
+          "color_type": 2,
+          "valid": true
+        },
+        {
+          "file": "T_Jam_RMB93_DigitAtlas_M.png",
+          "size": [
+            1024,
+            1024
+          ],
+          "bits": 8,
+          "color_type": 2,
+          "valid": true
+        }
+      ]
+    },
+    "visual_pump_clearance_21_samples": {
+      "passed": true,
+      "pairs": [
+        {
+          "moving": "Foreend_sculpted_ribs",
+          "fixed": "Receiver_shell",
+          "samples": [
+            {
+              "offset_m": 0.0,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.00275,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0055,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.00825,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.011,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.013750000000000002,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0165,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.01925,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.022,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.02475,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.027500000000000004,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.03025,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.033,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.03575,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0385,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.041249999999999995,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.044,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.04675,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0495,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.05225,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.05500000000000001,
+              "triangle_intersection_pairs": 0
+            }
+          ]
+        },
+        {
+          "moving": "Lower_barrel",
+          "fixed": "Receiver_shell",
+          "samples": [
+            {
+              "offset_m": 0.0,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.00275,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0055,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.00825,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.011,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.013750000000000002,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0165,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.01925,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.022,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.02475,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.027500000000000004,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.03025,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.033,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.03575,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0385,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.041249999999999995,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.044,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.04675,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0495,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.05225,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.05500000000000001,
+              "triangle_intersection_pairs": 0
+            }
+          ]
+        },
+        {
+          "moving": "Foreend_front_collar",
+          "fixed": "Upper_magazine",
+          "samples": [
+            {
+              "offset_m": 0.0,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.00275,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0055,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.00825,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.011,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.013750000000000002,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0165,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.01925,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.022,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.02475,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.027500000000000004,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.03025,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.033,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.03575,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0385,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.041249999999999995,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.044,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.04675,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0495,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.05225,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.05500000000000001,
+              "triangle_intersection_pairs": 0
+            }
+          ]
+        },
+        {
+          "moving": "Barrel_perforated_sleeve",
+          "fixed": "Upper_magazine",
+          "samples": [
+            {
+              "offset_m": 0.0,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.00275,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0055,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.00825,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.011,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.013750000000000002,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0165,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.01925,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.022,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.02475,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.027500000000000004,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.03025,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.033,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.03575,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0385,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.041249999999999995,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.044,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.04675,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.0495,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.05225,
+              "triangle_intersection_pairs": 0
+            },
+            {
+              "offset_m": 0.05500000000000001,
+              "triangle_intersection_pairs": 0
+            }
+          ]
+        }
+      ],
+      "limitation": "Surface triangle intersections for four specified exterior art pairs only; no physics, swept-volume, or functioning mechanism claim."
+    },
+    "grip_closed_positive_topology": {
+      "passed": true,
+      "parts": [
+        {
+          "part": "Pistol_grip",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 0.00017542551353120803
+        },
+        {
+          "part": "Grip_inlay_edge_-1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 6.960095409170092e-07
+        },
+        {
+          "part": "Grip_checkered_phenolic_-1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 3.673442296211156e-06
+        },
+        {
+          "part": "Grip_inlay_edge_1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 6.960095409170086e-07
+        },
+        {
+          "part": "Grip_checkered_phenolic_1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 3.673442296211153e-06
+        }
+      ]
+    },
+    "grip_seating_surface_clearance": {
+      "passed": true,
+      "intersections": []
+    },
+    "controls_closed_positive_topology": {
+      "passed": true,
+      "parts": [
+        {
+          "part": "Trigger_guard",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 6.108390451807087e-06
+        },
+        {
+          "part": "Trigger",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 5.006454700098538e-07
+        },
+        {
+          "part": "Left_control_seat",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 6.297052916692343e-07
+        },
+        {
+          "part": "Left_control_lever",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 1.6608654629928132e-06
+        },
+        {
+          "part": "Left_control_pivot",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 1.0404413753538712e-08
+        },
+        {
+          "part": "Left_small_pin",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 3.5173616849413106e-09
+        }
+      ]
+    },
+    "controls_action_clearance_21_samples": {
+      "passed": true,
+      "intersections": [],
+      "limitation": "Exterior surface intersections at sampled art poses; no internal mechanism or hand fit verification."
+    },
+    "stock_closed_positive_topology": {
+      "passed": true,
+      "parts": [
+        {
+          "part": "Folded_stock_rail_-1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 7.535348587878596e-06
+        },
+        {
+          "part": "Folded_stock_rail_1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 7.535348587878569e-06
+        },
+        {
+          "part": "Folded_stock_front_bridge",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 3.5708059721965476e-05
+        },
+        {
+          "part": "Folded_stock_heel_pad",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 2.616796194566624e-05
+        }
+      ]
+    },
+    "joinery_closed_positive_topology": {
+      "passed": true,
+      "parts": [
+        {
+          "part": "Loading_lid",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 5.811494125346995e-06
+        },
+        {
+          "part": "Counter_recess_rim",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 5.274621338222058e-08
+        },
+        {
+          "part": "Counter_sealing_gasket",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 1.1697352059228182e-08
+        },
+        {
+          "part": "Foreend_front_collar",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 2.034016408391539e-05
+        },
+        {
+          "part": "Upper_front_cap",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 6.650711145471909e-06
+        },
+        {
+          "part": "Stock_rear_hinge_-1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 5.626038175746198e-07
+        },
+        {
+          "part": "Stock_rear_hinge_1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 5.626037571262172e-07
+        },
+        {
+          "part": "Foreend_rear_recess_-1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 6.369594614988803e-07
+        },
+        {
+          "part": "Foreend_insert_border_-1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 4.7180984638006137e-07
+        },
+        {
+          "part": "Foreend_phenolic_insert_-1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 4.318080617428059e-07
+        },
+        {
+          "part": "Foreend_rear_recess_1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 6.369594614988772e-07
+        },
+        {
+          "part": "Foreend_insert_border_1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 4.718098463800606e-07
+        },
+        {
+          "part": "Foreend_phenolic_insert_1",
+          "nonmanifold_edges": 0,
+          "degenerate_faces": 0,
+          "signed_volume": 4.3180806174280656e-07
+        }
+      ]
+    },
+    "loading_lid_receiver_clearance_21_samples": {
+      "passed": true,
+      "samples": [
+        {
+          "angle_degrees": 0.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 4.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 8.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 12.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 16.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 20.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 24.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 28.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 32.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 36.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 40.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 44.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 48.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 52.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 56.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 60.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 64.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 68.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 72.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 76.0,
+          "triangle_intersection_pairs": 0
+        },
+        {
+          "angle_degrees": 80.0,
+          "triangle_intersection_pairs": 0
+        }
+      ],
+      "limitation": "Exterior seat surfaces only; hinge contact is intentionally excluded."
+    },
+    "foreend_insert_seating_surface_clearance": {
+      "passed": true,
+      "missing_pairs": [],
+      "intersections": [],
+      "limitation": "Surface intersections for the separate recessed inserts and surrounding shell; not a minimum-gap measurement."
+    },
+    "counter_glass_gasket_bezel_surface_clearance": {
+      "passed": true,
+      "missing_pairs": [],
+      "intersections": []
+    },
+    "counter_face_frozen_geometry_uv_contract": {
+      "passed": true,
+      "expected_vertex_count": 20,
+      "unique_matches": 20,
+      "maximum_position_error_m": 7.679882693323606e-09,
+      "maximum_uv_error": 2.388837865275353e-07,
+      "baseline": "Pre-joinery face: center(-.030,0,.056), right(0,-1,0), up(.6,0,.8), normal(-.8,0,.6), depth .00025, width .024, height .018, corner radius .0025, 4 corner intervals."
+    },
+    "stock_access_clearance_21_samples": {
+      "passed": true,
+      "stock_parts": [
+        "Folded_stock_rail_-1",
+        "Folded_stock_rail_1",
+        "Folded_stock_front_bridge",
+        "Folded_stock_heel_pad"
+      ],
+      "fixed_targets": [
+        "Receiver_shell",
+        "Upper_magazine",
+        "Upper_rear_ferrule",
+        "Lower_barrel",
+        "Barrel_perforated_sleeve",
+        "Front_sight",
+        "Rear_sight_sculpted_notch",
+        "Rear_sight_foot",
+        "Counter_face",
+        "Loading_lid"
+      ],
+      "samples": [
+        {
+          "pose_fraction": 0.0,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.05,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.1,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.15,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.2,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.25,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.3,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.35,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.4,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.45,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.5,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.55,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.6,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.65,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.7,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.75,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.8,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.85,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.9,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.95,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 1.0,
+          "intersections": []
+        }
+      ],
+      "limitation": "Exterior triangle intersection samples only; hinge contact parts excluded; not continuous collision or a mechanical simulation."
+    },
+    "stock_deployment_clearance_21_samples": {
+      "passed": true,
+      "stock_parts": [
+        "Folded_stock_rail_-1",
+        "Folded_stock_rail_1",
+        "Folded_stock_front_bridge",
+        "Folded_stock_heel_pad"
+      ],
+      "fixed_targets": [
+        "Receiver_shell",
+        "Upper_magazine",
+        "Upper_rear_ferrule",
+        "Lower_barrel",
+        "Barrel_perforated_sleeve",
+        "Front_sight",
+        "Rear_sight_sculpted_notch",
+        "Rear_sight_foot",
+        "Counter_face",
+        "Loading_lid"
+      ],
+      "samples": [
+        {
+          "pose_fraction": 0.0,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.05,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.1,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.15,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.2,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.25,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.3,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.35,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.4,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.45,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.5,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.55,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.6,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.65,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.7,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.75,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.8,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.85,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.9,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 0.95,
+          "intersections": []
+        },
+        {
+          "pose_fraction": 1.0,
+          "intersections": []
+        }
+      ],
+      "limitation": "Exterior triangle intersection samples only; hinge contact parts excluded; not continuous collision or a mechanical simulation."
+    },
+    "glb_roundtrip": {
+      "passed": true,
+      "triangles": 11846,
+      "expected_triangles": 11846,
+      "assemblies": [
+        "Action",
+        "Body",
+        "Counter",
+        "LoadingLid",
+        "Stock"
+      ],
+      "world_bounds": {
+        "min": [
+          -0.11495500057935715,
+          -0.03400000184774399,
+          -0.1020285040140152
+        ],
+        "max": [
+          0.5460000038146973,
+          0.03400000184774399,
+          0.07850000262260437
+        ],
+        "dimensions": [
+          0.6609550043940544,
+          0.06800000369548798,
+          0.18052850663661957
+        ]
+      },
+      "max_position_error_m": 0.0,
+      "group_position_error_m": {
+        "Body": 0.0,
+        "Action": 0.0,
+        "Stock": 0.0,
+        "LoadingLid": 0.0,
+        "Counter": 0.0
+      },
+      "tolerance_m": 1e-05
+    },
+    "fbx_roundtrip": {
+      "passed": true,
+      "triangles": 11846,
+      "expected_triangles": 11846,
+      "assemblies": [
+        "Action",
+        "Body",
+        "Counter",
+        "LoadingLid",
+        "Stock"
+      ],
+      "world_bounds": {
+        "min": [
+          -0.11495500057935715,
+          -0.03400006890296936,
+          -0.1020285040140152
+        ],
+        "max": [
+          0.5460000038146973,
+          0.033999934792518616,
+          0.07850000262260437
+        ],
+        "dimensions": [
+          0.6609550043940544,
+          0.06800000369548798,
+          0.18052850663661957
+        ]
+      },
+      "max_position_error_m": 6.705522537231445e-08,
+      "group_position_error_m": {
+        "Body": 1.862645149230957e-09,
+        "Action": 5.21540641784668e-08,
+        "Stock": 6.705522537231445e-08,
+        "LoadingLid": 1.5832483768463135e-08,
+        "Counter": 5.587935447692871e-09
+      },
+      "tolerance_m": 1e-05
+    }
+  },
+  "renders": [],
+  "failures": [],
+  "native": {
+    "parts": 47,
+    "triangles": 11846,
+    "bounds": {
+      "min": [
+        -0.11495500057935715,
+        -0.03400000184774399,
+        -0.1020285040140152
+      ],
+      "max": [
+        0.5460000038146973,
+        0.03400000184774399,
+        0.07850000262260437
+      ],
+      "dimensions": [
+        0.6609550043940544,
+        0.06800000369548798,
+        0.18052850663661957
+      ]
+    },
+    "assemblies": [
+      "Action",
+      "Body",
+      "Counter",
+      "LoadingLid",
+      "Stock"
+    ],
+    "group_bounds": {
+      "Action": {
+        "min": [
+          0.041999995708465576,
+          -0.02160000056028366,
+          -0.015600000508129597
+        ],
+        "max": [
+          0.5460000038146973,
+          0.02160000056028366,
+          0.0276000015437603
+        ],
+        "dimensions": [
+          0.5040000081062317,
+          0.04320000112056732,
+          0.043200002051889896
+        ]
+      },
+      "Body": {
+        "min": [
+          -0.11495500057935715,
+          -0.024500001221895218,
+          -0.1020285040140152
+        ],
+        "max": [
+          0.5389999747276306,
+          0.024500001221895218,
+          0.07850000262260437
+        ],
+        "dimensions": [
+          0.6539549753069878,
+          0.049000002443790436,
+          0.18052850663661957
+        ]
+      },
+      "Counter": {
+        "min": [
+          -0.035599999129772186,
+          -0.012000000104308128,
+          0.04895000159740448
+        ],
+        "max": [
+          -0.024799998849630356,
+          0.012000000104308128,
+          0.06335000693798065
+        ],
+        "dimensions": [
+          0.01080000028014183,
+          0.024000000208616257,
+          0.014400005340576172
+        ]
+      },
+      "LoadingLid": {
+        "min": [
+          0.024000000208616257,
+          -0.013500000350177288,
+          0.052299998700618744
+        ],
+        "max": [
+          0.10000000149011612,
+          0.013500000350177288,
+          0.05550000071525574
+        ],
+        "dimensions": [
+          0.07600000128149986,
+          0.027000000700354576,
+          0.0032000020146369934
+        ]
+      },
+      "Stock": {
+        "min": [
+          -0.017999999225139618,
+          -0.03400000184774399,
+          -0.04699999839067459
+        ],
+        "max": [
+          0.4254324734210968,
+          0.03400000184774399,
+          0.06880000233650208
+        ],
+        "dimensions": [
+          0.4434324726462364,
+          0.06800000369548798,
+          0.11580000072717667
+        ]
+      }
+    }
+  }
+}

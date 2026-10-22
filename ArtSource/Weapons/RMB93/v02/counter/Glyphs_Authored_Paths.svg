@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="600" viewBox="0 0 1280 600">
+<title>RMB93 instrument glyphs revision 5 — equal-height editable centerlines</title>
+<desc>Each labelled group contains original vector glyph paths. Constant stroke here shows editable centerlines; production width varies from 1.61 to 2.99 pixels by segment direction in build_counter.py.</desc>
+<rect width="1280" height="600" fill="#111816"/>
+<g id="glyph-0" transform="translate(0,0)">
+<text x="20" y="22" fill="#929b90" font-family="monospace" font-size="13">0</text>
+<path id="glyph-0-wire-0" d="M 102.0 45.0 L 141.0 45.0 L 177.0 81.0 L 177.0 181.0 L 147.0 211.0 L 112.0 211.0 L 79.0 178.0 L 79.0 76.0 L 102.0 45.0" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="glyph-0-wire-1" d="M 111.0 152.0 L 145.0 102.0" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g id="glyph-1" transform="translate(256,0)">
+<text x="20" y="22" fill="#929b90" font-family="monospace" font-size="13">1</text>
+<path id="glyph-1-wire-0" d="M 106.717949 66.282051 L 128.0 45.0 L 140.769231 45.0" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="glyph-1-wire-1" d="M 128.0 45.0 L 128.0 211.0" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="glyph-1-wire-2" d="M 108.846154 211.0 L 147.153846 211.0 L 152.474359 205.679487" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g id="glyph-2" transform="translate(512,0)">
+<text x="20" y="22" fill="#929b90" font-family="monospace" font-size="13">2</text>
+<path id="glyph-2-wire-0" d="M 78.09816 83.699387 L 96.429448 52.128834 Q 100.503067 45.0 108.650307 45.0 L 147.349693 45.0 L 178.920245 76.570552 L 178.920245 99.993865 Q 178.920245 107.122699 171.791411 114.251534 L 82.171779 198.779141 L 82.171779 211.0 L 172.809816 211.0 L 182.993865 199.797546" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g id="glyph-3" transform="translate(768,0)">
+<text x="20" y="22" fill="#929b90" font-family="monospace" font-size="13">3</text>
+<path id="glyph-3-wire-0" d="M 70.067114 65.053691 L 90.120805 45.0 L 149.167785 45.0 L 189.275168 78.422819 L 189.275168 102.932886 L 155.852349 126.328859 L 115.744966 126.328859 L 110.174497 131.899329" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="glyph-3-wire-1" d="M 155.852349 126.328859 L 190.389262 148.610738 L 190.389262 182.033557 L 160.308725 211.0 L 96.805369 211.0 L 70.067114 188.718121" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g id="glyph-4" transform="translate(1024,0)">
+<text x="20" y="22" fill="#929b90" font-family="monospace" font-size="13">4</text>
+<path id="glyph-4-wire-0" d="M 119.0 45.0 L 78.0 151.0 Q 75.0 159.0 82.0 160.0 L 182.0 160.0" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="glyph-4-wire-1" d="M 151.0 76.0 L 151.0 204.0 Q 151.0 211.0 158.0 211.0 L 166.0 211.0" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g id="glyph-5" transform="translate(0,300)">
+<text x="20" y="22" fill="#929b90" font-family="monospace" font-size="13">5</text>
+<path id="glyph-5-wire-0" d="M 180.0 45.0 L 102.0 45.0 L 83.0 118.0 L 145.0 118.0 L 179.0 147.0 L 179.0 182.0 L 150.0 211.0 L 104.0 211.0 L 80.0 191.0 L 80.0 181.0" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g id="glyph-6" transform="translate(256,300)">
+<text x="20" y="22" fill="#929b90" font-family="monospace" font-size="13">6</text>
+<path id="glyph-6-wire-0" d="M 170.0 52.0 L 164.0 45.0 L 137.0 45.0 L 83.0 103.0 L 83.0 182.0 L 111.0 211.0 L 147.0 211.0 L 178.0 180.0 L 178.0 149.0 L 150.0 120.0 L 109.0 120.0 L 83.0 146.0" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g id="glyph-7" transform="translate(512,300)">
+<text x="20" y="22" fill="#929b90" font-family="monospace" font-size="13">7</text>
+<path id="glyph-7-wire-0" d="M 79.414634 58.158537 L 87.512195 45.0 L 179.621951 45.0 L 109.780488 211.0 L 98.646341 211.0" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g id="glyph-8" transform="translate(768,300)">
+<text x="20" y="22" fill="#929b90" font-family="monospace" font-size="13">8</text>
+<path id="glyph-8-wire-0" d="M 106.0 45.0 L 144.0 45.0 L 174.0 75.0 L 174.0 98.0 L 87.0 155.0 L 80.0 165.0 L 80.0 182.0 L 108.0 211.0 L 146.0 211.0 L 178.0 180.0 L 178.0 164.0 L 88.0 100.0 L 88.0 74.0 L 106.0 45.0" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g id="glyph-9" transform="translate(1024,300)">
+<text x="20" y="22" fill="#929b90" font-family="monospace" font-size="13">9</text>
+<path id="glyph-9-wire-0" d="M 178.0 103.0 L 151.0 131.0 L 109.0 131.0 L 80.0 102.0 L 80.0 77.0 L 109.0 45.0 L 149.0 45.0 L 178.0 74.0 L 178.0 151.0 L 125.0 211.0 L 88.0 211.0 L 81.0 204.0" transform="translate(0,34)" fill="none" stroke="#e8a354" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</svg>
