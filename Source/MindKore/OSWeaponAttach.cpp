@@ -624,7 +624,7 @@ bool UOSWeaponsComponent::ApplyAttachment(int32 MountIndex, FName Id)
 	SeatWeapon = CurrentWeapon;
 	SeatStartSeconds = GetWorld()->GetTimeSeconds();
 	SeatPrevTime = -KINDA_SMALL_NUMBER;
-	UE_LOG(LogMindKore, Log, TEXT("Attach %s: %s %s -> %s, %.2f s"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString(), *OSMountName(Place.Type).ToString(),
+	UE_LOG(LogMindKore, Log, TEXT("Attach %s: %s %s %s -> %s, %.2f s"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString(), *OSMountName(Place.Type).ToString(),
 		Was.IsNone() ? TEXT("-") : *Was.ToString(), Id.IsNone() ? TEXT("-") : *Id.ToString(), GetSeatRemaining());
 	return true;
 }
@@ -1142,15 +1142,15 @@ void UOSWeaponsComponent::UpdateClearMagazine()
 	const FQuat Lying = FQuat::FindBetweenNormals(FVector::UpVector, -Along);
 	constexpr float Pitch = 0.465f, Lips = 0.6f;
 	const int32 Capacity = FMath::Max(Weapon.MagazineSize, 1);
-	TArray<FTransform> Rounds;
-	Rounds.Reserve(Weapon.Ammo);
+	TArray<FTransform> Stack;
+	Stack.Reserve(Weapon.Ammo);
 	for (int32 Round = 0; Round < FMath::Min(Weapon.Ammo, Capacity); ++Round)
 	{
 		const FVector At = Weapon.MagPivot + Down * (Lips + Round * Pitch) + Across * (Round % 2 ? 0.2f : -0.2f);
-		Rounds.Add(FTransform(Lying, At, FVector(0.009f, 0.009f, 0.019f)));
+		Stack.Add(FTransform(Lying, At, FVector(0.009f, 0.009f, 0.019f)));
 	}
 	RoundsInView->ClearInstances();
-	RoundsInView->AddInstances(Rounds, /*bShouldReturnIndices=*/false);
+	RoundsInView->AddInstances(Stack, /*bShouldReturnIndices=*/false);
 	// The follower under the last round; the spring from it to the floor, as long as the free space.
 	const float FollowerDepth = Lips + Weapon.Ammo * Pitch + 0.3f;
 	const float Floor = Lips + Capacity * Pitch + 1.5f;

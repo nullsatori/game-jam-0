@@ -25,7 +25,7 @@ namespace
 	constexpr int32 MoreY = 400;
 	constexpr int32 FootRuleY = 432;
 	constexpr int32 KeysY = 446;
-	constexpr int32 Centre = UOSSuitProjectorComponent::RasterHeight / 2;
+	constexpr int32 MidY = UOSSuitProjectorComponent::RasterHeight / 2;
 }
 
 UOSAttachMenu::UOSAttachMenu()
@@ -375,7 +375,7 @@ void UOSAttachMenu::Draw(TArray<FOSWeldBox>& Boxes, double Now, float Level) con
 	if (Rows.IsEmpty())
 	{
 		const FString None = LOCTEXT("NoneRow", "ОБВЕСА НЕТ").ToString();
-		Paint.Text(None, (PicLeft + PicRight - FOSProjectorPaint::TextWidth(None, 2)) / 2, Centre - 10, 2, 0.45f * Level);
+		Paint.Text(None, (PicLeft + PicRight - FOSProjectorPaint::TextWidth(None, 2)) / 2, MidY - 10, 2, 0.45f * Level);
 		Paint.TextRight(LOCTEXT("KeyRelease", "▸ ОТПУСТИТЬ TAB").ToString(), PicRight, KeysY, 2, 1.0f * Level);
 		return;
 	}
@@ -431,8 +431,8 @@ void UOSAttachMenu::Compose(int64 Tick, double Now)
 	const FOSProjectorPaint Paint{ Boxes };
 	const int64 Into = Tick - StateTick; // device ticks into the state, from 0
 	const bool bWall = Projector && Projector->HasWall();
-	const auto Point = [&Paint]() { Paint.Box(422, Centre - 2, 4, 4, 1.0f); };
-	const auto Line = [&Paint]() { Paint.Box(PicLeft, Centre - 1, PicRight - PicLeft, 2, 0.8f); };
+	const auto Point = [&Paint]() { Paint.Box(422, MidY - 2, 4, 4, 1.0f); };
+	const auto Line = [&Paint]() { Paint.Box(PicLeft, MidY - 1, PicRight - PicLeft, 2, 0.8f); };
 	if (bWall)
 	{
 		if (State == EState::Opening)
@@ -443,7 +443,7 @@ void UOSAttachMenu::Compose(int64 Tick, double Now)
 			{
 				// The mirror's sweep: the line gone up to the top rule, leaving it behind.
 				Paint.Dotted(PicLeft, PicRight, RuleY, 0.75f);
-				Paint.Box(PicLeft, Centre - 96, PicRight - PicLeft, 2, 0.8f);
+				Paint.Box(PicLeft, MidY - 96, PicRight - PicLeft, 2, 0.8f);
 			}
 			else
 			{
@@ -453,7 +453,7 @@ void UOSAttachMenu::Compose(int64 Tick, double Now)
 					// The squeezed frame: everything at 0.4 of its height about the centre.
 					for (FOSWeldBox& Box : Boxes)
 					{
-						Box.Y = int16(Centre + FMath::RoundToInt32((Box.Y - Centre) * 0.4f));
+						Box.Y = int16(MidY + FMath::RoundToInt32((Box.Y - MidY) * 0.4f));
 						Box.H = int16(FMath::Max(1, FMath::RoundToInt32(Box.H * 0.4f)));
 					}
 				}

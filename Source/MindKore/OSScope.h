@@ -318,7 +318,7 @@ public:
 	float GetMenuAlpha() const { return MenuAlpha; }
 
 	/** The menu's pose is what the springs head for now. */
-	bool IsMenuTarget() const { return Target == ETarget::Menu; }
+	bool IsMenuTarget() const { return Heading == ETarget::Menu; }
 
 	/** The gun the springs are moving now (INDEX_NONE: none). */
 	int32 GetMotionWeapon() const { return bMoving ? MotionWeapon : INDEX_NONE; }
@@ -368,7 +368,7 @@ private:
 	bool bHeld = false;
 	bool bHeldByHands = false;
 	bool bMenuHeld = false;
-	ETarget Target = ETarget::Rest;
+	ETarget Heading = ETarget::Rest;
 	/** The target before the last change (the way back from the menu takes the menu's Out springs). */
 	ETarget LeftTarget = ETarget::Rest;
 	float MenuAlpha = 0.0f;

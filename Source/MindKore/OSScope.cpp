@@ -182,13 +182,13 @@ void UOSScopeComponent::StepMotion(float DeltaTime, ETarget Wanted)
 	FVector AimPlace, AimTurn, MenuPlace, MenuTurn;
 	AimEnd(AimPlace, AimTurn);
 	MenuEnd(MenuPlace, MenuTurn);
-	if (Wanted != Target)
+	if (Wanted != Heading)
 	{
-		LeftTarget = Target;
-		Target = Wanted;
+		LeftTarget = Heading;
+		Heading = Wanted;
 		SinceSwitch = 0.0f;
 	}
-	bAimTarget = Target == ETarget::Aim;
+	bAimTarget = Heading == ETarget::Aim;
 	SinceSwitch += DeltaTime;
 	const auto EndOf = [&](ETarget Of, FVector& OutPlace, FVector& OutTurn)
 	{
@@ -196,12 +196,12 @@ void UOSScopeComponent::StepMotion(float DeltaTime, ETarget Wanted)
 		OutTurn = Of == ETarget::Aim ? AimTurn : Of == ETarget::Menu ? MenuTurn : FVector::ZeroVector;
 	};
 	FVector End, EndTurn, From, FromTurn;
-	EndOf(Target, End, EndTurn);
+	EndOf(Heading, End, EndTurn);
 	EndOf(LeftTarget, From, FromTurn);
 	// The springs of the way: into the aim or the menu their In; back to the hip the Out of where it was (the menu's, or the aim's when it has none).
 	const TArray<FOSAimSpring>& MenuIn = Aim.Menu.In.Num() >= 6 ? Aim.Menu.In : Aim.In;
 	const TArray<FOSAimSpring>& MenuOut = Aim.Menu.Out.Num() >= 6 ? Aim.Menu.Out : Aim.Out;
-	const TArray<FOSAimSpring>& Springs = Target == ETarget::Aim ? Aim.In : Target == ETarget::Menu ? MenuIn
+	const TArray<FOSAimSpring>& Springs = Heading == ETarget::Aim ? Aim.In : Heading == ETarget::Menu ? MenuIn
 		: (LeftTarget == ETarget::Menu ? MenuOut : Aim.Out);
 	if (Springs.Num() < 6)
 	{
@@ -214,9 +214,9 @@ void UOSScopeComponent::StepMotion(float DeltaTime, ETarget Wanted)
 		Goal[Axis] = SinceSwitch >= Springs[Axis].Delay ? End[Axis] : From[Axis];
 	}
 	// Anticipation: a raise (or the turn into the menu) starts with a dip.
-	const float DipCm = Target == ETarget::Menu ? Aim.Menu.AnticipationCm : Aim.AnticipationCm;
-	const float DipSeconds = Target == ETarget::Menu ? Aim.Menu.AnticipationSeconds : Aim.AnticipationSeconds;
-	if (Target != ETarget::Rest && SinceSwitch < DipSeconds)
+	const float DipCm = Heading == ETarget::Menu ? Aim.Menu.AnticipationCm : Aim.AnticipationCm;
+	const float DipSeconds = Heading == ETarget::Menu ? Aim.Menu.AnticipationSeconds : Aim.AnticipationSeconds;
+	if (Heading != ETarget::Rest && SinceSwitch < DipSeconds)
 	{
 		Goal.Z = FMath::Min(Goal.Z, Place.Z) - DipCm;
 	}
@@ -248,7 +248,7 @@ void UOSScopeComponent::StepMotion(float DeltaTime, ETarget Wanted)
 		}
 	}
 	// Settled: snap exactly onto the end (the sight line on the axis to the micron), and at the hip stop.
-	if (Target == ETarget::Rest && SinceSwitch > 0.2f && (Place - End).Size() < 0.01f && PlaceVelocity.Size() < 0.05f && (Turn - EndTurn).Size() < 0.01f
+	if (Heading == ETarget::Rest && SinceSwitch > 0.2f && (Place - End).Size() < 0.01f && PlaceVelocity.Size() < 0.05f && (Turn - EndTurn).Size() < 0.01f
 		&& TurnVelocity.Size() < 0.05f && LookLagTurn.Size() < 0.01f)
 	{
 		Place = End;
@@ -260,12 +260,12 @@ void UOSScopeComponent::StepMotion(float DeltaTime, ETarget Wanted)
 	const FVector Way = AimPlace - RestPlace;
 	const FVector MenuWay = MenuPlace - RestPlace;
 	MenuAlpha = MenuWay.SizeSquared() > 0.01f ? FMath::Clamp(FVector::DotProduct(Place - RestPlace, MenuWay) / MenuWay.SizeSquared(), 0.0f, 1.0f) : 0.0f;
-	if (Target != ETarget::Menu && LeftTarget != ETarget::Menu)
+	if (Heading != ETarget::Menu && LeftTarget != ETarget::Menu)
 	{
 		MenuAlpha = 0.0f;
 	}
 	Alpha = FMath::Clamp(FVector::DotProduct(Place - RestPlace, Way) / Way.SizeSquared(), 0.0f, 1.0f) * (1.0f - MenuAlpha);
-	if (!bMoving && Target == ETarget::Rest)
+	if (!bMoving && Heading == ETarget::Rest)
 	{
 		Alpha = MenuAlpha = 0.0f;
 	}
@@ -430,7 +430,7 @@ void UOSScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 	{
 		// No gun, or another one: it starts from its rest pose.
 		bMoving = bAimTarget = false;
-		Target = LeftTarget = ETarget::Rest;
+		Heading = LeftTarget = ETarget::Rest;
 		Alpha = MenuAlpha = 0.0f;
 		MotionWeapon = bGunInView ? Shown : INDEX_NONE;
 	}

@@ -220,6 +220,9 @@ public:
 	/** F6 and friends, from the Slate input preprocessor: true when used. */
 	bool HandleKey(const struct FKeyEvent& Event);
 
+	/** The game world the menu acts on (PIE or standalone), or null. */
+	UWorld* GetGameWorld() const;
+
 private:
 	struct FChange
 	{
@@ -240,7 +243,6 @@ private:
 	void LoadPins();
 	void SavePins() const;
 	void EnsureWidgets();
-	UWorld* GetGameWorld() const;
 
 	void OnWorldInitializedActors(const FActorsInitializedParams& Params);
 	void OnActorPreSpawn(AActor* Actor);
