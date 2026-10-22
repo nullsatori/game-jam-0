@@ -1,4 +1,5 @@
 #include "OSAttachMenu.h"
+#include "OSLens.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -307,6 +308,9 @@ bool OSProjectToHud(const UCameraComponent* Camera, const UCanvas& Canvas, const
 	const float Half = Canvas.ClipX * 0.5f;
 	const float Scale = Half / FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(FieldOfView, 5.0f, 170.0f) * 0.5f));
 	Out = FVector2D(Half + Local.Y / Local.X * Scale, Canvas.ClipY * 0.5f - Local.Z / Local.X * Scale);
+	// The bodycam lens (OSLens.h) bends the picture after it is drawn; the HUD is not bent: bend the point.
+	const FVector2D Clip(Canvas.ClipX, Canvas.ClipY);
+	Out = OSLensScreenUV(Out / Clip, OSLensK(*Camera)) * Clip;
 	return true;
 }
 
@@ -441,6 +445,31 @@ void UOSAttachMenu::DrawHud(AHUD& Hud, UCanvas& Canvas)
 			if (ProjectGun(Canvas, ToWorld.TransformPosition(Point), Pixel))
 			{
 				Gun += Pixel;
+			}
+		}
+		// What hangs on it counts too (the suppressor, a module, the long magazine): no box over it.
+		TArray<const UStaticMeshComponent*> Parts;
+		for (const UStaticMeshComponent* Module : Guns->ModulesInView)
+		{
+			Parts.Add(Module);
+		}
+		Parts.Add(Guns->MagInView);
+		for (const UStaticMeshComponent* Part : Parts)
+		{
+			if (!Part || !Part->IsVisible() || !Part->GetStaticMesh())
+			{
+				continue;
+			}
+			const FBox PartBox = Part->GetStaticMesh()->GetBoundingBox();
+			const FTransform PartToWorld = Part->GetComponentTransform();
+			for (int32 Corner = 0; Corner < 8; ++Corner)
+			{
+				const FVector Point((Corner & 1) ? PartBox.Max.X : PartBox.Min.X, (Corner & 2) ? PartBox.Max.Y : PartBox.Min.Y, (Corner & 4) ? PartBox.Max.Z : PartBox.Min.Z);
+				FVector2D Pixel;
+				if (ProjectGun(Canvas, PartToWorld.TransformPosition(Point), Pixel))
+				{
+					Gun += Pixel;
+				}
 			}
 		}
 	}

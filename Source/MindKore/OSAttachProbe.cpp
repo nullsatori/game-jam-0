@@ -399,6 +399,7 @@ namespace OSAttachProbe
 		At(0.2f, [Pawn, Guns]() { Guns->MountAttachment(Suppressor(), 0); Pawn->MenuPressed(); });
 		At(1.0f, [Shot]() { Shot(TEXT("side_laser_suppressor")); });
 		At(0.2f, [Pawn, Menu]() { Menu->Kill(); Pawn->MenuReleased(); });
+		At(1.0f, [Shot]() { Shot(TEXT("suppressor_hip")); });
 		// The clear magazine through a reload, full; then 7 and 0 rounds.
 		At(0.5f, [Guns]()
 		{
