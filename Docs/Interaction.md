@@ -16,7 +16,7 @@
 
 ## Как использовать
 
-- Повесить `UMKInteractionComponent` на пешку игрока (у `AJamZeroGPawn` уже есть:
+- Повесить `UMKInteractionComponent` на пешку игрока (у `AOSZeroGPawn` уже есть:
   F вызывает `Interact()`, если есть предложение, иначе толкает — `PushPressed`).
   Вызывать `Interact()` по кнопке. `CurrentOffer` / `Candidate` — что показывать в HUD.
 - Свой интерактивный актор: наследовать `IMKInteractable` (только C++,

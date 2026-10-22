@@ -3,9 +3,9 @@
 **Актуальность:** редакционная сверка 21.10.2026 — описание хвата согласовано с [Controls](Controls.md). Код, пробы и игра в этом проходе не проверялись; коммит последней полной сверки страницы не зафиксирован. Основания прежних проверок приведены в разделах ниже.
 
 Летающие хищники по мотивам скального наездника из Morrowind. Код —
-`Source/MindKore/JamFlyer.h/.cpp` (`AJamFlyerHabitat` — зона и стая,
-`AJamFlyer` — один летун), звук — `JamFlyerAudio.h/.cpp`, расстановка в картах —
-`Scripts/jam_flyers.py`. Числа ниже — значения по умолчанию из кода; что
+`Source/MindKore/OSFlyer.h/.cpp` (`AOSFlyerHabitat` — зона и стая,
+`AOSFlyer` — один летун), звук — `OSFlyerAudio.h/.cpp`, расстановка в картах —
+`Scripts/os_flyers.py`. Числа ниже — значения по умолчанию из кода; что
 переопределено в картах — «Где они».
 
 ## Что получает игрок
@@ -16,7 +16,7 @@
 очень длинный хвост-хлыст с костяным лезвием на конце. Около 5 м от клюва до
 лезвия, размах 3.5 м.
 
-- **Стая живёт в своей зоне** (`AJamFlyerHabitat`: шар или оболочка вокруг
+- **Стая живёт в своей зоне** (`AOSFlyerHabitat`: шар или оболочка вокруг
   планетоида) и никогда не висит на месте: летит на крейсерской скорости (7 м/с)
   к точкам впереди и вбок, поворачивает дугами (не больше 60° за раз — цель
   позади облетает, а не тормозит), покачивается вдоль «вверх» зоны; 30 % отрезков —
@@ -35,9 +35,9 @@
   тело можно толкать, хватать (см. [Controls](Controls.md)), бросать и стрелять по нему дальше. Живой
   летун проходит сквозь игрока (контакт — только укус), труп для пешки твёрдый.
   Вне гравитационных зон труп дрейфует по инерции. В зоне с гравитацией
-  (`AJamGravityZone`, оболочка планетоида —
+  (`AOSGravityZone`, оболочка планетоида —
   [Ship-Blockout](Ship-Blockout.md)) у трупа включается гравитация, и его тянет
-  общий для свободных тел `JamPullBodies` (`JamGravity.cpp`) с трением 0.4 /
+  общий для свободных тел `OSPullBodies` (`OSGravity.cpp`) с трением 0.4 /
   6 (`CorpseLinearDamping` / `CorpseAngularDamping`). Через 0.5 с после смерти
   летун ищет землю под собой: коснувшись, гасит вращение и снова блокирует его,
   и труп доскальзывает до остановки, не катится. Лежащее тело зона усыпляет, а
@@ -45,7 +45,7 @@
 
 ## Стая: лестница настроения
 
-У каждой стаи (зоны) одно настроение, `EJamFlockMood`. Охоту держит настроение
+У каждой стаи (зоны) одно настроение, `EOSFlockMood`. Охоту держит настроение
 стаи, а не сам летун. Каждая смена пишется в лог с причиной:
 `Flock …: curious -> stalking (…)`; смены состояний летуна —
 `Flyer …: wander -> curious (…)`.
@@ -80,7 +80,7 @@
 
 ### Провокации и спокойствие
 
-Вверх по лестнице стаю поднимают только провокации (`AJamFlyerHabitat::Provoke`):
+Вверх по лестнице стаю поднимают только провокации (`AOSFlyerHabitat::Provoke`):
 
 | Провокация | Куда |
 |---|---|
@@ -173,7 +173,7 @@ diving now)` в логе).
   (`EMKImpactKind::Blunt` через систему попаданий MindKore) и толчок 45 000
   кг·см/с (4.5 м/с на 100 кг) по направлению пике — в невесомости игрока
   отбрасывает, на планетоиде сбивает с шага. Камеру пешки встряхивает
-  (`KickCamera`, 8 см), на визор летит кровь (`UJamVisorBloodComponent`,
+  (`KickCamera`, 8 см), на визор летит кровь (`UOSVisorBloodComponent`,
   `M_MK_LensBlood`, пятно 0.9: ниже и сбоку от прицела, стекает за 3.5 с, два
   пятна самое большее). Летун отскакивает (3 м/с назад, 5 м/с вверх) и 1.2 с
   уходит прочь и вверх, потом снова кружит.
@@ -241,15 +241,15 @@ diving now)` в логе).
 
 ## Слух по среде
 
-Правило: в вакууме звука нет. `UJamWeaponsComponent` сообщает два шума —
+Правило: в вакууме звука нет. `UOSWeaponsComponent` сообщает два шума —
 выстрел у дула (`Fire`) и точку попадания пули с актором, в который она попала
-(`TraceShot`); обе строки зовут `AJamFlyerHabitat::ReportNoise`. Каждая зона, до
+(`TraceShot`); обе строки зовут `AOSFlyerHabitat::ReportNoise`. Каждая зона, до
 которой шуму не дальше `HearingRangeCm` (50 м) за её краем, решает по среде:
 
 - **контакт:** пуля попала в поверхность насеста (`RoostOn` или прикреплённое к
   нему), и на нём кто-то висит — насест чувствует корпусом: охота, каскад от
   висящего, ближайшего к попаданию. Работает и в вакууме;
-- **воздух:** шум внутри дышимой зоны (`AJamGravityZone` с `bBreathable`) слышат
+- **воздух:** шум внутри дышимой зоны (`AOSGravityZone` с `bBreathable`) слышат
   живые летуны этой стаи, которые сами в той же зоне. Блуждающие из них 8 с
   (`InvestigateSeconds`) кружат в 6 м вокруг шума на ×1.3 скорости; заметив
   при этом игрока, могут начать в пределах поводка, а не только у края зоны.
@@ -311,12 +311,12 @@ diving now)` в логе).
 12 с (`LandSeconds`) — берёт другую точку; свободных нет — сторожит.
 
 **Цена.** Висящий думает раз в 0.25 с (`RoostTickSeconds`); каждый кадр — пока
-идёт дрожь или усадка или игрок ближе 15 м. Замер `jam.Flyer.Cost` 19.10 после
+идёт дрожь или усадка или игрок ближе 15 м. Замер `os.Flyer.Cost` 19.10 после
 переноса насеста на обломок (NullRHI, `-UseFixedTimeStep -FPS=60`, все зоны
-`Lvl_Jam_Ship`, 37 летунов): в покое (`jam.Flyer.RoostProbe`, игрок в шлюзе) 24
+`Lvl_OS_Ship`, 37 летунов): в покое (`os.Flyer.RoostProbe`, игрок в шлюзе) 24
 висящих — 0.017 мс на кадр (5.5 мкс на тик), 13 летающих (6 сторожей и 7 летунов
 планетоида и пояса) — 0.334 мс (25.7 мкс на тик); вся стая обломка в охоте после
-болевого зова (`jam.Flyer.EncounterProbe`, 5 с от зова) — 9 висящих 0.045 мс, 28
+болевого зова (`os.Flyer.EncounterProbe`, 5 с от зова) — 9 висящих 0.045 мс, 28
 летающих 0.924 мс на кадр (44.7 мкс на тик). Это тик игровой нити, без рендера.
 
 ### Первая вылазка без оружия
@@ -345,7 +345,7 @@ diving now)` в логе).
 на фоне звезды, которая их подсвечивает, ведёт взгляд к корме; ещё несколько
 торчат из обращённого к кораблю борта. У стены `Flesh_WreckDoor` (носовая
 половина того же борта) никто не висит (5.5 м от её центра). Подбор по кадрам
-`jam.Flyer.Views … blind` (виды из шлюза, с полпути, с 20 м, перед стеной):
+`os.Flyer.Views … blind` (виды из шлюза, с полпути, с 20 м, перед стеной):
 фокус (3900, −6900, 2100), спад 9 м — ряд по видимой кромке (принято); фокус
 дальше к корме (4200, −7600, 2300), спад 7 м — большинство ушло на дальнюю
 сторону (отвергнуто); прежний фокус со спадом 7 м — кромка жиже (отвергнуто).
@@ -362,13 +362,13 @@ diving now)` в логе).
 
 ## Болевой зов: плоть — их нервы
 
-`AJamLivingWall` держит список связанных стай (`Jam|LivingWall|Nerves` →
-`LinkedHabitats`, элементы `FJamFleshLink`: `Habitat` и
+`AOSLivingWall` держит список связанных стай (`OS|LivingWall|Nerves` →
+`LinkedHabitats`, элементы `FOSFleshLink`: `Habitat` и
 `ArrivalDelaySeconds`). Залп, который рвёт не меньше `PainCallCells` (6) клеток,
 шлёт болевой зов `PainCall` (не чаще раза в `PainCallCooldownSeconds`, 20 с;
 функция общая для любой раненой плоти). Крик у раны и в рации, выброс крови и
 спор описаны в [LivingWall](LivingWall.md#нервы-болевой-зов-1910). Каждая
-связанная стая отвечает (`AJamFlyerHabitat::AnswerPainCall`):
+связанная стая отвечает (`AOSFlyerHabitat::AnswerPainCall`):
 
 - сразу охотится — каскад от летуна, ближайшего к ране (в вакууме его не
   слышно, но видно);
@@ -384,29 +384,29 @@ diving now)` в логе).
 выслеживания и приходит к игроку тенью, без пике, пока он её не
 спровоцирует. Это следует из кода (`Pulse`); прогоном не проверялось.
 
-На `Lvl_Jam_Ship` (по `Scripts/jam_flyers.py`): насест `Flyers_WreckRoost` на
+На `Lvl_OS_Ship` (по `Scripts/os_flyers.py`): насест `Flyers_WreckRoost` на
 брошенном корабле (30 летунов, гуще на кромке кормовой половины, с правилом
 первой вылазки без оружия) и стена `Flesh_WreckDoor` 4 × 4 м на его борту,
 обращённом к кораблю игрока; зов будит всю стаю. Внутрь
-обломка пока не попасть (лучи `jam.Flyer.Rays` 19.10: носовой отсек замкнут со
+обломка пока не попасть (лучи `os.Flyer.Rays` 19.10: носовой отсек замкнут со
 всех сторон), поэтому стена — на борту. Когда у обломка появится вход, её надо
 перенести в проём — связь останется.
 
 ## Как собрать встречу
 
-Для Ника. `Lvl_Jam_Ship` правится руками в редакторе: **`Scripts/build_ship.py`
+Для Ника. `Lvl_OS_Ship` правится руками в редакторе: **`Scripts/build_ship.py`
 не запускать никогда** — он строит карту заново и стирает ручную работу.
 
 Встреча = живая стена + насест летунов, связанный с ней, + задержка.
 
-1. **Насест.** `AJamFlyerHabitat` вокруг объекта (Place Actors → `JamFlyerHabitat`).
+1. **Насест.** `AOSFlyerHabitat` вокруг объекта (Place Actors → `OSFlyerHabitat`).
    - Радиус — у компонента `Zone` (`Sphere Radius`, по умолчанию 15 м), с
      запасом на корпус. Это же граница блуждания, от неё считаются поводок и
      заметность.
-   - `Jam|Flyer`: `FlockSize` (3), `LeashCm` (2000 — насколько далеко за край
+   - `OS|Flyer`: `FlockSize` (3), `LeashCm` (2000 — насколько далеко за край
      зоны они погонятся; у обломка 9000, до корабля игрока), `AggroMarginCm`
      (500), `AlertRadiusCm` (2500 — шаг каскада).
-   - `Jam|Flyer|Roost`: `RoostOn` — акторы корпуса (пусто — насеста нет, стая
+   - `OS|Flyer|Roost`: `RoostOn` — акторы корпуса (пусто — насеста нет, стая
      просто летает), `RoostShare` (0.75), `RoostSpacingCm` (230),
      `RoostFocus` (мировые координаты: при переносе зоны его надо двигать
      отдельно) и `RoostFocusFalloffCm` (0), `RoostSeed` (0 — новая картина
@@ -415,23 +415,23 @@ diving now)` в логе).
      подлетая к ней), `RoostWakeRadiusCm` (**1000 по
      умолчанию** — для встречи, где будит стена, ставить мало: у обломка 400),
      `RoostTouchCm` (220), `RoostRowCm` (350).
-   - `Jam|Flyer|Flock`: `bSpareUnarmed` (false), `RallyOutCm` (1200),
+   - `OS|Flyer|Flock`: `bSpareUnarmed` (false), `RallyOutCm` (1200),
      `CalmDownSeconds` (12), `MaxDivers` (2), `MaxFeints` (2).
-2. **Стена.** `AJamLivingWall` в проёме (или на корпусе), `WidthCm` /
+2. **Стена.** `AOSLivingWall` в проёме (или на корпусе), `WidthCm` /
    `HeightCm` (400 × 400) — по проёму. Остальное — [LivingWall](LivingWall.md).
-3. **Связь.** На стене `Jam|LivingWall|Nerves` → `Linked Habitats` → `+`:
+3. **Связь.** На стене `OS|LivingWall|Nerves` → `Linked Habitats` → `+`:
    `Habitat` — зона из п. 1, `Arrival Delay Seconds` (8) — сколько стае кружить над
    раной: примерно время пути игрока от стены до места, где должна быть драка.
    Не больше ~12 с, иначе стая придёт тенью (см. «Болевой зов»). Связь хранится
    на стене; у зоны обратной ссылки нет, одна стена может звать несколько стай.
    Там же `PainCallCells` (6) и `PainCallCooldownSeconds` (20).
-4. **Проверка.** `jam.Flyer.EncounterProbe` (берёт первую стену со связью в
-   карте) и кадры `jam.Flyer.WallShots` — см. «Проверка» и
+4. **Проверка.** `os.Flyer.EncounterProbe` (берёт первую стену со связью в
+   карте) и кадры `os.Flyer.WallShots` — см. «Проверка» и
    [Probes](Probes.md).
 
-**Скрипт `Scripts/jam_flyers.py`** ставит встречу обломка и все зоны летунов
-сам. Свои акторы он узнаёт так: класс `JamFlyerHabitat` или `JamLivingWall` и
-(тег `Jam.Flyers` или метка из его списков: `Flyers_Test`, `Flyers_Planetoid`,
+**Скрипт `Scripts/os_flyers.py`** ставит встречу обломка и все зоны летунов
+сам. Свои акторы он узнаёт так: класс `OSFlyerHabitat` или `OSLivingWall` и
+(тег `OS.Flyers` или метка из его списков: `Flyers_Test`, `Flyers_Planetoid`,
 `Flyers_Belt`, `Flyers_WreckRoost`, `Flesh_WreckDoor`). Такие акторы он удаляет
 и ставит заново из своих списков (`HABITATS`, `WALLS`); всё остальное в карте не
 трогает. Так 19.10 ушёл и прежний `Flyers_ShipRoost` (по тегу). Отсюда:
@@ -439,7 +439,7 @@ diving now)` в логе).
 - ручные правки этих пяти акторов следующий прогон сотрёт — меняйте их в
   списках скрипта или переименуйте и снимите тег (тогда они ваши, и скрипт их не
   тронет);
-- свою встречу ставьте руками с другой меткой и без тега `Jam.Flyers` — скрипт её
+- свою встречу ставьте руками с другой меткой и без тега `OS.Flyers` — скрипт её
   не тронет.
 
 Запуск — только из PowerShell, не из Git Bash: MSYS переписывает пути
@@ -448,17 +448,17 @@ diving now)` в логе).
 до и после.
 
 ```powershell
-$env:JAM_FLYERS_MAPS = "ship"   # ship, zerog или both (по умолчанию both)
-$env:JAM_FLYERS_QUIT = "1"      # закрыть редактор после сохранения
-& "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "<путь>\MKJamStarter.uproject" -ExecutePythonScript="<путь>\Scripts\jam_flyers.py" -unattended -nop4 -nosplash -nullrhi
+$env:OS_FLYERS_MAPS = "ship"   # ship, zerog или both (по умолчанию both)
+$env:OS_FLYERS_QUIT = "1"      # закрыть редактор после сохранения
+& "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "<путь>\MKJamStarter.uproject" -ExecutePythonScript="<путь>\Scripts\os_flyers.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
-В логе — строки `JAMFLYERS: …` (что поставлено, `saved /Game/Jam/Maps/Lvl_Jam_Ship`).
-Зерно насеста обломка можно задать через `JAM_WRECK_ROOST_SEED` (по умолчанию 19).
+В логе — строки `OSFLYERS: …` (что поставлено, `saved /Game/OS/Maps/Lvl_OS_Ship`).
+Зерно насеста обломка можно задать через `OS_WRECK_ROOST_SEED` (по умолчанию 19).
 
 ## Состояния летуна
 
-`EJamFlyerState`: `Wander` (блуждание; у насеста — сторож), `Roost` (висит),
+`EOSFlyerState`: `Wander` (блуждание; у насеста — сторож), `Roost` (висит),
 `Land` (садится), `Curious` (сканер), `Stalk` (тень), `Circle`, `Dive`,
 `Feint`, `Retreat`, `Stagger`, `Flee`, `Dead`.
 
@@ -470,7 +470,7 @@ $env:JAM_FLYERS_QUIT = "1"      # закрыть редактор после с�
 «Охотится» (`IsHunting`): `Circle`, `Dive`, `Retreat`, `Feint`, `Stagger`, `Flee`
 и бросок любопытного посреди боя.
 
-`AJamFlyer`: корень `Body` — симулируемая сфера 40 см, 20 кг, без гравитации и
+`AOSFlyer`: корень `Body` — симулируемая сфера 40 см, 20 кг, без гравитации и
 затухания, вращение заблокировано, пока жив (тип PhysicsBody; Pawn, Visibility и
 Camera игнорируются). Полёт — ускорение к желаемой скорости (`AddForce`, accel
 change), без навмеша. `Visual` поворачивается по скорости (сканер и тень на
@@ -483,8 +483,8 @@ change), без навмеша. `Visual` поворачивается по ск�
 
 ## Числа
 
-Все — свойства `AJamFlyer` (категории `Jam|Flyer|Flight`, `Hunt`, `Ladder`,
-`Hit`, `Hearing`, `Roost`, `Look`, `Sound`) и `AJamFlyerHabitat` (`Jam|Flyer`,
+Все — свойства `AOSFlyer` (категории `OS|Flyer|Flight`, `Hunt`, `Ladder`,
+`Hit`, `Hearing`, `Roost`, `Look`, `Sound`) и `AOSFlyerHabitat` (`OS|Flyer`,
 `Flock`, `Roost`); постоянных ИИ в коде нет. Значения по умолчанию:
 
 | Что | Значение (свойство) |
@@ -513,15 +513,15 @@ change), без навмеша. `Visual` поворачивается по ск�
 
 ## Где они
 
-По `Scripts/jam_flyers.py` (что в сохранённой карте сейчас, не проверялось —
+По `Scripts/os_flyers.py` (что в сохранённой карте сейчас, не проверялось —
 карта правится руками):
 
 | Карта | Зона (метка) | Центр, радиус | Стая | Переопределено |
 |---|---|---|---|---|
-| `Lvl_Jam_ZeroG` | `Flyers_Test` | (−1500, −2200, 0), 13 м — 26 м от старта | 3 | — |
-| `Lvl_Jam_Ship` | `Flyers_Planetoid` | центр планетоида (0, 16000, −1000), оболочка 90–120 м (рельеф до 86.5 м) | 4 | `InnerRadiusCm` 9000 |
-| `Lvl_Jam_Ship` | `Flyers_Belt` | (150, −6100, 100) над поясом обломков и топливом, 25 м | 3 | — |
-| `Lvl_Jam_Ship` | `Flyers_WreckRoost` | (3405, −6933, 1344), 38 м; насест на брошенном корабле (`root_0`) | 30 (24 висят) | `RoostShare` 0.8, шаг 200, фокус (3900, −6900, 2100) на кромке кормовой половины, спад 900, будит 400, двери и стены 550, зерно 19, `bSpareUnarmed`, поводок 90 м; зовёт стена `Flesh_WreckDoor` (задержка 8 с) |
+| `Lvl_OS_ZeroG` | `Flyers_Test` | (−1500, −2200, 0), 13 м — 26 м от старта | 3 | — |
+| `Lvl_OS_Ship` | `Flyers_Planetoid` | центр планетоида (0, 16000, −1000), оболочка 90–120 м (рельеф до 86.5 м) | 4 | `InnerRadiusCm` 9000 |
+| `Lvl_OS_Ship` | `Flyers_Belt` | (150, −6100, 100) над поясом обломков и топливом, 25 м | 3 | — |
+| `Lvl_OS_Ship` | `Flyers_WreckRoost` | (3405, −6933, 1344), 38 м; насест на брошенном корабле (`root_0`) | 30 (24 висят) | `RoostShare` 0.8, шаг 200, фокус (3900, −6900, 2100) на кромке кормовой половины, спад 900, будит 400, двери и стены 550, зерно 19, `bSpareUnarmed`, поводок 90 м; зовёт стена `Flesh_WreckDoor` (задержка 8 с) |
 
 У корабля игрока насеста нет с 19.10 (см. «Насест на обломке и вид из шлюза»).
 Обломок в шипах, но первая вылазка без оружия безопасна и там (см. «Первая
@@ -536,10 +536,10 @@ change), без навмеша. `Visual` поворачивается по ск�
 стандарту». Итог — слоёный звук с вариацией на каждом проигрывании,
 3D-пространство, отдельные правила для вакуума и воздуха, свой микс.
 
-### Слои (`Scripts/jam_flyer_sounds.py`)
+### Слои (`Scripts/os_flyer_sounds.py`)
 
-Каждое событие собрано из моно-стемов `SW_Jam_Flyer_<Событие>_<Роль>` (32 кГц,
-`/Game/JamArt/Audio/Flyer`), у каждого стема одна роль:
+Каждое событие собрано из моно-стемов `SW_OS_Flyer_<Событие>_<Роль>` (32 кГц,
+`/Game/OSArt/Audio/Flyer`), у каждого стема одна роль:
 
 | Роль | Что это |
 |---|---|
@@ -574,7 +574,7 @@ Hit 0.09/0.26/0.34/0.16/0.32, Bite 0.17/0.39/0.45/0.26/0.62.
 | Chirr — «фото» сканера | — | — | Attack укуса и Attack попадания (−4 дБ), ×1.75–2.05, три щелчка через 75 мс |
 | Flutter — шелест ткани между ударами | петля 2.0 с | −30 / −11.9 | гранулы шелеста простыней, концы сшиты по равной мощности |
 
-### Вариация на каждом проигрывании (`JamPlaySoundEvent`)
+### Вариация на каждом проигрывании (`OSPlaySoundEvent`)
 
 Варианты B/C не нужны: событие играет каждый слой своим `UAudioComponent`, и на
 каждое проигрывание заново выбираются одна высота на все слои (визг ×0.94–1.06,
@@ -588,7 +588,7 @@ Hit 0.09/0.26/0.34/0.16/0.32, Bite 0.17/0.39/0.45/0.26/0.62.
 
 ### Пространство
 
-- Все стемы моно, 3D (`JamFlyerAttenuation`). Голос (визги, крики): полная
+- Все стемы моно, 3D (`OSFlyerAttenuation`). Голос (визги, крики): полная
   громкость в сфере 6 м, дальше естественный спад на 50 м до −40 дБ. Крылья,
   шелест, пролёт, щелчки: сфера 2 м, спад 25 м до −60 дБ. Удары (попадание,
   укус): полная громкость в 8 м, дальше линейный спад на 30 м (естественная
@@ -598,16 +598,16 @@ Hit 0.09/0.26/0.34/0.16/0.32, Bite 0.17/0.39/0.45/0.26/0.62.
   на 1.5 м — кажется, что он прошёл сквозь голову.
 - Эффект Доплера на визге пике и пролёте: высота каждый кадр по относительной
   скорости (c = 343 м/с, ×2.5 по логарифму высоты, пределы 0.5–2).
-- Перекрытие: своя трассировка от уха игрока по Visibility (`JamSoundOccluded`);
+- Перекрытие: своя трассировка от уха игрока по Visibility (`OSSoundOccluded`);
   тело игрока и то, что он держит, не считаются. За преградой звук тусклый
   (900 Гц) и тише (×0.35); у движущихся звуков проверка каждые 0.15 с с
   переходом 0.15 с. Движковое перекрытие выключено: его луч начинается в теле и
-  стволе игрока и глушил звук при чистой линии (`jam.Flyer.MixCheck`: −12 дБ на
+  стволе игрока и глушил звук при чистой линии (`os.Flyer.MixCheck`: −12 дБ на
   10 м и на Visibility, и на Camera).
 - Вакуум или воздух — по игроку (дышит ли он: `Oxygen->IsBreathable()`). В
   вакууме — цепочка «через скафандр» (слой Tail, фильтр 3.5–5 кГц). В воздухе
   (кабина, оболочка планетоида) Tail молчит, фильтр открыт, каждый слой
-  посылает 10–30 % в `SM_Jam_AirReverb` (реверб 1.1 с, тёмный, только мокрый
+  посылает 10–30 % в `SM_OS_AirReverb` (реверб 1.1 с, тёмный, только мокрый
   сигнал, дальше мастер с лимитером).
 
 ### Микс
@@ -620,9 +620,9 @@ Hit 0.09/0.26/0.34/0.16/0.32, Bite 0.17/0.39/0.45/0.26/0.62.
   визжащих.
 - Крылья (удары и шелест) звучат только у 4 ближайших к игроку летунов
   (`Mix.MaxWingSets`).
-- Приоритеты волн (`jam_flyer_audio.py`): голос 0.9, удары 0.8, крылья 0.6 — ниже
-  собственного ствола игрока (1.0). Звуковой класс `SC_Jam_Flyer`. Визг аггро
-  нажимает `SMIX_Jam_FlyerDuck`: класс `SC_Jam_Ambience` ×0.5 на 0.8 с (50 мс вход,
+- Приоритеты волн (`os_flyer_audio.py`): голос 0.9, удары 0.8, крылья 0.6 — ниже
+  собственного ствола игрока (1.0). Звуковой класс `SC_OS_Flyer`. Визг аггро
+  нажимает `SMIX_OS_FlyerDuck`: класс `SC_OS_Ambience` ×0.5 на 0.8 с (50 мс вход,
   0.6 с выход). Класс эмбиента пока ничем не используется — давить нечего.
 - Один звук попадания на источник за `HitWindowSeconds` (60 мс, как
   `BlastWindowSeconds` у живой стены): дробинки летят и попадают в разные кадры.
@@ -635,15 +635,15 @@ Hit 0.09/0.26/0.34/0.16/0.32, Bite 0.17/0.39/0.45/0.26/0.62.
 
 Замеры 19.10 (записи; билд того дня):
 
-- `jam.Flyer.MixCheck` (пистолет, 10 м, три дубля): попадание на 2.4–3.3 LU тише
+- `os.Flyer.MixCheck` (пистолет, 10 м, три дубля): попадание на 2.4–3.3 LU тише
   выстрела игрока (выстрел −16.4 LUFS, попадание −19.0…−19.7, максимум
   моментальной громкости). С дробовиком (`1000 shotgun`, четыре дубля): выстрел
   −12.6…−12.7 LUFS, попадание на 2.8–4.2 LU ниже, одно событие на заряд. Пик
   попадания упирается в брикволл (−1.0 dBFS).
-- `jam.Flyer.Clip` (пистолет, 26 с): пик 35–36 волн при лимите 96, медиана пиков за
+- `os.Flyer.Clip` (пистолет, 26 с): пик 35–36 волн при лимите 96, медиана пиков за
   0.5 с 26, 0 отброшенных (при старом лимите 32 было превышение в 292 из 3064
   кадров); дубль с дробовиком — пик 45, 0 отброшенных. Пик мастера −1.00 dBFS.
-- Громкость в игре (`jam.Flyer.Clip`, максимум моментальной громкости за 0.6 с
+- Громкость в игре (`os.Flyer.Clip`, максимум моментальной громкости за 0.6 с
   после события, медианы): выстрел пистолета −13.3 LUFS, визг на пике с 10–14 м
   −19.7, пролёт −18.1, укус −18.6, попадание −13.3, предсмертный крик −15.0,
   взмахи с 14–25 м около −40. Весь дубль −20.8 LUFS интегрально, пик −3.4 dBFS.
@@ -651,13 +651,13 @@ Hit 0.09/0.26/0.34/0.16/0.32, Bite 0.17/0.39/0.45/0.26/0.62.
 ### Ассеты и пересборка
 
 ```
-python Scripts/jam_flyer_sounds.py <out> <listen или -> Saved/Donors <MindKore>/SFX
-JAM_WAV_DIR=<out> UnrealEditor-Cmd ... -ExecutePythonScript=Scripts/jam_flyer_audio.py
+python Scripts/os_flyer_sounds.py <out> <listen или -> Saved/Donors <MindKore>/SFX
+OS_WAV_DIR=<out> UnrealEditor-Cmd ... -ExecutePythonScript=Scripts/os_flyer_audio.py
 ```
 
-`jam_flyer_audio.py` импортирует стемы (класс, приоритет, петля шелеста),
-создаёт `SC_Jam_Flyer`, `SC_Jam_Ambience`, `SMIX_Jam_FlyerDuck`,
-`SM_Jam_AirReverb` (+ `SMX_Jam_AirReverb`) в `/Game/JamArt/Audio/Mix` и удаляет
+`os_flyer_audio.py` импортирует стемы (класс, приоритет, петля шелеста),
+создаёт `SC_OS_Flyer`, `SC_OS_Ambience`, `SMIX_OS_FlyerDuck`,
+`SM_OS_AirReverb` (+ `SMX_OS_AirReverb`) в `/Game/OSArt/Audio/Mix` и удаляет
 старые цельные волны. Доноры (Freesound HQ-превью, CC0, лицензия проверена на
 странице каждого; имя, страница, размер и лицензия записаны в
 `Saved/Donors/DONORS.txt`) лежат в `Saved/Donors/<id>/`, в репозиторий не идут —
@@ -667,27 +667,27 @@ JAM_WAV_DIR=<out> UnrealEditor-Cmd ... -ExecutePythonScript=Scripts/jam_flyer_au
 
 | Файл | Что |
 |---|---|
-| `Source/MindKore/JamFlyer.h/.cpp` | `AJamFlyerHabitat` (зона: спавнит стаю, отдаёт геометрию — `Contains`, `UpAt`, `PickPoint`; настроение, жетоны, каскад, поиск, слух, насест, болевой зов), `AJamFlyer` (`IMKImpactReceiver`); консольные команды `jam.Flyer.*` |
-| `UJamWeaponsComponent::Fire`, `TraceShot` (`JamWeapons.cpp`) | по строке: `AJamFlyerHabitat::ReportNoise` — выстрел у дула и точка попадания (слух) |
-| `AJamLivingWall::PainCall` | болевой зов связанным стаям ([LivingWall](LivingWall.md), «Нервы») |
-| `Source/MindKore/JamGravity.cpp` | `JamPullBodies`: гравитация зон тянет и усыпляет труп, как любое свободное тело |
-| `Source/MindKore/JamVisorBlood.h/.cpp` | `UJamVisorBloodComponent`: кровь на визоре (`M_MK_LensBlood` первым в цепочке постобработки камеры, пока есть пятно); летун добавляет его пешке сам при первом укусе |
-| `AJamZeroGPawn::KickCamera` | тряска камеры пешки (та же, что от удара) по запросу снаружи |
-| `Source/MindKore/JamFlyerAudio.h/.cpp` | слоёные события (`FJamSoundEvent`, `JamPlaySoundEvent`), затухание летуна, перекрытие, настройки микса |
-| `Source/MindKore/JamClipRecorder.h/.cpp` | запись дубля: вьюпорт → ffmpeg, мастер-сабмикс → wav (`jam.Flyer.Clip`) |
-| `Scripts/jam_flyer_sounds.py` | стемы звуков летуна (слои, LUFS, true peak) и файлы для прослушивания |
-| `Scripts/jam_flyer_audio.py` | импорт стемов, классы, дакинг, реверб воздуха |
-| `Scripts/blender/jam_flyer.py` | модель (Blender, headless): 4 части и атлас 256 px |
-| `Scripts/jam_import_meshes.py` | импорт `SM_Jam_Flyer_*` в `/Game/JamArt/Meshes/Flyer` (общий импортёр) |
-| `Scripts/jam_flyer_art.py` | текстура `T_Jam_Flyer_BC` (Nearest) и `MI_Jam_Flyer` (экземпляр `M_Jam_Gritty`) на всех частях |
-| `Scripts/jam_flyers.py` | зоны и стена встречи в картах (см. «Как собрать встречу»); его `place()` зовут и `build_ship.py`, `build_zerog.py` |
+| `Source/MindKore/OSFlyer.h/.cpp` | `AOSFlyerHabitat` (зона: спавнит стаю, отдаёт геометрию — `Contains`, `UpAt`, `PickPoint`; настроение, жетоны, каскад, поиск, слух, насест, болевой зов), `AOSFlyer` (`IMKImpactReceiver`); консольные команды `os.Flyer.*` |
+| `UOSWeaponsComponent::Fire`, `TraceShot` (`OSWeapons.cpp`) | по строке: `AOSFlyerHabitat::ReportNoise` — выстрел у дула и точка попадания (слух) |
+| `AOSLivingWall::PainCall` | болевой зов связанным стаям ([LivingWall](LivingWall.md), «Нервы») |
+| `Source/MindKore/OSGravity.cpp` | `OSPullBodies`: гравитация зон тянет и усыпляет труп, как любое свободное тело |
+| `Source/MindKore/OSVisorBlood.h/.cpp` | `UOSVisorBloodComponent`: кровь на визоре (`M_MK_LensBlood` первым в цепочке постобработки камеры, пока есть пятно); летун добавляет его пешке сам при первом укусе |
+| `AOSZeroGPawn::KickCamera` | тряска камеры пешки (та же, что от удара) по запросу снаружи |
+| `Source/MindKore/OSFlyerAudio.h/.cpp` | слоёные события (`FOSSoundEvent`, `OSPlaySoundEvent`), затухание летуна, перекрытие, настройки микса |
+| `Source/MindKore/OSClipRecorder.h/.cpp` | запись дубля: вьюпорт → ffmpeg, мастер-сабмикс → wav (`os.Flyer.Clip`) |
+| `Scripts/os_flyer_sounds.py` | стемы звуков летуна (слои, LUFS, true peak) и файлы для прослушивания |
+| `Scripts/os_flyer_audio.py` | импорт стемов, классы, дакинг, реверб воздуха |
+| `Scripts/blender/os_flyer.py` | модель (Blender, headless): 4 части и атлас 256 px |
+| `Scripts/os_import_meshes.py` | импорт `SM_OS_Flyer_*` в `/Game/OSArt/Meshes/Flyer` (общий импортёр) |
+| `Scripts/os_flyer_art.py` | текстура `T_OS_Flyer_BC` (Nearest) и `MI_OS_Flyer` (экземпляр `M_OS_Gritty`) на всех частях |
+| `Scripts/os_flyers.py` | зоны и стена встречи в картах (см. «Как собрать встречу»); его `place()` зовут и `build_ship.py`, `build_zerog.py` |
 
 ## Как пересобрать модель
 
 ```
-blender.exe -b --python Scripts/blender/jam_flyer.py -- <out_dir>
-JAM_FBX_DIR=<out_dir> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/jam_import_meshes.py" ...
-JAM_FBX_DIR=<out_dir> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/jam_flyer_art.py" ...
+blender.exe -b --python Scripts/blender/os_flyer.py -- <out_dir>
+OS_FBX_DIR=<out_dir> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/os_import_meshes.py" ...
+OS_FBX_DIR=<out_dir> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/os_flyer_art.py" ...
 ```
 
 FBX, PNG и превью остаются в `<out_dir>`; в репозитории — только `.uasset`.
@@ -698,14 +698,14 @@ FBX, PNG и превью остаются в `<out_dir>`; в репозитор�
 Команды, аргументы, карты и порядок запуска — [Probes](Probes.md). Что
 проверяет каждая:
 
-- `jam.Flyer.Probe` (логика): один летун зоны от блуждания до трупа — слух
+- `os.Flyer.Probe` (логика): один летун зоны от блуждания до трупа — слух
   (выстрел в вакууме не слышен; в временной зоне воздуха слетаются), лестница
   (бросок сканера; ствол на нём — выслеживание; ещё раз — охота и каскад),
   жетоны (FAIL, если пикирует больше `MaxDivers`), два укуса, срыв и бегство,
   спокойствие (в пробе 9 с на ступень вместо 12), прятки за планетоидом (только
   у оболочки; иначе шаг пропущен), поводок, смерть, труп. Пока идёт, включён
-  `jam.Flyer.LogFlaps`.
-- `jam.Flyer.RoostProbe` (логика): первый насест карты (на `Lvl_Jam_Ship` —
+  `os.Flyer.LogFlaps`.
+- `os.Flyer.RoostProbe` (логика): первый насест карты (на `Lvl_OS_Ship` —
   обломок) — цена тика, безоружный путь от шлюза к насесту (6 м от висящего,
   ближайшего к шлюзу) и назад, вокруг носа корабля к пистолету (`[pickup]:
   PASS` — ни одного укуса), касание висящего у насеста,
@@ -713,11 +713,11 @@ FBX, PNG и превью остаются в `<out_dir>`; в репозитор�
   120 с только прячется (там, где его оставил бой; `airlock` — в шлюзе; `cabin`
   — в кабине под насестом, ныряет туда через 4 с после выстрела) и считается всё,
   что делает стая; `PASS` — ни одного нового каскада.
-- `jam.Flyer.EncounterProbe` (логика): от шлюза к первой стене со связью,
+- `os.Flyer.EncounterProbe` (логика): от шлюза к первой стене со связью,
   выстрелы в пустоту по пути, дробовик в стену — болевой зов, обратный путь (где
   стая догнала: летун охоты в 15 м от игрока после сбора), выстрел в воздухе
   планетоида (слышен).
-- `jam.Flyer.Cost`, `jam.Flyer.Rays` — цена тика; лучи из точки (где выход из
+- `os.Flyer.Cost`, `os.Flyer.Rays` — цена тика; лучи из точки (где выход из
   отсека).
 - Кадры и звук (нужен рендер): `Shots`, `BiteShot`, `CorpseShot`, `Views`,
   `Portraits`, `WakeStrip`, `WallShots`; `MixCheck` (выстрел игрока и
@@ -729,15 +729,15 @@ FBX, PNG и превью остаются в `<out_dir>`; в репозитор�
 ### Перенос насеста на обломок 19.10
 
 Билд ветки `jam-roost-wreck` (NullRHI, `-nosound`, `-UseFixedTimeStep -FPS=60`),
-`Lvl_Jam_Ship`. `jam.Flyer.RoostProbe`:
+`Lvl_OS_Ship`. `os.Flyer.RoostProbe`:
 
 ```
-Flyer habitat JamFlyerHabitat_5: 30 flyers at V(X=3405.00, Y=-6933.00, Z=1344.00), radius 38 m (inner 0 m), leash 90 m; roost: 39 spots, 24 clinging; spares the unarmed player
+Flyer habitat OSFlyerHabitat_5: 30 flyers at V(X=3405.00, Y=-6933.00, Z=1344.00), radius 38 m (inner 0 m), leash 90 m; roost: 39 spots, 24 clinging; spares the unarmed player
 Flyer roost probe [walk]: unarmed, 169 m at 4 m/s - out to V(X=5558.73, Y=-1305.09, Z=1091.50), the roost visit V(X=4293.01, Y=-5441.41, Z=1606.55) (50 m from the airlock exit), back, the bow V(X=2420.00, Y=-1305.09, Z=1391.50) of root_3 (x 3220..7220), the pickup; ...
-Flock JamFlyerHabitat_5: curious -> stalking (the player touched JamFlyer_8 on the roost (the player is unarmed: stalking at most))
-Flyer roost probe [pickup]: PASS - 0 bite(s) on the way (menace, no attack); JamFlyerHabitat_5 mood curious: 23 roost 7 curious
-Flock JamFlyerHabitat_5: curious -> hunting (a round landing on the roost's hull (contact))
-Flock JamFlyerHabitat_5: the cascade is over - 25 woken in 9.73 s
+Flock OSFlyerHabitat_5: curious -> stalking (the player touched OSFlyer_8 on the roost (the player is unarmed: stalking at most))
+Flyer roost probe [pickup]: PASS - 0 bite(s) on the way (menace, no attack); OSFlyerHabitat_5 mood curious: 23 roost 7 curious
+Flock OSFlyerHabitat_5: curious -> hunting (a round landing on the roost's hull (contact))
+Flock OSFlyerHabitat_5: the cascade is over - 25 woken in 9.73 s
 Flyer probe [roost awake]: 23.3 s, 1401 samples - at most 2 diving at once (tokens 2), at most 2 feinting (cap 2); 9 dives, 6 feints, 1 darts begun; ...
 Flyer roost probe [hide 120 s]: PASS - 0 cascade(s) begun, 0 into the hunt, 0 call screech(es), 0 dive screech(es), 0 bite(s), 24 landed; ...
 ```
@@ -745,14 +745,14 @@ Flyer roost probe [hide 120 s]: PASS - 0 cascade(s) begun, 0 into the hunt, 0 ca
 После выстрела в корпус пять укусов отбросили игрока в открытый космос (в
 212 м от центра зоны): у обломка нечем зацепиться, и шаг «прячется» прошёл
 вдали от насеста — для обломка он почти ничего не доказывает. `cabin` и
-`airlock` после переноса не гонялись. `jam.Flyer.EncounterProbe`:
+`airlock` после переноса не гонялись. `os.Flyer.EncounterProbe`:
 
 ```
-Flyer encounter probe [at the wall]: JamFlyerHabitat_5 mood curious: 24 roost 4 curious 2 wander; the shotgun out
-Wall JamLivingWall_1: pain call 1 (a blast tore 35 cells) at V(X=3088.27, Y=-5170.86, Z=855.38) - ...; 1 linked flock(s)
+Flyer encounter probe [at the wall]: OSFlyerHabitat_5 mood curious: 24 roost 4 curious 2 wander; the shotgun out
+Wall OSLivingWall_1: pain call 1 (a blast tore 35 cells) at V(X=3088.27, Y=-5170.86, Z=855.38) - ...; 1 linked flock(s)
 Flyer cost: 300 frames in 0.9 s real - 9 clinging: 0.045 ms a frame (1441 ticks, 9.3 us each); 28 flying: 0.924 ms a frame (6201 ticks, 44.7 us each)
-Flyer encounter probe [met]: JamFlyer_31 within 15 m of the player 8.1 s after the call, 22 m into the way back (32% of 70 m)
-Flock JamFlyerHabitat_5: the cascade is over - 27 woken in 9.42 s
+Flyer encounter probe [met]: OSFlyer_31 within 15 m of the player 8.1 s after the call, 22 m into the way back (32% of 70 m)
+Flock OSFlyerHabitat_5: the cascade is over - 27 woken in 9.42 s
 ```
 
 До выстрела у стены все 24 висят: насест не проснулся от подлёта со стволом.
@@ -760,7 +760,7 @@ Flock JamFlyerHabitat_5: the cascade is over - 27 woken in 9.42 s
 ### Записи прогонов 19.10
 
 Раунд 4 (поиск, e99d816; NullRHI, `-nosound`, `-UseFixedTimeStep -FPS=60`),
-`Lvl_Jam_Ship`, `jam.Flyer.RoostProbe cabin`, каскады / визги зова за 60 с:
+`Lvl_OS_Ship`, `os.Flyer.RoostProbe cabin`, каскады / визги зова за 60 с:
 
 | Билд | Прогоны |
 |---|---|
@@ -772,56 +772,56 @@ Flock JamFlyerHabitat_5: the cascade is over - 27 woken in 9.42 s
 рядом со спрятавшимся. После:
 
 ```
-Flock JamFlyerHabitat_4: hunting -> stalking (lost the player for 4.0 s: searches where it saw him last, 9 m from the centre)
-Flyer JamFlyer_28: circle -> stalk (the flock is stalking now: searches where it saw the player last)
-Flock JamFlyerHabitat_4: stalking -> curious (calm: no provocation for 12 s)
+Flock OSFlyerHabitat_4: hunting -> stalking (lost the player for 4.0 s: searches where it saw him last, 9 m from the centre)
+Flyer OSFlyer_28: circle -> stalk (the flock is stalking now: searches where it saw the player last)
+Flock OSFlyerHabitat_4: stalking -> curious (calm: no provocation for 12 s)
 Flyer roost probe [hide 60 s]: PASS - 0 cascade(s) begun, 4 into the hunt, 3 call screech(es), 0 dive screech(es), 0 bite(s), 20 landed; mood hunting -> stalking (+4.0 s) -> curious (+16.1 s)
 ```
 
 `airlock` и по умолчанию — 0 каскадов и до, и после (там баг не
 воспроизводится). Прогоны не повторяются один в один, поэтому `cabin` гонялся
-по нескольку раз. `jam.Flyer.Probe all` (`Lvl_Jam_ZeroG`, два прогона): 7 и 4
+по нескольку раз. `os.Flyer.Probe all` (`Lvl_OS_ZeroG`, два прогона): 7 и 4
 укуса, не больше 1 пике сразу; вторая провокация стволом через 9.5 с прошла
 молча (`rejoins silently`). В первом прогоне `[flee]: DID NOT FLEE`: летун
 перешёл в бегство и в тот же кадр отпустил игрока по поводку (игрок за 57 м); во
-втором — `flees at +0.40 s`. `jam.Flyer.EncounterProbe`: каскад 9 за 4.27 с,
+втором — `flees at +0.40 s`. `os.Flyer.EncounterProbe`: каскад 9 за 4.27 с,
 встреча на обратном пути `8.1 s after the call, 22 m into the way back`.
 
-Раунд 3 (стая, насест, слух, встреча; NullRHI, `-nosound`), `Lvl_Jam_ZeroG`,
-`jam.Flyer.Probe all`:
+Раунд 3 (стая, насест, слух, встреча; NullRHI, `-nosound`), `Lvl_OS_ZeroG`,
+`os.Flyer.Probe all`:
 
 ```
-Flyer hearing: a shot at 61 m from JamFlyerHabitat_0's centre - vacuum: unheard
-Flock JamFlyerHabitat_0: curious -> stalking (heard a shot 65 m away through the air)
+Flyer hearing: a shot at 61 m from OSFlyerHabitat_0's centre - vacuum: unheard
+Flock OSFlyerHabitat_0: curious -> stalking (heard a shot 65 m away through the air)
 Flyer probe [hear +6 s]: mean distance to the shot 65.6 -> 55.0 m (3 flyers, all wander: investigating)
 Flyer probe [curious]: a dart at the face
-Flock JamFlyerHabitat_0: curious -> stalking (a gun held on JamFlyer_0 for 1.0 s)
-Flock JamFlyerHabitat_0: stalking -> hunting (a gun held on JamFlyer_0 for 1.0 s)
+Flock OSFlyerHabitat_0: curious -> stalking (a gun held on OSFlyer_0 for 1.0 s)
+Flock OSFlyerHabitat_0: stalking -> hunting (a gun held on OSFlyer_0 for 1.0 s)
 Flyer probe [hunt]: 10.0 s - at most 2 diving at once (tokens 2), at most 1 feinting (cap 2); 4 dives, 1 feints; 2 bite(s)
 Flyer probe [stagger +0.25 s]: stagger, 500 cm/s along the round (was 0), 126 cm off its line
 Flyer probe [flee]: flees at +0.40 s ... [back after 4.4 s]: circle
 Flyer probe [calm]: curious again after 14.6 s without provocation
 ```
 
-`Lvl_Jam_Ship`, `jam.Flyer.RoostProbe` (насест корабля, 26 летунов, 34 точки):
+`Lvl_OS_Ship`, `os.Flyer.RoostProbe` (насест корабля, 26 летунов, 34 точки):
 
 ```
 Flyer roost probe [walk]: unarmed, 82 m via ... at 4 m/s
-Flyer JamFlyer_21: roost -> feint (bumped 1.2 m away: peels off with a warning screech and a feint)
-Flock JamFlyerHabitat_4: curious -> stalking (the player touched JamFlyer_21 on the roost (the player is unarmed: stalking at most))
+Flyer OSFlyer_21: roost -> feint (bumped 1.2 m away: peels off with a warning screech and a feint)
+Flock OSFlyerHabitat_4: curious -> stalking (the player touched OSFlyer_21 on the roost (the player is unarmed: stalking at most))
 Flyer roost probe [pickup]: PASS - 0 bite(s) on the way (menace, no attack)
-Flyer hearing: a round landing on root_3, 9 m from JamFlyerHabitat_4's centre - contact: the roost feels it through the hull
-Flock JamFlyerHabitat_4: the cascade is over - 22 woken in 6.43 s
+Flyer hearing: a round landing on root_3, 9 m from OSFlyerHabitat_4's centre - contact: the roost feels it through the hull
+Flock OSFlyerHabitat_4: the cascade is over - 22 woken in 6.43 s
 Flyer probe [roost awake]: 16.0 s - at most 2 diving at once (tokens 2), at most 2 feinting (cap 2); 7 dives, 5 feints
 ```
 
-`jam.Flyer.EncounterProbe` (маршрут 70 м, задержка 8 с): `pain call 1 (a blast
-tore 47 cells)`, `the cascade is over - 8 woken in 3.40 s`, `[met]: JamFlyer_42
+`os.Flyer.EncounterProbe` (маршрут 70 м, задержка 8 с): `pain call 1 (a blast
+tore 47 cells)`, `the cascade is over - 8 woken in 3.40 s`, `[met]: OSFlyer_42
 within 15 m of the player 8.7 s after the call, 33 m into the way back`. Две из
 восьми дробин залпа ушли мимо стены в борт обломка — это контакт, и стая
 поднялась на долю секунды раньше зова; так и задумано.
 
-Ролики `jam.Flyer.Clip 34 roost`, `jam.Flyer.Clip 28 wall` (со звуком):
+Ролики `os.Flyer.Clip 34 roost`, `os.Flyer.Clip 28 wall` (со звуком):
 `Flock_roost.mp4`, `Flock_wall.mp4` — путь в отчёте того дня. В дубле насеста 18
 визгов пробуждения: 18 раз новый вытеснил визг, от которого остался хвост, 8 —
 дальний, 10 визгов пике пропущено; пик 75 волн из 96, 0 отброшено движком.
@@ -836,7 +836,7 @@ within 15 m of the player 8.7 s after the call, 33 m into the way back`. Две 
 - **Укус сквозь обшивку.** Пике, начатое до того, как игрок спрятался, может
   укусить через корпус: проверки линии у укуса нет. Жетон берётся, только когда
   летун видит игрока (`Think`, `case Circle`). Дальше пике идёт без зрения:
-  `case Dive` (`JamFlyer.cpp`, ~1760) кусает, как только центры ближе
+  `case Dive` (`OSFlyer.cpp`, ~1760) кусает, как только центры ближе
   `BiteReachCm` (1.9 м), а `Bite()` (~2021) бьёт без трассировки. Обход в пике
   (`Avoid`, ~2010) не уворачивается от препятствия в последних 2 м перед
   игроком, а потеря игрока пике не прерывает (вниз по лестнице переходят только
@@ -846,16 +846,16 @@ within 15 m of the player 8.7 s after the call, 33 m into the way back`. Две 
   стая перестаёт нападать.
 - Встреча с задержкой больше 12 с приходит к игроку тенью (см. «Болевой зов»;
   из кода, прогоном не проверено).
-- `jam.Flyer.EncounterProbe` и `WallShots` берут первую стену со связью в
+- `os.Flyer.EncounterProbe` и `WallShots` берут первую стену со связью в
   карте: вторая встреча ими не проверяется.
 - Не проверено: на слух — крик стены в рации, щелчки сканера, крик боли (только
   лог и пики записи); рендер 30 летунов обломка (цена — только тик игровой нити);
   отдельной пробы смены «сторож садится — висящий отрывается» нет (видна в логах
-  как `swap`); потеря из виду в `Lvl_Jam_ZeroG` (там негде спрятаться — проба
+  как `swap`); потеря из виду в `Lvl_OS_ZeroG` (там негде спрятаться — проба
   пишет `skipped`); стая `Flyers_Belt` пробой не гонялась (тот же код, другая
   зона); пятно на визоре через 0.2 с после укуса на кадре ещё не видно (на 1.2 и
   2.5 с видно), причину не разбирали.
-- `jam.Flyer.Clip roost` и `jam.Flyer.WakeStrip` без аргументов снимают от
+- `os.Flyer.Clip roost` и `os.Flyer.WakeStrip` без аргументов снимают от
   шлюза — после переноса насеста это вид на обломок с 65 м. Под обломок их не
   переделывали и после переноса не гоняли.
 - Брызги болевого зова издалека почти не читаются (кадры с 6 и 26 м, 19.10) —

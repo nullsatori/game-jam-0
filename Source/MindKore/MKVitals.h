@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-// Jam lift: MKBodyResponseComponent.h replaced by MKImpactHistory.h - only FMKImpactHistory was used.
+// OS lift: MKBodyResponseComponent.h replaced by MKImpactHistory.h - only FMKImpactHistory was used.
 #include "MKImpactHistory.h"
 #include "MKImpactTypes.h"
 #include "MKVitals.generated.h"
@@ -50,12 +50,12 @@ MINDKORE_API FMKIncomingDamage MKApplyIncomingDamage(
  * NOT an impact receiver. The pawn does not implement IMKImpactReceiver, so an
  * enemy round still does not reach the player at all - that is a separate
  * SURVIVAL decision, not something this owner turns on by existing.
- * Jam lift: in the starter AJamCharacter DOES implement IMKImpactReceiver and
+ * OS lift: in the starter AOSCharacter DOES implement IMKImpactReceiver and
  * forwards a round to ApplyIncoming - the paragraph above describes MindKore.
  *
  * Transient state: there is no save game or checkpoint. Death is an event
- * (OnDepleted); what follows is decided by its listener - in the jam, the
- * game mode (AJamShipGameMode revives the same pawn with Revive).
+ * (OnDepleted); what follows is decided by its listener - in the game, the
+ * game mode (AOSShipGameMode revives the same pawn with Revive).
  */
 UCLASS(ClassGroup = (MindKore), meta = (BlueprintSpawnableComponent))
 class MINDKORE_API UMKVitalsComponent : public UActorComponent

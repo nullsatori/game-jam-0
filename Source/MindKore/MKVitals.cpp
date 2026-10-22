@@ -2,7 +2,7 @@
 
 #include "GameFramework/Actor.h"
 #include "MindKore.h"
-// Jam lift: MKMeleeDefence.h cut - only MKBlockAppliesTo was used; its one-line rule is copied below.
+// OS lift: MKMeleeDefence.h cut - only MKBlockAppliesTo was used; its one-line rule is copied below.
 
 namespace
 {
@@ -11,7 +11,7 @@ namespace
 		return FMath::IsFinite(Value) ? FMath::Max(Value, 0.0f) : 0.0f;
 	}
 
-	// Jam lift: copied from MKMeleeDefence.cpp (MKBlockAppliesTo) so the melee defence module is not needed.
+	// OS lift: copied from MKMeleeDefence.cpp (MKBlockAppliesTo) so the melee defence module is not needed.
 	bool MKBlockAppliesTo(EMKImpactKind Kind)
 	{
 		// A crowbar held across the body does not stop a round (the task's rule,
@@ -80,7 +80,7 @@ bool UMKVitalsComponent::ApplyIncoming(float Damage, EMKImpactKind Kind, bool bB
 
 	if (HealthBefore > 0.0f && Health <= 0.0f)
 	{
-		// Death is the listener's (the jam's game mode); without one zero health is held at zero.
+		// Death is the listener's (the game's game mode); without one zero health is held at zero.
 		UE_LOG(LogMindKore, Warning, TEXT("Vitals %s: health reached 0, %d death listener(s)"), *GetNameSafe(GetOwner()),
 			OnDepleted.IsBound() ? 1 : 0);
 		OnDepleted.Broadcast();

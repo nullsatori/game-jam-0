@@ -1,10 +1,10 @@
-"""Builds /Game/Jam/Maps/Lvl_Jam_Range: a test range for the guns and the living walls (editor Python, headless).
+"""Builds /Game/OS/Maps/Lvl_OS_Range: a test range for the guns and the living walls (editor Python, headless).
 
   UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
       -ExecutePythonScript="<path>/Scripts/build_range.py" -unattended -nop4 -nosplash -nullrhi
 (wrap it in a script that calls unreal.SystemLibrary.quit_editor(), see README)
 
-The ship's mode (AJamShipGameMode), so a gravity zone gives a floor to stand on
+The ship's mode (AOSShipGameMode), so a gravity zone gives a floor to stand on
 and beyond it is zero-G. The hall: a 30 x 20 m floor open to space, gravity and
 air over it. At the start, on the left out of the firing lanes, three pickups -
 pistol, shotgun, SV-98 - and the grapple. Down the hall, facing the start: a square flesh wall at 8 m, another at
@@ -19,12 +19,12 @@ import sys
 import unreal
 
 sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
-import jam_flesh  # noqa: E402
-import jam_living_wall  # noqa: E402
+import os_flesh  # noqa: E402
+import os_living_wall  # noqa: E402
 
-MAP = "/Game/Jam/Maps/Lvl_Jam_Range"
+MAP = "/Game/OS/Maps/Lvl_OS_Range"
 CUBE = unreal.load_asset("/Engine/BasicShapes/Cube.Cube")
-MATS = "/Game/Jam/Materials"
+MATS = "/Game/OS/Materials"
 eal = unreal.EditorAssetLibrary
 les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
 eas = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
@@ -32,7 +32,7 @@ ues = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
 
 
 def log(msg):
-    unreal.log("JAMRANGE: " + msg)
+    unreal.log("OSRANGE: " + msg)
 
 
 def V(x, y, z):
@@ -98,11 +98,11 @@ settings = world.get_world_settings()
 settings.modify()
 settings.set_editor_property("global_gravity_set", True)
 settings.set_editor_property("global_gravity_z", 0.0)
-settings.set_editor_property("default_game_mode", unreal.JamShipGameMode.static_class())
+settings.set_editor_property("default_game_mode", unreal.OSShipGameMode.static_class())
 
-ANCHOR = tinted("MI_Jam_Anchor")
-PART = tinted("MI_Jam_ShipPart")
-JUNK = tinted("MI_Jam_Junk")
+ANCHOR = tinted("MI_OS_Anchor")
+PART = tinted("MI_OS_ShipPart")
+JUNK = tinted("MI_OS_Junk")
 
 # --- light: a low sun, a sky light, a fixed exposure ------------------------------------
 sun = spawn(unreal.DirectionalLight, V(0, 0, 2000), R(yaw=-30.0, pitch=-35.0), "Sun")
@@ -124,41 +124,41 @@ ppv.set_editor_property("settings", pp)
 
 # --- the hall: floor, gravity and air, the start with the pickups ------------------------
 block("Floor", V(1500, 0, -10), (3000, 2000, 20), ANCHOR)
-hall = spawn(unreal.JamGravityZone, V(1500, 0, 600), None, "Gravity_Hall")
+hall = spawn(unreal.OSGravityZone, V(1500, 0, 600), None, "Gravity_Hall")
 hall.get_editor_property("zone").set_box_extent(V(1500, 1000, 600))
 hall.set_editor_property("refill_per_second", 30.0)
 hall.set_editor_property("hud_text", unreal.Text("Тир: гравитация, воздух"))
 spawn(unreal.PlayerStart, V(150, 0, 100), R(), "PlayerStart")
 # On the left, out of the firing lanes (the walls stand at y -350, 0 and 450).
 for index, (name, y) in enumerate((("PISTOL", -650.0), ("SHOTGUN", -800.0), ("SV-98", -950.0))):
-    pickup = spawn(unreal.JamWeaponPickup, V(300, y, 60), R(yaw=90.0), "Pickup_" + name)
+    pickup = spawn(unreal.OSWeaponPickup, V(300, y, 60), R(yaw=90.0), "Pickup_" + name)
     pickup.set_actor_scale3d(V(0.4, 0.6, 1.2))
     pickup.set_editor_property("weapon_index", index)
     pickup.get_editor_property("mesh").set_material(0, PART)
     label_text(name, V(300, y, 160), 90, 30)
-grapple = spawn(unreal.JamToolPickup, V(300, -500, 60), R(yaw=90.0), "Pickup_Grapple")
+grapple = spawn(unreal.OSToolPickup, V(300, -500, 60), R(yaw=90.0), "Pickup_Grapple")
 grapple.set_actor_scale3d(V(0.4, 0.6, 1.2))
 grapple.get_editor_property("mesh").set_material(0, ANCHOR)
 label_text("GRAPPLE", V(300, -500, 160), 90, 30)
 
 # --- living walls down the hall, facing the start (-X) -----------------------------------
-WALL_MAT = jam_living_wall.material(log)
-FLESH = jam_flesh.materials(log)
+WALL_MAT = os_living_wall.material(log)
+FLESH = os_flesh.materials(log)
 
 
 def flesh_wall(label, centre, yaw, size, round_=False):
-    wall = spawn(unreal.JamLivingWall, centre, R(yaw=yaw), label)
+    wall = spawn(unreal.OSLivingWall, centre, R(yaw=yaw), label)
     wall.set_editor_property("width_cm", size)
     wall.set_editor_property("height_cm", size)
     wall.set_editor_property("round", round_)
     wall.set_editor_property("wall_material", WALL_MAT)
-    jam_flesh.skin_wall(wall, FLESH, round_=round_)
+    os_flesh.skin_wall(wall, FLESH, round_=round_)
     return wall
 
 
 # A wall's front (+Y) faces +X at yaw -90 (build_zerog.py): yaw 90 turns it to the start.
 square_near = flesh_wall("Wall_Square_8m", V(800, -350, 200), 90.0, 400.0)
-square_near.set_editor_property("tags", ["Jam.WallProbe"])
+square_near.set_editor_property("tags", ["OS.WallProbe"])
 flesh_wall("Wall_Square_14m", V(1400, 450, 200), 90.0, 400.0)
 flesh_wall("Wall_Round_20m", V(2000, 0, 250), 90.0, 400.0, round_=True)
 for label, loc in (("Target_8m", V(950, -350, 60)), ("Target_14m", V(1550, 450, 60)), ("Target_20m", V(2150, 0, 60))):

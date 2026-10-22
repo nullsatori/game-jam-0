@@ -14,7 +14,7 @@
 та же анатомия в круге, без радиальной симметрии (сфинктер из радиальных мышц
 читался как цветок): два встречных веера от разных участков края, короткие
 мышцы с двух других сторон, рядом друг с другом вдоль края. Рамы у неё нет: край —
-неровная мясистая губа в коже планеты (`MI_Jam_PlanetSkin`, мировая проекция,
+неровная мясистая губа в коже планеты (`MI_OS_PlanetSkin`, мировая проекция,
 шва с грунтом нет), где-то вздутая, где-то почти утонувшая; наружный край уходит
 на ~10 см под дно кратера или в стенку пещеры.
 
@@ -37,30 +37,30 @@
 
 | Файл | Что |
 |---|---|
-| `JamLivingWall.h/.cpp` | `AJamLivingWall`, приёмник `IMKImpactReceiver`; консольные `jam.Wall.Probe`, `jam.Wall.Shots`, `jam.Wall.Seal`, `jam.Wall.HitLag`, `jam.Wall.BlastFrames` (последние две — [Probes](Probes.md)) |
-| `Scripts/blender/jam_living_wall_mesh.py` | меши `SM_Jam_LivingWall_Square` (4 × 4 м, 69k треугольников) и `SM_Jam_LivingWall_Round` (Ø 4.9 м с губой, 69k) в Blender, процедурно, с сидом |
-| `Scripts/jam_import_meshes.py` | импорт FBX в `/Game/JamArt/Meshes/...` |
-| `Scripts/jam_flesh.py` | текстуры `T_Jam_Gritty_*`, мастер `M_Jam_Gritty` и экземпляры (`MI_Jam_Wall_*` — ткань стены), `skin_wall()` — вид меша для стены в скриптах сборки |
-| `Scripts/jam_living_wall.py` | материал стержней `M_Jam_LivingWall` (запасной вид без меша) |
+| `OSLivingWall.h/.cpp` | `AOSLivingWall`, приёмник `IMKImpactReceiver`; консольные `os.Wall.Probe`, `os.Wall.Shots`, `os.Wall.Seal`, `os.Wall.HitLag`, `os.Wall.BlastFrames` (последние две — [Probes](Probes.md)) |
+| `Scripts/blender/os_living_wall_mesh.py` | меши `SM_OS_LivingWall_Square` (4 × 4 м, 69k треугольников) и `SM_OS_LivingWall_Round` (Ø 4.9 м с губой, 69k) в Blender, процедурно, с сидом |
+| `Scripts/os_import_meshes.py` | импорт FBX в `/Game/OSArt/Meshes/...` |
+| `Scripts/os_flesh.py` | текстуры `T_OS_Gritty_*`, мастер `M_OS_Gritty` и экземпляры (`MI_OS_Wall_*` — ткань стены), `skin_wall()` — вид меша для стены в скриптах сборки |
+| `Scripts/os_living_wall.py` | материал стержней `M_OS_LivingWall` (запасной вид без меша) |
 
 ## Как поставить
 
 - Origin актора — **центр стены**. Ширина вдоль локальной X, высота вдоль Z,
   лицо (front) смотрит в **+Y**. Масштаб актора 1, размер задают свойства.
 - `WidthCm` / `HeightCm` округляются до целых клеток `CellSizeCm` (20 см).
-- `SkinMesh` — меш стены (`SM_Jam_LivingWall_Square` или `_Round`), он
+- `SkinMesh` — меш стены (`SM_OS_LivingWall_Square` или `_Round`), он
   масштабируется до `WidthCm` (`SkinSizeCm` 400 — его собственный размер),
   стена становится квадратной. Материалы по именам слотов: `Muscle`,
-  `Tendon`, `Vessel`, `Membrane` — `MI_Jam_Wall_*`, `FrameMetal` —
-  `MI_Jam_FrameMetal`; в скриптах это делает `jam_flesh.skin_wall()`. Без
-  меша стена рисуется стержнями, как раньше (`WallMaterial` = `MI_Jam_LivingWall`).
+  `Tendon`, `Vessel`, `Membrane` — `MI_OS_Wall_*`, `FrameMetal` —
+  `MI_OS_FrameMetal`; в скриптах это делает `os_flesh.skin_wall()`. Без
+  меша стена рисуется стержнями, как раньше (`WallMaterial` = `MI_OS_LivingWall`).
 - `bRound` — круглая стена: клетки вне вписанного эллипса не существуют (не
   рисуются, не сталкиваются, не рвутся) и служат краем, от которого
   зарастает ткань. Только для мембран кратеров и пробок пещер;
   прямоугольная стена всегда закрывает всю раму, углы тоже.
-- Тег `Jam.WallProbe` выбирает стену для `jam.Wall.Probe` и `jam.Wall.Shots`.
-  Без тега берётся первая найденная. `Jam.Crater` / `Jam.CavePlug` —
-  мембраны и пробки для `jam.Ship.Caves`.
+- Тег `OS.WallProbe` выбирает стену для `os.Wall.Probe` и `os.Wall.Shots`.
+  Без тега берётся первая найденная. `OS.Crater` / `OS.CavePlug` —
+  мембраны и пробки для `os.Ship.Caves`.
 - Коллизия `BlockAll` у пучков (стержней): стена держит пешку, предметы, канал
   `Shot` и Visibility (от неё можно оттолкнуться F). Физматериал
   `PM_MK_Flesh`, поэтому резолвер видит плоть: попадание звучит и метится как
@@ -91,7 +91,7 @@
 
 **Разрыв.** Любое попадание через `MKDeliverResolvedImpact` рвёт клетки, центр
 которых ближе `TearRadiusCm` к точке попадания. Это пули, а также удары
-предметов и пешки через `JamCollisionImpact`: пешка, врезавшаяся на 770 см/с,
+предметов и пешки через `OSCollisionImpact`: пешка, врезавшаяся на 770 см/с,
 рвёт 1–2 клетки. Если от одного источника за `BlastWindowSeconds` (0.06 с,
 считая от первого попадания) пришло `BurstMinHits` попаданий или больше
 (дробь), это один выстрел. Окно нужно потому, что дробины теперь летят
@@ -122,7 +122,7 @@
 
 **Вид меша и дыры.** С `SkinMesh` меш целый: клетки — только невидимая
 коллизия и логика. Каждая рана (одна на источник за окно, так что дробь — одна
-дыра) — аналитический контур `AJamLivingWall::WoundGap` вокруг точки попадания:
+дыра) — аналитический контур `AOSLivingWall::WoundGap` вокруг точки попадания:
 радиус (TearRadius × 1.2 у пули; у дробового — разброс дроби + запас, не больше
 потолка) × волна из гармоник 2–5 (амплитуды и фазы из случайного `Seed` раны,
 ограничено 0.75–1.3, чтобы дыра не сузилась уже пешки) × вытяжка вдоль волокон
@@ -133,8 +133,8 @@
 к центру за ~`StrandGrowSeconds` на клетку радиуса (smoothstep). Клетка рвётся,
 если её центр внутри контура, и остаётся открытой, пока он внутри; когда контур
 прошёл, её стержни (коллизия) отрастают за `StrandGrowSeconds`/2. Тот же контур
-рисует материал (`M_Jam_Gritty`, `LivingHoles`, HLSL `HOLE_HLSL` в
-`Scripts/jam_flesh.py` — формула одна, держать в согласии): до 6 дыр,
+рисует материал (`M_OS_Gritty`, `LivingHoles`, HLSL `HOLE_HLSL` в
+`Scripts/os_flesh.py` — формула одна, держать в согласии): до 6 дыр,
 `HoleNA` = (центр, радиус, возраст), `HoleNB` = (seed, угол волокна, вытяжка,
 кляксы), `HoleNC` = (оглушение, время закрытия), всё в пространстве меша. Поверх
 — волокнистый шум края (маска сосудов, ±20 % радиуса, ползёт со временем),
@@ -164,7 +164,7 @@ Pawn и PhysicsBody) и чья коллизия ближе половины пу
 ## Нервы: болевой зов (19.10)
 
 Плоть — нервная система летунов. У стены есть список связанных стай
-(`Jam|LivingWall|Nerves` → `LinkedHabitats`: `Habitat` — `AJamFlyerHabitat`,
+(`OS|LivingWall|Nerves` → `LinkedHabitats`: `Habitat` — `AOSFlyerHabitat`,
 `ArrivalDelaySeconds` — сколько стая кружит над раной, прежде чем пойти за
 игроком). Залп, рвущий не меньше `PainCallCells` (6) клеток, — болевой зов
 `PainCall(Где, Почему)` (не чаще раза в `PainCallCooldownSeconds`, 20 с;
@@ -179,8 +179,8 @@ Pawn и PhysicsBody) и чья коллизия ближе половины пу
   выключить);
 - **выброс** крови и спор из раны: 6 с (`VentSeconds`) по струе `SpurtVfx` каждые
   0.35 с, ×6 размера, через раз — куски плоти (`TearVfx`), затухая; на кадрах
-  (`jam.Flyer.WallShots`, 19.10) издалека почти не виден — нужен свой объёмный выброс;
-- каждая связанная стая отвечает (`AJamFlyerHabitat::AnswerPainCall`): охотится
+  (`os.Flyer.WallShots`, 19.10) издалека почти не виден — нужен свой объёмный выброс;
+- каждая связанная стая отвечает (`AOSFlyerHabitat::AnswerPainCall`): охотится
   сразу, кружит над раной (в 12 м наружу) `ArrivalDelaySeconds`, не пикируя, и
   идёт за игроком — на его обратном пути. Подробно — [Flyers](Flyers.md), «Встреча».
 
@@ -192,7 +192,7 @@ radio 0.60, venting 6.0 s; 1 linked flock(s)`.
 Стена + связанный насест + задержка, по шагам — в
 [Flyers, «Как собрать встречу»](Flyers.md#как-собрать-встречу).
 
-## Числа (все UPROPERTY, `Jam|LivingWall|*`)
+## Числа (все UPROPERTY, `OS|LivingWall|*`)
 
 | Свойство | По умолчанию | Кокон на корабле | Мембрана кратера / пробка пещеры |
 |---|---|---|---|
@@ -212,7 +212,7 @@ radio 0.60, venting 6.0 s; 1 linked flock(s)`.
 Что из них следует (по пробам ниже):
 
 - Пистолет: клетки не открываются; видимая рана — оглушение 0.05 с,
-  схлопывание 0.2 с (константы `HitStunSeconds`/`HitCloseSeconds` в `AJamLivingWall::ProcessHits`),
+  схлопывание 0.2 с (константы `HitStunSeconds`/`HitCloseSeconds` в `AOSLivingWall::ProcessHits`),
   закрыта через ~**0.45 с**.
 - Дробовик с 5 м: дробь ложится в круг радиусом 36–48 см от своего центра,
   рвётся 36–46 клеток (дыра 1.3–1.5 м), свободный круг радиусом 48–59 см.
@@ -227,12 +227,12 @@ radio 0.60, venting 6.0 s; 1 linked flock(s)`.
 
 ## Материал
 
-Ткань стены — `M_Jam_Gritty` (`Scripts/jam_flesh.py`, граф и числа
+Ткань стены — `M_OS_Gritty` (`Scripts/os_flesh.py`, граф и числа
 пересобираются при каждой сборке карты) с текстурами набора владельца
-`T_Jam_Gritty_*` (256 px, фильтр Nearest — ретро-тексель; мипы оставлены и
+`T_OS_Gritty_*` (256 px, фильтр Nearest — ретро-тексель; мипы оставлены и
 выбираются тоже «по ближайшему», поэтому вдали текстура грубеет ступенями, а
-не мерцает). Экземпляры стены (`MI_Jam_Wall_Muscle/Tendon/Vessel` —
-Masked, `MI_Jam_Wall_Membrane` — прозрачная двусторонняя, непрозрачность
+не мерцает). Экземпляры стены (`MI_OS_Wall_Muscle/Tendon/Vessel` —
+Masked, `MI_OS_Wall_Membrane` — прозрачная двусторонняя, непрозрачность
 0.88, чтобы освещённая ниша за стеной не читалась как дыра):
 
 - Цвет: `BaseColor` × `Tint` и тёмный налёт сосудов по маске
@@ -248,49 +248,49 @@ Masked, `MI_Jam_Wall_Membrane` — прозрачная двусторонняя
 - Волокно идёт вдоль каждой мышцы: UV0 меша — u вокруг, v вдоль.
 - Дыхание через WPO 0.5 см и дыры (см. «Вид меша и дыры»).
 
-Запасной вид стержнями — `M_Jam_LivingWall` (`Scripts/jam_living_wall.py`):
+Запасной вид стержнями — `M_OS_LivingWall` (`Scripts/os_living_wall.py`):
 та же мышечная текстура вдоль стержня, её нормаль и влажность, плюс прежние
 исчерченность, бледные концы, тёмные сосуды, разброс цвета, свечение тонких
 мест и дыхание.
 
 ## Станции
 
-- `Lvl_Jam_ZeroG`: ниша 4 × 4 × 3 м у западной стенки оболочки (устье x
+- `Lvl_OS_ZeroG`: ниша 4 × 4 × 3 м у западной стенки оболочки (устье x
   −3700), её закрывает стена `LivingWall` 4 × 4 м (меш) с одним тонким местом.
-  Внутри лежит деталь корабля 60 см, 40 кг (`Ship.Part`, `Jam.NoDrift`). Над
+  Внутри лежит деталь корабля 60 см, 40 кг (`Ship.Part`, `OS.NoDrift`). Над
   устьем надпись LIVING WALL, перед стеной тёплая лампа, в нише лампа. См.
   [ZeroG](ZeroG.md).
-- `Lvl_Jam_Ship`: кокон из 5 стен 2.6 м (меш, уменьшенный) вокруг модуля
+- `Lvl_OS_Ship`: кокон из 5 стен 2.6 м (меш, уменьшенный) вокруг модуля
   навигации на планетоиде; 4 круглые мембраны 4 м на дне кратеров
-  (`Jam.Crater`) и 2 круглые пробки 4 м в горловинах пещеры
-  (`Jam.CavePlug`). См. [Ship-Blockout](Ship-Blockout.md). Ещё стена 4 м
+  (`OS.Crater`) и 2 круглые пробки 4 м в горловинах пещеры
+  (`OS.CavePlug`). См. [Ship-Blockout](Ship-Blockout.md). Ещё стена 4 м
   `Flesh_WreckDoor` у обломков, связанная со стаей `Flyers_WreckRoost`
-  (задержка 8 с; ставит `Scripts/jam_flyers.py`, см. [Flyers](Flyers.md)).
-- `Lvl_Jam_Range` (`Scripts/build_range.py`): квадратные стены 4 м на 8 м
-  (`Jam.WallProbe`) и 14 м, круглая на 20 м, за каждой ящик; за концом зала в
+  (задержка 8 с; ставит `Scripts/os_flyers.py`, см. [Flyers](Flyers.md)).
+- `Lvl_OS_Range` (`Scripts/build_range.py`): квадратные стены 4 м на 8 м
+  (`OS.WallProbe`) и 14 м, круглая на 20 м, за каждой ящик; за концом зала в
   невесомости — ещё квадратная стена и блоки, за которые держаться.
 
 ## Проверка
 
-`jam.Wall.Probe [Имя]` (смоук `-game -nullrhi` на любой карте со стеной).
+`os.Wall.Probe [Имя]` (смоук `-game -nullrhi` на любой карте со стеной).
 Перед стрельбой проба проверяет, что целая стена герметична (то же делает
-`jam.Wall.Seal` для всех стен карты): шар пешки (r 40) и шар 15 см проходят
+`os.Wall.Seal` для всех стен карты): шар пешки (r 40) и шар 15 см проходят
 по нормали через сетку точек с шагом 25 см по всему проёму, углы включительно
 (у круглой — внутри круга), и ни один не должен пройти; у круглой ещё кольца
 15-сантиметровых свипов на 15 см внутри края, на краю и на 15 см снаружи —
 должны упереться в стену или в то, что её держит (дно кратера, горловину).
 
 ```
-Wall seal JamLivingWall_0 (rectangular, 400 x 400 cm): 256 grid points, the pawn sphere passes at 0, a 15 cm sphere at 0 - sealed
-Wall seal JamLivingWall_5 (rectangular, 260 x 260 cm): 121 grid points, the pawn sphere passes at 0, a 15 cm sphere at 0 - sealed
-Wall seal JamLivingWall_16 (round, 400 x 400 cm): 183 grid points, the pawn sphere passes at 0, a 15 cm sphere at 0, rings of 15 cm sweeps around the edge -15 cm: 0/36, +0 cm: 0/36, +15 cm: 0/36 - sealed
+Wall seal OSLivingWall_0 (rectangular, 400 x 400 cm): 256 grid points, the pawn sphere passes at 0, a 15 cm sphere at 0 - sealed
+Wall seal OSLivingWall_5 (rectangular, 260 x 260 cm): 121 grid points, the pawn sphere passes at 0, a 15 cm sphere at 0 - sealed
+Wall seal OSLivingWall_16 (round, 400 x 400 cm): 183 grid points, the pawn sphere passes at 0, a 15 cm sphere at 0, rings of 15 cm sweeps around the edge -15 cm: 0/36, +0 cm: 0/36, +15 cm: 0/36 - sealed
 ```
 
 (все 5 стен кокона и 6 круглых — так же, «sealed»). Дальше 15 см снаружи
 кольцо не проверяется: в пробке свип там начинается и кончается внутри скалы
 (коллизия — поверхность) и «проходит», не означая щели.
 
-С мешем (17.10, `Lvl_Jam_ZeroG`, клетки 20 см):
+С мешем (17.10, `Lvl_OS_ZeroG`, клетки 20 см):
 
 ```
 Wall probe [pistol 3 m]: whole again at +0.52 s after the shot, most open 1 cells
@@ -299,7 +299,7 @@ Wall probe [fly through the shotgun hole +0.1 s]: passed yes - deepest 165 cm be
 Wall probe [control: fly at the whole wall]: passed no - deepest 48 cm in front of the wall plane, now 193 cm in front, HP 97 -> 89
 ```
 
-С летящими дробинами (18.10, ветка `jam-weapons`, `Lvl_Jam_ZeroG`; дробь
+С летящими дробинами (18.10, ветка `jam-weapons`, `Lvl_OS_ZeroG`; дробь
 6000 см/с, пуля пистолета 9000 см/с): «+N s» считается от выстрела, поэтому
 к старым числам прибавились полёт 5 м (0.08 с) и окно стены (0.06 с); пролёт
 и «парковка» в дыре запускаются через столько же позже (`BlastLandsAfter`).
@@ -308,18 +308,18 @@ Wall probe [control: fly at the whole wall]: passed no - deepest 48 cm in front 
 Wall probe [pistol 3 m]: round 1, open 0 cells, pawn sphere through the aim point blocked
 ... (раунды 2–8 так же: open 0 cells, blocked)
 Wall probe [pistol 3 m]: +0.60 s after the last round, open 0 cells
-Living wall JamLivingWall_1: tore 78 cells (8 hit(s), one blast, hits within 51 cm of their centre) around (16, 6), regrowth after 2.60 s, 3 rim jet(s)
+Living wall OSLivingWall_1: tore 78 cells (8 hit(s), one blast, hits within 51 cm of their centre) around (16, 6), regrowth after 2.60 s, 3 rim jet(s)
 Wall probe [shotgun 5 m]: whole again at +4.88 s after the shot, most open 78 cells, passable (largest clear radius >= pawn radius) until +3.42 s, the sweep through the hole centre clear until +3.02 s
-Living wall JamLivingWall_1: tore 34 cells (5 hit(s), one blast, hits within 25 cm of their centre) around (29, -6), regrowth after 2.60 s, 3 rim jet(s)
+Living wall OSLivingWall_1: tore 34 cells (5 hit(s), one blast, hits within 25 cm of their centre) around (29, -6), regrowth after 2.60 s, 3 rim jet(s)
 Wall probe [fly through the shotgun hole, torn +0.1 s]: passed yes - deepest 249 cm behind the wall plane, now 204 cm behind, HP 100 -> 97
-Living wall JamLivingWall_1: tore 73 cells (7 hit(s), one blast, hits within 49 cm of their centre) around (18, 16), regrowth after 2.60 s, 3 rim jet(s)
+Living wall OSLivingWall_1: tore 73 cells (7 hit(s), one blast, hits within 49 cm of their centre) around (18, 16), regrowth after 2.60 s, 3 rim jet(s)
 Wall probe [parked in the hole]: closed with the pawn 574 cm in front of the plane (clear of the weave: yes), HP 94
 Wall probe [control: fly at the whole wall]: passed no - deepest 48 cm in front of the wall plane, now 193 cm in front, HP 94 -> 86
 ```
 
 Не все дробины попадают в стену: часть проходит сквозь щели плетения и
 бьёт то, что за ней (в логе `-LogCmds="LogMindKore Verbose"` — строки
-`Jam shot: MKPhysicsProp_89` / `StaticMeshActor_37`). Это не от полёта:
+`OS shot: MKPhysicsProp_89` / `StaticMeshActor_37`). Это не от полёта:
 сравнение 18.10 с хитсканом (тот же код, `ProjectileSpeed = 0`; `t.MaxFPS`
 60 и 30; подсчитано 6 выстрелов) — хитскан 8, 7, 5, 3, 7, 5 из 8 (35/48), полёт
 (`t.MaxFPS 60`, 9 выстрелов) 6, 7, 4, 4, 6, 6, 6, 7, 6 из 8 (52/72); пистолет так же проходит 1–3 пули из 8
@@ -330,7 +330,7 @@ Wall probe [control: fly at the whole wall]: passed no - deepest 48 cm in front 
 (a 1 m face needs 71)`, `+3.1 s centre 595 cm in front of the plane ... - out`.
 
 Ниже — пробы стержневой версии до меша (числа те же, клетки не менялись):
-Стрельба идёт по-настоящему: `AJamZeroGPawn::Fire` → `UJamWeaponsComponent`,
+Стрельба идёт по-настоящему: `AOSZeroGPawn::Fire` → `UOSWeaponsComponent`,
 разброс дроби тот же, что в игре. Порядок шагов:
 
 1. Пистолет с 3 м в перекрестье клетки; проба ждёт, пока стена снова станет
@@ -347,22 +347,22 @@ Wall probe [control: fly at the whole wall]: passed no - deepest 48 cm in front 
 6. Если ближе 4 м от стены лежит `Ship.Nav`: выстрел с 4 м, и модуль
    толкают в дыру со скоростью 250 см/с.
 
-`Lvl_Jam_ZeroG`:
+`Lvl_OS_ZeroG`:
 
 ```
-Wall probe: JamLivingWall_0, aim at V(X=-3710.00, Y=-10.00, Z=10.00), front V(X=1.00), 400 x 400 cm, sweep through the whole wall there blocked, clear radius there 0 cm
+Wall probe: OSLivingWall_0, aim at V(X=-3710.00, Y=-10.00, Z=10.00), front V(X=1.00), 400 x 400 cm, sweep through the whole wall there blocked, clear radius there 0 cm
 Wall probe [pistol 3 m]: whole again at +0.52 s after the shot, most open 1 cells
-Living wall JamLivingWall_0: tore 36 cells (4 hit(s), one blast, hits within 36 cm of their centre) around (12, 9), regrowth after 2.60 s, 3 rim jet(s)
+Living wall OSLivingWall_0: tore 36 cells (4 hit(s), one blast, hits within 36 cm of their centre) around (12, 9), regrowth after 2.60 s, 3 rim jet(s)
 Wall probe [shotgun 5 m]: +0.02 s torn 36 cells, hole centre 15 cm from the wall centre, clear radius there 48 cm, physics bodies left on torn strands 0 (largest scale 0.000)
 Wall probe [shotgun 5 m]: whole again at +3.80 s after the shot, most open 36 cells, passable (largest clear radius >= pawn radius) until +2.68 s, the sweep through the hole centre clear until +2.70 s
 Wall probe [fly through the shotgun hole +0.1 s]: passed yes - deepest 249 cm behind the wall plane, now 181 cm behind, HP 100 -> 91
 Wall probe [parked in the hole]: HP 91, clear radius 58 cm
-Living wall JamLivingWall_0: squeezed JamZeroGPawn_0 out to the front (growth 0.00), 3 damage
+Living wall OSLivingWall_0: squeezed OSZeroGPawn_0 out to the front (growth 0.00), 3 damage
 Wall probe [parked in the hole]: closed with the pawn 361 cm in front of the plane (clear of the weave: yes), HP 88
 Wall probe [control: fly at the whole wall]: passed no - deepest 48 cm in front of the wall plane, now 193 cm in front, HP 88 -> 80
 ```
 
-`Lvl_Jam_Ship` (кокон):
+`Lvl_OS_Ship` (кокон):
 
 ```
 Wall probe [pistol 3 m]: whole again at +0.52 s after the shot, most open 1 cells
@@ -381,7 +381,7 @@ Wall probe [module out]: +3.1 s centre 595 cm in front of the plane, wall open 7
 сжимала пучки до 0.001 вместо 0: дыра выглядела свободной, а пешка
 отскакивала от невидимых тел.
 
-`jam.Wall.Shots [Имя|Тег]` (окно `-game -windowed`, не NullRHI) снимает четыре
+`os.Wall.Shots [Имя|Тег]` (окно `-game -windowed`, не NullRHI) снимает четыре
 кадра `HighResShot` с 3.5 м: целая стена; +0.35 с после выстрела из дробовика;
 середина зарастания (когда четверть дыры уже заросла); +0.35 с после второго
 выстрела.

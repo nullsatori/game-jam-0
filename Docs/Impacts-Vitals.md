@@ -26,8 +26,8 @@
   `MKResolveImpactFromHit`; заполнить `ShotId` (новый `FGuid` на выстрел),
   `Kind`, `SourceActor`, `DamageAmount = база × DamageMultiplier`,
   `ImpulseNewtonSeconds`, `bHasPhysicsImpulse`; отдать
-  `MKDeliverResolvedImpact`. Пример — `UJamWeaponsComponent::TraceShot`
-  (`JamWeapons.cpp:702`).
+  `MKDeliverResolvedImpact`. Пример — `UOSWeaponsComponent::TraceShot`
+  (`OSWeapons.cpp:702`).
 - Свой приёмник: реализовать `IMKImpactReceiver` (можно в Blueprint).
   Не вызывать `Execute_ReceiveResolvedImpact` напрямую.
 - Таблица отклика — `DA_Impact_Default` (звуки попаданий по телу, кровь,
@@ -37,7 +37,7 @@
   `AbsorbFraction` 0.6; `ApplyIncoming(Damage, Kind, bBlocked, EventId)`,
   `Restore(Health, Armor)`, `Revive()`; при 0 здоровья — предупреждение в лог и
   событие `OnDepleted`. Что дальше, решает слушатель: в джеме это
-  `AJamShipGameMode` (возрождение в каюте); без слушателя здоровье просто
+  `AOSShipGameMode` (возрождение в каюте); без слушателя здоровье просто
   держится на нуле.
 
 ## Обязательный конфиг (`Config/DefaultEngine.ini`)
@@ -55,7 +55,7 @@
   (`MKVitals.h:5`), `MKMeleeDefence.h` вырезан, однострочное
   `MKBlockAppliesTo` скопировано (`MKVitals.cpp:5, 14`).
 - `MKHitZoneRig` (зоны на скелете) не перенесён — нужен только врагам.
-- **Отличие от MindKore** (`JamWeapons.cpp:729`): у `AMKImpactDummy` нет
+- **Отличие от MindKore** (`OSWeapons.cpp:729`): у `AMKImpactDummy` нет
   ничего, что блокирует `Shot`, поэтому по правилу MindKore выстрел уходил в
   стену за ним. В `TraceShot` ближайшая зона в таком случае считается
   блокирующим попаданием.

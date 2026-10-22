@@ -1,6 +1,6 @@
 #include "MKImpactHistory.h"
 
-// Jam lift: copied verbatim from MKBodyResponseComponent.cpp.
+// OS lift: copied verbatim from MKBodyResponseComponent.cpp.
 bool FMKImpactHistory::Accept(const FGuid& ShotId, int32 Interaction)
 {
 	if (!ShotId.IsValid()) return true;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-// Jam lift: PhysicsControlData.h include and AngularDrive cut - the PhysicsControl plugin is not enabled; only ApplyPointImpulse is used (AMKPhysicsProp).
+// OS lift: PhysicsControlData.h include and AngularDrive cut - the PhysicsControl plugin is not enabled; only ApplyPointImpulse is used (AMKPhysicsProp).
 
 struct FBodyInstance;
 

@@ -1,12 +1,12 @@
 # ShipMode (режим, зоны, HUD, контроллер, пикапы)
 
-**Актуальность:** редакционная сверка 21.10.2026 — обновлены ссылки на архивные результаты. В ходе подготовки документации в этой сессии точечно читался переход запуска в `JamShip.cpp`; остальные системы и игровые пробы заново не проверялись. Коммит полной сверки страницы не зафиксирован.
+**Актуальность:** редакционная сверка 21.10.2026 — обновлены ссылки на архивные результаты. В ходе подготовки документации в этой сессии точечно читался переход запуска в `OSShip.cpp`; остальные системы и игровые пробы заново не проверялись. Коммит полной сверки страницы не зафиксирован.
 
 ## Что получает игрок
 
-Один режим на всех картах — `AJamShipGameMode` (`GlobalDefaultGameMode` в
+Один режим на всех картах — `AOSShipGameMode` (`GlobalDefaultGameMode` в
 `Config/DefaultEngine.ini` и GameMode Override каждой из четырёх карт). Одна
-физическая пешка `AJamZeroGPawn` на весь забег: в зоне гравитации она ходит,
+физическая пешка `AOSZeroGPawn` на весь забег: в зоне гравитации она ходит,
 вне зон летает ([ZeroG](ZeroG.md#режимы-движения)). Стволов на старте нет —
 их дают шкафы; крюк-кошку — свой пикап. Цель — три лампы пульта (корпус,
 топливо, навигация) и рычаг; по пути — ценный груз «Груз n/N». Смерть не
@@ -17,52 +17,52 @@
 
 | Файл | Что |
 |---|---|
-| `JamShip.h/.cpp` | `AJamShipGameMode`, `AJamGravityZone`, `AJamShipHUD`, `AJamShipController`; тест `Jam.Gravity.OvalZone`; пробы `jam.Ship.*`, `jam.Hull.*` ([Probes](Probes.md)) |
-| `JamGravity.h/.cpp` | правило зон и гравитация тел: `JamGravityAt`, `JamAirZoneAt`, `JamPullBodies`, `JamPredictFlight`; тест `Jam.Gravity.ZonePriority` |
-| `JamPickups.h/.cpp` | `AJamPickupBase`, `AJamWeaponPickup`, `AJamToolPickup`, `AJamSuitLocker`, `AJamCargo`; id `MKJamGrappleTool()`, `MKJamSuitKey()` |
-| `JamShipParts.h/.cpp` | `AJamShipPanel` (лампы и рычаг), `AJamPlateSocket` и `AJamCleanZone` ([HullRepair](HullRepair.md)), `AJamBreakableRock` ([Ship-Blockout](Ship-Blockout.md)) |
-| `JamDockZone.h/.cpp` | `AJamDockZone` — доки топлива и навигации ([DockZone](DockZone.md)) |
-| `JamGameMode.h/.cpp` | `AJamZeroGGameMode` (база режима корабля), `AJamZeroGHUD` (база HUD); не используемые `AJamGameMode`, `AJamHUD` |
-| `JamCharacter.h/.cpp` | не используемая наземная пешка `AJamCharacter` ([JamCharacter](JamCharacter.md)) |
+| `OSShip.h/.cpp` | `AOSShipGameMode`, `AOSGravityZone`, `AOSShipHUD`, `AOSShipController`; тест `OS.Gravity.OvalZone`; пробы `os.Ship.*`, `os.Hull.*` ([Probes](Probes.md)) |
+| `OSGravity.h/.cpp` | правило зон и гравитация тел: `OSGravityAt`, `OSAirZoneAt`, `OSPullBodies`, `OSPredictFlight`; тест `OS.Gravity.ZonePriority` |
+| `OSPickups.h/.cpp` | `AOSPickupBase`, `AOSWeaponPickup`, `AOSToolPickup`, `AOSSuitLocker`, `AOSCargo`; id `OSGrappleTool()`, `OSSuitKey()` |
+| `OSShipParts.h/.cpp` | `AOSShipPanel` (лампы и рычаг), `AOSPlateSocket` и `AOSCleanZone` ([HullRepair](HullRepair.md)), `AOSBreakableRock` ([Ship-Blockout](Ship-Blockout.md)) |
+| `OSDockZone.h/.cpp` | `AOSDockZone` — доки топлива и навигации ([DockZone](DockZone.md)) |
+| `OSGameMode.h/.cpp` | `AOSZeroGGameMode` (база режима корабля), `AOSZeroGHUD` (база HUD); не используемые `AOSGameMode`, `AOSHUD` |
+| `OSCharacter.h/.cpp` | не используемая наземная пешка `AOSCharacter` ([OSCharacter](OSCharacter.md)) |
 | `Scripts/tag_cabin_start.py` | тег `Cabin` на `PlayerStart` внутри `Gravity_Cabin` в карте, которую правят руками |
 
-## Режим `AJamShipGameMode`
+## Режим `AOSShipGameMode`
 
-Наследник `AJamZeroGGameMode`. Сам ставит `HUDClass` = `AJamShipHUD` и
-`PlayerControllerClass` = `AJamShipController`; пешка (`AJamZeroGPawn`) — от
+Наследник `AOSZeroGGameMode`. Сам ставит `HUDClass` = `AOSShipHUD` и
+`PlayerControllerClass` = `AOSShipController`; пешка (`AOSZeroGPawn`) — от
 базы. Тикает (группа по умолчанию — до физики). Обслуживает первого
 `PlayerController` мира.
 
-**Старт.** `StartPlay` базы, потом `CargoTotal` = число `AJamCargo` на карте
+**Старт.** `StartPlay` базы, потом `CargoTotal` = число `AOSCargo` на карте
 (лог `Ship: n cargo in ...`): правка карты руками счёт «Груз n/N» не ломает.
 `SetPlayerDefaults` подписывает режим на `Vitals->OnDepleted` пешки.
 
 **Каждый тик** (`Tick`):
 
-1. `JamPullBodies` — гравитация зон каждому свободному телу (правило и
+1. `OSPullBodies` — гравитация зон каждому свободному телу (правило и
    исключения — [ZeroG «Гравитация для тел»](ZeroG.md#гравитация-для-тел)).
    Идёт всегда, даже после финала.
 2. Нет пешки или `bEnded` — дальше ничего.
-3. Воздух: зона `JamAirZoneAt` в точке пешки (любая, с `bWalk` или без) →
-   `UJamOxygenComponent::SetBreathable(bBreathable, RefillPerSecond)`; вне зон —
+3. Воздух: зона `OSAirZoneAt` в точке пешки (любая, с `bWalk` или без) →
+   `UOSOxygenComponent::SetBreathable(bBreathable, RefillPerSecond)`; вне зон —
    не дышит из зоны (только расход).
-4. Гравитация: зона `JamGravityAt` (только с `bWalk`) →
-   `AJamZeroGPawn::SetGravity(GravityAt, GravityCm, bRadial)`; вне зон —
+4. Гравитация: зона `OSGravityAt` (только с `bWalk`) →
+   `AOSZeroGPawn::SetGravity(GravityAt, GravityCm, bRadial)`; вне зон —
    нулевая (невесомость). Что пешка делает с этим — [ZeroG](ZeroG.md#режимы-движения).
 
 **Стволы и инструменты.** Пешка сама стартует без стволов
-(`Guns->bStartWithAllWeapons = false` в конструкторе `AJamZeroGPawn`), их
-открывают `AJamWeaponPickup`. Список `Tools` (`FName`) заполняют
-`AJamToolPickup`; читает его только `AJamZeroGPawn::HasGrapple`: под этим
-режимом кошка (Left Alt) работает лишь после пикапа с `MKJamGrappleTool()`,
+(`Guns->bStartWithAllWeapons = false` в конструкторе `AOSZeroGPawn`), их
+открывают `AOSWeaponPickup`. Список `Tools` (`FName`) заполняют
+`AOSToolPickup`; читает его только `AOSZeroGPawn::HasGrapple`: под этим
+режимом кошка (Left Alt) работает лишь после пикапа с `OSGrappleTool()`,
 под другим — сразу ([ZeroG](ZeroG.md#крюк-кошка-left-alt)). Стяжка и сварка
 пикапа не требуют ([HullRepair](HullRepair.md)).
 
-**Цели.** Режим целей не хранит — их считает `AJamShipPanel` (пульт в каюте):
+**Цели.** Режим целей не хранит — их считает `AOSShipPanel` (пульт в каюте):
 
 | Лампа | Зелёная, когда | Источник |
 |---|---|---|
-| Корпус | все `HullSockets` (`AJamPlateSocket`) `bFilled`, и список не пуст | [HullRepair](HullRepair.md) |
+| Корпус | все `HullSockets` (`AOSPlateSocket`) `bFilled`, и список не пуст | [HullRepair](HullRepair.md) |
 | Топливо | `FuelDock->IsCompleted()` | [DockZone](DockZone.md) |
 | Навигация | `NavDock->IsCompleted()` | [DockZone](DockZone.md) |
 
@@ -73,7 +73,7 @@
 «не готово: корпус, топливо, навигация» (что не готово). Всё готово —
 `EndGame`.
 
-**Груз.** `AJamCargo` на F: `Cargo` +1, тост «Груз n/N», предмет исчезает
+**Груз.** `AOSCargo` на F: `Cargo` +1, тост «Груз n/N», предмет исчезает
 (см. «Пикапы»). На рычаг груз не влияет — только на финальный тост.
 
 **Финал** (`EndGame`, один раз): `bEnded = true`, событие `OnLaunchAttempt`
@@ -91,12 +91,12 @@
 
 **Смерть и возрождение.** Смерть решает режим, а не жизни и не кислород:
 `UMKVitalsComponent::OnDepleted` пешки → `HandleDeath` (после финала —
-ничего): лог `Ship: ... died`, `AJamZeroGPawn::LetGoOfEverything`, ввод
+ничего): лог `Ship: ... died`, `AOSZeroGPawn::LetGoOfEverything`, ввод
 пешки выключается. Через `RespawnDelaySeconds` — `RespawnInCabin`:
 
 - куда: первый `PlayerStart` с тегом актора `Cabin`; нет такого — первый
   попавшийся `PlayerStart` и предупреждение в лог; нет ни одного — на месте;
-- `AJamZeroGPawn::ReviveAt`: тело телепортом в точку старта, скорость и
+- `AOSZeroGPawn::ReviveAt`: тело телепортом в точку старта, скорость и
   вращение 0, тряска 0, `Vitals->Revive()` (здоровье до `MaxHealth`, броня до
   `StartingArmor`), кислород до `CapacitySeconds`;
 - взгляд — рыскание старта, тангаж 0; ввод снова включён; тост «Очнулся в
@@ -109,7 +109,7 @@
 телами, `Tools`, `Cargo`; и мир — швы, прихватки, вычищенный корпус, доки.
 Первый спавн забега — обычный выбор `PlayerStart` движком (режим его не
 переопределяет); тег `Cabin` читается только при возрождении. На
-`Lvl_Jam_Ship` тег ставит `Scripts/tag_cabin_start.py` (на `PlayerStart`
+`Lvl_OS_Ship` тег ставит `Scripts/tag_cabin_start.py` (на `PlayerStart`
 внутри зоны `Gravity_Cabin`).
 
 | Свойство | По умолчанию | Смысл |
@@ -123,13 +123,13 @@
 | `bEnded` | false | рычаг потянут |
 | `OnLaunchAttempt` | событие | рычаг потянут при трёх зелёных лампах |
 
-Что режим берёт от `AJamZeroGGameMode` — см. «Старые режимы» ниже.
+Что режим берёт от `AOSZeroGGameMode` — см. «Старые режимы» ниже.
 
 ## Переход к боссу
 
-Целевые этапы забега описаны в [Progression](Vision/Progression.md#запуск-и-завершение). Текущий `EndGame` устанавливает `bEnded` до вызова `OnLaunchAttempt`; после этого режим не обновляет воздух/гравитацию пешки и игнорирует смерть, а таймер перезапуска уже запущен. Поэтому одной подписки босса на событие недостаточно: интеграция требует отделить попытку запуска от окончательного завершения. Сверка `JamShip.cpp` — 21.10.2026; конкретная реализация переходов ещё не выбрана.
+Целевые этапы забега описаны в [Progression](Vision/Progression.md#запуск-и-завершение). Текущий `EndGame` устанавливает `bEnded` до вызова `OnLaunchAttempt`; после этого режим не обновляет воздух/гравитацию пешки и игнорирует смерть, а таймер перезапуска уже запущен. Поэтому одной подписки босса на событие недостаточно: интеграция требует отделить попытку запуска от окончательного завершения. Сверка `OSShip.cpp` — 21.10.2026; конкретная реализация переходов ещё не выбрана.
 
-## Зона `AJamGravityZone`
+## Зона `AOSGravityZone`
 
 Место с гравитацией и/или воздухом. Корень — `UBoxComponent` `Zone` (extent
 по умолчанию 400 × 250 × 150 см, без коллизии). Форма — первое подходящее:
@@ -177,7 +177,7 @@
 Направление гравитации к форме не привязано: у радиальной — к центру актора
 зоны, даже если граница — объём.
 
-## `JamGravity.h`
+## `OSGravity.h`
 
 Правило выбора зоны и гравитация тел описаны в
 [ZeroG «Гравитация для тел»](ZeroG.md#гравитация-для-тел); здесь — только
@@ -185,21 +185,21 @@
 
 | Функция | Что |
 |---|---|
-| `JamGravityAt(World, Location)` | `FJamGravity`: ускорение (см/с², ноль вне зон) и зона-победитель среди зон с `bWalk` |
-| `JamAirZoneAt(World, Location)` | зона-победитель среди всех зон (чей воздух), или null |
-| `JamPullBodies(World)` | раз в кадр из `AJamShipGameMode::Tick`: сила зон свободным телам, усыпление лёгших |
-| `JamPredictFlight(...)` | полёт шара под `JamGravityAt` со свипами и отскоками — для прогноза (Left Shift) |
-| `JamGravityRelativeRotation` / `JamGravityWorldRotation` | поворот в рамку, где «низ» — данная гравитация, и обратно |
+| `OSGravityAt(World, Location)` | `FOSGravity`: ускорение (см/с², ноль вне зон) и зона-победитель среди зон с `bWalk` |
+| `OSAirZoneAt(World, Location)` | зона-победитель среди всех зон (чей воздух), или null |
+| `OSPullBodies(World)` | раз в кадр из `AOSShipGameMode::Tick`: сила зон свободным телам, усыпление лёгших |
+| `OSPredictFlight(...)` | полёт шара под `OSGravityAt` со свипами и отскоками — для прогноза (Left Shift) |
+| `OSGravityRelativeRotation` / `OSGravityWorldRotation` | поворот в рамку, где «низ» — данная гравитация, и обратно |
 
-Консольные: `jam.Gravity.Probe`, `jam.Gravity.Stills`, `jam.Gravity.Cost`
+Консольные: `os.Gravity.Probe`, `os.Gravity.Stills`, `os.Gravity.Cost`
 ([Probes](Probes.md)).
 
 ## HUD
 
-`AJamShipHUD` = HUD невесомой пешки (`AJamZeroGHUD`) плюс строки корабля.
+`AOSShipHUD` = HUD невесомой пешки (`AOSZeroGHUD`) плюс строки корабля.
 Всё — текст и линии Canvas движковым средним шрифтом.
 
-`AJamZeroGHUD`:
+`AOSZeroGHUD`:
 
 - точки прицела нет (владелец 18.10) — целятся прицелы стволов;
 - скорость: зелёный ромб на точке «камера + направление скорости» с «n m/s»,
@@ -215,17 +215,17 @@
   «[n] Имя патроны/запас», с перезарядкой «(перезарядка n.n)», или «без
   оружия».
 
-`AJamShipHUD` сверху:
+`AOSShipHUD` сверху:
 
 - слева сверху — «Корпус: n/N», «Топливо: n/N», «Навигация: n/N» первого
-  `AJamShipPanel` на карте, красным/зелёным как лампы; под ними «Груз n/N» и
+  `AOSShipPanel` на карте, красным/зелёным как лампы; под ними «Груз n/N» и
   `HudText` зоны воздуха («Можно дышать»);
 - слева внизу (над O2) — строки ремонта корпуса: инструмент в руке с
   подсказкой клавиш, «Держусь …», ближайшая в 5 м пробоина с листом или швом
   ([HullRepair](HullRepair.md));
 - тост — по центру на четверти высоты экрана, ×1.2; после рычага ×2.
 
-## Контроллер `AJamShipController`
+## Контроллер `AOSShipController`
 
 Ставится и режимом корабля, и его базой. Поворачивает только взгляд
 (`ControlRotation`), никогда физическое тело пешки.
@@ -247,7 +247,7 @@
   возрождение, проба), контроллер берёт её как новый взгляд.
 - **`AddViewKick(FRotator)`** — пинок взгляда (отдача, толчок доставания
   ствола): копится и тратится в следующем `UpdateRotation`, как мышь. Зовёт
-  `UJamWeaponsComponent` ([RecoilWeapons-Core](RecoilWeapons-Core.md)).
+  `UOSWeaponsComponent` ([RecoilWeapons-Core](RecoilWeapons-Core.md)).
 - `GetViewGravity()` — «низ», которым пользуется взгляд сейчас.
 
 | Свойство | По умолчанию | Смысл |
@@ -256,66 +256,66 @@
 | `RecoveryMaxDegPerSec` | 240 °/с | потолок скорости доворота после свободного вращения |
 
 Чувствительности мыши у контроллера нет: её множит пешка
-(`AJamZeroGPawn::LookSensitivity` 0.7, ещё и на множитель прицела).
+(`AOSZeroGPawn::LookSensitivity` 0.7, ещё и на множитель прицела).
 
-## Пикапы (`JamPickups.h`)
+## Пикапы (`OSPickups.h`)
 
-`AJamPickupBase` (абстрактный, `IMKInteractable`): статичный куб движка
+`AOSPickupBase` (абстрактный, `IMKInteractable`): статичный куб движка
 (`BlockAll`) до арта. Предлагает `ActionLabel` (или отказ с причиной), на
-взаимодействии (у `AJamZeroGPawn` — F) зовёт `Give`; удалось — `bTaken`,
+взаимодействии (у `AOSZeroGPawn` — F) зовёт `Give`; удалось — `bTaken`,
 больше ничего не предлагает и при `bHideWhenTaken` (по умолчанию да)
 скрывается без коллизии. Тегов не ставит.
 
 | Класс | Предложение | Отказ | Что даёт | Тост |
 |---|---|---|---|---|
-| `AJamWeaponPickup` | «Взять оружие» | «только в скафандре» — у взявшего нет `UJamWeaponsComponent` (ключ скафандра не проверяется) | `UnlockWeapon(WeaponIndex)` и сразу достаёт ствол; держал тело — отпускает и берёт ствол. `WeaponIndex` 0 — Пистолет, 1 — Дробовик, 2 — Снапа. `Gun` = `Rmb93` сначала ставит в слот Рысь (RMB-93) с полным магазином: её описание строит код (`JamMakeRmb93` в `JamRmb93.cpp`) из дробовика по умолчанию на `BeginPlay` пикапа, в карте хранится только выбор. Обычный пикап того же слота ствол не возвращает, только открывает | «Получено: <ствол>» |
-| `AJamToolPickup` | «Взять инструмент» | — | `ToolId` (по умолчанию `MKJamGrappleTool()` = `Grapple`) в `AJamShipGameMode::Tools` | «Получено: <ToolName>» (по умолчанию «Крюк-кошка») |
-| `AJamSuitLocker` | «Надеть скафандр» | «некуда надеть» (нет кейринга), «скафандр уже надет» | ключ `MKJamSuitKey()` = `Jam.Suit` на кейринг; `bHideWhenTaken` = false — шкаф остаётся | «Скафандр надет» |
-| `AJamCargo` | «Забрать груз» | — | `Cargo` +1 в режиме, предмет уничтожается | «Груз n/N» |
+| `AOSWeaponPickup` | «Взять оружие» | «только в скафандре» — у взявшего нет `UOSWeaponsComponent` (ключ скафандра не проверяется) | `UnlockWeapon(WeaponIndex)` и сразу достаёт ствол; держал тело — отпускает и берёт ствол. `WeaponIndex` 0 — Пистолет, 1 — Дробовик, 2 — Снапа. `Gun` = `Rmb93` сначала ставит в слот Рысь (RMB-93) с полным магазином: её описание строит код (`OSMakeRmb93` в `OSRmb93.cpp`) из дробовика по умолчанию на `BeginPlay` пикапа, в карте хранится только выбор. Обычный пикап того же слота ствол не возвращает, только открывает | «Получено: <ствол>» |
+| `AOSToolPickup` | «Взять инструмент» | — | `ToolId` (по умолчанию `OSGrappleTool()` = `Grapple`) в `AOSShipGameMode::Tools` | «Получено: <ToolName>» (по умолчанию «Крюк-кошка») |
+| `AOSSuitLocker` | «Надеть скафандр» | «некуда надеть» (нет кейринга), «скафандр уже надет» | ключ `OSSuitKey()` = `OS.Suit` на кейринг; `bHideWhenTaken` = false — шкаф остаётся | «Скафандр надет» |
+| `AOSCargo` | «Забрать груз» | — | `Cargo` +1 в режиме, предмет уничтожается | «Груз n/N» |
 
 Скафандр в коде — только ключ: его спрашивает дверь с `RequiredKeyId`
-`Jam.Suit` ([Doors-Keys-Locks](Doors-Keys-Locks.md)); на кислород он не
-влияет. `AJamCargo` — не `AJamPickupBase`, а свободное тело
+`OS.Suit` ([Doors-Keys-Locks](Doors-Keys-Locks.md)); на кислород он не
+влияет. `AOSCargo` — не `AOSPickupBase`, а свободное тело
 `AMKPhysicsProp`: тег `Cargo`, куб 40 × 30 × 30 см, 6 кг; падает в зонах,
-бьёт при ударе, дрейфует без `Jam.NoDrift`, его можно схватить.
+бьёт при ударе, дрейфует без `OS.NoDrift`, его можно схватить.
 
 ## Старые режимы
 
-`AJamZeroGGameMode` напрямую не стоит ни на одной карте — только как база
-`AJamShipGameMode`. От него режим корабля получает:
+`AOSZeroGGameMode` напрямую не стоит ни на одной карте — только как база
+`AOSShipGameMode`. От него режим корабля получает:
 
-- `DefaultPawnClass` = `AJamZeroGPawn` (и `PlayerControllerClass` =
-  `AJamShipController`, который режим корабля ставит ещё раз);
+- `DefaultPawnClass` = `AOSZeroGPawn` (и `PlayerControllerClass` =
+  `AOSShipController`, который режим корабля ставит ещё раз);
 - `StartPlay`: каждому симулируемому `AMKPhysicsProp` —
-  `UJamCollisionImpactComponent` (удары, [ZeroG](ZeroG.md#столкновения)), а
-  без тега `Jam.NoDrift` — демпфирование 0, случайный дрейф до
+  `UOSCollisionImpactComponent` (удары, [ZeroG](ZeroG.md#столкновения)), а
+  без тега `OS.NoDrift` — демпфирование 0, случайный дрейф до
   `InitialDriftMaxCm` (20 см/с) и вращение до `InitialSpinMaxDeg` (30 °/с)
   с сидом `DriftSeed` (1337); лог `ZeroG mode: world gravity Z ...`;
-- HUD-базу `AJamZeroGHUD` (свой `HUDClass` базы режим корабля заменяет).
+- HUD-базу `AOSZeroGHUD` (свой `HUDClass` базы режим корабля заменяет).
 
-`AJamGameMode` (`AJamCharacter` + `AJamHUD`), `AJamHUD` и `AJamCharacter`
-нигде не используются: `GlobalDefaultGameMode` — `JamShipGameMode`, все
-четыре карты (`Lvl_Jam_Ship`, `Lvl_Jam_ZeroG`, `Lvl_Jam_Range`,
-`Lvl_Jam_TestRoom`) ссылаются только на `JamShipGameMode`, скрипты карт
+`AOSGameMode` (`AOSCharacter` + `AOSHUD`), `AOSHUD` и `AOSCharacter`
+нигде не используются: `GlobalDefaultGameMode` — `OSShipGameMode`, все
+четыре карты (`Lvl_OS_Ship`, `Lvl_OS_ZeroG`, `Lvl_OS_Range`,
+`Lvl_OS_TestRoom`) ссылаются только на `OSShipGameMode`, скрипты карт
 ставят его же, ни один ассет в `Content` не ссылается на старые классы. Они
 компилируются и доступны как GameMode Override в редакторе.
 
 ## Проверка
 
-- Automation: `Jam.Gravity.OvalZone` (овал: центр, край пола, угол коробки
+- Automation: `OS.Gravity.OvalZone` (овал: центр, край пола, угол коробки
   вне овала, потолок, отступ, поворот и масштаб, шар важнее),
-  `Jam.Gravity.ZonePriority` (приоритет, меньшая зона, зона без `bWalk`,
+  `OS.Gravity.ZonePriority` (приоритет, меньшая зона, зона без `bWalk`,
   радиальная, `bPullAlongActorDown`).
-- Смерть и возрождение — `jam.Hull.Probe`; режим, пикапы, лампы, рычаг —
-  `jam.Ship.Probe` ([Ship-Blockout](Archive/Ship-Layout-Generated.md#проверка),
+- Смерть и возрождение — `os.Hull.Probe`; режим, пикапы, лампы, рычаг —
+  `os.Ship.Probe` ([Ship-Blockout](Archive/Ship-Layout-Generated.md#проверка),
   [Probes](Probes.md)).
 
 ## Ограничения
 
 - `OnLaunchAttempt` никто не слушает: босса нет, рычаг просто кончает забег.
 - Режим обслуживает одного игрока (`GetFirstPlayerController`).
-- Отказ `AJamWeaponPickup` «только в скафандре» говорит о скафандре, а
-  проверяет компонент стволов: у `AJamZeroGPawn` он есть всегда, так что
+- Отказ `AOSWeaponPickup` «только в скафандре» говорит о скафандре, а
+  проверяет компонент стволов: у `AOSZeroGPawn` он есть всегда, так что
   отказа на практике нет.
 - Ничья «меньшая зона» сравнивает описанные коробки: повёрнутая длинная
   коробка может проиграть зоне, которая на деле больше.

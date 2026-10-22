@@ -13,33 +13,33 @@
 
 | Что | Как делается | Где описано |
 |---|---|---|
-| Выстрелы, затворы, помпа, курок, магазины | `Scripts/jam_space_shots.py`: слои transient / mid / body / sub / rumble / tail, тёмный ревер, компрессор, лимитер −1 dBFS; в игре вариант C | [RecoilWeapons-Sound](RecoilWeapons-Sound.md) |
-| Затворная задержка USP (щелчок рычага, удар затвора) | `Scripts/jam_slide_sounds.py`: дубль сброса затвора Glock 17, разрезанный на два звука, тем же шаблоном механизмов | [RecoilWeapons-Sound](RecoilWeapons-Sound.md#затворная-задержка-usp-2010-ветка-jam-slide-sound) |
-| Летуны: визг аггро и пике, взмахи, шелест, пролёт, попадание, укус, смерть | `Scripts/jam_flyer_sounds.py`: моно-стемы по ролям (Attack, Body, Character, Sub, Tail), вариация на каждом проигрывании в `UJamFlyerAudio` | [Flyers — Звук](Flyers.md) |
-| Шаги и падения на мясе (планетоид, живые стены) | доноры MindKore `SC_MK_Hit_Torso` / `SC_MK_Hit_Limb` на пешке: шаг каждые 130 см, высота ×0.4–0.55, громкость 0.35 | `AJamZeroGPawn` (`FleshStepSound`, `FleshCrashSound`) |
-| Щелчок выстрела в воздухе, комната каюты, подъём высоких у механизмов | `Scripts/jam_air_sounds.py`: первые миллисекунды доноров выстрела с их высокими (`SW_Jam_ShotAir_*`), импульсный отклик каюты; `Scripts/jam_air_audio.py`: `SM_Jam_CabinReverb` (свёртка), `SEC_Jam_GunAirLift` (EQ) | [RecoilWeapons-Sound — В воздухе](RecoilWeapons-Sound.md#в-воздухе-2010-ветка-jam-air-sound) |
-| Смена оружия (кобура, ремень) | `Scripts/jam_switch_foley.py`: записанные доноры (кожа кобуры, ремень, антабка, стук приклада), тот же тракт «через скафандр», что у механизмов; `SW_Jam_Stow_*` / `SW_Jam_Draw_*`, разброс громкости и высоты на каждом проигрывании | [RecoilWeapons-Pose — Смена оружия](RecoilWeapons-Pose.md#смена-оружия-убрать-и-достать) |
+| Выстрелы, затворы, помпа, курок, магазины | `Scripts/os_space_shots.py`: слои transient / mid / body / sub / rumble / tail, тёмный ревер, компрессор, лимитер −1 dBFS; в игре вариант C | [RecoilWeapons-Sound](RecoilWeapons-Sound.md) |
+| Затворная задержка USP (щелчок рычага, удар затвора) | `Scripts/os_slide_sounds.py`: дубль сброса затвора Glock 17, разрезанный на два звука, тем же шаблоном механизмов | [RecoilWeapons-Sound](RecoilWeapons-Sound.md#затворная-задержка-usp-2010-ветка-jam-slide-sound) |
+| Летуны: визг аггро и пике, взмахи, шелест, пролёт, попадание, укус, смерть | `Scripts/os_flyer_sounds.py`: моно-стемы по ролям (Attack, Body, Character, Sub, Tail), вариация на каждом проигрывании в `UOSFlyerAudio` | [Flyers — Звук](Flyers.md) |
+| Шаги и падения на мясе (планетоид, живые стены) | доноры MindKore `SC_MK_Hit_Torso` / `SC_MK_Hit_Limb` на пешке: шаг каждые 130 см, высота ×0.4–0.55, громкость 0.35 | `AOSZeroGPawn` (`FleshStepSound`, `FleshCrashSound`) |
+| Щелчок выстрела в воздухе, комната каюты, подъём высоких у механизмов | `Scripts/os_air_sounds.py`: первые миллисекунды доноров выстрела с их высокими (`SW_OS_ShotAir_*`), импульсный отклик каюты; `Scripts/os_air_audio.py`: `SM_OS_CabinReverb` (свёртка), `SEC_OS_GunAirLift` (EQ) | [RecoilWeapons-Sound — В воздухе](RecoilWeapons-Sound.md#в-воздухе-2010-ветка-jam-air-sound) |
+| Смена оружия (кобура, ремень) | `Scripts/os_switch_foley.py`: записанные доноры (кожа кобуры, ремень, антабка, стук приклада), тот же тракт «через скафандр», что у механизмов; `SW_OS_Stow_*` / `SW_OS_Draw_*`, разброс громкости и высоты на каждом проигрывании | [RecoilWeapons-Pose — Смена оружия](RecoilWeapons-Pose.md#смена-оружия-убрать-и-достать) |
 
-WAV импортирует `Scripts/jam_import_audio.py`: берёт `SW_Jam_*.wav` из папки
-`JAM_WAV_DIR`, кладёт в `JAM_AUDIO_DEST` (по умолчанию
-`/Game/JamArt/Audio/Weapons`, у летунов — `/Game/JamArt/Audio/Flyer`).
+WAV импортирует `Scripts/os_import_audio.py`: берёт `SW_OS_*.wav` из папки
+`OS_WAV_DIR`, кладёт в `OS_AUDIO_DEST` (по умолчанию
+`/Game/OSArt/Audio/Weapons`, у летунов — `/Game/OSArt/Audio/Flyer`).
 
 ## Вакуум и воздух
 
 И летуны, и свои стволы выбирают тракт по тому, дышит ли игрок
-(`UJamOxygenComponent::IsBreathable`; его пишет `AJamShipGameMode::Tick` из
-`JamAirZoneAt`, больше никто).
+(`UOSOxygenComponent::IsBreathable`; его пишет `AOSShipGameMode::Tick` из
+`OSAirZoneAt`, больше никто).
 
 - **Летуны.** В вакууме — хвост «через скафандр» (слой Tail). В воздушной зоне хвост
-  выключен, и вместо него идёт посыл в `SM_Jam_AirReverb`. Перекрытие геометрией —
+  выключен, и вместо него идёт посыл в `SM_OS_AirReverb`. Перекрытие геометрией —
   своя проверка лучом от уха по Visibility, тело игрока и то, что он держит, не
   мешают. Движковое перекрытие выключено: его луч выходил из тела игрока и глушил
   летунов при чистой видимости.
-- **Свои стволы** (`UJamWeaponsComponent::IsInAir`, одно место). В вакууме — как
+- **Свои стволы** (`UOSWeaponsComponent::IsInAir`, одно место). В вакууме — как
   были, «через скафандр». В воздухе выстрел остаётся тем же, а сверху ложится щелчок
-  воздуха (`SW_Jam_ShotAir_*`) — резкий, с высокими, которые скафандр срезает;
+  воздуха (`SW_OS_ShotAir_*`) — резкий, с высокими, которые скафандр срезает;
   механизмы, магазины, затворная задержка и кобура/ремень — с лёгким подъёмом высоких
-  (`SEC_Jam_GunAirLift`). Всё это посылается в `SM_Jam_CabinReverb` — свою короткую
+  (`SEC_OS_GunAirLift`). Всё это посылается в `SM_OS_CabinReverb` — свою короткую
   металлическую комнату каюты (0.55 с), а не в ревер летунов (1.1 с, тёмный).
   Звук, который уже играет, остаётся в своей среде: переход через шлюз его не
   переключает. Разбор и замеры — [RecoilWeapons-Sound — В воздухе](RecoilWeapons-Sound.md#в-воздухе-2010-ветка-jam-air-sound).
@@ -47,11 +47,11 @@ WAV импортирует `Scripts/jam_import_audio.py`: берёт `SW_Jam_*.w
 ## Мастер
 
 `Config/DefaultEngine.ini`, `[/Script/Engine.AudioSettings] MasterSubmix` —
-`SM_Jam_Master`. В его цепочке один эффект, `SMX_Jam_MasterBrickwall`
-(`UJamBrickwallPreset`, `Source/MindKore/JamBrickwall.h`). Это жёсткий
+`SM_OS_Master`. В его цепочке один эффект, `SMX_OS_MasterBrickwall`
+(`UOSBrickwallPreset`, `Source/MindKore/OSBrickwall.h`). Это жёсткий
 ограничитель: потолок −1 dBFS, look-ahead 5 мс, отпуск 80 мс, без выходного
 усиления. Весь звук игры из-за него опаздывает на 5 мс. Цепочку собирает
-`Scripts/jam_master_limiter.py`. Встроенный динамический процессор движка
+`Scripts/os_master_limiter.py`. Встроенный динамический процессор движка
 пропускал суммы выстрелов до 0 dBFS — разбор в
 [RecoilWeapons-Sound — Лимитер на мастере](RecoilWeapons-Sound.md#лимитер-на-мастере).
 
@@ -65,21 +65,21 @@ WAV импортирует `Scripts/jam_import_audio.py`: берёт `SW_Jam_*.w
 - Свой выстрел громче всего: приоритет 1.0, у летунов 0.9 / 0.8 / 0.6. В воздухе
   он громче ещё на 0.2–2 LU (щелчок воздуха).
 - 2D-звук приходит на мастер на 3.1 дБ тише своего файла в каждом канале, моно-волна —
-  на 9.1 дБ (замер `jam.Weapons.AirTake`, 20.10). Поэтому щелчки воздуха записаны в
+  на 9.1 дБ (замер `os.Weapons.AirTake`, 20.10). Поэтому щелчки воздуха записаны в
   стерео.
 - Визг в пике на ~6 дБ тише выстрела, попадание по летуну — на ~3 дБ. Заряд
   дроби по летуну — одно попадание с суммой урона, а не восемь.
 - Одновременно не больше 2 визгов, крылья — у 4 ближайших летунов.
-- Визг аггро приглушает класс `SC_Jam_Ambience` (`SMIX_Jam_FlyerDuck`), но
+- Визг аггро приглушает класс `SC_OS_Ambience` (`SMIX_OS_FlyerDuck`), но
   эмбиента в игре пока нет.
 
 ## Проверка
 
-- `jam.Audio.LimiterProbe` — пик выхода мастера под очередь выстрелов.
-- `jam.Weapons.AirTake [B|sync]` — среда стволов от каюты через шлюз (PASS / FAIL) и
+- `os.Audio.LimiterProbe` — пик выхода мастера под очередь выстрелов.
+- `os.Weapons.AirTake [B|sync]` — среда стволов от каюты через шлюз (PASS / FAIL) и
   дубль стволов в каюте и за шлюзом; в лог — сколько брал брикволл.
-- `jam.Flyer.MixCheck [shotgun]` — выстрел и попадание по летуну по отдельности.
-- `jam.Flyer.Clip [shotgun] [stat]` — ролик со звуком; в логе пик голосов против
+- `os.Flyer.MixCheck [shotgun]` — выстрел и попадание по летуну по отдельности.
+- `os.Flyer.Clip [shotgun] [stat]` — ролик со звуком; в логе пик голосов против
   лимита (`Flyer clip voices`).
 
 Как запускать — [Probes](Probes.md). Записи в фоновом окне получаются тихими —

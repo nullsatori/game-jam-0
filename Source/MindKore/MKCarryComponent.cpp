@@ -4,7 +4,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
-// Jam lift: MKChaosMoverComponent.h / MKMoverPawn.h cut - the starter pawn is an ACharacter.
+// OS lift: MKChaosMoverComponent.h / MKMoverPawn.h cut - the starter pawn is an ACharacter.
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "MKPhysicsPropComponent.h"
@@ -64,7 +64,7 @@ FVector UMKCarryComponent::HoldPoint(const FVector& ViewLocation, const FRotator
 
 bool UMKCarryComponent::IsStandingOn(const UMKPhysicsPropComponent* Prop) const
 {
-	// Jam lift: AMKMoverPawn/UMKChaosMoverComponent floor check replaced by ACharacter's CharacterMovement CurrentFloor.
+	// OS lift: AMKMoverPawn/UMKChaosMoverComponent floor check replaced by ACharacter's CharacterMovement CurrentFloor.
 	const ACharacter* Character = Cast<ACharacter>(GetOwner());
 	const UCharacterMovementComponent* Movement = Character ? Character->GetCharacterMovement() : nullptr;
 	if (!Prop || !Movement || !Movement->IsMovingOnGround() || !Movement->CurrentFloor.IsWalkableFloor())
