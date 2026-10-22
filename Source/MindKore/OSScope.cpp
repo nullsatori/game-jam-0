@@ -87,7 +87,7 @@ UOSScopeComponent::UOSScopeComponent()
 	Sniper.BreathDeg = 0.12f;
 	// The attachment menu's pose (Docs/Attachments.md, «Поза меню»). The pistol's fitted on the PC's stills 22.10
 	// (os.Attach.Stills): its left side flat to the eye, right of the projected menu, the magazine's foot in the frame.
-	Pistol.Menu.OffsetCm = FVector(40.0f, 15.0f, 2.0f);
+	Pistol.Menu.OffsetCm = FVector(40.0f, 12.0f, -6.0f);
 	Pistol.Menu.Turn = FRotator(-5.0f, -35.0f, -10.0f);
 	Pistol.Menu.GunFieldOfView = 95.0f;
 	Pistol.Menu.In = { { 3.2f, 0.55f, 0.05f }, { 3.0f, 0.6f, 0.03f }, { 3.4f, 0.5f, 0.0f }, { 2.4f, 0.42f, 0.0f }, { 2.4f, 0.42f, 0.0f }, { 2.0f, 0.38f, 0.0f } };

@@ -815,6 +815,9 @@ void UOSWeaponsComponent::MakeAttachmentComponents()
 	// The suit projector's lasers' reasons: no shadow (a light moving with the camera every frame), no MegaLights.
 	TorchInView->CastShadows = false;
 	TorchInView->bAllowMegaLights = false;
+	// No bounce or haze: Lumen's temporal GI dragged the moving pool behind (playtest 22.10, ghosting).
+	TorchInView->IndirectLightingIntensity = 0.0f;
+	TorchInView->VolumetricScatteringIntensity = 0.0f;
 	TorchInView->IntensityUnits = ELightUnits::Candelas;
 	TorchInView->bUseInverseSquaredFalloff = true;
 	TorchInView->SetVisibleFlag(false);

@@ -187,7 +187,7 @@ struct FOSAttachment
 	float ThreadTravelCm = 1.2f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Seat")
-	float ThreadSeconds = 0.45f;
+	float ThreadSeconds = 1.2f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Seat")
 	float UnthreadSeconds = 0.35f;
