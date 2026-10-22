@@ -1,5 +1,5 @@
 # Runs one jam.* probe headless (NullRHI, logic only) at several fixed frame rates side by side: a system that
-# moves or times something must give the same numbers at every rate (CLAUDE.md, "Частота кадров").
+# moves or times something must give the same numbers at every rate (AGENTS.md, "Частота кадров").
 #   .\Scripts\jam_fps_sweep.ps1 /Game/Jam/Maps/Lvl_Jam_Ship jam.Move.Probe
 #   .\Scripts\jam_fps_sweep.ps1 /Game/Jam/Maps/Lvl_Jam_ZeroG jam.ZeroG.Probe -Rates 30,144 -Seconds 240
 # Run from PowerShell, not Git Bash (MSYS rewrites /Game/... paths). Logs: Saved/Logs/Sweep_<map>_<command>_<fps>.log.

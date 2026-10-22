@@ -3,8 +3,8 @@
 ## Открыть и собрать
 
 1. Установить UE 5.8, Visual Studio с C++ и [Git LFS](https://git-lfs.com).
-   Выполнить `git lfs install`, затем клонировать репозиторий и в его корне
-   выполнить `git config lfs.setlockablereadonly false`. Без этого LFS выдаёт
+   Клонировать репозиторий и выполнить в PowerShell `.\Scripts\setup_git.ps1`
+   (что он настраивает — в разделе [Git LFS](#git-lfs)). Без него LFS выдаёт
    блокируемые `.uasset`/`.umap` только для чтения: редактор их не сохранит,
    а скрипты упадут на `jam_build.save`.
 2. Открыть `MKJamStarter.uproject`. Редактор предложит собрать модуль —
@@ -127,9 +127,25 @@ Editor-плагина. В git их нет (обе папки в `.gitignore`; д
 ## Git LFS
 
 - Все двоичные файлы (`.uasset`, `.umap`, `.fbx`, `.wav`, `.png` и т. д.)
-  идут через LFS. Новый арт кладётся в `Content/JamArt/`.
+  идут через LFS, список типов — в `.gitattributes`. Новый арт кладётся в
+  `Content/JamArt/`. Новый двоичный тип сначала добавить в `.gitattributes`.
 - `.uasset` и `.umap` блокируемые. Перед правкой —
   `git lfs lock <файл>`, после push — `git lfs unlock <файл>`. Кто что держит:
-  `git lfs locks`.
+  `git lfs locks`. Push с правкой чужого заблокированного файла отклоняется.
 - Квота LFS общая на аккаунт и почти занята, поэтому текстуры не больше 2K,
-  исходники (`.blend`, `.psd`) в репозиторий не класть.
+  исходники (`.blend`, `.psd`, `.spp` и т. п.) в репозиторий не класть:
+  они в `.gitignore`. Исходники лежат в `ArtSource/` (папка целиком в `.gitignore`), в репо идёт
+  экспорт (`.fbx`, `.png`).
+- Настройка клона — `Scripts/setup_git.ps1`, один раз на клон (настройки
+  общие для всех его worktree): `git lfs install` (фильтры и pre-push хук,
+  без хука push уходит без LFS-объектов), `lfs.setlockablereadonly false`,
+  `lfs.locksverify true`, `git lfs pull` и проверка. В `.lfsconfig` эти
+  ключи не задать: LFS их там игнорирует.
+- Проверка `Scripts/check_lfs.sh` (Git Bash) и её копия в CI
+  (`.github/workflows/lfs.yml`, на каждый push и PR) падают, если файл из
+  `.gitattributes` лёг в обычный git, двоичный файл без правила LFS или
+  закоммичен исходник. Исправление для первого случая:
+  `git rm --cached <файл>` и снова `git add <файл>`.
+- Облачные сессии Claude не достают до сервера LFS (`lfs.github.com`
+  закрыт): они видят только указатели и пушат только код. Бинарники
+  коммитятся и пушатся с ПК.
