@@ -12,6 +12,8 @@ ue-mcp.local.*
 # The two MCP editor plugins each user deploys locally (README, MCP section)
 Plugins/UE_MCP_Bridge/
 Plugins/VibeUE/
+# NVIDIA DLSS plugin (~1.8 GB of binaries): each machine installs it, Docs/Development.md "DLSS"
+Plugins/NVIDIA/
 .idea/
 __pycache__/
 
