@@ -6,7 +6,7 @@ the map, finds the PlayerStart inside the cabin's gravity zone (label
 Gravity_Cabin), adds the tag (modify() first, so the change is saved) and saves.
 Running it again changes nothing. build_ship.py tags the start it spawns.
 
-  UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  UnrealEditor-Cmd.exe <path>/OuterSpace.uproject
       -ExecutePythonScript="<path>/Scripts/tag_cabin_start.py" -unattended -nop4 -nosplash -nullrhi
 """
 import unreal

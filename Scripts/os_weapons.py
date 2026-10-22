@@ -1,6 +1,6 @@
 """The guns' first-person meshes (editor Python, headless).
 
-  OS_FBX_DIR=<dir with the FBX files below> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  OS_FBX_DIR=<dir with the FBX files below> UnrealEditor-Cmd.exe <path>/OuterSpace.uproject
       -ExecutePythonScript="<path>/Scripts/os_weapons.py" -unattended -nop4 -nosplash -nullrhi
 
 Imports SM_OS_Shotgun, SM_OS_Shotgun_Pump, SM_OS_SV98 and SM_OS_SV98_Bolt

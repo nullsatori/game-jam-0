@@ -450,7 +450,7 @@ diving now)` в логе).
 ```powershell
 $env:OS_FLYERS_MAPS = "ship"   # ship, zerog или both (по умолчанию both)
 $env:OS_FLYERS_QUIT = "1"      # закрыть редактор после сохранения
-& "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "<путь>\MKJamStarter.uproject" -ExecutePythonScript="<путь>\Scripts\os_flyers.py" -unattended -nop4 -nosplash -nullrhi
+& "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "<путь>\OuterSpace.uproject" -ExecutePythonScript="<путь>\Scripts\os_flyers.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 В логе — строки `OSFLYERS: …` (что поставлено, `saved /Game/OS/Maps/Lvl_OS_Ship`).
@@ -686,8 +686,8 @@ OS_WAV_DIR=<out> UnrealEditor-Cmd ... -ExecutePythonScript=Scripts/os_flyer_audi
 
 ```
 blender.exe -b --python Scripts/blender/os_flyer.py -- <out_dir>
-OS_FBX_DIR=<out_dir> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/os_import_meshes.py" ...
-OS_FBX_DIR=<out_dir> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/os_flyer_art.py" ...
+OS_FBX_DIR=<out_dir> UnrealEditor-Cmd.exe <path>/OuterSpace.uproject -ExecutePythonScript="<path>/Scripts/os_import_meshes.py" ...
+OS_FBX_DIR=<out_dir> UnrealEditor-Cmd.exe <path>/OuterSpace.uproject -ExecutePythonScript="<path>/Scripts/os_flyer_art.py" ...
 ```
 
 FBX, PNG и превью остаются в `<out_dir>`; в репозитории — только `.uasset`.

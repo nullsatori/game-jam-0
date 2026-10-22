@@ -1,7 +1,7 @@
 """Builds /Game/OS/Maps/Lvl_OS_TestRoom from scratch (editor Python, headless).
 
 Run:
-  UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -run=pythonscript
+  UnrealEditor-Cmd.exe <path>/OuterSpace.uproject -run=pythonscript
       -script="<path>/Scripts/build_test_room.py" -unattended -nop4 -nosplash
 
 The room is a dark 16 x 12 m box of engine cubes (ceiling 3 m), split by a

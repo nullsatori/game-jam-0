@@ -116,7 +116,7 @@
 Пересборка материалов:
 
 ```
-UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePythonScript="<repo>/Scripts/os_muzzle_fx.py" -unattended -nop4 -nosplash -nullrhi
+UnrealEditor-Cmd.exe OuterSpace.uproject -ExecutePythonScript="<repo>/Scripts/os_muzzle_fx.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 ## Объёмный воксельный дым (ветка `jam-fx4`, 19.10)

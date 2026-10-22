@@ -1,6 +1,6 @@
 """Muzzle flash and powder smoke materials for UOSMuzzleFxComponent (editor Python).
 
-  UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/os_muzzle_fx.py" -unattended -nop4 -nosplash -nullrhi
+  UnrealEditor-Cmd.exe <path>/OuterSpace.uproject -ExecutePythonScript="<path>/Scripts/os_muzzle_fx.py" -unattended -nop4 -nosplash -nullrhi
 
 Rebuilt in place on every run. Both draw a sprite on the engine plane
 (/Engine/BasicShapes/Plane, UV 0..1), one instance per sprite in an instanced

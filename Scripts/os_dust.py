@@ -1,6 +1,6 @@
 """Space dust: M_OS_Dust, the material of AOSZeroGPawn's dust specks (editor Python).
 
-  UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/os_dust.py" -unattended -nop4 -nosplash -nullrhi
+  UnrealEditor-Cmd.exe <path>/OuterSpace.uproject -ExecutePythonScript="<path>/Scripts/os_dust.py" -unattended -nop4 -nosplash -nullrhi
 
 Also called by Scripts/build_zerog.py. Rebuilt in place on every run.
 

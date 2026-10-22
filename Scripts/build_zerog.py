@@ -2,7 +2,7 @@
 
 Run (the editor stays open after a plain -ExecutePythonScript; wrap it in a
 script that calls unreal.SystemLibrary.quit_editor(), see README):
-  UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  UnrealEditor-Cmd.exe <path>/OuterSpace.uproject
       -ExecutePythonScript="<path>/Scripts/build_zerog.py" -unattended -nop4 -nosplash -nullrhi
 
 A closed 80 x 80 x 50 m box centred on the origin, lit for play (the

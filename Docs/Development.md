@@ -7,25 +7,25 @@
    (что он настраивает — в разделе [Git LFS](#git-lfs)). Без него LFS выдаёт
    блокируемые `.uasset`/`.umap` только для чтения: редактор их не сохранит,
    а скрипты упадут на `os_build.save`.
-2. Открыть `MKJamStarter.uproject`. Редактор предложит собрать модуль —
+2. Открыть `OuterSpace.uproject`. Редактор предложит собрать модуль —
    согласиться. Можно собрать и без редактора: `Scripts\build.bat` (двойной
    клик или из консоли). Он сам находит движок по `EngineAssociation` из
    `.uproject` через реестр (или берёт `UE_ROOT`, если задана), собирает
-   `MKJamStarterEditor Win64 Development` и ждёт клавишу в конце. Аргументы:
-   `game` — цель игры `MKJamStarter` (перед cook), `DebugGame`/`Shipping` —
+   `OuterSpaceEditor Win64 Development` и ждёт клавишу в конце. Аргументы:
+   `game` — цель игры `OuterSpace` (перед cook), `DebugGame`/`Shipping` —
    другая конфигурация, `-nopause` — без паузы. Если редактор этого checkout
    открыт с Live Coding, сборка редактора откажется: закрыть его или нажать в
    нём Ctrl+Alt+F11. То же вручную из PowerShell:
 
    ```powershell
-   & "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" MKJamStarterEditor Win64 Development -Project="<путь>\MKJamStarter.uproject" -WaitMutex
+   & "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" OuterSpaceEditor Win64 Development -Project="<путь>\OuterSpace.uproject" -WaitMutex
    ```
 
 Карты `Lvl_OS_ZeroG`, `Lvl_OS_Range` и `Lvl_OS_TestRoom` собираются с нуля
 скриптами `Scripts/build_zerog.py`, `build_range.py` и `build_test_room.py`:
 
 ```
-UnrealEditor-Cmd.exe <путь>\MKJamStarter.uproject -ExecutePythonScript="<путь>/Scripts/build_zerog.py" -unattended -nop4 -nosplash -nullrhi
+UnrealEditor-Cmd.exe <путь>\OuterSpace.uproject -ExecutePythonScript="<путь>/Scripts/build_zerog.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 `Lvl_OS_Ship` с 18.10 правится руками в редакторе. `Scripts/build_ship.py`
@@ -55,12 +55,12 @@ Win64 Development: в ней работают консоль `os.*` и лини�
 редактора из раздела «Открыть и собрать» (cook работает через него):
 
 ```powershell
-$p = "<путь>\MKJamStarter.uproject"
-& "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" MKJamStarter Win64 Development "-Project=$p" -WaitMutex -NoHotReloadFromIDE
+$p = "<путь>\OuterSpace.uproject"
+& "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" OuterSpace Win64 Development "-Project=$p" -WaitMutex -NoHotReloadFromIDE
 & "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun "-project=$p" -noP4 -platform=Win64 -clientconfig=Development -skipbuild -nocompileeditor -cook -stage -pak -nodebuginfo -map=Lvl_OS_Ship+Lvl_OS_Range+Lvl_OS_ZeroG+Lvl_OS_TestRoom "-stagingdirectory=<папка вне репозитория>" -unattended -utf8output
 ```
 
-Сдаётся папка `<папка>\Windows` целиком, запуск — `MKJamStarter.exe`
+Сдаётся папка `<папка>\Windows` целиком, запуск — `OuterSpace.exe`
 (стартовая карта `Lvl_OS_Ship`). Упаковку в репозиторий не класть.
 
 Замер 19.10 на машине разработки: `Build.bat` — ~55 с, `BuildCookRun` — 27 с
@@ -101,7 +101,7 @@ Editor-плагина. В git их нет (обе папки в `.gitignore`; д
    Node.js. Из корня репозитория, при закрытом редакторе:
 
    ```powershell
-   npx -y ue-mcp@1.4.8-beta.2 deploy MKJamStarter.uproject
+   npx -y ue-mcp@1.4.8-beta.2 deploy OuterSpace.uproject
    ```
 
 2. **VibeUE**, снимок `dc051be7c49b08e613ca7a2196fe9f39c9b52119` из
@@ -123,7 +123,7 @@ Editor-плагина. В git их нет (обе папки в `.gitignore`; д
 - Путь к проекту в `.mcp.json` относительный, поэтому клиент запускать из
   корня репозитория. Иначе — свой абсолютный путь к `.uproject` в локальной
   настройке клиента (для Claude Code: `claude mcp add --scope local ue-mcp -- npx -y
-  ue-mcp@1.4.8-beta.2 <путь>/MKJamStarter.uproject`).
+  ue-mcp@1.4.8-beta.2 <путь>/OuterSpace.uproject`).
 - `ue-mcp.yml` — общая настройка сервера: `server.mode: in-process`, сервер
   живёт вместе с клиентом и не подключается к чужому редактору. Личные
   правки — в `ue-mcp.local.yml`, он не коммитится.
@@ -150,7 +150,7 @@ Editor-плагина. В git их нет (обе папки в `.gitignore`; д
    (от него DLSS зависит). Остальные плагины архива (Streamline, NIS,
    генерация кадров) проекту не нужны. Файлы `.pdb` можно не копировать.
 3. Собрать проект и открыть редактор. Проверка: в консоли
-   `r.NGX.DLSS.Enable` отвечает `1`, в `Saved/Logs/MKJamStarter.log` есть `LogDLSS: NVIDIA NGX DLSS supported DLSS-SR=1` и `NGXPerfQuality=DLAA(5)`.
+   `r.NGX.DLSS.Enable` отвечает `1`, в `Saved/Logs/OuterSpace.log` есть `LogDLSS: NVIDIA NGX DLSS supported DLSS-SR=1` и `NGXPerfQuality=DLAA(5)`.
 
 Вернуть TSR: удалить блок DLSS в `Config/DefaultEngine.ini`. В упаковку
 DLSS попадает, только если плагин стоит на машине, которая собирает сдачу.

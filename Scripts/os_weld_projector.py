@@ -1,6 +1,6 @@
 """The suit projector's materials for hull repair (UOSWeldProjectorComponent, UOSHullToolsComponent; editor Python).
 
-  UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/os_weld_projector.py" -unattended -nop4 -nosplash -nullrhi
+  UnrealEditor-Cmd.exe <path>/OuterSpace.uproject -ExecutePythonScript="<path>/Scripts/os_weld_projector.py" -unattended -nop4 -nosplash -nullrhi
 
 Rebuilt in place on every run. After MindKore's bodycam projector (L22: its
 Scripts/author_projector_materials.py, M_MK_Projector_Picture and M_MK_Projector_Beam),

@@ -1,6 +1,6 @@
 """The flyer's look: its colour atlas and material (editor Python, headless).
 
-  OS_FBX_DIR=<out dir of Scripts/blender/os_flyer.py> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  OS_FBX_DIR=<out dir of Scripts/blender/os_flyer.py> UnrealEditor-Cmd.exe <path>/OuterSpace.uproject
       -ExecutePythonScript="<path>/Scripts/os_flyer_art.py" -unattended -nop4 -nosplash -nullrhi
 
 Run after Scripts/os_import_meshes.py has imported the four SM_OS_Flyer_* meshes
