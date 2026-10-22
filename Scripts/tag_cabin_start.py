@@ -1,6 +1,6 @@
-"""Tag the cabin's PlayerStart "Cabin" in Lvl_Jam_Ship (editor Python, headless).
+"""Tag the cabin's PlayerStart "Cabin" in Lvl_OS_Ship (editor Python, headless).
 
-AJamShipGameMode wakes the player at the PlayerStart tagged Cabin after death.
+AOSShipGameMode wakes the player at the PlayerStart tagged Cabin after death.
 The ship map is edited by hand, so this touches only that one actor: it opens
 the map, finds the PlayerStart inside the cabin's gravity zone (label
 Gravity_Cabin), adds the tag (modify() first, so the change is saved) and saves.
@@ -11,12 +11,12 @@ Running it again changes nothing. build_ship.py tags the start it spawns.
 """
 import unreal
 
-SHIP = "/Game/Jam/Maps/Lvl_Jam_Ship"
+SHIP = "/Game/OS/Maps/Lvl_OS_Ship"
 TAG = "Cabin"
 
 
 def log(message):
-    unreal.log("JAMCABIN: " + message)
+    unreal.log("OSCABIN: " + message)
 
 
 def run():
@@ -25,7 +25,7 @@ def run():
     if not les.load_level(SHIP):
         raise RuntimeError("cannot open " + SHIP)
     actors = eas.get_all_level_actors()
-    cabins = [a for a in actors if isinstance(a, unreal.JamGravityZone) and a.get_actor_label() == "Gravity_Cabin"]
+    cabins = [a for a in actors if isinstance(a, unreal.OSGravityZone) and a.get_actor_label() == "Gravity_Cabin"]
     if len(cabins) != 1:
         raise RuntimeError("expected one Gravity_Cabin zone, found %d" % len(cabins))
     starts = [a for a in actors if isinstance(a, unreal.PlayerStart) and cabins[0].contains(a.get_actor_location(), 0.0)]

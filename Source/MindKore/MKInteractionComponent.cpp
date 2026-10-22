@@ -6,7 +6,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
-// Jam lift: MKDeviceHUD.h include cut - the bodycam device journal (UMKDeviceMemory) is not lifted.
+// OS lift: MKDeviceHUD.h include cut - the bodycam device journal (UMKDeviceMemory) is not lifted.
 #include "MindKore.h"
 
 UMKInteractionComponent::UMKInteractionComponent()
@@ -113,12 +113,12 @@ void UMKInteractionComponent::Interact()
 	{
 		UE_LOG(LogMindKore, Log, TEXT("Interact: %s refuses '%s': %s"),
 			*Candidate->GetName(), *CurrentOffer.Action.ToString(), *CurrentOffer.Reason.ToString());
-		// Jam lift: UMKDeviceMemory::NoteRefusal cut - the device journal is not lifted.
+		// OS lift: UMKDeviceMemory::NoteRefusal cut - the device journal is not lifted.
 		return;
 	}
 	UE_LOG(LogMindKore, Log, TEXT("Interact: %s '%s'"), *Candidate->GetName(), *CurrentOffer.Action.ToString());
 	Cast<IMKInteractable>(Candidate)->CompleteInteraction(GetOwner());
-	// Jam lift: UMKDeviceMemory::Learn cut - the device journal is not lifted.
+	// OS lift: UMKDeviceMemory::Learn cut - the device journal is not lifted.
 	RefreshCandidate();
 }
 

@@ -1,4 +1,4 @@
-// MindKore module rules (jam starter: the lifted systems plus the jam pawn).
+// MindKore module rules (OS starter: the lifted systems plus the OS pawn).
 
 using UnrealBuildTool;
 
@@ -25,11 +25,11 @@ public class MindKore : ModuleRules
 			"EnhancedInput",
 			"Niagara",
 			"PhysicsCore",
-			// jam.Audio.LimiterProbe records the master output (UAudioMixerBlueprintLibrary).
+			// os.Audio.LimiterProbe records the master output (UAudioMixerBlueprintLibrary).
 			"AudioMixer",
-			// FFrameGrabber: jam.Flyer.Clip records the viewport (JamClipRecorder).
+			// FFrameGrabber: os.Flyer.Clip records the viewport (OSClipRecorder).
 			"MovieSceneCapture",
-			// RHIGetGPUFrameCycles: the scope's cost probe (jam.Scope.Shots).
+			// RHIGetGPUFrameCycles: the scope's cost probe (os.Scope.Shots).
 			"RHI",
 			// AMKGlassPane builds its shards at runtime; the plugin is enabled by
 			// default in UE 5.8, so it needs no .uproject entry.
@@ -39,14 +39,14 @@ public class MindKore : ModuleRules
 			"AIModule",
 			"GameplayTasks",
 			"NavigationSystem",
-			// The debug menu (JamDebug.cpp, JamDebugMenu.cpp): Slate panel, JSON configs, the clipboard,
+			// The debug menu (OSDebug.cpp, OSDebugMenu.cpp): Slate panel, JSON configs, the clipboard,
 			// the preset assets' listing.
 			"Slate",
 			"SlateCore",
 			"ApplicationCore",
 			"Json",
 			"AssetRegistry",
-			// The cabin's convolution reverb: UJamAudioTools fills its impulse response asset (the plugin
+			// The cabin's convolution reverb: UOSAudioTools fills its impulse response asset (the plugin
 			// is enabled by default in UE 5.8, so it needs no .uproject entry).
 			"Synthesis",
 		});

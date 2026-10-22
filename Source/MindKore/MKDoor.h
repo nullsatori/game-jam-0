@@ -58,7 +58,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MindKore|Door")
 	TObjectPtr<UStaticMeshComponent> Leaf = nullptr;
 
-	// Jam lift: HandleAnchor (UMKFrameAnchorComponent) cut - it only framed the handle for the bodycam device HUD, which is not lifted.
+	// OS lift: HandleAnchor (UMKFrameAnchorComponent) cut - it only framed the handle for the bodycam device HUD, which is not lifted.
 
 	/** Enemies in this box are asked where they are going (IsOnRouteOf). Sized to both sides of the leaf. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MindKore|Door")

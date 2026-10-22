@@ -1,6 +1,6 @@
 # Tether and motion prediction
 
-Оба — часть `AJamZeroGPawn` (`Source/MindKore/JamZeroGPawn.h/.cpp`).
+Оба — часть `AOSZeroGPawn` (`Source/MindKore/OSZeroGPawn.h/.cpp`).
 
 ## Трос
 
@@ -26,7 +26,7 @@
 | `TetherLengthCm` | 800 | длина троса |
 | `TetherStiffness` / `TetherDamping` | 500 / 50 | мягкость натянутого троса (0 — жёсткий предел) |
 
-Смоук (`jam.ZeroG.Probe`, деталь 407 кг в 5 м, толчок от опоры):
+Смоук (`os.ZeroG.Probe`, деталь 407 кг в 5 м, толчок от опоры):
 
 ```
 ZeroG tether: on MKPhysicsProp_16, 407 kg, 500 cm away, rope 800 cm
@@ -46,9 +46,9 @@ Shift (`IA_ZG_Aim` → `bAiming`), рисуется пунктир — куда 
 
 **Устройство.** Скорость после действия = текущая + импульс / масса
 (толчок `PushImpulse`, отдача `RecoilImpulse` текущего ствола
-(`FJamWeapon`), бросок `min(ThrowImpulse, m × MaxThrowSpeedCm)`). Путь —
-`JamPredictFlight` (`JamGravity.cpp`): дуга под гравитацией зон
-(`JamGravityAt`, одна на кусок ~0.1 с), шаг — дельта кадра (1/240…1/30 с), как
+(`FOSWeapon`), бросок `min(ThrowImpulse, m × MaxThrowSpeedCm)`). Путь —
+`OSPredictFlight` (`OSGravity.cpp`): дуга под гравитацией зон
+(`OSGravityAt`, одна на кусок ~0.1 с), шаг — дельта кадра (1/240…1/30 с), как
 шагает физика; sweep сферы (радиус тела пешки или `Bounds.SphereRadius` тела)
 по каналу `PhysicsBody` на `PredictSeconds`; в точке касания нормальная
 скорость отражается с `PredictRestitution`, касательная сохраняется. Гравитация
@@ -65,7 +65,7 @@ Shift (`IA_ZG_Aim` → `bAiming`), рисуется пунктир — куда 
 
 - Линии — `DrawDebugLine`/`DrawDebugSphere`: видны в Development, вырезаются
   в Shipping. Так же рисуется и линия крюка-кошки (`UpdateGrapple`,
-  `JamZeroGPawn.cpp:848`; см. [ZeroG.md](ZeroG.md) «Крюк-кошка»).
+  `OSZeroGPawn.cpp:848`; см. [ZeroG.md](ZeroG.md) «Крюк-кошка»).
   Для релиза — `UCableComponent` (плагин CableComponent) для троса и кошки,
   меш/Niagara для пунктира.
 - Трос прямой, без провисания и без столкновений с миром — он проходит сквозь

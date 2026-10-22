@@ -1,4 +1,4 @@
-"""Builds /Game/Jam/Maps/Lvl_Jam_TestRoom from scratch (editor Python, headless).
+"""Builds /Game/OS/Maps/Lvl_OS_TestRoom from scratch (editor Python, headless).
 
 Run:
   UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -run=pythonscript
@@ -17,11 +17,11 @@ and a back corridor. The stations sit along the partition and in the hall:
   7 SHOOT           AMKImpactDummy
   8 APPLIANCES      BP_MK_Microwave, BP_MK_Toilet (AMKAppliance children)
 
-The player is the game's one pawn (AJamZeroGPawn) under the ship's mode
-(AJamShipGameMode): a gravity zone over the room lets it walk, with the same
+The player is the game's one pawn (AOSZeroGPawn) under the ship's mode
+(AOSShipGameMode): a gravity zone over the room lets it walk, with the same
 controls as everywhere (F interacts, RMB grabs, Q/E roll); the three gun
 pickups stand by the start, the RMB-93's on a stand beside them and a Nixie
-display by the partition (jam_nixie_test_room.py). World gravity stays normal for the props.
+display by the partition (os_nixie_test_room.py). World gravity stays normal for the props.
 
 Every number is centimetres. The script deletes an existing map first and
 asserts the editor world is the new one before it spawns anything (a failed
@@ -29,7 +29,7 @@ new_level leaves the previous level open and would receive the actors).
 """
 import unreal
 
-MAP = "/Game/Jam/Maps/Lvl_Jam_TestRoom"
+MAP = "/Game/OS/Maps/Lvl_OS_TestRoom"
 CUBE = unreal.load_asset("/Engine/BasicShapes/Cube.Cube")
 CYL = unreal.load_asset("/Engine/BasicShapes/Cylinder.Cylinder")
 MK = "/Game/MindKore/"
@@ -41,7 +41,7 @@ ues = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
 
 
 def log(msg):
-    unreal.log("JAMROOM: " + msg)
+    unreal.log("OSROOM: " + msg)
 
 
 def load(path):
@@ -132,7 +132,7 @@ package = world.get_outer().get_path_name()
 if package != MAP:
     raise RuntimeError("editor world is %s, not %s: refusing to spawn" % (package, MAP))
 log("new level " + package)
-world.get_world_settings().set_editor_property("default_game_mode", unreal.JamShipGameMode.static_class())
+world.get_world_settings().set_editor_property("default_game_mode", unreal.OSShipGameMode.static_class())
 
 # --- shell -------------------------------------------------------------------
 W, D, H, T = 1600.0, 1200.0, 300.0, 20.0     # room size and wall thickness
@@ -195,11 +195,11 @@ ppv.set_editor_property("settings", settings)
 # --- 8 player start ----------------------------------------------------------
 spawn(unreal.PlayerStart, V(800, 150, 100), 90, "PlayerStart")
 # The ship's mode: walking and air come from a gravity zone over the whole room; the guns from pickups.
-room_zone = spawn(unreal.JamGravityZone, V(W / 2, D / 2, H / 2), 0, "Gravity_Room")
+room_zone = spawn(unreal.OSGravityZone, V(W / 2, D / 2, H / 2), 0, "Gravity_Room")
 room_zone.get_editor_property("zone").set_box_extent(V(W / 2, D / 2, H / 2 + 50))
 room_zone.set_editor_property("refill_per_second", 30.0)
 for index, (name, x) in enumerate((("PISTOL", 1000.0), ("SHOTGUN", 1120.0), ("SV-98", 1240.0))):
-    gun = spawn(unreal.JamWeaponPickup, V(x, 120, 60), 90, "Pickup_" + name)
+    gun = spawn(unreal.OSWeaponPickup, V(x, 120, 60), 90, "Pickup_" + name)
     gun.set_actor_scale3d(V(0.3, 0.5, 1.2))
     gun.set_editor_property("weapon_index", index)
     label_text(name, V(x, 120, 160), 90)
@@ -223,14 +223,14 @@ if (leaf_hi.x - leaf_lo.x) > (leaf_hi.y - leaf_lo.y):
     set_rel(leaf, V((leaf_lo.y + leaf_hi.y) / 2, -leaf_lo.x, -leaf_lo.z), 90.0)
 else:
     set_rel(leaf, V(-(leaf_lo.x + leaf_hi.x) / 2, -leaf_lo.y, -leaf_lo.z), 0.0)
-door.set_editor_property("required_key_id", "jam_key")
+door.set_editor_property("required_key_id", "os_key")
 box("Door1_KeyStand", 330, 370, 280, 320, 0, 95)
 # SM_MK_Yard_KeyTag hangs below its pivot (z -19..-0.6): the hook sits 25 cm above the stand.
 key = spawn(unreal.MKKeyPickup, V(350, 300, 120), 0, "Door1_Key")
 key_mesh = key.get_editor_property("mesh")
 key_mesh.modify()
 key_mesh.set_static_mesh(load(MK + "Art/Admin/Yard/KeyRoute/SM_MK_Yard_KeyTag"))
-key.set_editor_property("key_id", "jam_key")
+key.set_editor_property("key_id", "os_key")
 label_text("1 DOOR + KEY", V(fx, PY - 12, 250), -90)
 
 
@@ -354,7 +354,7 @@ label_text("8 APPLIANCES", V(120, 530, 200), 0)
 # Preserve the playable RMB93/Nixie station when regenerating this test map.
 import runpy
 from pathlib import Path
-runpy.run_path(str(Path(__file__).with_name('jam_nixie_test_room.py')))['place']()
+runpy.run_path(str(Path(__file__).with_name('os_nixie_test_room.py')))['place']()
 
 # --- save ---------------------------------------------------------------------------
 world = ues.get_editor_world()

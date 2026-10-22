@@ -2,7 +2,7 @@
 	"FileVersion": 3,
 	"EngineAssociation": "5.8",
 	"Category": "",
-	"Description": "Game-jam starter: interaction, doors and keys, switches, carry, prying, glass, impacts and bullet time lifted from MindKore.",
+	"Description": "Outer Space: a first-person zero-gravity shooter built on physical interaction. A wrecked cargo ship beside a living, predatory mini-planet; push off surfaces and ride weapon recoil, grab, carry and throw, patch the hull, recover fuel and a navigation module, and get away.",
 	"Modules": [
 		{
 			"Name": "MindKore",

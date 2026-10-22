@@ -1,7 +1,7 @@
 #include "MKPhysicsBridge.h"
 #include "PhysicsEngine/BodyInstance.h"
 
-// Jam lift: AngularDrive cut (PhysicsControl plugin not enabled), see MKPhysicsBridge.h.
+// OS lift: AngularDrive cut (PhysicsControl plugin not enabled), see MKPhysicsBridge.h.
 bool MKPhysicsBridge::ApplyPointImpulse(FBodyInstance& Body, const FVector& NewtonSeconds, const FVector& WorldPointCm)
 {
 	if (!Body.IsInstanceSimulatingPhysics() || NewtonSeconds.ContainsNaN() || WorldPointCm.ContainsNaN()

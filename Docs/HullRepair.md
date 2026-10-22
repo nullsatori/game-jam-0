@@ -24,7 +24,7 @@
    пешка замирает (отдача снапы — 0 см/с через 0.3–0.5 с), движения мыши её
    не сносят. ПКМ ещё раз — отпустить.
 
-Инструмент — одно из состояний рук пешки (`EJamHands::Tool`): его клавиши идут
+Инструмент — одно из состояний рук пешки (`EOSHands::Tool`): его клавиши идут
 сразу после стволов (при трёх стволах 4 и 5). Что делают клавиши с
 инструментом в руке, что становится со стволом и его перезарядкой и как руки
 переходят от тела к инструменту — [ZeroG «Руки»](ZeroG.md#руки).
@@ -73,14 +73,14 @@
 
 | Файл | Что |
 |---|---|
-| `Source/MindKore/JamHullTools.h/.cpp` | `UJamHullToolsComponent` (`HullTools` на пешке): стяжка (линии, подмотка, срезание, нити лазера) и горелка |
-| `Source/MindKore/JamWeldProjector.h/.cpp` | `UJamWeldProjectorComponent` (`WeldProjector` под камерой пешки): рамка пробоины светом на корпусе, пробы `jam.Weld.Curves` |
+| `Source/MindKore/OSHullTools.h/.cpp` | `UOSHullToolsComponent` (`HullTools` на пешке): стяжка (линии, подмотка, срезание, нити лазера) и горелка |
+| `Source/MindKore/OSWeldProjector.h/.cpp` | `UOSWeldProjectorComponent` (`WeldProjector` под камерой пешки): рамка пробоины светом на корпусе, пробы `os.Weld.Curves` |
 | `Source/MindKore/DeviceFont/` | знакогенератор MK Pribor N из MindKore (`MKDeviceFontData.inl`) и его лицензия MIT |
-| `Scripts/jam_weld_projector.py` | материалы `/Game/JamArt/Materials/Hull`: `M_Jam_WeldProjection` (light function), `M_Jam_StrapLaser` (нить) |
-| `Source/MindKore/JamShipParts.h/.cpp` | `AJamPlateSocket` — пробоина: контур, зазоры, перекрытие, шов, прихватка, герметичность |
-| `Source/MindKore/JamZeroGPawn.h/.cpp` | руки (`SetHands`, `TakeTool`), клавиши инструментов и ЛКМ/R/колесо для них (`Route`, `Press`, `PressSlot`), `Cling` (ПКМ по корпусу) |
-| `Source/MindKore/JamShip.h/.cpp` | смерть: `AJamShipGameMode` слушает `UMKVitalsComponent::OnDepleted` (`HandleDeath`), через `RespawnDelaySeconds` — `RespawnInCabin`; строки HUD, пробы `jam.Hull.Stills`, проба `jam.Hull.Probe` |
-| `Source/MindKore/JamZeroGPawn.h/.cpp` | `LetGoOfEverything` (что смерть снимает), `ReviveAt` (телепорт, покой, здоровье и кислород) |
+| `Scripts/os_weld_projector.py` | материалы `/Game/OSArt/Materials/Hull`: `M_OS_WeldProjection` (light function), `M_OS_StrapLaser` (нить) |
+| `Source/MindKore/OSShipParts.h/.cpp` | `AOSPlateSocket` — пробоина: контур, зазоры, перекрытие, шов, прихватка, герметичность |
+| `Source/MindKore/OSZeroGPawn.h/.cpp` | руки (`SetHands`, `TakeTool`), клавиши инструментов и ЛКМ/R/колесо для них (`Route`, `Press`, `PressSlot`), `Cling` (ПКМ по корпусу) |
+| `Source/MindKore/OSShip.h/.cpp` | смерть: `AOSShipGameMode` слушает `UMKVitalsComponent::OnDepleted` (`HandleDeath`), через `RespawnDelaySeconds` — `RespawnInCabin`; строки HUD, пробы `os.Hull.Stills`, проба `os.Hull.Probe` |
+| `Source/MindKore/OSZeroGPawn.h/.cpp` | `LetGoOfEverything` (что смерть снимает), `ReviveAt` (телепорт, покой, здоровье и кислород) |
 | `Scripts/tag_cabin_start.py` | тег `Cabin` на `PlayerStart` каюты в карте, которую правят руками |
 | `Scripts/build_ship.py` | пробоины (рамка: X вдоль корпуса, Z наружу), листы 3 × 3 м |
 
@@ -91,7 +91,7 @@
 `Stiffness × растяжение + Damping × скорость расхождения`, не больше `MaxForce`.
 Неподвижный конец (корпус) — только опора. Свободная линия ни на что не влияет.
 
-**Пробоина** (`AJamPlateSocket`) в своей рамке: дыра `HoleHalfCm` вокруг начала
+**Пробоина** (`AOSPlateSocket`) в своей рамке: дыра `HoleHalfCm` вокруг начала
 координат по X (вдоль корпуса) и Y, наружная грань корпуса — `SurfaceZ`, +Z
 наружу. Контур нарезан на куски по `SegmentCm`. Десять раз в секунду (пока
 рядом игрок или в `Catch` лист):
@@ -104,16 +104,16 @@
 зазор у куска не больше `MaxGapCm` и мусора нет; в режиме «резать» — отнимает
 вдвое быстрее. Прихватка выключает листу физику там, где он лежит; срезанная
 прихватка включает обратно. Пешка сама отпускает тело, которое держит рукой или
-тросом, как только оно перестало симулироваться (`AJamZeroGPawn::Tick`): иначе
+тросом, как только оно перестало симулироваться (`AOSZeroGPawn::Tick`): иначе
 рука повисла бы на неподвижном листе, как на корпусе.
 
-**Держаться** — `AJamZeroGPawn::Cling`: рука держит точку корпуса, пешка висит
+**Держаться** — `AOSZeroGPawn::Cling`: рука держит точку корпуса, пешка висит
 на ней на пружине-демпфере вдоль руки (`UpdateArm`, режим `Hang`), см.
 [ZeroG «Хват»](ZeroG.md#хват-рука-как-в-white-knuckle).
 
 **Отрисовка.** Нити стяжки — меши (`UStaticMeshComponent` на линию, материал
-`M_Jam_StrapLaser`), рамка пробоины — два прожектора с light function
-(`M_Jam_WeldProjection`); `DrawDebug*` в ремонте корпуса нет, так что от
+`M_OS_StrapLaser`), рамка пробоины — два прожектора с light function
+(`M_OS_WeldProjection`); `DrawDebug*` в ремонте корпуса нет, так что от
 выключенного в Shipping отладочного рисования он не зависит (в самой Shipping
 не проверено — см. «Не сделано»).
 
@@ -134,7 +134,7 @@
 
 ## Проверка
 
-`jam.Hull.Probe [индекс] [shots]` на `Lvl_Jam_Ship` (`-game -nullrhi`,
+`os.Hull.Probe [индекс] [shots]` на `Lvl_OS_Ship` (`-game -nullrhi`,
 18.10.2026, лог `hull_probe3`; строки смерти — 19.10.2026, `World_Hull1`):
 
 ```
@@ -152,9 +152,9 @@
 [let go, sniper +0.5 s]: speed 700 cm/s
 [before death]: suit yes, pistol locked, shotgun locked, sniper unlocked, strap lines 2 (on the belt 1), torch 'Горелка: ближе', hook in, input on
 [dead +0.1 s]: HP 0, suit yes, pistol locked, shotgun locked, sniper unlocked, strap lines 1 (on the belt 0), torch '', hook off, input off
-[after death +4.3 s]: pawn JamZeroGPawn_0 (the same), at V(X=5480.00, Z=1018.00), zone JamGravityZone_0, standing, 72 cm from the Cabin start, HP 100, O2 180, suit yes, pistol locked, shotgun locked, sniper unlocked, strap lines 1 (on the belt 0), torch '', hook off, input on
+[after death +4.3 s]: pawn OSZeroGPawn_0 (the same), at V(X=5480.00, Z=1018.00), zone OSGravityZone_0, standing, 72 cm from the Cabin start, HP 100, O2 180, suit yes, pistol locked, shotgun locked, sniper unlocked, strap lines 1 (on the belt 0), torch '', hook off, input on
 [after the respawn]: seam 100%, coverage 100%, ... sealed yes, ... panel hull 1
-[JamPlateSocket_4, plate 40 cm off, no junk]: refused: gap, seam 0%
+[OSPlateSocket_4, plate 40 cm off, no junk]: refused: gap, seam 0%
 ```
 
 С `shots` — два кадра (`Shot`): лист притянут; после сварки, «Пробоина заварена 1/3».
@@ -170,14 +170,14 @@
   стяжка прижала лист неровно (Z 20.13 вместо 20), 492 шага горелки из 800 идут
   по щели и шов 34 % (`jam-aim4`, 19.10), иначе 100 %.
 
-Логика шва, стяжки и прихватки от проектора не менялась (из `AJamPlateSocket`
+Логика шва, стяжки и прихватки от проектора не менялась (из `AOSPlateSocket`
 убрана только отрисовка).
 
 Проба гоняет логику напрямую (`AddLine`, `Weld`, `Cling`), не через ввод.
 
 ## Проектор скафандра
 
-`UJamWeldProjectorComponent` — по образцу проектора бодикама MindKore (L22,
+`UOSWeldProjectorComponent` — по образцу проектора бодикама MindKore (L22,
 `UMKBodycamProjectorComponent`, `MKProjectorModel`) и рамки прибора (L20,
 `FMKDeviceFrameState`). Владелец 19.10: «рамку сварки тоже в духе проектора из
 майндкора делаем»; затем — тёмно-синий нуар, тонкий дрожащий пунктир, сходящаяся
@@ -212,7 +212,7 @@
 
 **Чем отличается.** Растр у MindKore в кадре проектора; здесь — в кадре
 пробоины: light function переводит освещаемую точку в систему пробоины
-(`M_Jam_WeldProjection`), поэтому рамка прибита к корпусу, а прожектор едет с
+(`M_OS_WeldProjection`), поэтому рамка прибита к корпусу, а прожектор едет с
 камерой. Свет — только в слое ±(40…70) см у наружной грани корпуса: теней у
 прожекторов нет (руки закрывали бы шов, а тень от света, что движется с
 камерой, перерисовывалась бы каждый кадр), слой не пускает рамку на пол сквозь
@@ -222,16 +222,16 @@
 **Появление.** Контур и рамка — 12 групп (по две половины на сторону дыры,
 четыре стороны рамки); каждая летит со своей стороны наискось с замахом
 (`Anticipation` 0.07), быстрым ходом с перелётом (`Overshoot` 0.12) и
-затухающим успокоением с недолётом, старты вразнобой (`JamWeldGroupRank`);
+затухающим успокоением с недолётом, старты вразнобой (`OSWeldGroupRank`);
 последняя защёлкивается к `AppearSeconds` 0.7 с, полёт группы
 `FlightSeconds` 0.4 с. По пути дрожь ×`AppearJitterGain` 5, доля штрихов
 `StrobeShare` 0.12 мигает каждый на своей частоте 5–13 Гц и ещё 0.5 с после
 захвата. Надпись печатается последней, 45 знаков в секунду. Уход — за 0.3 с
 наружу с ускорением и угасанием. Сменился лист (взял, отпустил, положил) —
 быстрое повторное схождение за `ReconvergeSeconds` 0.4 с. Кривые —
-`jam.Weld.Curves` → `Saved/Logs/WeldCurves.csv`.
+`os.Weld.Curves` → `Saved/Logs/WeldCurves.csv`.
 
-**Числа** (всё — свойства компонента, категории `Jam|Projector` и `Jam|Projector|Look…`).
+**Числа** (всё — свойства компонента, категории `OS|Projector` и `OS|Projector|Look…`).
 
 | Параметр | Значение | Что |
 |---|---|---|
@@ -245,25 +245,25 @@
 | `PlateMarginCm` / `PlateRangeCm` / `SnapCm` / `SnapDeg` | 25 / 1000 / 15 / 6 | квадрат пустых рук, дальность листа, защёлкивание |
 | `ViewRangeCm` / `LookConeDeg` | 1500 / 25 | когда пробоина «под взглядом» |
 
-**Цена** (`ProfileGPU`, 1280 × 720, Lvl_Jam_Ship, кадр с 2 м): свет гало —
+**Цена** (`ProfileGPU`, 1280 × 720, Lvl_OS_Ship, кадр с 2 м): свет гало —
 LightFunction 0.008 мс + RenderLight 0.012 мс; сердцевина горит только на
 бледных штрихах (столько же). Пробоины не в кадре — свет скрыт, компонент
 тикает 24 раза в секунду и смотрит три пробоины.
 
 **Пробы** (рендер, `UnrealEditor.exe -game -RenderOffscreen -ResX=1280 -ResY=720`):
-- `jam.Hull.Stills <i>` — 11 кадров: лист со стяжкой и зазором, мусор, прихвачен,
+- `os.Hull.Stills <i>` — 11 кадров: лист со стяжкой и зазором, мусор, прихвачен,
   наполовину, вспышка заварки, заварено; с 2 и 8 м (вдоль корпуса). `0` —
   пробоина на свету звезды (2.5 лк), `1` — в тени (0 лк).
-- `jam.Hull.Stills <i> plates` — пустые руки; лист на стяжке далеко и повёрнут;
+- `os.Hull.Stills <i> plates` — пустые руки; лист на стяжке далеко и повёрнут;
   рядом, но мимо; лист 2 × 2 м (мал); ровно и закрывает (2.5 и 6 м).
-- `jam.Hull.Stills <i> strips` — появление, кадр каждые 33 мс (часы прибора
+- `os.Hull.Stills <i> strips` — появление, кадр каждые 33 мс (часы прибора
   держатся `HoldClock`), и секунда дрожи.
 
 ## Не сделано
 
-- Ввод стяжки (клавиша, ЛКМ, R, колесо, ПКМ) проверен `jam.Hands.Probe` через
+- Ввод стяжки (клавиша, ЛКМ, R, колесо, ПКМ) проверен `os.Hands.Probe` через
   настоящие действия ввода; у сварки — только клавиша (ЛКМ и R горелки —
-  логикой `jam.Hull.Probe`, не вводом).
+  логикой `os.Hull.Probe`, не вводом).
 - Искр и звука сварки нет.
 - Удержание R «срезать все», дробь, рвущая прихватку, запасной лист вместо
   улетевшего, обучающая первая пробоина — из дизайна, пока нет.
@@ -276,5 +276,5 @@ LightFunction 0.008 мс + RenderLight 0.012 мс; сердцевина гори
   ровно по дыре, квадрат пустых рук (`PlateMarginCm` 25) шире любого листа.
 - Проектор не видели вживую в движении, только стоп-кадрами (часы прибора
   держались). В упакованной Development проектор рисует надписи; Shipping
-  стартует, но пробы и кадры `jam.Hull.Stills` в ней не снять — проектор и
+  стартует, но пробы и кадры `os.Hull.Stills` в ней не снять — проектор и
   нити стяжки в Shipping не проверены ([Development](Development.md#как-собрать-сдачу)).

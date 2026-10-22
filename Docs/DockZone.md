@@ -7,23 +7,23 @@
 дока, мягко захватывается: тормозит и подтягивается к центру зоны, а не
 улетает дальше. Счёт живой: вытолкнул деталь — она больше не считается.
 
-- На `Lvl_Jam_ZeroG` большие детали (200–800 кг, 2–4 м) висят в 20–40 м от
+- На `Lvl_OS_ZeroG` большие детали (200–800 кг, 2–4 м) висят в 20–40 м от
   ракеты; в HUD невесомости — «Детали: n/N», когда все на месте — «- готово»
   (строка только для дока с тегом `Ship.Part`).
-- На `Lvl_Jam_Ship` доки — топливо и навигация; их показывают лампы пульта и
+- На `Lvl_OS_Ship` доки — топливо и навигация; их показывают лампы пульта и
   строки «Топливо: n/N», «Навигация: n/N» ([ShipMode](ShipMode.md)).
 
 ## Классы и файлы
 
 | Файл | Что |
 |---|---|
-| `Source/MindKore/JamDockZone.h/.cpp` | `AJamDockZone` |
-| `Source/MindKore/JamShipParts.h/.cpp` | `AJamCleanZone` — наследник, который только считает мусор корпуса ([HullRepair](HullRepair.md)); `AJamShipPanel` читает `IsCompleted()` доков |
-| `Source/MindKore/JamGameMode.cpp` | строка «Детали» в `AJamZeroGHUD` |
+| `Source/MindKore/OSDockZone.h/.cpp` | `AOSDockZone` |
+| `Source/MindKore/OSShipParts.h/.cpp` | `AOSCleanZone` — наследник, который только считает мусор корпуса ([HullRepair](HullRepair.md)); `AOSShipPanel` читает `IsCompleted()` доков |
+| `Source/MindKore/OSGameMode.cpp` | строка «Детали» в `AOSZeroGHUD` |
 
 ## Как поставить
 
-- Поставить `AJamDockZone`, размер — `Zone` (box extent, по умолчанию
+- Поставить `AOSDockZone`, размер — `Zone` (box extent, по умолчанию
   600 × 700 × 800 см); коробка поворачивается вместе с актором.
 - Деталям — тег актора `RequiredTag`. Деталь — актор, чей корневой компонент
   симулирует физику (класс любой; на картах — `AMKPhysicsProp`).
@@ -44,29 +44,29 @@
 Деталь, покинувшая зону, получает демпфирование 0 (не прежнее — какое было
 до захвата, док не помнит).
 
-`AJamCleanZone` — тот же док с `RequiredTag` `Junk.Foreign`, без захвата
+`AOSCleanZone` — тот же док с `RequiredTag` `Junk.Foreign`, без захвата
 (демпфирование и тяга 0) и с `RequiredCount` 100000: только считает.
 
 ## Карты
 
-`Lvl_Jam_ZeroG` (`Scripts/build_zerog.py`): зона `Dock_Ship` в (2600, 0, 0)
+`Lvl_OS_ZeroG` (`Scripts/build_zerog.py`): зона `Dock_Ship` в (2600, 0, 0)
 у ракеты, `RequiredCount` 4, надпись DOCK, коробка обведена зелёными
 рёбрами `Dock_Edge_*`. Детали `Ship.Part`: куб 300 кг (2 × 2.5 × 3 м),
 цилиндр 800 кг (2.2 × 4 м), куб 500 кг (3.5 × 2 × 2 м), цилиндр 200 кг
 (3 × 2 м) и пятая — куб 60 см, 40 кг в нише за живой стеной
 ([ZeroG](ZeroG.md#как-сделать-невесомый-уровень)).
 
-`Lvl_Jam_Ship` (`Scripts/build_ship.py`): `Dock_Fuel` — тег `Ship.Fuel`,
+`Lvl_OS_Ship` (`Scripts/build_ship.py`): `Dock_Fuel` — тег `Ship.Fuel`,
 нужно 2, коробка 6 × 6 × 6 м; `Dock_Nav` — тег `Ship.Nav`, нужен 1,
-3 × 4 × 4 м; `Clean_Hull` — `AJamCleanZone`. Где они и что в них носить —
+3 × 4 × 4 м; `Clean_Hull` — `AOSCleanZone`. Где они и что в них носить —
 [Ship-Blockout](Ship-Blockout.md).
 
-Смоук (`jam.ZeroG.Probe`, шаг дока: первую деталь `Ship.Part` ставит на 5 м
+Смоук (`os.ZeroG.Probe`, шаг дока: первую деталь `Ship.Part` ставит на 5 м
 под центр первого дока):
 
 ```
 ZeroG probe [dock]: 0/4 before; moving MKPhysicsProp_0 (300 kg) inside
-Dock JamDockZone_0: 1/4 parts
+Dock OSDockZone_0: 1/4 parts
 ZeroG probe [dock]: 1/4 after 1 s, part drifting at 21 cm/s
 ```
 
@@ -78,4 +78,4 @@ ZeroG probe [dock]: 1/4 after 1 s, part drifting at 21 cm/s
 - Тяга к центру сводит детали в одну точку — они толкаются друг о друга;
   у ракеты-заглушки центр зоны рядом с цилиндром.
 - `OnCompleted` в коде никто не слушает: пульт корабля читает `IsCompleted()`
-  каждый тик, на `Lvl_Jam_ZeroG` полный док ничего не запускает.
+  каждый тик, на `Lvl_OS_ZeroG` полный док ничего не запускает.

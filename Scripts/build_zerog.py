@@ -1,4 +1,4 @@
-"""Builds /Game/Jam/Maps/Lvl_Jam_ZeroG from scratch (editor Python, headless).
+"""Builds /Game/OS/Maps/Lvl_OS_ZeroG from scratch (editor Python, headless).
 
 Run (the editor stays open after a plain -ExecutePythonScript; wrap it in a
 script that calls unreal.SystemLibrary.quit_editor(), see README):
@@ -10,12 +10,12 @@ A closed 80 x 80 x 50 m box centred on the origin, lit for play (the
 light the shell does not shadow, a low sky light and a fixed exposure.
 Shapes are coloured by role: anchors grey, junk mid grey-brown, ship parts
 orange, oxygen blue, the dock outlined in green. WorldSettings: global
-gravity 0 and the AJamShipGameMode override (the one mode of every map). Inside: floating junk
-(AMKPhysicsProp, 5-500 kg; the mode (AJamZeroGGameMode's StartPlay) gives it drift and spin on
+gravity 0 and the AOSShipGameMode override (the one mode of every map). Inside: floating junk
+(AMKPhysicsProp, 5-500 kg; the mode (AOSZeroGGameMode's StartPlay) gives it drift and spin on
 StartPlay), static 4 m anchor blocks to push off, a rocket stand-in at the far
 +X end with the dock zone and four tagged ship parts (Ship.Part) 20-40 m away,
 oxygen canisters, a glass pane in a floating frame, an impact dummy,
-a living wall (AJamLivingWall) closing an alcove against the shell with a ship
+a living wall (AOSLivingWall) closing an alcove against the shell with a ship
 part inside, and the PlayerStart at the origin facing +X, 1 m from the first anchor's face,
 with the gun and grapple pickups beside it.
 Everything is seeded: the same map every run.
@@ -27,14 +27,14 @@ import sys
 
 import unreal
 
-# The shared living wall material (Scripts/jam_living_wall.py), found next to this script.
+# The shared living wall material (Scripts/os_living_wall.py), found next to this script.
 sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
-import jam_build  # noqa: E402
-import jam_dust  # noqa: E402
-import jam_flesh  # noqa: E402
-import jam_living_wall  # noqa: E402
+import os_build  # noqa: E402
+import os_dust  # noqa: E402
+import os_flesh  # noqa: E402
+import os_living_wall  # noqa: E402
 
-MAP = "/Game/Jam/Maps/Lvl_Jam_ZeroG"
+MAP = "/Game/OS/Maps/Lvl_OS_ZeroG"
 CUBE = unreal.load_asset("/Engine/BasicShapes/Cube.Cube")
 CYL = unreal.load_asset("/Engine/BasicShapes/Cylinder.Cylinder")
 DRUM = unreal.load_asset("/Game/MindKore/Art/Admin/Yard/Props2/SM_MK_Yard_Drum")
@@ -42,7 +42,7 @@ DRUM = unreal.load_asset("/Game/MindKore/Art/Admin/Yard/Props2/SM_MK_Yard_Drum")
 eal = unreal.EditorAssetLibrary
 mel = unreal.MaterialEditingLibrary
 tools = unreal.AssetToolsHelpers.get_asset_tools()
-MATS = "/Game/Jam/Materials"
+MATS = "/Game/OS/Materials"
 les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
 eas = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 ues = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
@@ -50,7 +50,7 @@ rng = random.Random(7)
 
 
 def log(msg):
-    unreal.log("JAMZEROG: " + msg)
+    unreal.log("OSZEROG: " + msg)
 
 
 def V(x, y, z):
@@ -93,7 +93,7 @@ def tint(name, rgb):
     mi = tools.create_asset(name, MATS, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
     mel.set_material_instance_parent(mi, unreal.load_asset("/Engine/BasicShapes/BasicShapeMaterial"))
     mel.set_material_instance_vector_parameter_value(mi, "Color", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
-    jam_build.save(path)
+    os_build.save(path)
     log("made " + path)
     return mi
 
@@ -132,21 +132,21 @@ if world.get_outer().get_path_name() != MAP:
 log("new level " + MAP)
 
 log("BasicShapeMaterial vector parameters: %s" % mel.get_vector_parameter_names(unreal.load_asset("/Engine/BasicShapes/BasicShapeMaterial")))
-SHELL = tint("MI_Jam_Shell", (0.12, 0.12, 0.13))
-ANCHOR = tint("MI_Jam_Anchor", (0.45, 0.46, 0.48))
-JUNK = tint("MI_Jam_Junk", (0.32, 0.27, 0.22))
-PART = tint("MI_Jam_ShipPart", (0.95, 0.42, 0.05))
-OXYGEN = tint("MI_Jam_O2", (0.1, 0.35, 0.95))
-DOCK = tint("MI_Jam_Dock", (0.2, 0.9, 0.3))
-ROCKET_MAT = tint("MI_Jam_Rocket", (0.85, 0.85, 0.8))
-jam_dust.material(log)  # AJamZeroGPawn's dust specks
+SHELL = tint("MI_OS_Shell", (0.12, 0.12, 0.13))
+ANCHOR = tint("MI_OS_Anchor", (0.45, 0.46, 0.48))
+JUNK = tint("MI_OS_Junk", (0.32, 0.27, 0.22))
+PART = tint("MI_OS_ShipPart", (0.95, 0.42, 0.05))
+OXYGEN = tint("MI_OS_O2", (0.1, 0.35, 0.95))
+DOCK = tint("MI_OS_Dock", (0.2, 0.9, 0.3))
+ROCKET_MAT = tint("MI_OS_Rocket", (0.85, 0.85, 0.8))
+os_dust.material(log)  # AOSZeroGPawn's dust specks
 
 settings = world.get_world_settings()
 settings.modify()
 settings.set_editor_property("global_gravity_set", True)
 settings.set_editor_property("global_gravity_z", 0.0)
 # One pawn, one rule set on every map (owner 18.10): the ship's mode; the guns come from pickups.
-settings.set_editor_property("default_game_mode", unreal.JamShipGameMode.static_class())
+settings.set_editor_property("default_game_mode", unreal.OSShipGameMode.static_class())
 
 # --- the box -----------------------------------------------------------------
 HX, HY, HZ, T = 4000.0, 4000.0, 2500.0, 100.0
@@ -194,11 +194,11 @@ ppv.set_editor_property("settings", pp)
 spawn(unreal.PlayerStart, V(0, 0, 0), 0, "PlayerStart")
 # The guns and the grapple on pickups beside the start, as on the other maps (F takes them).
 for index, (name, y) in enumerate((("PISTOL", -250.0), ("SHOTGUN", -400.0), ("SV-98", -550.0))):
-    gun = spawn(unreal.JamWeaponPickup, V(150, y, -60), 90, "Pickup_" + name)
+    gun = spawn(unreal.OSWeaponPickup, V(150, y, -60), 90, "Pickup_" + name)
     gun.set_actor_scale3d(V(0.3, 0.5, 1.2))
     gun.set_editor_property("weapon_index", index)
     label_text(name, V(150, y, 60), 90, 25.0)
-grapple = spawn(unreal.JamToolPickup, V(150, -700, -60), 90, "Pickup_Grapple")
+grapple = spawn(unreal.OSToolPickup, V(150, -700, -60), 90, "Pickup_Grapple")
 grapple.set_actor_scale3d(V(0.3, 0.5, 1.2))
 label_text("GRAPPLE", V(150, -700, 60), 90, 25.0)
 ANCHORS = [V(300, 0, 0), V(-2000, 1500, 500), V(1500, -2200, -800), V(-1800, -2000, 1200), V(2200, 2000, -1500)]
@@ -210,7 +210,7 @@ label_text("ROCKET", V(3300 - 250, 0, 900), 180)
 
 # --- stations -----------------------------------------------------------------------
 for i, loc in enumerate([(-300, 300, 0), (0, -400, 150), (200, 400, -200), (-500, -200, 100)]):
-    canister = spawn(unreal.JamOxygenCanister, V(*loc), 0, "O2_Canister_%d" % i)
+    canister = spawn(unreal.OSOxygenCanister, V(*loc), 0, "O2_Canister_%d" % i)
     canister.get_editor_property("body").set_material(0, OXYGEN)
     zero_damping(canister.get_editor_property("body"))
 label_text("O2", V(-300, 300, 80), 0, 30)
@@ -232,10 +232,10 @@ label_text("DUMMY", V(0, -1190, 140), 90, 30)
 
 # --- ship parts and the dock --------------------------------------------------------
 # Loot: big tagged parts 20-40 m from the rocket, to be towed or pushed into the dock.
-dock = spawn(unreal.JamDockZone, V(2600, 0, 0), 0, "Dock_Ship")
+dock = spawn(unreal.OSDockZone, V(2600, 0, 0), 0, "Dock_Ship")
 dock.set_editor_property("required_count", 4)
 label_text("DOCK", V(2600, 0, 900), 180)
-# The dock's box (AJamDockZone default extent 600 x 700 x 800) as twelve thin green edges, no collision.
+# The dock's box (AOSDockZone default extent 600 x 700 x 800) as twelve thin green edges, no collision.
 DX, DY, DZ, E = 600.0, 700.0, 800.0, 8.0
 for a in (-1, 1):
     for b in (-1, 1):
@@ -290,10 +290,10 @@ log("junk: %d props" % count)
 for i, (loc, yaw) in enumerate([(V(-1500, 0, 600), 0), (V(1500, 1200, -400), 200), (V(-800, -2600, -900), 60)]):
     spawn(unreal.MKImpactDummy, loc, yaw, "Dummy_Floating_%d" % i)
 
-# --- the living wall: an alcove against the shell, closed by AJamLivingWall (Docs/LivingWall.md) ---
+# --- the living wall: an alcove against the shell, closed by AOSLivingWall (Docs/LivingWall.md) ---
 # After everything else so the seeded layout above is unchanged; the first
 # candidate mouth with nothing placed within 1.5 m of the alcove is taken.
-WALL_MAT = jam_living_wall.material(log)
+WALL_MAT = os_living_wall.material(log)
 DEPTH, OPEN_W, SIDE_T = 300.0, 400.0, 40.0
 X_MOUTH = -HX + DEPTH
 taken = [a.get_actor_location() for a in eas.get_all_level_actors()
@@ -309,13 +309,13 @@ block("Alcove_Top", V(xc, y0, z0 + half), (DEPTH, OPEN_W + 2 * SIDE_T, SIDE_T), 
 block("Alcove_Bottom", V(xc, y0, z0 - half), (DEPTH, OPEN_W + 2 * SIDE_T, SIDE_T), material=ANCHOR)
 block("Alcove_Left", V(xc, y0 - half, z0), (DEPTH, SIDE_T, OPEN_W), material=ANCHOR)
 block("Alcove_Right", V(xc, y0 + half, z0), (DEPTH, SIDE_T, OPEN_W), material=ANCHOR)
-wall = spawn(unreal.JamLivingWall, V(X_MOUTH - 10, y0, z0), -90, "LivingWall")  # yaw -90: its front (+Y) faces +X, the arena
+wall = spawn(unreal.OSLivingWall, V(X_MOUTH - 10, y0, z0), -90, "LivingWall")  # yaw -90: its front (+Y) faces +X, the arena
 wall.set_editor_property("width_cm", OPEN_W)
 wall.set_editor_property("height_cm", OPEN_W)
 wall.set_editor_property("thin_spot_count", 1)
 wall.set_editor_property("wall_material", WALL_MAT)
-jam_flesh.skin_wall(wall, jam_flesh.materials(log))  # the mesh look (Docs/LivingWall.md)
-wall.set_editor_property("tags", ["Jam.WallProbe"])
+os_flesh.skin_wall(wall, os_flesh.materials(log))  # the mesh look (Docs/LivingWall.md)
+wall.set_editor_property("tags", ["OS.WallProbe"])
 prize = spawn(unreal.MKPhysicsProp, V(xc, y0, z0), 0, "ShipPart_Alcove_40kg")
 prize_body = prize.get_editor_property("body")
 prize_body.modify()
@@ -323,7 +323,7 @@ prize_body.set_static_mesh(CUBE)
 prize_body.set_material(0, PART)
 prize.set_actor_scale3d(V(0.6, 0.6, 0.6))
 prize.set_editor_property("mass_kg", 40.0)
-prize.set_editor_property("tags", ["Ship.Part", "Jam.NoDrift"])
+prize.set_editor_property("tags", ["Ship.Part", "OS.NoDrift"])
 zero_damping(prize_body)
 inside = spawn(unreal.PointLight, V(xc - 60, y0, z0 + 120), 0, "Alcove_Light")
 inside_light = inside.get_editor_property("point_light_component")
@@ -339,9 +339,9 @@ front_light.set_editor_property("light_color", unreal.Color(r=255, g=210, b=180,
 label_text("LIVING WALL", V(X_MOUTH + 10, y0, z0 + OPEN_W / 2 + 70), 0, 50)
 log("living wall at the alcove mouth x %.0f, y %.0f, z %.0f" % (X_MOUTH - 10, y0, z0))
 
-# --- flyers: their habitats (Scripts/jam_flyers.py, Docs/Flyers.md) ---
-import jam_flyers  # noqa: E402
-jam_flyers.place(MAP, log)
+# --- flyers: their habitats (Scripts/os_flyers.py, Docs/Flyers.md) ---
+import os_flyers  # noqa: E402
+os_flyers.place(MAP, log)
 
 # --- save -------------------------------------------------------------------------------
 assert ues.get_editor_world().get_outer().get_path_name() == MAP

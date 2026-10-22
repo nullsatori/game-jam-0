@@ -14,6 +14,10 @@
 
   2. Close the editor, run os_rename_code.py --apply, build, open the editor, then:
          py "<repo>/Scripts/rename/os_rename_assets.py" resave
+     - repeats the redirector fixup and the map retag (tags and key ids such as Jam.Suit), in
+       case pass 1 stopped early: rename_assets asks "Continue with rename?" for assets the C++
+       CDOs reference, which an unattended -ExecutePythonScript run answers Cancel, so pass 1
+       has to be run from the Output Log;
      - force-resaves every package under /Game whose bytes still name Jam (old class/struct names
        held through [CoreRedirects], old tags), then scans again and prints what is left.
 
@@ -112,8 +116,35 @@ def fix_redirectors():
     redirs = [a.get_asset() for a in registry.get_assets(flt)]
     redirs = [r for r in redirs if r]
     log(f"fixing up {len(redirs)} redirectors")
-    if redirs:
+    if not redirs:
+        return
+    if hasattr(tools, "fixup_referencers"):
         tools.fixup_referencers(redirs)
+        return
+    # UE 5.8 Python has no fixup_referencers: resave each referencer (it loads through the
+    # redirector and saves the new path), then delete the redirector once nothing points at it.
+    les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+    opts = unreal.AssetRegistryDependencyOptions(include_soft_package_references=True,
+                                                 include_hard_package_references=True)
+    for r in redirs:
+        pkg = r.get_outermost().get_name()
+        for ref in [str(p) for p in registry.get_referencers(pkg, opts) or []]:
+            if ref == pkg or not ref.startswith("/Game/"):
+                continue
+            if ref.split("/")[-1].startswith("Lvl_"):
+                if les.load_level(ref):
+                    unreal.EditorLoadingAndSavingUtils.save_current_level()
+            elif eal.load_asset(ref):
+                eal.save_asset(ref, only_if_is_dirty=False)
+            log(f"  resaved {ref} (referenced {pkg})")
+    unreal.EditorLoadingAndSavingUtils.new_blank_map(False)
+    for r in redirs:
+        pkg = r.get_outermost().get_name()
+        left = [str(p) for p in registry.get_referencers(pkg, opts) or [] if str(p) != pkg]
+        if left:
+            log(f"  kept redirector {pkg}: still referenced by {', '.join(left)}")
+        else:
+            log(f"  deleted redirector {pkg}: {eal.delete_asset(pkg)}")
 
 
 def rename_tags(maps):
@@ -137,6 +168,17 @@ def rename_tags(maps):
                 if [str(t) for t in cnew] != [str(t) for t in ctags]:
                     comp.modify()
                     comp.component_tags = cnew
+                    changed += 1
+            # Key ids (AMKDoor/AMKLift RequiredKeyId, AMKKeyPickup KeyId) match code-side names like OS.Suit.
+            for prop in ("required_key_id", "key_id"):
+                try:
+                    old = str(actor.get_editor_property(prop))
+                except Exception:
+                    continue
+                if renamed(old) != old:
+                    actor.modify()
+                    actor.set_editor_property(prop, unreal.Name(renamed(old)))
+                    log(f"  {actor.get_name()}.{prop}: {old} -> {renamed(old)}")
                     changed += 1
         log(f"{m}: {changed} actors/components retagged")
         if changed:
@@ -166,12 +208,18 @@ def scan():
 
 def resave_pass():
     unreal.EditorLoadingAndSavingUtils.new_blank_map(False)
+    # Idempotent: covers a rename pass that stopped before its redirector/tag steps.
+    fix_redirectors()
+    rename_tags([str(a.package_name) for a in all_assets("/Game/OS/Maps")
+                 if str(a.asset_class_path.asset_name) == "World"])
     hits = scan()
     for pkg in sorted(hits):
         if pkg.split("/")[-1].startswith("Lvl_"):
             les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
             if les.load_level(pkg):
-                unreal.EditorLoadingAndSavingUtils.save_current_level()
+                # save_current_level skips a clean map; save_map writes it regardless.
+                world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
+                unreal.EditorLoadingAndSavingUtils.save_map(world, pkg)
         elif eal.load_asset(pkg):
             eal.save_asset(pkg, only_if_is_dirty=False)
     unreal.EditorLoadingAndSavingUtils.new_blank_map(False)

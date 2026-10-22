@@ -8,7 +8,7 @@ Plain averaging would erase the stars, so every output texel is a blend of its
 block's mean and its block's brightest source pixel (STAR_KEEP): a star survives
 as one chunky texel, the Milky Way keeps its band. Then a subtle grade toward the
 gritty palette - shadows a little violet, mids a little warm dust - and a
-posterize to LEVELS steps per channel. Imported with filter Nearest (jam_sky.py).
+posterize to LEVELS steps per channel. Imported with filter Nearest (os_sky.py).
 """
 import sys
 
