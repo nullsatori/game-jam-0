@@ -764,8 +764,7 @@ void UJamWeaponsComponent::ClearView()
 	PoseWeapon = INDEX_NONE; // the next draw starts from its put-away pose
 	if (ViewModel)
 	{
-		ViewModel->SetStaticMesh(nullptr);
-		ActionInView->SetStaticMesh(nullptr);
+		SetViewMeshes(nullptr);
 	}
 }
 
@@ -777,8 +776,7 @@ void UJamWeaponsComponent::FinishSwitch()
 	if (ViewModel)
 	{
 		const FJamWeapon* Gun = GetWeapon();
-		ViewModel->SetStaticMesh(Gun ? Gun->ViewMesh.Get() : nullptr);
-		ActionInView->SetStaticMesh(Gun ? Gun->ActionMesh.Get() : nullptr);
+		SetViewMeshes(Gun);
 	}
 	Pose = FPoseState();
 	PoseWeapon = ShownWeapon;
@@ -806,8 +804,7 @@ const FJamWeapon* UJamWeaponsComponent::UpdateSwitch(float DeltaTime, bool bHand
 			PoseWeapon = INDEX_NONE; // the next draw starts from its put-away pose, the same gun too
 		}
 		const FJamWeapon* Gun = Weapons.IsValidIndex(Index) ? &Weapons[Index] : nullptr;
-		ViewModel->SetStaticMesh(Gun ? Gun->ViewMesh.Get() : nullptr);
-		ActionInView->SetStaticMesh(Gun ? Gun->ActionMesh.Get() : nullptr);
+		SetViewMeshes(Gun);
 		SinceKickSeconds = 1000.0f; // a gun coming into view shows no kick (its cycle keeps its own clock)
 	};
 	// Per-play volume and pitch so repeated switches do not sound identical.
@@ -1096,12 +1093,14 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 		// Its rounds leave with it (review 19.10: they stayed in Ammo until the reload's end); a reload
 		// abandoned before the seat leaves the gun empty.
 		Weapon.Ammo = 0;
+		UpdateCounterAmmo();
 	}
 	if (!Weapon.ShellMesh && Crossed(PrevReloadTime, Time, Weapon.MagInSoundSeconds))
 	{
 		// The fresh magazine seated: the rounds count now, not at the reload's end - a switch after the seat keeps them.
 		const int32 Moved = FMath::Min(Weapon.MagazineSize - Weapon.Ammo, Weapon.Reserve);
 		Weapon.Ammo += Moved;
+		UpdateCounterAmmo();
 		Weapon.Reserve -= Moved;
 		Play(Weapon.MagInSound);
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s magazine in, %d/%d"), *GetNameSafe(GetOwner()), *Weapon.Name.ToString(), Weapon.Ammo, Weapon.Reserve);
@@ -1135,6 +1134,7 @@ void UJamWeaponsComponent::UpdatePartEvents(float DeltaTime)
 				&& Weapon.Ammo < Weapon.MagazineSize && Weapon.Reserve > 0)
 			{
 				++Weapon.Ammo;
+				UpdateCounterAmmo();
 				--Weapon.Reserve;
 				Play(Weapon.ShellInsertSound);
 				UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s round in, %d/%d"), *GetNameSafe(GetOwner()), *Weapon.Name.ToString(), Weapon.Ammo, Weapon.Reserve);

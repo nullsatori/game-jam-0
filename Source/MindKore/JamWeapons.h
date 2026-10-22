@@ -8,6 +8,7 @@
 
 class UAudioComponent;
 class UJamScopeComponent;
+class UJamNixieCounterComponent;
 class UMaterialInterface;
 class UMKImpactDataAsset;
 class USoundBase;
@@ -120,6 +121,10 @@ struct FJamWeapon
 	/** The gun seen in first person; none: nothing in hand. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|View")
 	TObjectPtr<UStaticMesh> ViewMesh = nullptr;
+
+	/** Optional Nixie material slot on ViewMesh; -1 leaves all materials untouched. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|View", meta = (ClampMin = "-1"))
+	int32 NixieMaterialSlot = INDEX_NONE;
 
 	/** Where ViewMesh sits relative to the camera (X forward, Y right, Z up). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|View")
@@ -618,6 +623,10 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	TObjectPtr<UStaticMeshComponent> ViewModel = nullptr;
 
+	/** Created only for a weapon opting into NixieMaterialSlot; fed by equip/shot/reload events. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
+	TObjectPtr<UJamNixieCounterComponent> AmmoCounter = nullptr;
+
 	/** The gun's moving part (FJamWeapon::ActionMesh), on ViewModel. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	TObjectPtr<UStaticMeshComponent> ActionInView = nullptr;
@@ -711,6 +720,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Jam|Weapons")
 	void UnlockWeapon(int32 Index);
 
+	/** Install a pickup's definition before UnlockWeapon. A fresh pickup starts with a full magazine. */
+	bool ApplyPickupWeapon(int32 Index, const FJamWeapon& Definition);
+
 	UFUNCTION(BlueprintPure, Category = "Jam|Weapons")
 	bool IsWeaponUnlocked(int32 Index) const { return Weapons.IsValidIndex(Index) && Weapons[Index].bUnlocked; }
 
@@ -796,6 +808,8 @@ private:
 	void UpdateRounds(float DeltaTime);
 	void UpdateRecoil(float DeltaTime);
 	void UpdateViewModel(float DeltaTime);
+	void SetViewMeshes(const FJamWeapon* Weapon);
+	void UpdateCounterAmmo();
 	/** Turn the owner's view by degrees in the view's own frame. */
 	void TurnView(float PitchDeg, float YawDeg) const;
 	/** The owner's hands hold the gun (AJamZeroGPawn::GetHands); an owner without hands always. */
@@ -902,3 +916,12 @@ private:
 	/** R pressed during the shot's cycle: the reload starts when it is through (a shot or a switch drops it). */
 	bool bReloadQueued = false;
 };
+
+/**
+ * The RMB-93 «Рысь» in the pump shotgun's slot (JamRmb93.cpp): built from the pump shotgun's
+ * definition with its own meshes, pump travel and Nixie counter. A pickup with Gun = Rmb93 puts it in.
+ */
+MINDKORE_API FJamWeapon JamMakeRmb93(const FJamWeapon& PumpShotgun);
+
+/** The RMB-93's sight line on the pump shotgun's aim (its springs kept). */
+MINDKORE_API FJamGunAim JamMakeRmb93Aim(const FJamGunAim& PumpAim);

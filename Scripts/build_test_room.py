@@ -20,7 +20,8 @@ and a back corridor. The stations sit along the partition and in the hall:
 The player is the game's one pawn (AJamZeroGPawn) under the ship's mode
 (AJamShipGameMode): a gravity zone over the room lets it walk, with the same
 controls as everywhere (F interacts, RMB grabs, Q/E roll); the three gun
-pickups stand by the start. World gravity stays normal for the props.
+pickups stand by the start, the RMB-93's on a stand beside them and a Nixie
+display by the partition (jam_nixie_test_room.py). World gravity stays normal for the props.
 
 Every number is centimetres. The script deletes an existing map first and
 asserts the editor world is the new one before it spawns anything (a failed
@@ -349,6 +350,11 @@ for path, loc, name in ((MK + "Household/BP_MK_Microwave", V(90, 430, 90), "Appl
     a = eas.spawn_actor_from_object(bp, loc, R(0))
     a.set_actor_label(name)
 label_text("8 APPLIANCES", V(120, 530, 200), 0)
+
+# Preserve the playable RMB93/Nixie station when regenerating this test map.
+import runpy
+from pathlib import Path
+runpy.run_path(str(Path(__file__).with_name('jam_nixie_test_room.py')))['place']()
 
 # --- save ---------------------------------------------------------------------------
 world = ues.get_editor_world()
