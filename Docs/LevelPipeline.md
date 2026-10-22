@@ -138,8 +138,8 @@ UnrealEditor-Cmd ... -ExecutePythonScript="Scripts/jam_level.py <карта> <м
 
 - Перед правкой карты — `git pull`, после — сохранить всё и закоммитить
   изменённые файлы акторов.
-- В README — одна строка настройки LFS для свежего клона:
-  `git config lfs.setlockablereadonly false`. Иначе все `.uasset` придут только
+- Настройка LFS для свежего клона — `Scripts/setup_git.ps1` (README), он же
+  задаёт `lfs.setlockablereadonly false`. Иначе все `.uasset` придут только
   для чтения (строка в README есть; `jam_build.save()` теперь падает с
   ошибкой вместо тихого несохранения).
 
