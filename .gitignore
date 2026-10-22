@@ -17,3 +17,18 @@ __pycache__/
 
 # Local planning scratchpad; shared tasks live on the board (Docs/Workflow.md).
 /Docs/Planning/MVP-Backlog.md
+
+# Art sources stay out of the repo (LFS quota, Docs/Development.md "Git LFS").
+# Keep them next to the checkout, e.g. ArtSource/; commit the exported .fbx/.png.
+*.blend
+*.blend1
+*.psd
+*.psb
+*.spp
+*.kra
+*.xcf
+*.ztl
+*.zpr
+*.max
+*.ma
+*.mb

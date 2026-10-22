@@ -33,7 +33,7 @@
 ## Открыть и запустить
 
 1. Установить UE 5.8, Visual Studio с C++ и Git LFS.
-2. Выполнить `git lfs install`; после клонирования в корне репозитория — `git config lfs.setlockablereadonly false`.
+2. После клонирования выполнить в PowerShell `.\Scripts\setup_git.ps1`: настроит Git LFS для клона.
 3. Открыть `MKJamStarter.uproject`, согласиться на сборку модуля и запустить стартовую карту.
 
 **Карту `Lvl_Jam_Ship` не пересобирать через `Scripts/build_ship.py`: он стирает ручную работу.** Правила работы с картами, LFS, командами сборки и MCP-плагинами — в [Development](Docs/Development.md).
