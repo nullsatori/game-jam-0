@@ -67,6 +67,9 @@ FJamWeapon JamMakeRmb93(const FJamWeapon& PumpShotgun)
 	// breech face and the barrel's end, lying along the bore, falling, tumbling end over end.
 	Gun.EjectPort = FVector(2.8f, 0.0f, -0.75f);
 	Gun.EjectSeconds = 0.26f;
+	// The counter drops with the pump's home (its double knock at 0.40 s): the next round leaves the tube for the
+	// chamber then, and the change plays after the flash, with the eye back on the gun.
+	Gun.CounterSeconds = 0.4f;
 	Gun.EjectVelocity = FVector(20.0f, -10.0f, -180.0f);
 	Gun.bEjectAlongBore = true;
 

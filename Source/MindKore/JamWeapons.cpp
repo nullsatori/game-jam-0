@@ -585,16 +585,27 @@ void UJamWeaponsComponent::SetViewMeshes(const FJamWeapon* Weapon)
 	}
 	ViewModel->SetStaticMesh(Weapon ? Weapon->ViewMesh.Get() : nullptr);
 	ActionInView->SetStaticMesh(Weapon ? Weapon->ActionMesh.Get() : nullptr);
+	bCounterPowerPending = false;
 	if (!Weapon || Weapon->NixieMaterialSlot < 0) return;
 	if (!AmmoCounter)
 	{
 		AmmoCounter = NewObject<UJamNixieCounterComponent>(GetOwner(), TEXT("WeaponAmmoCounter"));
 		AmmoCounter->MaterialSlots.Reset(); // Register/BeginPlay must not bind the pawn's root mesh.
 		AmmoCounter->RegisterComponent();
+		AmmoCounter->SetCounterEnabled(false); // made lit by default: dark until PowerCounter
 	}
 	AmmoCounter->SetDigit(Weapon->Ammo);
-	AmmoCounter->SetCounterEnabled(true);
 	AmmoCounter->BindMesh(ViewModel, { Weapon->NixieMaterialSlot });
+	// Dark until the draw brings it into frame (PowerCounter): the tube's warm-up plays where it is seen, not behind
+	// the shoulder (owner 22.10).
+	bCounterPowerPending = true;
+}
+
+void UJamWeaponsComponent::PowerCounter()
+{
+	if (!bCounterPowerPending || !AmmoCounter) return;
+	bCounterPowerPending = false;
+	AmmoCounter->SetCounterEnabled(true);
 }
 
 void UJamWeaponsComponent::UpdateCounterAmmo()
@@ -733,7 +744,10 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 		return false;
 	}
 	--Weapon->Ammo;
-	UpdateCounterAmmo();
+	if (Weapon->CounterSeconds <= 0.0f)
+	{
+		UpdateCounterAmmo(); // else with the cycle (UpdatePartEvents): the pump's home counts it off
+	}
 	// The last round: the empty magazine's follower lifts the slide stop, and this stroke ends locked open (SlideLockTravel).
 	Weapon->bSlideLocked = Weapon->Ammo == 0 && Weapon->CanLockOpen();
 	bReloadQueued = false; // the trigger won over a waiting R
