@@ -128,16 +128,17 @@ Editor-плагина. В git их нет (обе папки в `.gitignore`; д
 
 Сглаживание по умолчанию — DLAA: плагин NVIDIA DLSS при 100 % разрешения
 (блок `[SystemSettings]` в `Config/DefaultEngine.ini`, так же, как в MindKore).
-Плагина в git нет: с бинарниками он весит ~1,8 ГБ, это больше всей квоты LFS
+Плагина в git нет: с бинарниками он весит больше гигабайта, это больше всей квоты LFS
 (`Plugins/NVIDIA/` в `.gitignore`). В `.uproject` он помечен `Optional`:
 без плагина или на видеокарте не от NVIDIA проект работает на TSR в
 нативном разрешении.
 
 Установка, при закрытом редакторе:
 
-1. Скачать NVIDIA DLSS для UE 5.8 (версия 8.8.0, `8.8.0-NGX310.9.1`) с
-   [developer.nvidia.com/rtx/dlss/get-started](https://developer.nvidia.com/rtx/dlss/get-started)
-   или взять готовую папку из `MindKore/Plugins/NVIDIA`.
+1. Скачать NVIDIA DLSS для UE 5.8, версия 8.9.0 (`8.9.0-NGX310.9.16`, архив
+   `2026.10.16_ue5.8_dlss4.5plugin_v8.9.0.zip`, ~1,2 ГБ) с
+   [developer.nvidia.com/rtx/dlss](https://developer.nvidia.com/rtx/dlss).
+   В MindKore пока стоит 8.8.0, она тоже работает.
 2. Положить в `Plugins/NVIDIA/` папки `DLSS` и `StreamlineNGXCommon`
    (от него DLSS зависит). Остальные плагины архива (Streamline, NIS,
    генерация кадров) проекту не нужны. Файлы `.pdb` можно не копировать.
