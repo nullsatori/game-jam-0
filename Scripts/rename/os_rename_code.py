@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 APPLY = "--apply" in sys.argv
 SELF = Path(__file__).resolve()
 
-SKIP_PREFIXES = ("Docs/Archive/",)
+SKIP_PREFIXES = ("Docs/Archive/", "Scripts/rename/")
 ASSET_EXT = {".uasset", ".umap"}
 TEXT_EXT = {".cpp", ".h", ".inl", ".cs", ".py", ".ps1", ".bat", ".sh", ".ini", ".md", ".json",
             ".yml", ".yaml", ".txt", ".uproject", ".gitattributes", ".gitignore"}
