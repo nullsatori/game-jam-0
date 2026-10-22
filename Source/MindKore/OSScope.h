@@ -36,6 +36,49 @@ struct FOSAimSpring
 };
 
 /**
+ * One gun's pose in the attachment menu (Docs/Attachments.md, «Поза меню»): turned over in the hand so its left
+ * side and rail face the eye, the roll leading. On the same springs as the aim, which it excludes.
+ */
+USTRUCT(BlueprintType)
+struct FOSGunMenuPose
+{
+	GENERATED_BODY()
+
+	/** Where the gun's origin goes, camera frame (cm forward, right, up) - absolute, like the aim's end. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Menu")
+	FVector OffsetCm = FVector(22.0f, 11.0f, -7.0f);
+
+	/** Its turn from the rest pose: pitch, yaw, roll (degrees). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Menu")
+	FRotator Turn = FRotator(-12.0f, -25.0f, -50.0f);
+
+	/** In and out, per channel as FOSGunAim's (X, Y, Z, pitch, yaw, roll); Out empty: the aim's Out. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Menu")
+	TArray<FOSAimSpring> In;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Menu")
+	TArray<FOSAimSpring> Out;
+
+	/** The gun's own field of view in the menu's pose. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Menu", meta = (ClampMin = "10.0", ClampMax = "170.0"))
+	float GunFieldOfView = 95.0f;
+
+	/** The dip before it turns (cm down, s). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Menu", meta = (ClampMin = "0.0"))
+	float AnticipationCm = 0.6f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Menu", meta = (ClampMin = "0.0"))
+	float AnticipationSeconds = 0.05f;
+
+	/** The nod on a row change: the pose springs' kick (cm/s toward the eye is -X; deg/s). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Menu")
+	FVector RowKickMove = FVector(-6.0f, 0.0f, 0.0f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Menu")
+	FRotator RowKickTurn = FRotator(0.0f, 0.0f, 15.0f);
+};
+
+/**
  * One gun's way to the eye (owner 18.10: aim on every gun, «настолько же проработанное, как у снайперки по
  * анимации»): where its sight line is, how far behind it the eye sits, how the gun moves there and back.
  * Aimed, the line from SightRearCm to SightFrontCm lies on the view axis with the rear point EyeCm ahead.
@@ -96,6 +139,10 @@ struct FOSGunAim
 	/** Aimed, the gun breathes: a slow sway of this many degrees (pitch; yaw 0.6 of it) at ~0.23 / 0.15 Hz. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Aim", meta = (ClampMin = "0.0"))
 	float BreathDeg = 0.15f;
+
+	/** The attachment menu's pose (Tab held). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Menu")
+	FOSGunMenuPose Menu;
 };
 
 /**
@@ -264,11 +311,26 @@ public:
 	/** The pawn's RMB while a gun is out (AOSZeroGPawn::Use): aim as with the key. */
 	void SetAimHeld(bool bInHeld) { bHeldByHands = bInHeld; }
 
+	/** The attachment menu wants its pose (UOSAttachMenu): over the aim, which drops while it is held. */
+	void SetMenuHeld(bool bInHeld) { bMenuHeld = bInHeld; }
+
+	/** 0 at the hip .. 1 in the menu's pose. */
+	float GetMenuAlpha() const { return MenuAlpha; }
+
+	/** The menu's pose is what the springs head for now. */
+	bool IsMenuTarget() const { return Target == ETarget::Menu; }
+
 	/** The gun the springs are moving now (INDEX_NONE: none). */
 	int32 GetMotionWeapon() const { return bMoving ? MotionWeapon : INDEX_NONE; }
 
 	/** UOSWeaponsComponent: Weapon's rest pose in view moved toward the eye, and the share of its kick that stays. */
 	void AimPose(int32 Weapon, FTransform& Rest, float& KickScale) const;
+
+	/**
+	 * After AimPose: nothing more - the springs carry the aim and the menu's pose alike, AimPose already wrote them;
+	 * here only the kick's share for a gun in the menu's pose (none fires there). Kept beside AimPose as the brief's seam.
+	 */
+	void MenuPose(int32 Weapon, FTransform& Rest, float& KickScale) const;
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -279,8 +341,14 @@ private:
 	/** Capture, target and lens on the gun in view, once the weapons component has made it. */
 	bool Build();
 
-	/** Step the springs by DeltaTime toward the hip (bAim false) or the eye. */
-	void StepMotion(float DeltaTime, bool bAim);
+	/** Where the springs head: the hip, the eye, the menu's pose. */
+	enum class ETarget : uint8 { Rest, Aim, Menu };
+
+	/** Step the springs by DeltaTime toward the hip, the eye or the menu's pose. */
+	void StepMotion(float DeltaTime, ETarget Wanted);
+
+	/** The menu's pose end for MotionWeapon: its place and turn, as AimEnd's. */
+	void MenuEnd(FVector& OutPlace, FVector& OutTurn) const;
 
 	/** MotionWeapon's aimed pose: its place (cm) and its turn from the rest pose (pitch, yaw, roll, deg) in the camera's frame. */
 	void AimEnd(FVector& OutPlace, FVector& OutTurn) const;
@@ -299,6 +367,11 @@ private:
 
 	bool bHeld = false;
 	bool bHeldByHands = false;
+	bool bMenuHeld = false;
+	ETarget Target = ETarget::Rest;
+	/** The target before the last change (the way back from the menu takes the menu's Out springs). */
+	ETarget LeftTarget = ETarget::Rest;
+	float MenuAlpha = 0.0f;
 	/** The gun whose pose the springs hold. */
 	int32 MotionWeapon = INDEX_NONE;
 	float Alpha = 0.0f;

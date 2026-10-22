@@ -85,6 +85,32 @@ UOSScopeComponent::UOSScopeComponent()
 	Sniper.AnticipationSeconds = 0.09f;
 	Sniper.LookLag = 0.02f;
 	Sniper.BreathDeg = 0.12f;
+	// The attachment menu's pose (Docs/Attachments.md, «Поза меню»; first numbers, fitted on the PC's stills): the roll
+	// leads - the gun turns over in the palm, its left side and rail to the eye.
+	Pistol.Menu.OffsetCm = FVector(22.0f, 11.0f, -7.0f);
+	Pistol.Menu.Turn = FRotator(-12.0f, -25.0f, -50.0f);
+	Pistol.Menu.GunFieldOfView = 95.0f;
+	Pistol.Menu.In = { { 3.2f, 0.55f, 0.05f }, { 3.0f, 0.6f, 0.03f }, { 3.4f, 0.5f, 0.0f }, { 2.4f, 0.42f, 0.0f }, { 2.4f, 0.42f, 0.0f }, { 2.0f, 0.38f, 0.0f } };
+	Pistol.Menu.AnticipationCm = 0.6f;
+	Pistol.Menu.AnticipationSeconds = 0.05f;
+	Pistol.Menu.RowKickMove = FVector(-6.0f, 0.0f, 0.0f);
+	Pistol.Menu.RowKickTurn = FRotator(0.0f, 0.0f, 15.0f);
+	PumpGun.Menu.OffsetCm = FVector(20.0f, 13.0f, -9.0f);
+	PumpGun.Menu.Turn = FRotator(-8.0f, -18.0f, -40.0f);
+	PumpGun.Menu.GunFieldOfView = 85.0f;
+	PumpGun.Menu.In = { { 1.6f, 0.55f, 0.08f }, { 1.5f, 0.6f, 0.05f }, { 1.5f, 0.5f, 0.1f }, { 1.1f, 0.42f, 0.0f }, { 1.1f, 0.42f, 0.0f }, { 0.9f, 0.38f, 0.0f } };
+	PumpGun.Menu.AnticipationCm = 1.2f;
+	PumpGun.Menu.AnticipationSeconds = 0.1f;
+	PumpGun.Menu.RowKickMove = FVector(-4.0f, 0.0f, 0.0f);
+	PumpGun.Menu.RowKickTurn = FRotator(0.0f, 0.0f, 10.0f);
+	Sniper.Menu.OffsetCm = FVector(18.0f, 14.0f, -12.0f);
+	Sniper.Menu.Turn = FRotator(-6.0f, -14.0f, -30.0f);
+	Sniper.Menu.GunFieldOfView = 90.0f;
+	Sniper.Menu.In = { { 1.8f, 0.58f, 0.08f }, { 1.8f, 0.62f, 0.05f }, { 2.0f, 0.55f, 0.0f }, { 1.4f, 0.45f, 0.0f }, { 1.4f, 0.45f, 0.0f }, { 1.2f, 0.4f, 0.0f } };
+	Sniper.Menu.AnticipationCm = 1.0f;
+	Sniper.Menu.AnticipationSeconds = 0.08f;
+	Sniper.Menu.RowKickMove = FVector(-3.0f, 0.0f, 0.0f);
+	Sniper.Menu.RowKickTurn = FRotator(0.0f, 0.0f, 8.0f);
 	Aims = { Pistol, PumpGun, Sniper };
 	LensMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/Materials/Weapons/M_OS_ScopeLens.M_OS_ScopeLens")));
 	ReticleMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/Materials/Weapons/M_OS_ScopeReticle.M_OS_ScopeReticle")));
@@ -133,19 +159,50 @@ void UOSScopeComponent::AimEnd(FVector& OutPlace, FVector& OutTurn) const
 	OutTurn = FVector(Turned.Pitch, Turned.Yaw, Turned.Roll);
 }
 
-void UOSScopeComponent::StepMotion(float DeltaTime, bool bAim)
+void UOSScopeComponent::MenuEnd(FVector& OutPlace, FVector& OutTurn) const
+{
+	const FOSGunMenuPose& Menu = Aims[MotionWeapon].Menu;
+	OutPlace = Menu.OffsetCm;
+	OutTurn = FVector(Menu.Turn.Pitch, Menu.Turn.Yaw, Menu.Turn.Roll);
+}
+
+void UOSScopeComponent::MenuPose(int32 Weapon, FTransform& Rest, float& KickScale) const
+{
+	// The springs' pose is AimPose's for both ends; in the menu's pose no shot is fired, so the kick is the hip's.
+	if (Weapon == MotionWeapon && bMoving && MenuAlpha > 0.0f)
+	{
+		KickScale = FMath::Lerp(KickScale, 1.0f, MenuAlpha);
+	}
+}
+
+void UOSScopeComponent::StepMotion(float DeltaTime, ETarget Wanted)
 {
 	const FOSGunAim& Aim = Aims[MotionWeapon];
 	const FVector RestPlace = Weapons->Weapons[MotionWeapon].ViewOffset.GetTranslation();
-	FVector AimPlace, AimTurn;
+	FVector AimPlace, AimTurn, MenuPlace, MenuTurn;
 	AimEnd(AimPlace, AimTurn);
-	if (bAim != bAimTarget)
+	MenuEnd(MenuPlace, MenuTurn);
+	if (Wanted != Target)
 	{
-		bAimTarget = bAim;
+		LeftTarget = Target;
+		Target = Wanted;
 		SinceSwitch = 0.0f;
 	}
+	bAimTarget = Target == ETarget::Aim;
 	SinceSwitch += DeltaTime;
-	const TArray<FOSAimSpring>& Springs = bAimTarget ? Aim.In : Aim.Out;
+	const auto EndOf = [&](ETarget Of, FVector& OutPlace, FVector& OutTurn)
+	{
+		OutPlace = Of == ETarget::Aim ? AimPlace : Of == ETarget::Menu ? MenuPlace : RestPlace;
+		OutTurn = Of == ETarget::Aim ? AimTurn : Of == ETarget::Menu ? MenuTurn : FVector::ZeroVector;
+	};
+	FVector End, EndTurn, From, FromTurn;
+	EndOf(Target, End, EndTurn);
+	EndOf(LeftTarget, From, FromTurn);
+	// The springs of the way: into the aim or the menu their In; back to the hip the Out of where it was (the menu's, or the aim's when it has none).
+	const TArray<FOSAimSpring>& MenuIn = Aim.Menu.In.Num() >= 6 ? Aim.Menu.In : Aim.In;
+	const TArray<FOSAimSpring>& MenuOut = Aim.Menu.Out.Num() >= 6 ? Aim.Menu.Out : Aim.Out;
+	const TArray<FOSAimSpring>& Springs = Target == ETarget::Aim ? Aim.In : Target == ETarget::Menu ? MenuIn
+		: (LeftTarget == ETarget::Menu ? MenuOut : Aim.Out);
 	if (Springs.Num() < 6)
 	{
 		return;
@@ -154,19 +211,20 @@ void UOSScopeComponent::StepMotion(float DeltaTime, bool bAim)
 	FVector Goal;
 	for (int32 Axis = 0; Axis < 3; ++Axis)
 	{
-		const bool bGo = SinceSwitch >= Springs[Axis].Delay;
-		Goal[Axis] = (bGo == bAimTarget) ? AimPlace[Axis] : RestPlace[Axis];
+		Goal[Axis] = SinceSwitch >= Springs[Axis].Delay ? End[Axis] : From[Axis];
 	}
-	// Anticipation: a raise starts with a dip.
-	if (bAimTarget && SinceSwitch < Aim.AnticipationSeconds)
+	// Anticipation: a raise (or the turn into the menu) starts with a dip.
+	const float DipCm = Target == ETarget::Menu ? Aim.Menu.AnticipationCm : Aim.AnticipationCm;
+	const float DipSeconds = Target == ETarget::Menu ? Aim.Menu.AnticipationSeconds : Aim.AnticipationSeconds;
+	if (Target != ETarget::Rest && SinceSwitch < DipSeconds)
 	{
-		Goal.Z = FMath::Min(Goal.Z, Place.Z) - Aim.AnticipationCm;
+		Goal.Z = FMath::Min(Goal.Z, Place.Z) - DipCm;
 	}
 	// Aimed, it breathes: two slow, unrelated sines (pitch, yaw).
 	const float Now = GetWorld()->GetTimeSeconds();
 	const FVector Breath = bAimTarget ? Aim.BreathDeg * FVector(FMath::Sin(2.0f * PI * 0.23f * Now), 0.6f * FMath::Sin(2.0f * PI * 0.15f * Now + 1.3f), 0.0f)
 		: FVector::ZeroVector;
-	const FVector TurnEnd = (SinceSwitch >= Springs[3].Delay) == bAimTarget ? AimTurn : FVector::ZeroVector;
+	const FVector TurnEnd = SinceSwitch >= Springs[3].Delay ? EndTurn : FromTurn;
 	// x'' = w^2 (goal - x) - 2 zeta w x', semi-implicit Euler in steps of at most 4 ms (stable at the 4.4 Hz ends).
 	const int32 Steps = FMath::Clamp(FMath::CeilToInt(DeltaTime / 0.004f), 1, 32);
 	const float Dt = DeltaTime / Steps;
@@ -190,21 +248,26 @@ void UOSScopeComponent::StepMotion(float DeltaTime, bool bAim)
 		}
 	}
 	// Settled: snap exactly onto the end (the sight line on the axis to the micron), and at the hip stop.
-	const FVector End = bAimTarget ? AimPlace : RestPlace;
-	const FVector EndTurn = bAimTarget ? AimTurn : FVector::ZeroVector;
-	if (!bAimTarget && SinceSwitch > 0.2f && (Place - End).Size() < 0.01f && PlaceVelocity.Size() < 0.05f && (Turn - EndTurn).Size() < 0.01f
+	if (Target == ETarget::Rest && SinceSwitch > 0.2f && (Place - End).Size() < 0.01f && PlaceVelocity.Size() < 0.05f && (Turn - EndTurn).Size() < 0.01f
 		&& TurnVelocity.Size() < 0.05f && LookLagTurn.Size() < 0.01f)
 	{
 		Place = End;
 		Turn = EndTurn;
 		PlaceVelocity = TurnVelocity = FVector::ZeroVector;
-		bMoving = bAimTarget;
+		bMoving = false;
 	}
+	// How far along each way the gun is: the aim's share fades as the menu's grows (the two exclude each other).
 	const FVector Way = AimPlace - RestPlace;
-	Alpha = FMath::Clamp(FVector::DotProduct(Place - RestPlace, Way) / Way.SizeSquared(), 0.0f, 1.0f);
-	if (!bMoving && !bAimTarget)
+	const FVector MenuWay = MenuPlace - RestPlace;
+	MenuAlpha = MenuWay.SizeSquared() > 0.01f ? FMath::Clamp(FVector::DotProduct(Place - RestPlace, MenuWay) / MenuWay.SizeSquared(), 0.0f, 1.0f) : 0.0f;
+	if (Target != ETarget::Menu && LeftTarget != ETarget::Menu)
 	{
-		Alpha = 0.0f;
+		MenuAlpha = 0.0f;
+	}
+	Alpha = FMath::Clamp(FVector::DotProduct(Place - RestPlace, Way) / Way.SizeSquared(), 0.0f, 1.0f) * (1.0f - MenuAlpha);
+	if (!bMoving && Target == ETarget::Rest)
+	{
+		Alpha = MenuAlpha = 0.0f;
 	}
 }
 
@@ -344,8 +407,12 @@ void UOSScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 	const int32 Shown = Weapons->GetShownWeapon();
 	const bool bGunInView = Weapons->Weapons.IsValidIndex(Shown) && Aims.IsValidIndex(Shown);
 	const bool bScopeInView = bGunInView && Shown == ScopedWeapon;
-	const bool bWants = (bHeld || bHeldByHands) && bGunInView && Shown == Weapons->CurrentWeapon
+	// The attachment menu's pose (Tab held, a module on its way, a magazine being swapped) wins over the aim.
+	const bool bMenu = bMenuHeld && bGunInView && Shown == Weapons->CurrentWeapon && Weapons->GetWeapon();
+	const bool bWants = !bMenu && (bHeld || bHeldByHands) && bGunInView && Shown == Weapons->CurrentWeapon
 		&& Weapons->GetWeapon() && Weapons->GetReloadRemaining() <= 0.0f;
+	const ETarget Wanted = bMenu ? ETarget::Menu : bWants ? ETarget::Aim : ETarget::Rest;
+	const float WasMenuAlpha = MenuAlpha;
 	const float WasAlpha = Alpha;
 	// The body's velocity change this frame, in the camera's frame: the gun's inertia sways it the other way.
 	const FVector BodyVelocity = GetOwner()->GetVelocity();
@@ -363,12 +430,13 @@ void UOSScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 	{
 		// No gun, or another one: it starts from its rest pose.
 		bMoving = bAimTarget = false;
-		Alpha = 0.0f;
+		Target = LeftTarget = ETarget::Rest;
+		Alpha = MenuAlpha = 0.0f;
 		MotionWeapon = bGunInView ? Shown : INDEX_NONE;
 	}
 	if (bGunInView)
 	{
-		if (!bMoving && (bWants || BodyChange.Size() * SwayPerBodyVelocity > 0.5f || LookLagTurn.Size() > 0.2f))
+		if (!bMoving && (bWants || bMenu || BodyChange.Size() * SwayPerBodyVelocity > 0.5f || LookLagTurn.Size() > 0.2f))
 		{
 			bMoving = true;
 			Place = Weapons->Weapons[Shown].ViewOffset.GetTranslation();
@@ -377,7 +445,7 @@ void UOSScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 		if (bMoving)
 		{
 			PlaceVelocity -= (BodyChange * SwayPerBodyVelocity).GetClampedToMaxSize(MaxSwayCmPerSec);
-			StepMotion(DeltaTime, bWants);
+			StepMotion(DeltaTime, Wanted);
 		}
 	}
 	if (CVarScopeTrace.GetValueOnGameThread() && bMoving)
@@ -400,13 +468,15 @@ void UOSScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 		// The bodycam's field and the gun's aim are live (the debug menu edits them): the eyepiece follows.
 		Capture->FOVAngle = GetCaptureFieldOfView();
 	}
-	if (Alpha > 0.0f || WasAlpha > 0.0f)
+	if (Alpha > 0.0f || WasAlpha > 0.0f || MenuAlpha > 0.0f || WasMenuAlpha > 0.0f)
 	{
 		// The world keeps the bodycam's field (owner: no zoom outside the scope);
-		// only the gun narrows its own, coming up large to the eye.
+		// only the gun narrows its own, coming up large to the eye - or in the menu's pose.
 		const float WorldFieldOfView = Camera->FieldOfView;
-		Camera->SetEnableFirstPersonFieldOfView(Alpha > 0.0f);
-		Camera->SetFirstPersonFieldOfView(FMath::Lerp(WorldFieldOfView, Aims.IsValidIndex(MotionWeapon) ? Aims[MotionWeapon].GunFieldOfView : WorldFieldOfView, Alpha));
+		const float AimField = Aims.IsValidIndex(MotionWeapon) ? Aims[MotionWeapon].GunFieldOfView : WorldFieldOfView;
+		const float MenuField = Aims.IsValidIndex(MotionWeapon) ? Aims[MotionWeapon].Menu.GunFieldOfView : WorldFieldOfView;
+		Camera->SetEnableFirstPersonFieldOfView(Alpha > 0.0f || MenuAlpha > 0.0f);
+		Camera->SetFirstPersonFieldOfView(WorldFieldOfView + (AimField - WorldFieldOfView) * Alpha + (MenuField - WorldFieldOfView) * MenuAlpha);
 	}
 	if (LensMID && bScopeInView)
 	{
