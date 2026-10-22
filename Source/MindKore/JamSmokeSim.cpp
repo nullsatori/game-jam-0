@@ -19,6 +19,46 @@ void FJamSmokeSim::Reset(int32 InN, float InCellCm, bool bInAir, const FVector3f
 	}
 	Solid.SetNumZeroed(Count);
 	FMemory::Memzero(Solid.GetData(), Count);
+	Lo = FIntVector(0);
+	Hi = FIntVector(-1);
+}
+
+void FJamSmokeSim::UpdateBox()
+{
+	// The cells with gas or heat, by slice; then their bounds grown by Margin cells: every step works only there.
+	constexpr int32 Margin = 4;
+	TArray<FIntVector4, TInlineAllocator<64>> SliceLo, SliceHi;
+	SliceLo.Init(FIntVector4(N, N, N, 0), N);
+	SliceHi.Init(FIntVector4(-1, -1, -1, 0), N);
+	ParallelFor(N, [&](int32 Z)
+	{
+		for (int32 Y = 0; Y < N; ++Y)
+		{
+			for (int32 X = 0; X < N; ++X)
+			{
+				const int32 I = Index(X, Y, Z);
+				if (Rho[I] > 0.002f || Heat[I] > 0.005f)
+				{
+					SliceLo[Z] = FIntVector4(FMath::Min(SliceLo[Z].X, X), FMath::Min(SliceLo[Z].Y, Y), FMath::Min(SliceLo[Z].Z, Z), 0);
+					SliceHi[Z] = FIntVector4(FMath::Max(SliceHi[Z].X, X), FMath::Max(SliceHi[Z].Y, Y), FMath::Max(SliceHi[Z].Z, Z), 0);
+				}
+			}
+		}
+	});
+	FIntVector L(N), H(-1);
+	for (int32 Z = 0; Z < N; ++Z)
+	{
+		L = FIntVector(FMath::Min(L.X, SliceLo[Z].X), FMath::Min(L.Y, SliceLo[Z].Y), FMath::Min(L.Z, SliceLo[Z].Z));
+		H = FIntVector(FMath::Max(H.X, SliceHi[Z].X), FMath::Max(H.Y, SliceHi[Z].Y), FMath::Max(H.Z, SliceHi[Z].Z));
+	}
+	if (H.X < 0)
+	{
+		Lo = FIntVector(0);
+		Hi = FIntVector(-1);
+		return;
+	}
+	Lo = FIntVector(FMath::Max(L.X - Margin, 0), FMath::Max(L.Y - Margin, 0), FMath::Max(L.Z - Margin, 0));
+	Hi = FIntVector(FMath::Min(H.X + Margin, N - 1), FMath::Min(H.Y + Margin, N - 1), FMath::Min(H.Z + Margin, N - 1));
 }
 
 void FJamSmokeSim::RebuildSolids()
@@ -147,20 +187,13 @@ void FJamSmokeSim::Confine(float Dt, float Epsilon)
 	const float Inv2 = 0.5f / CellCm;
 	const auto At = [this](int32 X, int32 Y, int32 Z) { return Index(FMath::Clamp(X, 0, N - 1), FMath::Clamp(Y, 0, N - 1), FMath::Clamp(Z, 0, N - 1)); };
 	// omega = curl U (central differences), and its magnitude: the churn the material shows.
-	ParallelFor(N, [&](int32 Z)
+	ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 	{
-		for (int32 Y = 0; Y < N; ++Y)
-		{
-			for (int32 X = 0; X < N; ++X)
-			{
-				const int32 I = Index(X, Y, Z);
-				const int32 XP = At(X + 1, Y, Z), XM = At(X - 1, Y, Z), YP = At(X, Y + 1, Z), YM = At(X, Y - 1, Z), ZP = At(X, Y, Z + 1), ZM = At(X, Y, Z - 1);
-				Wx[I] = ((Uz[YP] - Uz[YM]) - (Uy[ZP] - Uy[ZM])) * Inv2;
-				Wy[I] = ((Ux[ZP] - Ux[ZM]) - (Uz[XP] - Uz[XM])) * Inv2;
-				Wz[I] = ((Uy[XP] - Uy[XM]) - (Ux[YP] - Ux[YM])) * Inv2;
-				Curl[I] = FMath::Sqrt(Wx[I] * Wx[I] + Wy[I] * Wy[I] + Wz[I] * Wz[I]);
-			}
-		}
+		const int32 XP = At(X + 1, Y, Z), XM = At(X - 1, Y, Z), YP = At(X, Y + 1, Z), YM = At(X, Y - 1, Z), ZP = At(X, Y, Z + 1), ZM = At(X, Y, Z - 1);
+		Wx[I] = ((Uz[YP] - Uz[YM]) - (Uy[ZP] - Uy[ZM])) * Inv2;
+		Wy[I] = ((Ux[ZP] - Ux[ZM]) - (Uz[XP] - Uz[XM])) * Inv2;
+		Wz[I] = ((Uy[XP] - Uy[XM]) - (Ux[YP] - Ux[YM])) * Inv2;
+		Curl[I] = FMath::Sqrt(Wx[I] * Wx[I] + Wy[I] * Wy[I] + Wz[I] * Wz[I]);
 	});
 	if (Epsilon <= 0.0f)
 	{
@@ -168,100 +201,77 @@ void FJamSmokeSim::Confine(float Dt, float Epsilon)
 	}
 	// Fedkiw: f = eps h (normalize(grad |omega|) x omega).
 	const float Scale = Epsilon * CellCm * Dt;
-	ParallelFor(N, [&](int32 Z)
+	ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 	{
-		for (int32 Y = 0; Y < N; ++Y)
+		if (Solid[I])
 		{
-			for (int32 X = 0; X < N; ++X)
-			{
-				const int32 I = Index(X, Y, Z);
-				if (Solid[I])
-				{
-					continue;
-				}
-				FVector3f Eta((Curl[At(X + 1, Y, Z)] - Curl[At(X - 1, Y, Z)]), (Curl[At(X, Y + 1, Z)] - Curl[At(X, Y - 1, Z)]), (Curl[At(X, Y, Z + 1)] - Curl[At(X, Y, Z - 1)]));
-				const float Len = Eta.Size();
-				if (Len < 1e-5f)
-				{
-					continue;
-				}
-				Eta /= Len;
-				const FVector3f F = (Eta ^ FVector3f(Wx[I], Wy[I], Wz[I])) * Scale;
-				Ux[I] += F.X;
-				Uy[I] += F.Y;
-				Uz[I] += F.Z;
-			}
+			return;
 		}
+		FVector3f Eta((Curl[At(X + 1, Y, Z)] - Curl[At(X - 1, Y, Z)]), (Curl[At(X, Y + 1, Z)] - Curl[At(X, Y - 1, Z)]), (Curl[At(X, Y, Z + 1)] - Curl[At(X, Y, Z - 1)]));
+		const float Len = Eta.Size();
+		if (Len < 1e-5f)
+		{
+			return;
+		}
+		Eta /= Len;
+		const FVector3f F = (Eta ^ FVector3f(Wx[I], Wy[I], Wz[I])) * Scale;
+		Ux[I] += F.X;
+		Uy[I] += F.Y;
+		Uz[I] += F.Z;
 	});
 }
 
 void FJamSmokeSim::Advect(float Dt)
 {
 	const float Cells = Dt / CellCm;
-	ParallelFor(N, [&](int32 Z)
+	ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 	{
-		for (int32 Y = 0; Y < N; ++Y)
+		if (Solid[I])
 		{
-			for (int32 X = 0; X < N; ++X)
-			{
-				const int32 I = Index(X, Y, Z);
-				if (Solid[I])
-				{
-					T0[I] = T1[I] = T2[I] = T3[I] = T4[I] = 0.0f;
-					continue;
-				}
-				const FVector3f From = FVector3f(X, Y, Z) - FVector3f(Ux[I], Uy[I], Uz[I]) * Cells;
-				T0[I] = Sample(Ux, From);
-				T1[I] = Sample(Uy, From);
-				T2[I] = Sample(Uz, From);
-				T3[I] = Sample(Rho, From);
-				T4[I] = Sample(Heat, From);
-				// The density's limits where it came from (MacCormack's clamp below).
-				const int32 X0 = FMath::Clamp(int32(From.X), 0, N - 2), Y0 = FMath::Clamp(int32(From.Y), 0, N - 2), Z0 = FMath::Clamp(int32(From.Z), 0, N - 2);
-				float Lo = Rho[Index(X0, Y0, Z0)], Hi = Lo;
-				for (int32 C = 1; C < 8; ++C)
-				{
-					const float V = Rho[Index(X0 + (C & 1), Y0 + ((C >> 1) & 1), Z0 + (C >> 2))];
-					Lo = FMath::Min(Lo, V);
-					Hi = FMath::Max(Hi, V);
-				}
-				Wx[I] = Lo;
-				Wy[I] = Hi;
-			}
+			T0[I] = T1[I] = T2[I] = T3[I] = T4[I] = 0.0f;
+			return;
 		}
+		const FVector3f From = FVector3f(X, Y, Z) - FVector3f(Ux[I], Uy[I], Uz[I]) * Cells;
+		T0[I] = Sample(Ux, From);
+		T1[I] = Sample(Uy, From);
+		T2[I] = Sample(Uz, From);
+		T3[I] = Sample(Rho, From);
+		T4[I] = Sample(Heat, From);
+		// The density's limits where it came from (MacCormack's clamp below).
+		const int32 X0 = FMath::Clamp(int32(From.X), 0, N - 2), Y0 = FMath::Clamp(int32(From.Y), 0, N - 2), Z0 = FMath::Clamp(int32(From.Z), 0, N - 2);
+		float L = Rho[Index(X0, Y0, Z0)], H = L;
+		for (int32 C = 1; C < 8; ++C)
+		{
+			const float V = Rho[Index(X0 + (C & 1), Y0 + ((C >> 1) & 1), Z0 + (C >> 2))];
+			L = FMath::Min(L, V);
+			H = FMath::Max(H, V);
+		}
+		Wx[I] = L;
+		Wy[I] = H;
 	});
 	// MacCormack for the density only: trace the advected field back, take half the round trip's error off, clamp
 	// to where it came from. Semi-Lagrangian alone smears a 4 cm grid into a ball within a second; this keeps rims.
-	ParallelFor(N, [&](int32 Z)
+	// (Outside the working box T3 is stale, but the trace back stays within its margin: at most ~3 cells a step.)
+	ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 	{
-		for (int32 Y = 0; Y < N; ++Y)
-		{
-			for (int32 X = 0; X < N; ++X)
-			{
-				const int32 I = Index(X, Y, Z);
-				Wz[I] = Solid[I] ? 0.0f : Sample(T3, FVector3f(X, Y, Z) + FVector3f(Ux[I], Uy[I], Uz[I]) * Cells);
-			}
-		}
+		Wz[I] = Solid[I] ? 0.0f : Sample(T3, FVector3f(X, Y, Z) + FVector3f(Ux[I], Uy[I], Uz[I]) * Cells);
 	});
-	ParallelFor(N, [&](int32 Z)
+	// Back into the fields, the working box only (outside it nothing moved).
+	ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 	{
-		for (int32 I = Z * N * N, End = I + N * N; I < End; ++I)
-		{
-			T3[I] = Solid[I] ? 0.0f : FMath::Clamp(T3[I] + 0.5f * (Rho[I] - Wz[I]), Wx[I], Wy[I]);
-		}
+		Ux[I] = T0[I];
+		Uy[I] = T1[I];
+		Uz[I] = T2[I];
+		Rho[I] = Solid[I] ? 0.0f : FMath::Clamp(T3[I] + 0.5f * (Rho[I] - Wz[I]), Wx[I], Wy[I]);
+		Heat[I] = T4[I];
 	});
-	Swap(Ux, T0);
-	Swap(Uy, T1);
-	Swap(Uz, T2);
-	Swap(Rho, T3);
-	Swap(Heat, T4);
 }
 
 void FJamSmokeSim::Project(float Swell)
 {
 	const float H = CellCm;
 	const float Inv2 = 0.5f / H;
-	// A neighbour's velocity for the divergence: a solid's is 0, outside the box the cell's own (the gas leaves freely).
+	// A neighbour's velocity for the divergence: a solid's is 0, outside the grid the cell's own (the gas leaves freely).
 	const auto Vel = [this](const TArray<float>& U, int32 I, int32 X, int32 Y, int32 Z)
 	{
 		if (X < 0 || Y < 0 || Z < 0 || X >= N || Y >= N || Z >= N)
@@ -272,29 +282,24 @@ void FJamSmokeSim::Project(float Swell)
 		return Solid[J] ? 0.0f : U[J];
 	};
 	// Hot gas swells: a volume source in the divergence (Lap P = div U - S), so the slug blooms instead of sliding as a blob.
-	ParallelFor(N, [&](int32 Z)
+	ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 	{
-		for (int32 Y = 0; Y < N; ++Y)
-		{
-			for (int32 X = 0; X < N; ++X)
-			{
-				const int32 I = Index(X, Y, Z);
-				Div[I] = Solid[I] ? 0.0f
-					: (Vel(Ux, I, X + 1, Y, Z) - Vel(Ux, I, X - 1, Y, Z) + Vel(Uy, I, X, Y + 1, Z) - Vel(Uy, I, X, Y - 1, Z) + Vel(Uz, I, X, Y, Z + 1) - Vel(Uz, I, X, Y, Z - 1)) * Inv2
-						- Swell * Heat[I];
-			}
-		}
+		Div[I] = Solid[I] ? 0.0f
+			: (Vel(Ux, I, X + 1, Y, Z) - Vel(Ux, I, X - 1, Y, Z) + Vel(Uy, I, X, Y + 1, Z) - Vel(Uy, I, X, Y - 1, Z) + Vel(Uz, I, X, Y, Z + 1) - Vel(Uz, I, X, Y, Z - 1)) * Inv2
+				- Swell * Heat[I];
 	});
-	// Red-black Gauss-Seidel, warm-started from the last step's pressure. A solid neighbour mirrors the cell
-	// (no flow through it), outside the box the pressure is 0 (open faces).
+	// Red-black Gauss-Seidel over the working box, warm-started from the last step's pressure. A solid neighbour
+	// mirrors the cell (no flow through it), outside the grid the pressure is 0 (open faces); past the working box
+	// the last pressure there stands as the boundary.
 	for (int32 Sweep = 0; Sweep < 2 * Jacobi; ++Sweep)
 	{
 		const int32 Colour = Sweep & 1;
-		ParallelFor(N, [&](int32 Z)
+		ParallelFor(Hi.Z - Lo.Z + 1, [&](int32 K)
 		{
-			for (int32 Y = 0; Y < N; ++Y)
+			const int32 Z = Lo.Z + K;
+			for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
 			{
-				for (int32 X = (Y + Z + Colour) & 1; X < N; X += 2)
+				for (int32 X = Lo.X + ((Lo.X + Y + Z + Colour) & 1); X <= Hi.X; X += 2)
 				{
 					const int32 I = Index(X, Y, Z);
 					if (Solid[I])
@@ -327,29 +332,22 @@ void FJamSmokeSim::Project(float Swell)
 		const int32 J = Index(X, Y, Z);
 		return Solid[J] ? P[I] : P[J];
 	};
-	ParallelFor(N, [&](int32 Z)
+	ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 	{
-		for (int32 Y = 0; Y < N; ++Y)
+		if (Solid[I])
 		{
-			for (int32 X = 0; X < N; ++X)
-			{
-				const int32 I = Index(X, Y, Z);
-				if (Solid[I])
-				{
-					continue;
-				}
-				Ux[I] -= (Pr(I, X + 1, Y, Z) - Pr(I, X - 1, Y, Z)) * Inv2;
-				Uy[I] -= (Pr(I, X, Y + 1, Z) - Pr(I, X, Y - 1, Z)) * Inv2;
-				Uz[I] -= (Pr(I, X, Y, Z + 1) - Pr(I, X, Y, Z - 1)) * Inv2;
-				// Nothing flows into a solid (it may leave it: the gas lifts off the floor freely).
-				if (X + 1 < N && IsSolid(X + 1, Y, Z)) { Ux[I] = FMath::Min(Ux[I], 0.0f); }
-				if (X > 0 && IsSolid(X - 1, Y, Z)) { Ux[I] = FMath::Max(Ux[I], 0.0f); }
-				if (Y + 1 < N && IsSolid(X, Y + 1, Z)) { Uy[I] = FMath::Min(Uy[I], 0.0f); }
-				if (Y > 0 && IsSolid(X, Y - 1, Z)) { Uy[I] = FMath::Max(Uy[I], 0.0f); }
-				if (Z + 1 < N && IsSolid(X, Y, Z + 1)) { Uz[I] = FMath::Min(Uz[I], 0.0f); }
-				if (Z > 0 && IsSolid(X, Y, Z - 1)) { Uz[I] = FMath::Max(Uz[I], 0.0f); }
-			}
+			return;
 		}
+		Ux[I] -= (Pr(I, X + 1, Y, Z) - Pr(I, X - 1, Y, Z)) * Inv2;
+		Uy[I] -= (Pr(I, X, Y + 1, Z) - Pr(I, X, Y - 1, Z)) * Inv2;
+		Uz[I] -= (Pr(I, X, Y, Z + 1) - Pr(I, X, Y, Z - 1)) * Inv2;
+		// Nothing flows into a solid (it may leave it: the gas lifts off the floor freely).
+		if (X + 1 < N && IsSolid(X + 1, Y, Z)) { Ux[I] = FMath::Min(Ux[I], 0.0f); }
+		if (X > 0 && IsSolid(X - 1, Y, Z)) { Ux[I] = FMath::Max(Ux[I], 0.0f); }
+		if (Y + 1 < N && IsSolid(X, Y + 1, Z)) { Uy[I] = FMath::Min(Uy[I], 0.0f); }
+		if (Y > 0 && IsSolid(X, Y - 1, Z)) { Uy[I] = FMath::Max(Uy[I], 0.0f); }
+		if (Z + 1 < N && IsSolid(X, Y, Z + 1)) { Uz[I] = FMath::Min(Uz[I], 0.0f); }
+		if (Z > 0 && IsSolid(X, Y, Z - 1)) { Uz[I] = FMath::Max(Uz[I], 0.0f); }
 	});
 }
 
@@ -383,24 +381,17 @@ void FJamSmokeSim::Churn(float Dt, float Amount)
 	}
 	// Only where there is heat (the fresh gas; nothing once it has cooled), a lattice of ~3 cells drifting with time.
 	const FVector3f Drift(Time * 0.9f, Time * -0.7f, Time * 0.5f);
-	ParallelFor(N, [&](int32 Z)
+	ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 	{
-		for (int32 Y = 0; Y < N; ++Y)
+		if (Heat[I] < 0.02f || Solid[I])
 		{
-			for (int32 X = 0; X < N; ++X)
-			{
-				const int32 I = Index(X, Y, Z);
-				if (Heat[I] < 0.02f || Solid[I])
-				{
-					continue;
-				}
-				const FVector3f P = FVector3f(X, Y, Z) / 2.5f + Drift;
-				const float S = Amount * Heat[I] * Dt;
-				Ux[I] += S * SmokeNoise(P, NoiseSeed);
-				Uy[I] += S * SmokeNoise(P, NoiseSeed ^ 0x9E3779B9u);
-				Uz[I] += S * SmokeNoise(P, NoiseSeed ^ 0x85EBCA6Bu);
-			}
+			return;
 		}
+		const FVector3f Pos = FVector3f(X, Y, Z) / 2.5f + Drift;
+		const float S = Amount * Heat[I] * Dt;
+		Ux[I] += S * SmokeNoise(Pos, NoiseSeed);
+		Uy[I] += S * SmokeNoise(Pos, NoiseSeed ^ 0x9E3779B9u);
+		Uz[I] += S * SmokeNoise(Pos, NoiseSeed ^ 0x85EBCA6Bu);
 	});
 }
 
@@ -408,23 +399,27 @@ void FJamSmokeSim::Step(float Dt, float Age, const FJamSmokeParams& K)
 {
 	Jacobi = K.Jacobi;
 	Time += Dt;
+	// Every pass works in the box around the gas and its heat (plus a margin), not the whole grid.
+	UpdateBox();
+	if (Hi.X < Lo.X)
+	{
+		return;
+	}
 	// 1. Forces. Air: hot gas rises against Down and the air takes the gas's own motion. A vacuum: nothing acts.
 	if (bAir)
 	{
 		const float Drag = FMath::Exp(-Dt / K.DragSeconds);
 		const FVector3f Lift = -Down * (K.Buoyancy * Dt);
-		ParallelFor(N, [&](int32 Z)
+		ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 		{
-			for (int32 I = Z * N * N, End = I + N * N; I < End; ++I)
-			{
-				Ux[I] = (Ux[I] + Lift.X * Heat[I]) * Drag;
-				Uy[I] = (Uy[I] + Lift.Y * Heat[I]) * Drag;
-				Uz[I] = (Uz[I] + Lift.Z * Heat[I]) * Drag;
-			}
+			Ux[I] = (Ux[I] + Lift.X * Heat[I]) * Drag;
+			Uy[I] = (Uy[I] + Lift.Y * Heat[I]) * Drag;
+			Uz[I] = (Uz[I] + Lift.Z * Heat[I]) * Drag;
 		});
+		// The fresh gas churns (air only: without the pressure solve the push is divergent, and the advected
+		// density would swell with it).
+		Churn(Dt, K.Turbulence);
 	}
-	// The fresh gas churns (in a vacuum too: its own turbulence, frozen in as it flies apart).
-	Churn(Dt, K.Turbulence);
 	// 2. The curls the coarse grid would smear (no pressure feeds them in a vacuum: half).
 	Confine(Dt, bAir ? K.Vorticity : K.Vorticity * 0.5f);
 	// 3. Everything rides the velocity (the velocity itself too: free-streaming in a vacuum).
@@ -437,18 +432,11 @@ void FJamSmokeSim::Step(float Dt, float Age, const FJamSmokeParams& K)
 	// 5. Dissipation; the outer two cells bleed (a soft open boundary: nothing drawn at the box faces).
 	const float Decay = FMath::Exp(-Dt * K.DecayPerSecond);
 	const float Cool = FMath::Exp(-Dt / K.HeatSeconds);
-	ParallelFor(N, [&](int32 Z)
+	ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 	{
-		for (int32 Y = 0; Y < N; ++Y)
-		{
-			for (int32 X = 0; X < N; ++X)
-			{
-				const int32 I = Index(X, Y, Z);
-				const bool bEdge = FMath::Min3(FMath::Min(X, N - 1 - X), FMath::Min(Y, N - 1 - Y), FMath::Min(Z, N - 1 - Z)) < 2;
-				Rho[I] *= bEdge ? Decay * 0.5f : Decay;
-				Heat[I] *= Cool;
-			}
-		}
+		const bool bEdge = FMath::Min3(FMath::Min(X, N - 1 - X), FMath::Min(Y, N - 1 - Y), FMath::Min(Z, N - 1 - Z)) < 2;
+		Rho[I] *= bEdge ? Decay * 0.5f : Decay;
+		Heat[I] *= Cool;
 	});
 }
 
@@ -544,11 +532,22 @@ void FJamSmokeSim::Stats(float& OutMeanSpeed, float& OutMaxHeat) const
 	OutMeanSpeed = Mass > 1e-4 ? float(Speed / Mass) : 0.0f;
 }
 
-void FJamSmokeSim::Pack(TArray<FColor>& Out) const
+void FJamSmokeSim::Pack(TArray<FColor>& Out, const FVector3f& Up, float Occlusion) const
 {
 	const FIntPoint Size = AtlasSize(N);
 	Out.SetNumZeroed(Size.X * Size.Y);
 	const auto Byte = [](float V) { return uint8(FMath::Clamp(FMath::RoundToInt(V * 255.0f), 0, 255)); };
+	const auto At = [this](const FIntVector& Q) { return Rho[Index(FMath::Clamp(Q.X, 0, N - 1), FMath::Clamp(Q.Y, 0, N - 1), FMath::Clamp(Q.Z, 0, N - 1))]; };
+	// The ambient's shadow per voxel (the material's room light the volume does not get): the gas above it (toward
+	// Up, 1 to 7 cells) and around it (2 cells each way). Worked out here once per voxel instead of per ray step.
+	const float Steps[4] = { 1.0f, 2.0f, 4.0f, 7.0f };
+	const float Weights[4] = { 1.0f, 1.0f, 1.5f, 2.0f };
+	FIntVector UpCells[4];
+	for (int32 S = 0; S < 4; ++S)
+	{
+		const FVector3f U = Up * Steps[S];
+		UpCells[S] = FIntVector(FMath::RoundToInt(U.X), FMath::RoundToInt(U.Y), FMath::RoundToInt(U.Z));
+	}
 	ParallelFor(N, [&](int32 Z)
 	{
 		const int32 OX = (Z % 8) * N, OY = (Z / 8) * N;
@@ -557,7 +556,20 @@ void FJamSmokeSim::Pack(TArray<FColor>& Out) const
 			for (int32 X = 0; X < N; ++X)
 			{
 				const int32 I = Index(X, Y, Z);
-				Out[(OY + Y) * Size.X + OX + X] = FColor(Byte(Rho[I]), Byte(Heat[I]), Byte(Curl[I] / 40.0f), Solid[I] ? 255 : 0);
+				float Lit = 1.0f;
+				if (Rho[I] > 0.004f)
+				{
+					const FIntVector C(X, Y, Z);
+					float Above = 0.0f;
+					for (int32 S = 0; S < 4; ++S)
+					{
+						Above += At(C + UpCells[S]) * Weights[S];
+					}
+					const float Around = At(C + FIntVector(2, 0, 0)) + At(C - FIntVector(2, 0, 0)) + At(C + FIntVector(0, 2, 0))
+						+ At(C - FIntVector(0, 2, 0)) + At(C + FIntVector(0, 0, 2)) + At(C - FIntVector(0, 0, 2));
+					Lit = FMath::Exp(-Occlusion * (Above + 0.25f * Around));
+				}
+				Out[(OY + Y) * Size.X + OX + X] = FColor(Byte(Rho[I]), Byte(Heat[I]), Byte(Lit), Byte(Curl[I] / 40.0f));
 			}
 		}
 	});

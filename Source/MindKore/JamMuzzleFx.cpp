@@ -1,4 +1,4 @@
-#include "JamMuzzleFx.h"
+﻿#include "JamMuzzleFx.h"
 
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
@@ -155,9 +155,9 @@ UJamMuzzleFxComponent::UJamMuzzleFxComponent()
 		Gun.RoundAlongCm = RoundAlong;
 		Gun.CloudSeconds = Seconds;
 	};
-	Cloud(Pistol, 20, 3.0f, 10.0f, 7.0f, 450.0f, 40.0f, 0.12f, 220.0f, 0.5f, 0.3f, 0.35f, 0.05f, 10, 2.0f, 1.0f, 6.0f, 100.0f, 160.0f, 4.0f);
-	Cloud(Shotgun, 32, 4.0f, 22.0f, 16.0f, 600.0f, 90.0f, 0.14f, 260.0f, 0.6f, 0.4f, 0.5f, 0.03f, 12, 3.0f, 1.2f, 10.0f, 140.0f, 220.0f, 6.0f);
-	Cloud(Sniper, 28, 3.5f, 12.0f, 9.0f, 500.0f, 50.0f, 0.10f, 240.0f, 0.5f, 0.35f, 0.4f, 0.04f, 10, 2.5f, 1.2f, 8.0f, 120.0f, 260.0f, 5.0f);
+	Cloud(Pistol, 20, 3.0f, 10.0f, 7.0f, 450.0f, 40.0f, 0.12f, 220.0f, 0.5f, 0.3f, 0.35f, 0.05f, 4, 2.0f, 0.35f, 6.0f, 100.0f, 160.0f, 4.0f);
+	Cloud(Shotgun, 24, 128.0f / 24.0f, 22.0f, 16.0f, 600.0f, 90.0f, 0.14f, 260.0f, 0.6f, 0.4f, 0.5f, 0.03f, 4, 3.0f, 0.35f, 10.0f, 140.0f, 220.0f, 6.0f);
+	Cloud(Sniper, 22, 98.0f / 22.0f, 12.0f, 9.0f, 500.0f, 50.0f, 0.10f, 240.0f, 0.5f, 0.35f, 0.4f, 0.04f, 4, 2.5f, 0.35f, 8.0f, 120.0f, 260.0f, 5.0f);
 	// The blast's swell and the jet's length (not in the design: a slug of a few cells slid as a blob and lost its
 	// momentum within 0.2 s on a 4 cm grid; a ball blown up in the first tenth and a jet that keeps pushing travel).
 	Pistol.EmitSeconds = 0.06f;
@@ -283,6 +283,7 @@ void UJamMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const U
 	const FVector Bore = Muzzle.GetRotation().GetAxisX();
 	if (CVarVolumetricSmoke.GetValueOnGameThread() != 0 && CloudMaterial.LoadSynchronous())
 	{
+		WaitSims();
 		// The round leaves from the eye along the view: through every older cloud in its way it throws the gas on
 		// its line aside and drives a jet down it (the pressure solve rolls its mouth into a vortex ring); a
 		// shotgun blast out of the muzzle shoves the older clouds ahead of it on.
@@ -390,8 +391,21 @@ FTransform UJamMuzzleFxComponent::Sprite(const FVector& Location, const FVector&
 	return FTransform(FRotationMatrix::MakeFromZX(-Location, Along).ToQuat(), Location, FVector(LengthCm / 100.0f, WidthCm / 100.0f, 1.0f));
 }
 
+void UJamMuzzleFxComponent::WaitSims() const
+{
+	for (const FCloud& Cloud : Clouds)
+	{
+		if (Cloud.Pending.IsValid())
+		{
+			Cloud.Pending.Wait();
+			Cloud.Pending = UE::Tasks::FTask();
+		}
+	}
+}
+
 void UJamMuzzleFxComponent::ClearClouds()
 {
+	WaitSims();
 	for (FCloud& Cloud : Clouds)
 	{
 		Cloud.Age = -1.0f;
@@ -401,6 +415,7 @@ void UJamMuzzleFxComponent::ClearClouds()
 
 FString UJamMuzzleFxComponent::DescribeClouds() const
 {
+	WaitSims();
 	FString Line;
 	const FVector Eye = View->GetComponentLocation();
 	for (const FCloud& Cloud : Clouds)
@@ -423,6 +438,7 @@ FString UJamMuzzleFxComponent::DescribeClouds() const
 
 void UJamMuzzleFxComponent::DumpClouds(const FString& Name) const
 {
+	WaitSims();
 	for (int32 Slot = 0; Slot < Clouds.Num(); ++Slot)
 	{
 		const FCloud& Cloud = Clouds[Slot];
@@ -446,8 +462,13 @@ int32 UJamMuzzleFxComponent::GetCloudCount() const
 
 namespace
 {
-	/** The grids step at a fixed rate: the same gas at 30, 60 or 144 fps (AGENTS.md, «Частота кадров»). */
+	/**
+	 * The grids step at a fixed rate - the same gas at 30, 60 or 144 fps (AGENTS.md, В«Р§Р°СЃС‚РѕС‚Р° РєР°РґСЂРѕРІВ») - of 60 Hz while
+	 * the slug is fast (FastSeconds after the shot), 30 Hz after: the slow churn does not need more, and a step costs.
+	 */
 	constexpr float SimStep = 1.0f / 60.0f;
+	constexpr float SlowStep = 1.0f / 30.0f;
+	constexpr float FastSeconds = 0.5f;
 
 #if !UE_BUILD_SHIPPING
 	/** jam.Fx.SmokeCost: what the grids cost on the game thread since the last call. */
@@ -456,14 +477,15 @@ namespace
 		double StepUs = 0.0, MaxStepUs = 0.0, FrameUs = 0.0, MaxFrameUs = 0.0;
 		int32 Steps = 0, Frames = 0;
 	} GSmokeCost;
+	FCriticalSection GSmokeCostLock;
 
 	FAutoConsoleCommand GSmokeCostCommand(
 		TEXT("jam.Fx.SmokeCost"),
-		TEXT("Log what the smoke grids cost on the game thread since the last call (a step: mean / max us; a frame with any grid stepping, packing and uploading: mean / max us), then start over."),
+		TEXT("Log what the smoke grids cost since the last call - a step (on a worker thread): mean / max us; the game thread in a frame with a grid stepping (waiting for the steps, the box, the upload): mean / max us - then start over."),
 		FConsoleCommandDelegate::CreateLambda([]()
 		{
 			FSmokeCost& C = GSmokeCost;
-			UE_LOG(LogMindKore, Log, TEXT("Smoke cost: %d step(s), %.0f us mean, %.0f us max; %d frame(s) with grids, %.0f us mean, %.0f us max"),
+			UE_LOG(LogMindKore, Log, TEXT("Smoke cost: %d step(s) off the game thread, %.0f us mean, %.0f us max; game thread in %d frame(s) with grids, %.0f us mean, %.0f us max"),
 				C.Steps, C.Steps ? C.StepUs / C.Steps : 0.0, C.MaxStepUs, C.Frames, C.Frames ? C.FrameUs / C.Frames : 0.0, C.MaxFrameUs);
 			C = FSmokeCost();
 		}));
@@ -555,14 +577,16 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, c
 	// The slug: out of the bore (a brake lets 1 - SmokeBrake on forward and throws the rest out of both side ports).
 	const FVector3f MuzzleLocal(Cloud->Basis.UnrotateVector(Cloud->Muzzle - Cloud->Centre));
 	const FVector3f BoreLocal(Cloud->Basis.UnrotateVector(Bore));
+	const float Throw = bAir ? 1.0f : VacuumThrowShare;
+	const float Radial = bAir ? 1.0f : VacuumRadialScale;
 	Sim.Inject(MuzzleLocal + BoreLocal * Gun.SlugLengthCm, BoreLocal, Gun.SlugLengthCm, Gun.SlugRadiusCm, 1.0f, 1.0f,
-		BoreLocal * Gun.SlugSpeedCm * (1.0f - Gun.SmokeBrake), Gun.SlugRadialCm);
+		BoreLocal * Gun.SlugSpeedCm * (1.0f - Gun.SmokeBrake) * Throw, Gun.SlugRadialCm * Radial);
 	if (Gun.SmokeBrake > 0.0f)
 	{
 		for (const float Side : { 1.0f, -1.0f })
 		{
 			const FVector3f Port(Cloud->Basis.UnrotateVector(BoreQuat.RotateVector(FVector(-0.35f, Side, 0.0f).GetSafeNormal())));
-			Sim.Inject(MuzzleLocal + Port * Gun.SlugLengthCm, Port, Gun.SlugLengthCm, Gun.SlugRadiusCm, 1.0f, 1.0f, Port * Gun.SlugSpeedCm * Gun.SmokeBrake * 0.5f, Gun.SlugRadialCm * 0.5f);
+			Sim.Inject(MuzzleLocal + Port * Gun.SlugLengthCm, Port, Gun.SlugLengthCm, Gun.SlugRadiusCm, 1.0f, 1.0f, Port * Gun.SlugSpeedCm * Gun.SmokeBrake * 0.5f * Throw, Gun.SlugRadialCm * 0.5f * Radial);
 		}
 	}
 	// The grid's texture, one per slot (point-sampled: each texel is a voxel).
@@ -599,8 +623,6 @@ void UJamMuzzleFxComponent::Blast(const FVector& Origin, const FVector& Directio
 		{
 			continue;
 		}
-		// A frozen vacuum cloud woken works at its grown cells.
-		Sim.CellCm = Guns[Cloud.Gun].CellCm * Cloud.Scale;
 		if (Sim.Impulse(FVector3f(Local), FVector3f(Dir), RadiusCm, Along, Push, Clear))
 		{
 			Cloud.Awake = WakeSeconds;
@@ -663,9 +685,33 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 			TuneApplied = Tune;
 		}
 	}
-	const double FrameStart = FPlatformTime::Seconds();
-	bool bAnyStep = false;
 #endif
+	// The last frame's steps: their box shift and atlas (TickComponent waited for them).
+	for (FCloud& Cloud : Clouds)
+	{
+		if (Cloud.Age < 0.0f || !Cloud.bPendingAtlas)
+		{
+			continue;
+		}
+		Cloud.bPendingAtlas = false;
+		// The box follows the gas by whole cells: the voxels stay where they are in the world.
+		Cloud.Centre += Cloud.Basis.RotateVector(FVector(Cloud.PendingShift) * Cloud.Sim->CellCm);
+		const FIntPoint Size = FJamSmokeSim::AtlasSize(Cloud.Sim->N);
+		// The render thread copies it later: its own buffer and region, freed when done.
+		uint8* Data = static_cast<uint8*>(FMemory::Malloc(Cloud.Atlas.Num() * sizeof(FColor)));
+		FMemory::Memcpy(Data, Cloud.Atlas.GetData(), Cloud.Atlas.Num() * sizeof(FColor));
+		FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, Size.X, Size.Y);
+		Cloud.Grid->UpdateTextureRegions(0, 1, Region, Size.X * sizeof(FColor), sizeof(FColor), Data,
+			[](uint8* Src, const FUpdateTextureRegion2D* Regions) { FMemory::Free(Src); delete Regions; });
+	}
+	struct FLaunch
+	{
+		FCloud* Cloud;
+		int32 Steps;
+		float FirstAt;
+		float Dt;
+	};
+	TArray<FLaunch, TInlineAllocator<4>> Launches;
 	// The youngest clouds that want to move step; past MaxActiveSims the older ones hold still this frame.
 	TArray<FCloud*, TInlineAllocator<8>> Stepping;
 	for (FCloud& Cloud : Clouds)
@@ -687,6 +733,8 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 		}
 		const FJamMuzzleFx& G = Guns[Cloud.Gun];
 		FJamSmokeSim& Sim = *Cloud.Sim;
+		// A grown vacuum cloud's cells are grown too (a push or a wake works at them).
+		Sim.CellCm = G.CellCm * Cloud.Scale;
 		Cloud.Age += DeltaTime;
 		if (Cloud.Age >= G.CloudSeconds)
 		{
@@ -721,58 +769,14 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 			Cloud.bFrozen = false;
 			Cloud.Rise = FVector::ZeroVector;
 			Cloud.StepCarry += DeltaTime;
-			int32 Steps = 0;
-			while (Cloud.StepCarry >= SimStep)
-			{
-				Cloud.StepCarry -= SimStep;
-				// The muzzle keeps puffing the slug for EmitSeconds (from where it was at the shot, carried with the gas).
-				const float At = Cloud.Age - Cloud.StepCarry;
-				if (At < G.EmitSeconds)
-				{
-					const FVector3f From(Cloud.Basis.UnrotateVector(Cloud.Muzzle + Cloud.Carried * At - Cloud.Centre));
-					const FVector3f BoreLocal(Cloud.Basis.UnrotateVector(Cloud.Bore));
-					// The gas still leaving the bore behind the blast's ball: a narrower stem.
-					Sim.Inject(From + BoreLocal * G.SlugLengthCm * 0.4f, BoreLocal, G.SlugLengthCm * 0.4f, G.SlugRadiusCm * 0.5f, 1.0f, 1.0f,
-						BoreLocal * G.SlugSpeedCm * (1.0f - G.SmokeBrake), G.SlugRadialCm * 0.5f);
-				}
-#if !UE_BUILD_SHIPPING
-				const double T0 = FPlatformTime::Seconds();
-#endif
-				Sim.Step(SimStep, At, G.Sim);
-#if !UE_BUILD_SHIPPING
-				const double Us = (FPlatformTime::Seconds() - T0) * 1e6;
-				GSmokeCost.StepUs += Us;
-				GSmokeCost.MaxStepUs = FMath::Max(GSmokeCost.MaxStepUs, Us);
-				++GSmokeCost.Steps;
-				bAnyStep = true;
-#endif
-				// A long frame does not pile up steps (at most 4: a hitch slows the gas instead).
-				if (++Steps == 4)
-				{
-					Cloud.StepCarry = 0.0f;
-					break;
-				}
-			}
-			// The box follows the gas by whole cells: the voxels stay where they are in the world.
-			float Mass;
-			const FVector3f Off = Sim.Centroid(Mass);
-			if (Mass > 0.01f && Off.GetAbsMax() > 1.5f)
-			{
-				const FIntVector Cells(FMath::RoundToInt(Off.X), FMath::RoundToInt(Off.Y), FMath::RoundToInt(Off.Z));
-				Sim.Shift(Cells);
-				Cloud.Centre += Cloud.Basis.RotateVector(FVector(Cells) * Sim.CellCm);
-			}
+			// Whole fixed steps; a long frame does not pile them up (at most 4: a hitch slows the gas instead).
+			const float Dt = Cloud.Age - Cloud.StepCarry < FastSeconds ? SimStep : SlowStep;
+			const int32 Steps = FMath::Min(FMath::FloorToInt(Cloud.StepCarry / Dt), 4);
 			if (Steps > 0)
 			{
-				Sim.Pack(Cloud.Atlas);
-				const FIntPoint Size = FJamSmokeSim::AtlasSize(Sim.N);
-				// The render thread copies it later: its own buffer and region, freed when done.
-				uint8* Data = static_cast<uint8*>(FMemory::Malloc(Cloud.Atlas.Num() * sizeof(FColor)));
-				FMemory::Memcpy(Data, Cloud.Atlas.GetData(), Cloud.Atlas.Num() * sizeof(FColor));
-				FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, Size.X, Size.Y);
-				Cloud.Grid->UpdateTextureRegions(0, 1, Region, Size.X * sizeof(FColor), sizeof(FColor), Data,
-					[](uint8* Src, const FUpdateTextureRegion2D* Regions) { FMemory::Free(Src); delete Regions; });
+				Launches.Add({ &Cloud, Steps, Cloud.Age - Cloud.StepCarry + Dt, Dt });
 			}
+			Cloud.StepCarry = Steps == 4 ? 0.0f : Cloud.StepCarry - Steps * Dt;
 			Cloud.Awake = FMath::Max(0.0f, Cloud.Awake - DeltaTime);
 		}
 		else if (!Cloud.bFrozen)
@@ -789,7 +793,10 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 			}
 			Mean /= FMath::Max(float(Mass), 1e-3f);
 			Cloud.Rise = Sim.bAir ? Cloud.Basis.RotateVector(FVector(Mean)) : FVector::ZeroVector;
-			Cloud.ExpandRate = Sim.bAir ? 0.0f : FMath::Clamp(Sim.MeanRadialSpeed() / (0.5f * Sim.N * G.CellCm), 0.05f, 0.6f);
+			// The grid's own radial speed is smeared within a few steps (semi-Lagrangian self-advection), so the slug's
+			// expansion speed sets the rate when it is the larger.
+			const float Radial = FMath::Max(Sim.MeanRadialSpeed(), G.SlugRadialCm * VacuumRadialScale * 0.5f);
+			Cloud.ExpandRate = Sim.bAir ? 0.0f : FMath::Clamp(Radial / (0.5f * Sim.N * G.CellCm), 0.05f, 1.0f);
 		}
 		else
 		{
@@ -814,15 +821,13 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 		Material->SetScalarParameterValue(TEXT("Life"), G.CloudSeconds);
 		Material->SetScalarParameterValue(TEXT("Thin"), 1.0f / FMath::Cube(Cloud.Scale));
 		Material->SetScalarParameterValue(TEXT("Erode"), G.Erode);
+		Material->SetScalarParameterValue(TEXT("AmbientShare"), Sim.bAir ? 1.0f : VacuumAmbientShare);
 		Material->SetScalarParameterValue(TEXT("Seed"), Cloud.Seed);
 		// The volume integrates per local unit (a cell here, HeterogeneousVolumesLiveShadingPipeline.usf: StepSize is
 		// world / LocalToWorldScale): extinction and emission per cm times the cell's cm.
 		Material->SetScalarParameterValue(TEXT("Extinction"), G.DenseExtinction);
 		Material->SetScalarParameterValue(TEXT("UnitCm"), G.CellCm * Cloud.Scale);
 		Material->SetVectorParameterValue(TEXT("Eye"), FLinearColor(EyeLocal.X, EyeLocal.Y, EyeLocal.Z, EyeClearCm));
-		// The ambient comes from above: against the local gravity, or the world's up without it (box frame).
-		const FVector3f Up = Sim.Down.IsNearlyZero() ? FVector3f(Cloud.Basis.UnrotateVector(FVector::UpVector)) : -Sim.Down;
-		Material->SetVectorParameterValue(TEXT("Up"), FLinearColor(Up.X, Up.Y, Up.Z, 0.0f));
 #if !UE_BUILD_SHIPPING
 		for (const TPair<FName, FString>& Each : MaterialTune)
 		{
@@ -836,15 +841,6 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 		// The volume box: Cells units a side, each a cell (grown with a frozen vacuum cloud).
 		Cloud.Volume->SetWorldTransform(FTransform(Cloud.Basis, Cloud.Centre, FVector(G.CellCm * Cloud.Scale)));
 	}
-#if !UE_BUILD_SHIPPING
-	if (bAnyStep)
-	{
-		const double Us = (FPlatformTime::Seconds() - FrameStart) * 1e6;
-		GSmokeCost.FrameUs += Us;
-		GSmokeCost.MaxFrameUs = FMath::Max(GSmokeCost.MaxFrameUs, Us);
-		++GSmokeCost.Frames;
-	}
-#endif
 	// A flyer diving through stirs the gas after it: the swirl of its wings.
 	if (GetCloudCount() > 0)
 	{
@@ -856,6 +852,55 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 				Blast(Flyer->GetActorLocation() - Velocity * DeltaTime, Velocity.GetSafeNormal(), 25.0f, Velocity.Size() * 0.4f, 40.0f, 0.0f, nullptr);
 			}
 		}
+	}
+	// The steps, off the game thread while the rest of the frame runs (each grid its own task; ParallelFor inside):
+	// the muzzle's stem, the steps, the box's follow (taken next frame), the atlas.
+	for (const FLaunch& L : Launches)
+	{
+		FCloud* Cloud = L.Cloud;
+		const FJamMuzzleFx G = Guns[Cloud->Gun];
+		const FVector3f Up = Cloud->Sim->Down.IsNearlyZero() ? FVector3f(Cloud->Basis.UnrotateVector(FVector::UpVector)) : -Cloud->Sim->Down;
+		const float Occlusion = AmbientOcclusion;
+		Cloud->Pending = UE::Tasks::Launch(UE_SOURCE_LOCATION, [Cloud, G, L, Up, Occlusion]()
+		{
+			FJamSmokeSim& Sim = *Cloud->Sim;
+			for (int32 Step = 0; Step < L.Steps; ++Step)
+			{
+				const float At = L.FirstAt + Step * L.Dt;
+				// The muzzle keeps puffing for EmitSeconds (from where it was at the shot, carried with the gas): the gas
+				// still leaving the bore behind the blast's ball, a narrower stem. In a vacuum none: the slug flies apart
+				// on its own, and a stem behind it drew a streak the box could not follow.
+				if (At < G.EmitSeconds && Sim.bAir)
+				{
+					const FVector3f From(Cloud->Basis.UnrotateVector(Cloud->Muzzle + Cloud->Carried * At - Cloud->Centre));
+					const FVector3f BoreLocal(Cloud->Basis.UnrotateVector(Cloud->Bore));
+					Sim.Inject(From + BoreLocal * G.SlugLengthCm * 0.4f, BoreLocal, G.SlugLengthCm * 0.4f, G.SlugRadiusCm * 0.5f, 1.0f, 1.0f,
+						BoreLocal * G.SlugSpeedCm * (1.0f - G.SmokeBrake), G.SlugRadialCm * 0.5f);
+				}
+#if !UE_BUILD_SHIPPING
+				const double T0 = FPlatformTime::Seconds();
+#endif
+				Sim.Step(L.Dt, At, G.Sim);
+#if !UE_BUILD_SHIPPING
+				const double Us = (FPlatformTime::Seconds() - T0) * 1e6;
+				FScopeLock Lock(&GSmokeCostLock);
+				GSmokeCost.StepUs += Us;
+				GSmokeCost.MaxStepUs = FMath::Max(GSmokeCost.MaxStepUs, Us);
+				++GSmokeCost.Steps;
+#endif
+			}
+			// The box follows the gas by whole cells (the game thread moves the box by PendingShift next frame).
+			float Mass;
+			const FVector3f Off = Sim.Centroid(Mass);
+			Cloud->PendingShift = FIntVector::ZeroValue;
+			if (Mass > 0.01f && Off.GetAbsMax() > 1.5f)
+			{
+				Cloud->PendingShift = FIntVector(FMath::RoundToInt(Off.X), FMath::RoundToInt(Off.Y), FMath::RoundToInt(Off.Z));
+				Sim.Shift(Cloud->PendingShift);
+			}
+			Sim.Pack(Cloud->Atlas, Up, Occlusion);
+			Cloud->bPendingAtlas = true;
+		});
 	}
 }
 
@@ -916,7 +961,8 @@ void UJamMuzzleFxComponent::TickHotCases(float DeltaTime)
 		bool bInCloud = false;
 		for (FCloud& Cloud : Clouds)
 		{
-			if (Cloud.Age < 0.0f)
+			// Air only: in a vacuum nothing drags a wisp after the case (and a woken vacuum cloud would stop growing).
+			if (Cloud.Age < 0.0f || !Cloud.Sim->bAir)
 			{
 				continue;
 			}
@@ -964,8 +1010,27 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	{
 		return;
 	}
-	TickClouds(DeltaTime);
+	// The grids' last steps (off the game thread) first: everything here touches them.
+#if !UE_BUILD_SHIPPING
+	const double FrameStart = FPlatformTime::Seconds();
+	bool bGrids = false;
+	for (const FCloud& Cloud : Clouds)
+	{
+		bGrids |= Cloud.Pending.IsValid();
+	}
+#endif
+	WaitSims();
 	TickHotCases(DeltaTime);
+	TickClouds(DeltaTime);
+#if !UE_BUILD_SHIPPING
+	if (bGrids)
+	{
+		const double Us = (FPlatformTime::Seconds() - FrameStart) * 1e6;
+		GSmokeCost.FrameUs += Us;
+		GSmokeCost.MaxFrameUs = FMath::Max(GSmokeCost.MaxFrameUs, Us);
+		++GSmokeCost.Frames;
+	}
+#endif
 
 	// The flash: white-hot for its peak, a fast fall, then a dim cooling glow.
 	if (Flash->GetInstanceCount() > 0)
@@ -1378,6 +1443,7 @@ namespace
 					After(1.5f, [Still, Tag, Hold]() { Hold(); Still(Tag + TEXT("_b_shot2_settled_1500ms")); });
 				});
 			});
+			After(21.5f, [Controller]() { Controller->ConsoleCommand(TEXT("jam.Fx.SmokeCost")); });
 			After(22.0f, []() { UE_LOG(LogMindKore, Log, TEXT("Smoke moments: done")); });
 			return;
 		}
@@ -1408,6 +1474,7 @@ namespace
 				Controller->ConsoleCommand(TEXT("ProfileGPU"));
 			});
 			After(11.5f, [Still]() { Still(TEXT("budget_three_shotgun_clouds")); });
+			After(12.0f, [Controller]() { Controller->ConsoleCommand(TEXT("jam.Fx.SmokeCost")); });
 			After(12.5f, []() { UE_LOG(LogMindKore, Log, TEXT("Smoke moments: done")); });
 			return;
 		}

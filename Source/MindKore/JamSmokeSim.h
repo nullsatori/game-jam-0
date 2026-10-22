@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Async/ParallelFor.h"
 #include "JamSmokeSim.generated.h"
 
 /** The gas's behaviour in a smoke grid (Docs/RecoilWeapons-SmokeSim.md). */
@@ -96,13 +97,37 @@ struct FJamSmokeSim
 	float MeanRadialSpeed() const;
 	/** Mean |U| (cm/s) and the hottest cell (log lines). */
 	void Stats(float& OutMeanSpeed, float& OutMaxHeat) const;
-	/** The atlas for the material: 8 tiles across, ceil(N / 8) down, each N x N (slice z at tile (z % 8, z / 8)); R density, G heat, B churn (|curl| / 40 /s), A solid. */
-	void Pack(TArray<FColor>& Out) const;
+	/**
+	 * The atlas for the material: 8 tiles across, ceil(N / 8) down, each N x N (slice z at tile (z % 8, z / 8)); R density,
+	 * G heat, B the ambient's shadow (1 lit: exp(-Occlusion x the gas above toward Up, box frame, and around), A churn
+	 * (|curl| / 40 /s). Solid cells hold no gas, so the material needs no flag for them.
+	 */
+	void Pack(TArray<FColor>& Out, const FVector3f& Up, float Occlusion) const;
 	static FIntPoint AtlasSize(int32 InN) { return FIntPoint(8 * InN, ((InN + 7) / 8) * InN); }
 
 private:
 	TArray<float> T0, T1, T2, T3, T4, P, Div, Wx, Wy, Wz;
 	int32 Jacobi = 12;
+	/** The working box of this step (cells, inclusive; empty when Hi < Lo): the gas and its heat grown by a margin. */
+	FIntVector Lo = FIntVector(0);
+	FIntVector Hi = FIntVector(-1);
+	void UpdateBox();
+	/** Body(X, Y, Z, Index) over the working box, z-slices in parallel. */
+	template <typename FBody>
+	void ForBox(const FBody& Body) const
+	{
+		ParallelFor(FMath::Max(Hi.Z - Lo.Z + 1, 0), [&](int32 K)
+		{
+			const int32 Z = Lo.Z + K;
+			for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
+			{
+				for (int32 X = Lo.X; X <= Hi.X; ++X)
+				{
+					Body(X, Y, Z, Index(X, Y, Z));
+				}
+			}
+		});
+	}
 	bool IsSolid(int32 X, int32 Y, int32 Z) const { return Solid[Index(X, Y, Z)] != 0; }
 	void Advect(float Dt);
 	void Churn(float Dt, float Amount);

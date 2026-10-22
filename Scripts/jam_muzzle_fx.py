@@ -233,7 +233,7 @@ int n = (int)(N + 0.5);
 #define CELL(q) Grid.Load(int3((q).x + ((q).z % 8) * n, (q).y + ((q).z / 8) * n, 0))
 int3 v = min(int3(floor(u * n)), n - 1);
 float4 g = CELL(v);
-if (g.a > 0.5) return 0;
+#undef CELL
 // 3D ordered dither on the voxel grid; a per-voxel hash: its own erosion threshold.
 float th = (M[((v.x + v.z) & 3) + 4 * ((v.y + 2 * v.z) & 3)] + 0.5) / 16;
 float hv = frac(sin(dot(float3(v) + S * 31, float3(127.1, 311.7, 74.7))) * 43758.5453);
@@ -246,27 +246,14 @@ float band = min(floor(saturate(dens) * 3 + th), 3);
 if (band < 1) return 0;
 // The eye clears: voxels this close are gone (flying through a cloud never fills the lens).
 if (length(l - E.xyz) < E.w) return 0;
-// The room's light the volume does not get (bounced, the sky): an ambient that the cloud shadows itself - the
-// gas above a voxel (toward Up, 1 to 7 voxels) and around it (2 voxels each way) dim it. A lit crown, a dark
-// belly, dark folds; no flat veil.
-float occ = 0;
-const float ST[4] = { 1, 2, 4, 7 };
-const float WT[4] = { 1, 1, 1.5, 2 };
-for (int i = 0; i < 4; i++)
-{
-    int3 q = clamp(int3(floor(float3(v) + 0.5 + Up.xyz * ST[i])), 0, n - 1);
-    occ += CELL(q).r * WT[i];
-}
-float around = CELL(clamp(v + int3(2, 0, 0), 0, n - 1)).r + CELL(clamp(v - int3(2, 0, 0), 0, n - 1)).r
-             + CELL(clamp(v + int3(0, 2, 0), 0, n - 1)).r + CELL(clamp(v - int3(0, 2, 0), 0, n - 1)).r
-             + CELL(clamp(v + int3(0, 0, 2), 0, n - 1)).r + CELL(clamp(v - int3(0, 0, 2), 0, n - 1)).r;
-float lit = exp(-occ * Oc) * exp(-around * Oc * 0.25);
+// g.b: the room's light the volume does not get (bounced, the sky) as the cloud shadows it - the gas above and
+// around the voxel, worked out on the CPU (FJamSmokeSim::Pack). A lit crown, a dark belly, dark folds.
+float lit = g.b;
 // Embers: the hottest voxels of the fresh core glow and flicker out one by one (a 24 Hz hash per voxel).
 float flick = frac(sin(dot(float3(v), float3(12.9898, 78.233, 37.719)) + floor(Tm * 24) * 0.618) * 43758.5453);
 float ember = (g.g > 0.62 + 0.3 * th) ? saturate(g.g - 0.5) * 2 * (0.4 + 0.6 * flick) : 0;
 // The fringe only on thin voxels that move (churn): the crumbling rim glitters, still smoke does not.
-float fringe = (band == 1 && g.b > 0.25) ? 1 - 0.6 * (v.y & 1) : 0;
-#undef CELL
+float fringe = (band == 1 && g.a > 0.25) ? 1 - 0.6 * (v.y & 1) : 0;
 // z: ember (+) or fringe (-), never both on one voxel.
 return float4(band / 3, saturate(g.g * 1.4), ember > 0 ? ember : -fringe, lit);
 """
@@ -277,14 +264,14 @@ def _volume(m, node, custom, data, scalar, colour, mul):
     m.set_editor_property("used_with_heterogeneous_volumes", True)
     world = node(unreal.MaterialExpressionWorldPosition)
     vec = {}
-    for name in ["CloudCentre", "CloudX", "CloudY", "CloudZ", "Eye", "Up"]:
+    for name in ["CloudCentre", "CloudX", "CloudY", "CloudZ", "Eye"]:
         vec[name] = colour(name, unreal.LinearColor(0, 0, 0, 0))
     grid = node(unreal.MaterialExpressionTextureObjectParameter, parameter_name="Grid",
                 texture=unreal.load_asset("/Engine/EngineResources/DefaultTexture"))
     inputs = {"W": world, "H": scalar("HalfCm", 64.0), "N": scalar("Cells", 32.0), "S": scalar("Seed", 0.0),
               "T": scalar("Age", 0.0), "L": scalar("Life", 6.0), "Th": scalar("Thin", 1.0), "Er": scalar("Erode", 0.9),
-              "Gn": scalar("Gain", 1.0), "Oc": scalar("Occlusion", 0.5), "Tm": node(unreal.MaterialExpressionTime), "Grid": grid}
-    rgba = {"C": "CloudCentre", "BX": "CloudX", "BY": "CloudY", "BZ": "CloudZ", "E": "Eye", "Up": "Up"}
+              "Gn": scalar("Gain", 1.0), "Tm": node(unreal.MaterialExpressionTime), "Grid": grid}
+    rgba = {"C": "CloudCentre", "BX": "CloudX", "BY": "CloudY", "BZ": "CloudZ", "E": "Eye"}
     n = node(unreal.MaterialExpressionCustom, code=VOLUME_HLSL, description="Cloud",
              output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT4,
              inputs=[_input(k) for k in list(inputs) + list(rgba)])
@@ -319,7 +306,7 @@ def _volume(m, node, custom, data, scalar, colour, mul):
     # The ambient as scattering: sigma x albedo x radiance x lit, so a thick lump shows albedo x radiance on its
     # lit crown whatever its extinction, and its shadowed belly and folds go dark.
     ambient = mul(mul(mul(sigma, albedo), colour("AmbientColour", unreal.LinearColor(1.0, 0.85, 0.70, 1.0))),
-                  mul(lit, scalar("Ambient", 1.0)))
+                  mul(lit, mul(scalar("Ambient", 1.0), scalar("AmbientShare", 1.0))))
     ember = node(unreal.MaterialExpressionMax)
     mel.connect_material_expressions(glowbits, "", ember, "A")
     mel.connect_material_expressions(scalar("Zero", 0.0), "", ember, "B")

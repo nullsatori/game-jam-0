@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "JamSmokeSim.h"
+#include "Tasks/Task.h"
 #include "JamMuzzleFx.generated.h"
 
 class UHeterogeneousVolumeComponent;
@@ -244,6 +245,24 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float WakeSeconds = 1.0f;
 
+	/**
+	 * In a vacuum the gas expands freely: the slug keeps this share of its speed out of the bore and swells out of
+	 * its own centre this many times faster (a shell flying apart, not a jet), and the muzzle puffs no stem.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float VacuumThrowShare = 0.3f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	float VacuumRadialScale = 2.5f;
+
+	/** How much the gas above and around a voxel shadows the material's room ambient (FJamSmokeSim::Pack). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	float AmbientOcclusion = 0.5f;
+
+	/** The material's room ambient (the bounced light the volume does not get) outside air: none to bounce in space. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float VacuumAmbientShare = 0.0f;
+
 	/** A spent case smokes while hot: its heat's time constant, s (1 when it leaves the port). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.05"))
 	float CaseHeatSeconds = 1.4f;
@@ -396,6 +415,11 @@ private:
 		float Scale = 1.0f;
 		float ExpandRate = 0.0f;
 		bool bFrozen = false;
+		/** The grid's steps run off the game thread (launched at the end of TickClouds); its result - the shift the box
+		 *  owes the gas and a packed atlas - is taken on the game thread after the wait. */
+		mutable UE::Tasks::FTask Pending;
+		FIntVector PendingShift = FIntVector::ZeroValue;
+		bool bPendingAtlas = false;
 	};
 
 	/** A case still hot. */
@@ -408,6 +432,8 @@ private:
 	};
 
 	void SpawnCloud(int32 Weapon, const FTransform& Muzzle, const FVector& GunVelocity);
+	/** Waits for every grid still stepping off the game thread: before anything on the game thread touches a grid. */
+	void WaitSims() const;
 	void TickClouds(float DeltaTime);
 	void TickHotCases(float DeltaTime);
 	/** A push along Origin + t Direction (world) through every living cloud it crosses but Except (FJamSmokeSim::Impulse); wakes them. */
