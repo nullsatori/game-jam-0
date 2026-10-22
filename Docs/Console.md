@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 99 команд, 8 переменных.
+Всего: 100 команд, 8 переменных.
 
 ## `os.Attach`
 
@@ -22,6 +22,7 @@
 | `os.Attach.List` | — | os.Attach.List: the guns, their places, what is on them, the pouch. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
 | `os.Attach.Mount` | `<Id> [slot\|gun Id]` | os.Attach.Mount <Id> [slot\|gun Id]: onto the gun at once, no motion (default the gun in hand); given first if not carried. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
 | `os.Attach.Probe` | — | os.Attach.Probe: the attachment menu, seating, the laser, the torch, the suppressor, the RMB-93 swap and the 20-round magazine, step by step (Lvl_OS_TestRoom, -nullrhi); PASS/FAIL per line. *не в Shipping* | `Source/MindKore/OSAttachProbe.cpp` |
+| `os.Attach.Stills` | `[X Y Z Pitch Yaw Roll]` | os.Attach.Stills [X Y Z Pitch Yaw Roll]: HighResShot frames of the attachment menu, the laser rolling on, its dot on a wall, the gun's side with the suppressor and the clear magazine at 20 / 7 / 0 rounds; os.Attach.Cost over 3 s of the laser (Lvl_OS_TestRoom, real RHI). Six numbers try a pistol menu pose (OffsetCm, Turn) for the run. *не в Shipping* | `Source/MindKore/OSAttachProbe.cpp` |
 | `os.Attach.Take` | `<Id\|all>` | os.Attach.Take <Id\|all>: off the gun at once and out of the pouch. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
 | `os.Attach.Unmount` | `<Id\|all>` | os.Attach.Unmount <Id\|all>: off its gun at once, into the pouch. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
 

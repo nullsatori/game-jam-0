@@ -1,8 +1,8 @@
-// os.Attach.Probe (Lvl_OS_TestRoom / Lvl_OS_ZeroG, -nullrhi): the attachment system step by step, as
+// os.Attach.Probe and os.Attach.Stills (Lvl_OS_TestRoom / Lvl_OS_ZeroG, -nullrhi): the attachment system step by step, as
 // Docs/Vision/Attachments.md §11 and the 14:16 addendum (the USP's 20-round magazine) list it. Tab is
 // pressed and let go through AOSZeroGPawn::MenuPressed / MenuReleased (the keys' own handlers); the rest
 // through UOSWeaponsComponent's API. Each check ends in PASS or FAIL; the last line is
-// "Attach probe: done, N FAIL". Docs/Attachments.md, «Пробы».
+// "Attach probe: N checks, F failed", then "Attach probe: done" (Scripts/os_fps_sweep.ps1 waits for it). Docs/Attachments.md, «Пробы».
 
 #include "MindKore.h"
 #include "OSAttachMenu.h"
@@ -11,8 +11,10 @@
 #include "OSWeapons.h"
 #include "OSZeroGPawn.h"
 
+#include "Camera/CameraComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
@@ -52,10 +54,12 @@ namespace OSAttachProbe
 	{
 		TWeakObjectPtr<AOSZeroGPawn> Pawn;
 		int32 Fails = 0;
+		int32 Checks = 0;
 
 		void Check(const TCHAR* What, bool bPass, const FString& Detail = FString())
 		{
 			Fails += bPass ? 0 : 1;
+			++Checks;
 			UE_LOG(LogMindKore, Log, TEXT("Attach probe: %s%s%s - %s"), What, Detail.IsEmpty() ? TEXT("") : TEXT(": "), *Detail, bPass ? TEXT("PASS") : TEXT("FAIL"));
 		}
 	};
@@ -324,9 +328,111 @@ namespace OSAttachProbe
 			const FOSWeapon& Usp = Guns->Weapons[0];
 			R->Check(TEXT("slide released, 20 in"), Usp.Ammo == 20 && !Usp.bSlideLocked && Usp.MagazineSize == 20, Ammo(Usp));
 			UE_LOG(LogMindKore, Log, TEXT("Attach probe: gear at the end - %s"), *Guns->DescribeGear().Replace(TEXT("\n"), TEXT("; ")));
-			UE_LOG(LogMindKore, Log, TEXT("Attach probe: done, %d FAIL"), R->Fails);
+			UE_LOG(LogMindKore, Log, TEXT("Attach probe: %d checks, %d failed"), R->Checks, R->Fails);
+			UE_LOG(LogMindKore, Log, TEXT("Attach probe: done"));
 		});
 	}
+
+	/** os.Attach.Stills (real RHI): the menu, the laser rolling on, its dot on a wall, the side with the suppressor, the clear magazine at 20 / 7 / 0. */
+	void RunStills(const TArray<FString>& Args, UWorld* World)
+	{
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AOSZeroGPawn* Pawn = Controller ? Cast<AOSZeroGPawn>(Controller->GetPawn()) : nullptr;
+		if (!Pawn || !Pawn->Guns || !Pawn->Guns->AttachMenu || !Pawn->Guns->FindAttachment(BigMag()))
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Attach stills: needs the AOSZeroGPawn with its guns"));
+			return;
+		}
+		UOSWeaponsComponent* Guns = Pawn->Guns;
+		UOSAttachMenu* Menu = Guns->AttachMenu;
+		// Six numbers try a pistol menu pose for this run: OffsetCm X Y Z, Turn pitch yaw roll.
+		if (Args.Num() >= 6 && Guns->Scope && Guns->Scope->Aims.IsValidIndex(0))
+		{
+			FOSGunMenuPose& Pose = Guns->Scope->Aims[0].Menu;
+			Pose.OffsetCm = FVector(FCString::Atof(*Args[0]), FCString::Atof(*Args[1]), FCString::Atof(*Args[2]));
+			Pose.Turn = FRotator(FCString::Atof(*Args[3]), FCString::Atof(*Args[4]), FCString::Atof(*Args[5]));
+			UE_LOG(LogMindKore, Log, TEXT("Attach stills: menu pose %s, turn %s"), *Pose.OffsetCm.ToCompactString(), *Pose.Turn.ToCompactString());
+		}
+		const auto Shot = [Controller](const TCHAR* Label)
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Attach stills: HighResShot [%s]"), Label);
+			Controller->ConsoleCommand(TEXT("HighResShot 1"));
+		};
+		float T = 1.0f;
+		const auto At = [Pawn, &T](float Wait, TFunction<void()> Step) { T += Wait; After(Pawn, T, MoveTemp(Step)); };
+
+		// Stand under the lamp, face the wall: see below.
+		At(0.0f, [Pawn, Controller, Guns]()
+		{
+			for (const FOSAttachment& Each : TArray<FOSAttachment>(Guns->Attachments))
+			{
+				Guns->TakeAttachment(Each.Id);
+			}
+			Reset(Pawn);
+			Guns->Weapons[0].Ammo = 12;
+			Guns->Weapons[0].Reserve = 60;
+			for (const FName Id : { Laser(), Torch(), Suppressor(), BigMag() })
+			{
+				Guns->GiveAttachment(Id, true);
+			}
+			// Near the room's lamp (Lvl_OS_TestRoom's flicker light at (800, 400)), its light from behind on the gun, the pickups out of the frame,
+			// facing the wall at Y 0 some 3 m off: the menu and the dot on it, the gun lit from the eye's side.
+			Pawn->SetActorLocation(FVector(600.0f, 330.0f, Pawn->GetActorLocation().Z), false, nullptr, ETeleportType::TeleportPhysics);
+			Controller->SetControlRotation(FRotator(-4.0f, 270.0f, 0.0f));
+		});
+		At(1.5f, [Pawn]() { Pawn->MenuPressed(); });
+		At(0.9f, [Menu, Shot]() { UE_LOG(LogMindKore, Log, TEXT("Attach stills: menu %s"), *Menu->DescribeRows()); Shot(TEXT("menu_open")); });
+		At(0.3f, [Menu, Shot]() { Menu->Step(1); Shot(TEXT("menu_step")); });
+		At(0.3f, [Pawn, Menu]() { Menu->Step(-1); });
+		// Let go on the laser: the roll-on, three moments of it, then the dot.
+		At(0.3f, [Pawn]() { Pawn->MenuReleased(); });
+		At(0.25f, [Shot]() { Shot(TEXT("seat_approach")); });
+		At(0.2f, [Shot]() { Shot(TEXT("seat_rail")); });
+		At(0.2f, [Shot]() { Shot(TEXT("seat_lock")); });
+		At(1.5f, [Pawn, Shot]()
+		{
+			GEngine->Exec(Pawn->GetWorld(), TEXT("os.Attach.Cost"));
+			Shot(TEXT("laser_wall"));
+		});
+		At(3.0f, [Pawn]() { GEngine->Exec(Pawn->GetWorld(), TEXT("os.Attach.Cost")); });
+		// The side: the laser and the suppressor on, the menu's pose shows the gun's left side.
+		At(0.2f, [Pawn, Guns]() { Guns->MountAttachment(Suppressor(), 0); Pawn->MenuPressed(); });
+		At(1.0f, [Shot]() { Shot(TEXT("side_laser_suppressor")); });
+		At(0.2f, [Pawn, Menu]() { Menu->Kill(); Pawn->MenuReleased(); });
+		// The clear magazine through a reload, full; then 7 and 0 rounds.
+		At(0.5f, [Guns]()
+		{
+			Guns->UnmountAttachment(Suppressor());
+			// On the slide stop: the swap is an empty reload, the new magazine full.
+			Guns->Weapons[0].Ammo = 0;
+			Guns->Weapons[0].bSlideLocked = true;
+			Guns->ApplyAttachment(2, BigMag());
+		});
+		At(0.5f, [Shot]() { Shot(TEXT("bigmag_reload")); });
+		At(2.0f, [Pawn, Guns, Shot]()
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Attach stills: %s"), *Ammo(Guns->Weapons[0]));
+			Shot(TEXT("bigmag_20_hip"));
+			Pawn->MenuPressed();
+		});
+		At(1.0f, [Pawn, Shot]() { Shot(TEXT("bigmag_20_side")); GEngine->Exec(Pawn->GetWorld(), TEXT("os.Attach.Cost")); });
+		At(0.3f, [Guns]() { Guns->Weapons[0].Ammo = 7; });
+		At(0.3f, [Shot]() { Shot(TEXT("bigmag_7_side")); });
+		At(0.3f, [Guns]() { Guns->Weapons[0].Ammo = 0; });
+		At(0.3f, [Shot]() { Shot(TEXT("bigmag_0_side")); });
+		At(0.5f, [Pawn, Menu]()
+		{
+			Menu->Kill();
+			Pawn->MenuReleased();
+			GEngine->Exec(Pawn->GetWorld(), TEXT("os.Attach.Cost"));
+			UE_LOG(LogMindKore, Log, TEXT("Attach stills: done"));
+		});
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GAttachStills(
+		TEXT("os.Attach.Stills"),
+		TEXT("os.Attach.Stills [X Y Z Pitch Yaw Roll]: HighResShot frames of the attachment menu, the laser rolling on, its dot on a wall, the gun's side with the suppressor and the clear magazine at 20 / 7 / 0 rounds; os.Attach.Cost over 3 s of the laser (Lvl_OS_TestRoom, real RHI). Six numbers try a pistol menu pose (OffsetCm, Turn) for the run."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunStills));
 
 	FAutoConsoleCommandWithWorld GAttachProbe(
 		TEXT("os.Attach.Probe"),
