@@ -90,10 +90,11 @@ FJamWeapon JamMakeRmb93(const FJamWeapon& PumpShotgun)
 		{ 0.39f, 0.0f, 0.0f, 0.0f } });
 	Gun.ShellTurn = JamMakeCycleCurve({ { 0.0f, 1.4f, 0.0f, 0.0f }, { 0.12f, 1.0f, -2.0f, 0.0f }, { 0.16f, 0.5f, -12.5f, -12.5f },
 		{ 0.2f, 0.0f, -6.0f, 0.0f }, { 0.21f, -0.05f, 0.0f, 0.0f }, { 0.22f, 0.0f, 0.0f, 0.0f } });
-	// The window to the eye: the muzzle down and to the left, rolled a little onto the left hand, drawn 6 cm back and 5 up.
+	// The window to the eye: the muzzle down and to the left, rolled a little onto the left hand, drawn 3 cm back and
+	// 3 down (owner 22.10: 5 cm up filled the frame - the tilt alone shows the window).
 	// The lead before the first round is 0.3 s: the palm strikes the latch at 0.14 s and the lid is open on its stop by 0.24 s.
 	Gun.ReloadBodyTurn = FRotator(-14.0f, -12.0f, -18.0f);
-	Gun.ReloadBodyOffsetCm = FVector(-6.0f, -5.0f, 5.0f);
+	Gun.ReloadBodyOffsetCm = FVector(-3.0f, -5.0f, -3.0f);
 	Gun.ReloadBody = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.03f, 1.0f, 0.0f, 0.0f }, { 0.3f, 1.0f, 0.0f, 0.0f } });
 	Gun.ReloadKicks.Reset();
 	// Three beats a round, as the pump's: the nose into the tube, the base pressed down, the push home (forward).
