@@ -902,6 +902,8 @@ public:
 
 	/** Loose cases and magazines in the world now. */
 	int32 GetDebrisCount() const { return Debris.Num(); }
+	/** The case or magazine thrown last, if it is still there (stills). */
+	AActor* GetLastDebris() const { return Debris.IsEmpty() ? nullptr : Debris.Last().Get(); }
 
 	/** A drawn gun fires only once its pose is this close to rest (and DrawReadySeconds into the draw). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Pose", meta = (ClampMin = "0.0"))
