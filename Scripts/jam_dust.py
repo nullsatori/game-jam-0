@@ -15,7 +15,7 @@ Owner 22.10: "too bright white, blurry, big". The dot used to be a Gaussian size
 the world, so a speck a hand's width from the lens grew into a soft blob tens of
 pixels wide. Now it is a hard-edged disc whose radius is held between MinRadiusPx and
 MaxRadiusPx screen pixels (a crisp 1-3 pixel dot, the low-res look); a speck smaller
-than that loses brightness instead of growing, so far dust fades out. Warm grey and
+than that loses brightness instead of growing, so far dust is dimmer. Warm grey and
 dimmer, and Responsive AA so the temporal AA does not smear it.
 """
 import os
@@ -33,13 +33,14 @@ mel = unreal.MaterialEditingLibrary
 # Distance of the view ray from the speck's centre (engine cube: half edge 50 units).
 # One screen pixel in the same units is fwidth(d). The disc keeps its world size
 # (Core) while that lies between MinPx and MaxPx pixels; outside it is clamped, and a
-# disc grown above Core keeps Core's energy (dimmer, not bigger).
+# disc grown above Core is dimmer by Core/r, but never below FarDim (a full-energy
+# version made far dust vanish under DLAA, run 22.10).
 MOTE_HLSL = """
 float d = length(cross(P, normalize(V)));
 float px = max(fwidth(d), 1e-4);
 float r = clamp(Core, MinPx * px, MaxPx * px);
 float disc = saturate((r - d) / px + 0.5);
-return disc * min(1.0, (Core * Core) / (r * r));
+return disc * max(FarDim, min(1.0, Core / r));
 """
 # Slow wander in world space, each speck its own phase.
 DRIFT_HLSL = """
@@ -102,14 +103,15 @@ def material(log=unreal.log):
     link(node(unreal.MaterialExpressionCameraVectorWS), view, "")
     mote = custom(MOTE_HLSL, "Mote", unreal.CustomMaterialOutputType.CMOT_FLOAT1,
                   {"P": local, "V": view, "Core": scalar("CoreUnits", 5.0),
-                   "MinPx": scalar("MinRadiusPx", 0.5), "MaxPx": scalar("MaxRadiusPx", 1.25)})
+                   "MinPx": scalar("MinRadiusPx", 0.75), "MaxPx": scalar("MaxRadiusPx", 1.25),
+                   "FarDim": scalar("FarDim", 0.35)})
     rand = node(unreal.MaterialExpressionPerInstanceRandom)
     time = node(unreal.MaterialExpressionTime)
     # Twinkle: 0.55..1 at its own pace.
     twinkle = custom("return 0.775 + 0.225 * sin(T * (0.6 + R) * S + R * 6.2831853);", "Twinkle",
                      unreal.CustomMaterialOutputType.CMOT_FLOAT1, {"T": time, "R": rand, "S": scalar("TwinkleSpeed", 1.3)})
     colour = node(unreal.MaterialExpressionVectorParameter, parameter_name="Colour", default_value=unreal.LinearColor(0.95, 0.82, 0.62, 1.0))
-    emissive = mul(mul(mul(colour, scalar("Brightness", 0.15)), mote), twinkle)
+    emissive = mul(mul(mul(colour, scalar("Brightness", 0.3)), mote), twinkle)
     mel.connect_material_property(emissive, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     drift = custom(DRIFT_HLSL, "Drift", unreal.CustomMaterialOutputType.CMOT_FLOAT3,
                    {"T": time, "R": rand, "Amp": scalar("DriftCm", 6.0)})
