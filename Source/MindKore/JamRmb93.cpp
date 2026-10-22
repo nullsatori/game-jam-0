@@ -342,20 +342,36 @@ namespace
 				}
 				else if (Gun.Ammo == 5 && G->GetReloadRemaining() > 0.0f && World->GetTimeSeconds() - ReloadStart >= Lead + 0.05f)
 				{
-					Check(Shoot() && G->GetReloadRemaining() <= 0.0f, TEXT("a shot breaks the loading off"));
+					Check(Shoot() && G->GetReloadRemaining() <= 0.0f && L.State == EJamLidState::Free, TEXT("a shot breaks the loading off, the lid open"));
+					LatchedIn = FVector2D(-1.0f);
+					PrevT = 0.0f;
 					Next();
 				}
 				break;
-			case 4: // left open, it swings free; zero-G from here
-				if (Since() >= 0.5f)
+			case 4: // the stroke through, the hand shuts it: caught at the cycle's end, latched Close's length on (in shot time)
+			{
+				const float T = Gun.SinceShot;
+				if (LatchedIn.X < 0.0f && L.State == EJamLidState::Latched)
 				{
-					// Not "on the sight": the forward stroke yanks the gun out, muzzle down, and throws an open lid shut
-					// onto its kicker and back - where it is 0.5 s on depends on the frame the shot fell in.
-					Check(L.State == EJamLidState::Free && L.Angle > 1.0f, FString::Printf(TEXT("the lid is left open and free (%.1f deg)"), L.Angle));
+					LatchedIn = FVector2D(PrevT, T);
+				}
+				PrevT = T;
+				const float Latch = Gun.GetActionCycleSeconds() + L.Close.GetRichCurveConst()->GetLastKey().Time;
+				if (T >= Latch + 0.2f)
+				{
+					UE_LOG(LogMindKore, Log, TEXT("Rmb93 probe: broken off - latched in %.3f..%.3f s after the shot (due %.3f)"), LatchedIn.X, LatchedIn.Y, Latch);
+					Check(LatchedIn.X >= 0.0f && LatchedIn.X <= Latch + 0.01f && Latch <= LatchedIn.Y + 0.01f && L.Angle == 0.0f,
+						TEXT("broken off, the hand shuts the lid once the stroke is through"));
+					// Zero-G from here, the lid let go on the rear sight (free outside a reload, so the hand leaves it).
 					JamSetGravityScale(0.0f);
+					FJamLid& Free = G->Weapons[1].Lid;
+					Free.State = EJamLidState::Free;
+					Free.Angle = Free.OpenStopDeg;
+					Free.Speed = 0.0f;
 					Next();
 				}
 				break;
+			}
 			case 5: // zero-G: it floats to its spring's rest
 				if (Since() >= 3.0f)
 				{

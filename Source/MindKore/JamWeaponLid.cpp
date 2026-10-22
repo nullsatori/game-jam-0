@@ -103,10 +103,11 @@ namespace
 	 * Lid over reload time Reload0..Reload1 (< 0: no reload) and DeltaTime, in steps of at most LidStepSeconds, its
 	 * events on the step they fall in: the palm on the latch at StrikeSeconds (bStrike, latched), a flick up at the
 	 * first round when it lies below ClearDeg, the hand's catch CloseSeconds before ReloadLength and the press shut
-	 * along Close (latched at its last key); free, it swings (SwingLid).
+	 * along Close (latched at its last key); free, it swings (SwingLid). A reload broken off with the lid open
+	 * (bCatchPending): the hand catches it as shot time Shot0..Shot1 reaches CatchAtShot - the pump stroke through.
 	 */
-	void RunLid(FJamLid& Lid, float Reload0, float Reload1, float Lead, float ReloadLength, bool bStrike, const FLidPull& Pull, float DeltaTime,
-		FLidRun& Out)
+	void RunLid(FJamLid& Lid, float Reload0, float Reload1, float Lead, float ReloadLength, bool bStrike, float Shot0, float Shot1,
+		float CatchAtShot, const FLidPull& Pull, float DeltaTime, FLidRun& Out)
 	{
 		const int32 Steps = FMath::Clamp(FMath::CeilToInt(DeltaTime / LidStepSeconds), 1, 2048);
 		const float Dt = DeltaTime / Steps;
@@ -144,6 +145,17 @@ namespace
 			else
 			{
 				Lid.bHeldClear = false;
+				if (Lid.bCatchPending && Lid.State == EJamLidState::Free
+					&& FMath::Lerp(Shot0, Shot1, float(Step + 1) / Steps) >= CatchAtShot)
+				{
+					Lid.State = EJamLidState::Hand;
+					Lid.CatchAngle = Lid.Angle;
+					Lid.SinceCatch = 0.0f;
+				}
+			}
+			if (Lid.State != EJamLidState::Free)
+			{
+				Lid.bCatchPending = false;
 			}
 			if (Lid.State == EJamLidState::Hand)
 			{
@@ -250,10 +262,11 @@ void UJamWeaponsComponent::UpdateLid(FJamWeapon& Weapon, const FTransform& GunWo
 		Still.State = EJamLidState::Latched;
 		Still.Angle = Still.Speed = 0.0f;
 		Still.bHeldClear = false;
+		Still.bCatchPending = false;
 		FLidPull Pull;
 		Pull.Accel = GunWorld.GetRotation().UnrotateVector(Gravity);
 		FLidRun Run;
-		RunLid(Still, 0.0f, HeldAt, Lead, 2.0f * Lead + LidPoseShells * Weapon.ReloadSeconds, true, Pull, HeldAt, Run);
+		RunLid(Still, 0.0f, HeldAt, Lead, 2.0f * Lead + LidPoseShells * Weapon.ReloadSeconds, true, -1.0f, -1.0f, 0.0f, Pull, HeldAt, Run);
 		LidInView->SetRelativeLocationAndRotation(Lid.HingeCm, FQuat(FVector::RightVector, FMath::DegreesToRadians(Still.Angle)));
 		LidTrackFrames = 0;
 		return;
@@ -307,9 +320,20 @@ void UJamWeaponsComponent::UpdateLid(FJamWeapon& Weapon, const FTransform& GunWo
 	{
 		From = ReloadFromSeconds;
 	}
+	// Broken off (a shot, a switch) with the lid open: the hand shuts it once the pump stroke is through - left standing,
+	// it read as broken (owner 22.10). A new reload takes it over instead.
+	if (Reload < 0.0f && LidPrevReload >= 0.0f && Lid.State == EJamLidState::Free)
+	{
+		Lid.bCatchPending = true;
+	}
+	else if (Reload >= 0.0f)
+	{
+		Lid.bCatchPending = false;
+	}
 	LidPrevReload = Reload;
 	FLidRun Run;
-	RunLid(Lid, From, Reload, Lead, float(ReloadEndSeconds - ReloadStartSeconds), bReloadStrikesLid, Pull, DeltaTime, Run);
+	RunLid(Lid, From, Reload, Lead, float(ReloadEndSeconds - ReloadStartSeconds), bReloadStrikesLid, FMath::Max(Weapon.SinceShot - DeltaTime, 0.0f),
+		Weapon.SinceShot, Weapon.GetActionCycleSeconds(), Pull, DeltaTime, Run);
 
 	if (Run.bStrikeSound && Lid.StrikeSound)
 	{
