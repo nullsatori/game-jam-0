@@ -26,6 +26,7 @@
 #include "OSScope.h"
 #include "OSLadder.h"
 #include "OSWeapons.h"
+#include "OSAttachMenu.h"
 #include "OSSuitProjector.h"
 #include "OSWeldProjector.h"
 #include "Kismet/GameplayStatics.h"
@@ -234,6 +235,7 @@ void AOSZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	UInputAction* CrowbarAction = MakeAction(TEXT("IA_ZG_Crowbar"), EInputActionValueType::Boolean);
 	UInputAction* AimAction = MakeAction(TEXT("IA_ZG_Aim"), EInputActionValueType::Boolean);
 	UInputAction* JumpAction = MakeAction(TEXT("IA_ZG_Jump"), EInputActionValueType::Boolean);
+	UInputAction* MenuAction = MakeAction(TEXT("IA_ZG_Menu"), EInputActionValueType::Boolean);
 
 	Map(LookAction, EKeys::Mouse2D, false, false);
 	// WASD onto one 2D axis: D is +X, W is +Y (swizzled), A and S negated.
@@ -258,6 +260,8 @@ void AOSZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	Map(BulletTimeAction, EKeys::V, false, false);
 	Map(CrowbarAction, EKeys::G, false, false);
 	Map(AimAction, EKeys::LeftShift, false, false);
+	// Tab: tapped, the attachment's switch; held, the attachment menu (Docs/Attachments.md, Docs/Controls.md).
+	Map(MenuAction, EKeys::Tab, false, false);
 	// Space is also Lift: thrust up in zero-G, a jump (press) in a gravity zone.
 	Map(JumpAction, EKeys::SpaceBar, false, false);
 
@@ -302,6 +306,39 @@ void AOSZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	Input->BindAction(BulletTimeAction, ETriggerEvent::Completed, this, &AOSZeroGPawn::BulletTimeReleased);
 	Input->BindAction(CrowbarAction, ETriggerEvent::Started, this, &AOSZeroGPawn::ToggleCrowbar);
 	Input->BindAction(JumpAction, ETriggerEvent::Started, this, &AOSZeroGPawn::JumpPressed);
+	Input->BindAction(MenuAction, ETriggerEvent::Started, this, &AOSZeroGPawn::MenuPressed);
+	Input->BindAction(MenuAction, ETriggerEvent::Completed, this, &AOSZeroGPawn::MenuReleased);
+}
+
+void AOSZeroGPawn::MenuPressed()
+{
+	MenuPressedAt = GetWorld()->GetRealTimeSeconds();
+	// The gun starts turning at once: a tap brings it back from half-way on its springs, without a jump.
+	if (GetHands() == EOSHands::Gun && Guns->AttachMenu)
+	{
+		Guns->AttachMenu->Press();
+	}
+}
+
+void AOSZeroGPawn::MenuReleased()
+{
+	const bool bTap = MenuPressedAt >= 0.0 && GetWorld()->GetRealTimeSeconds() - MenuPressedAt < MenuTapSeconds;
+	MenuPressedAt = -1.0;
+	if (!Guns->AttachMenu)
+	{
+		return;
+	}
+	if (bTap)
+	{
+		// A tap: the switch of the attachment on the gun (the laser, the torch); the menu begun goes dark unapplied.
+		Guns->AttachMenu->Kill();
+		if (GetHands() == EOSHands::Gun)
+		{
+			Guns->ToggleSwitch();
+		}
+		return;
+	}
+	Guns->AttachMenu->Release();
 }
 
 void AOSZeroGPawn::PawnClientRestart()
@@ -468,7 +505,13 @@ EOSHandAction AOSZeroGPawn::Route(EOSHandKey Key) const
 		/* Held */         { A::Throw,       A::None,     A::Hands,  A::NextGun, A::None },
 		/* Empty */        { A::None,        A::None,     A::Hands,  A::None,    A::None },
 	};
-	const A Action = Table[uint8(GetHands())][uint8(Key)];
+	A Action = Table[uint8(GetHands())][uint8(Key)];
+	// The attachment menu up (a flag over Gun, Docs/ZeroG.md «Руки»): LMB applies, the wheel selects, the rest is swallowed.
+	if (GetHands() == EOSHands::Gun && Guns->AttachMenu && Guns->AttachMenu->IsActive())
+	{
+		static const A MenuRow[5] = { A::MenuApply, A::None, A::None, A::MenuSelect, A::None };
+		Action = MenuRow[uint8(Key)];
+	}
 	// The move mode's say (Allows): a ladder takes RMB (the hands are on the rungs).
 	if ((Action == A::Fire || Action == A::AutoFire) && !Allows().bFire)
 	{
@@ -521,6 +564,12 @@ void AOSZeroGPawn::Press(EOSHandKey Key, float Value)
 	case EOSHandAction::Reel:
 		HullTools->Reel(Step);
 		break;
+	case EOSHandAction::MenuApply:
+		Guns->AttachMenu->ApplyNow();
+		break;
+	case EOSHandAction::MenuSelect:
+		Guns->AttachMenu->Step(Step);
+		break;
 	default:
 		break;
 	}
@@ -528,6 +577,11 @@ void AOSZeroGPawn::Press(EOSHandKey Key, float Value)
 
 void AOSZeroGPawn::PressSlot(int32 Slot)
 {
+	// Any digit puts the attachment menu out, unapplied (the same gun's key too).
+	if (Guns->AttachMenu)
+	{
+		Guns->AttachMenu->Kill();
+	}
 	if (Slot >= Guns->Weapons.Num())
 	{
 		TakeTool(Slot == GetToolSlot(EOSHullTool::Strap) ? EOSHullTool::Strap : EOSHullTool::Welder);
@@ -886,6 +940,11 @@ FString AOSZeroGPawn::GetRmbPrompt() const
 
 void AOSZeroGPawn::PushPressed()
 {
+	// F (a pickup, a door, a body) puts the attachment menu out, unapplied.
+	if (Guns->AttachMenu)
+	{
+		Guns->AttachMenu->Kill();
+	}
 	// F is the interaction first (a pickup, a door, a canister: owner 18.10); with nothing offered it pushes.
 	if (Interaction->CurrentOffer.IsOffered())
 	{

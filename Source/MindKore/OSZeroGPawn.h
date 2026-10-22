@@ -116,6 +116,10 @@ enum class EOSHandAction : uint8
 	ToolSecondary,
 	/** The wheel with the strap: reel the last line. */
 	Reel,
+	/** LMB with the attachment menu up: apply, as letting Tab go (Docs/Attachments.md). */
+	MenuApply,
+	/** The wheel with the attachment menu up: the next row. */
+	MenuSelect,
 };
 
 /** What a movement mode allows (AOSZeroGPawn::Allows). */
@@ -458,6 +462,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|ZeroG|Input", meta = (ClampMin = "0.0"))
 	float LookSensitivity = 0.7f;
 
+	/** Tab let go sooner than this (real seconds) is a tap - the attachment's switch; held longer, the menu (Docs/Attachments.md). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|ZeroG|Input", meta = (ClampMin = "0.05"))
+	float MenuTapSeconds = 0.25f;
+
+	/** Tab down / up (the input bindings and the probes). */
+	void MenuPressed();
+	void MenuReleased();
+
 	// --- thrusters and stabiliser ------------------------------------------------
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|ZeroG|Thrusters")
@@ -793,6 +805,8 @@ private:
 	void Thrust(const FInputActionValue& Value);
 	void Lift(const FInputActionValue& Value);
 	void PushPressed();
+	/** Real time Tab went down (a tap is shorter than MenuTapSeconds); < 0: up. */
+	double MenuPressedAt = -1.0;
 	/** Stored: Gun, Tool or Held (GetHands reads a Gun with none unlocked as Empty). */
 	EOSHands Hands = EOSHands::Gun;
 	/** What the hands go back to when a held body is let go: Gun or Tool. */
