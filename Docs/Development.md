@@ -8,7 +8,14 @@
    блокируемые `.uasset`/`.umap` только для чтения: редактор их не сохранит,
    а скрипты упадут на `jam_build.save`.
 2. Открыть `MKJamStarter.uproject`. Редактор предложит собрать модуль —
-   согласиться. Можно собрать и из PowerShell:
+   согласиться. Можно собрать и без редактора: `Scripts\build.bat` (двойной
+   клик или из консоли). Он сам находит движок по `EngineAssociation` из
+   `.uproject` через реестр (или берёт `UE_ROOT`, если задана), собирает
+   `MKJamStarterEditor Win64 Development` и ждёт клавишу в конце. Аргументы:
+   `game` — цель игры `MKJamStarter` (перед cook), `DebugGame`/`Shipping` —
+   другая конфигурация, `-nopause` — без паузы. Если редактор этого checkout
+   открыт с Live Coding, сборка редактора откажется: закрыть его или нажать в
+   нём Ctrl+Alt+F11. То же вручную из PowerShell:
 
    ```powershell
    & "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" MKJamStarterEditor Win64 Development -Project="<путь>\MKJamStarter.uproject" -WaitMutex
