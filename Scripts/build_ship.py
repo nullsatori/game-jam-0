@@ -7,7 +7,7 @@ run unless OS_REBUILD_SHIP_WIPES_HAND_EDITS=1 is set (Docs/LevelPipeline.md).
 Run (an existing map is rebuilt in place; the editor stays open after
 a plain -ExecutePythonScript, so wrap it in a script that ends with
 unreal.SystemLibrary.quit_editor()):
-  UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  UnrealEditor-Cmd.exe <path>/OuterSpace.uproject
       -ExecutePythonScript="<path>/Scripts/build_ship.py" -unattended -nop4 -nosplash -nullrhi
 
 Everything is in centimetres, the ship along +X with its centre at the origin.

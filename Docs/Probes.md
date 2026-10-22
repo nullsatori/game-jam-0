@@ -9,7 +9,7 @@
 Без окна (только логика, NullRHI):
 
 ```powershell
-$a = '"<путь>/MKJamStarter.uproject" /Game/OS/Maps/Lvl_OS_ZeroG -game -nullrhi -nosound -unattended -nop4 -nosplash -log=Probe.log -ExecCmds="os.ZeroG.Probe"'
+$a = '"<путь>/OuterSpace.uproject" /Game/OS/Maps/Lvl_OS_ZeroG -game -nullrhi -nosound -unattended -nop4 -nosplash -log=Probe.log -ExecCmds="os.ZeroG.Probe"'
 Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" -ArgumentList $a
 ```
 

@@ -1,6 +1,6 @@
 """Import the Blender-made meshes into /Game/OSArt/Meshes (editor Python, headless).
 
-  OS_FBX_DIR=<dir with the FBX files> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  OS_FBX_DIR=<dir with the FBX files> UnrealEditor-Cmd.exe <path>/OuterSpace.uproject
       -ExecutePythonScript="<path>/Scripts/os_import_meshes.py" -unattended -nop4 -nosplash -nullrhi
 
 The FBX files come from Scripts/blender/*.py (os_planet.py, os_living_wall_mesh.py)

@@ -193,7 +193,7 @@ RMS −25.3 dBFS:
 
 ```
 python Scripts/os_slide_sounds.py .work/donors <wav для игры> Saved/Listen <Saved/Listen ветки звука>
-OS_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePythonScript="<repo>/Scripts/os_import_audio.py" -unattended -nop4 -nosplash -nullrhi
+OS_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe OuterSpace.uproject -ExecutePythonScript="<repo>/Scripts/os_import_audio.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 Прослушка в игровом времени (через лимитер −1 dBFS, как мастер):
@@ -445,8 +445,8 @@ RT60 0.55 с (T20 × 3 по IR в полосе 500 Гц – 4 кГц — 0.54 с
 ```
 python Scripts/os_space_shots.py <доноры> <wav для игры> Saved/Listen    # Donor_<id>_dry.wav
 python Scripts/os_air_sounds.py Saved/Listen .work/air_wav Saved/Listen/air
-OS_WAV_DIR=.work/air_wav UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePythonScript="<repo>/Scripts/os_import_audio.py" -unattended -nop4 -nosplash -nullrhi
-OS_WAV_DIR=.work/air_wav UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePythonScript="<repo>/Scripts/os_air_audio.py" -unattended -nop4 -nosplash -nullrhi
+OS_WAV_DIR=.work/air_wav UnrealEditor-Cmd.exe OuterSpace.uproject -ExecutePythonScript="<repo>/Scripts/os_import_audio.py" -unattended -nop4 -nosplash -nullrhi
+OS_WAV_DIR=.work/air_wav UnrealEditor-Cmd.exe OuterSpace.uproject -ExecutePythonScript="<repo>/Scripts/os_air_audio.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 Ограничение: в воздушной оболочке планетоида ствол тоже звучит металлической комнатой —
@@ -475,7 +475,7 @@ OS_WAV_DIR=.work/air_wav UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePyth
 
 ```
 python Scripts/os_space_shots.py <доноры> <wav для игры> Saved/Listen
-OS_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePythonScript="<repo>/Scripts/os_import_audio.py" -unattended -nop4 -nosplash -nullrhi
+OS_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe OuterSpace.uproject -ExecutePythonScript="<repo>/Scripts/os_import_audio.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 `Saved/Listen` (не в репозитории): `<звук>_space.wav` — все варианты (A, B, C);

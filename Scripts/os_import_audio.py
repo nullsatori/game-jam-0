@@ -1,6 +1,6 @@
 """Import the guns' waves (editor Python, headless).
 
-  OS_WAV_DIR=<out dir of Scripts/os_space_shots.py> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  OS_WAV_DIR=<out dir of Scripts/os_space_shots.py> UnrealEditor-Cmd.exe <path>/OuterSpace.uproject
       -ExecutePythonScript="<path>/Scripts/os_import_audio.py" -unattended -nop4 -nosplash -nullrhi
 
 Every SW_OS_*.wav in OS_WAV_DIR becomes a SoundWave in /Game/OSArt/Audio/Weapons

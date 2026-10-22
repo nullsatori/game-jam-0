@@ -1,10 +1,10 @@
 using UnrealBuildTool;
 
-public class MKJamStarterTarget : TargetRules
+public class OuterSpaceEditorTarget : TargetRules
 {
-	public MKJamStarterTarget(TargetInfo Target) : base(Target)
+	public OuterSpaceEditorTarget(TargetInfo Target) : base(Target)
 	{
-		Type = TargetType.Game;
+		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.V7;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;
 		ExtraModuleNames.Add("MindKore");

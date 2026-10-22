@@ -1,6 +1,6 @@
 """The flyer's sound assets (editor Python, headless). Docs/Flyers.md, "Sound".
 
-  OS_WAV_DIR=<out dir of Scripts/os_flyer_sounds.py> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  OS_WAV_DIR=<out dir of Scripts/os_flyer_sounds.py> UnrealEditor-Cmd.exe <path>/OuterSpace.uproject
       -ExecutePythonScript="<path>/Scripts/os_flyer_audio.py" -unattended -nop4 -nosplash -nullrhi
 
 - Imports every SW_OS_Flyer_*.wav (mono stems) into /Game/OSArt/Audio/Flyer, replacing; the

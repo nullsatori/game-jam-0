@@ -1,8 +1,8 @@
 @echo off
-rem Build MKJamStarter from the command line (Docs/Development.md, first section).
+rem Build OuterSpace from the command line (Docs/Development.md, first section).
 rem Double-click it, or run from cmd / PowerShell:
-rem   Scripts\build.bat                    editor target MKJamStarterEditor, Development
-rem   Scripts\build.bat game               game target MKJamStarter (before a cook)
+rem   Scripts\build.bat                    editor target OuterSpaceEditor, Development
+rem   Scripts\build.bat game               game target OuterSpace (before a cook)
 rem   Scripts\build.bat editor DebugGame   any of Development, DebugGame, Shipping
 rem   Scripts\build.bat -nopause           no "press any key" at the end (for other scripts)
 rem The engine is %UE_ROOT% if set, otherwise the .uproject's EngineAssociation looked up in the
@@ -11,8 +11,8 @@ rem Exit code is the one from UnrealBuildTool.
 setlocal EnableExtensions
 
 for %%I in ("%~dp0..") do set "ROOT=%%~fI"
-set "UPROJECT=%ROOT%\MKJamStarter.uproject"
-set "TARGET=MKJamStarterEditor"
+set "UPROJECT=%ROOT%\OuterSpace.uproject"
+set "TARGET=OuterSpaceEditor"
 set "CONFIG=Development"
 set "NOPAUSE="
 set "BADARG="
@@ -20,8 +20,8 @@ set "UBT_RAN="
 
 :args
 if "%~1"=="" goto args_done
-if /i "%~1"=="editor" (set "TARGET=MKJamStarterEditor"
-) else if /i "%~1"=="game" (set "TARGET=MKJamStarter"
+if /i "%~1"=="editor" (set "TARGET=OuterSpaceEditor"
+) else if /i "%~1"=="game" (set "TARGET=OuterSpace"
 ) else if /i "%~1"=="Development" (set "CONFIG=Development"
 ) else if /i "%~1"=="DebugGame" (set "CONFIG=DebugGame"
 ) else if /i "%~1"=="Shipping" (set "CONFIG=Shipping"
@@ -92,7 +92,7 @@ if "%RC%"=="0" (
     echo BUILD OK
 ) else (
     echo BUILD FAILED, exit code %RC%
-    if defined UBT_RAN if /i "%TARGET%"=="MKJamStarterEditor" echo If the log says Live Coding is active: close the editor of this checkout or press Ctrl+Alt+F11 in it.
+    if defined UBT_RAN if /i "%TARGET%"=="OuterSpaceEditor" echo If the log says Live Coding is active: close the editor of this checkout or press Ctrl+Alt+F11 in it.
 )
 if not defined NOPAUSE pause
 exit /b %RC%

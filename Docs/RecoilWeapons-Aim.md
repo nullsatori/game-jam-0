@@ -315,7 +315,7 @@ first-person-примитива вычисляется из уже сжатог�
 Пересборка материала:
 
 ```
-UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePythonScript="<repo>/Scripts/os_scope.py" -unattended -nop4 -nosplash -nullrhi
+UnrealEditor-Cmd.exe OuterSpace.uproject -ExecutePythonScript="<repo>/Scripts/os_scope.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 **Проба `os.Scope.Shots`** (`-game -windowed`, не NullRHI, `Lvl_OS_Range`):

@@ -18,7 +18,7 @@
 исходного блок-аута сохранена в [архиве](Archive/Ship-Layout-Generated.md).
 
 ```
-UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/build_ship.py" -unattended -nop4 -nosplash -nullrhi
+UnrealEditor-Cmd.exe <path>/OuterSpace.uproject -ExecutePythonScript="<path>/Scripts/build_ship.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 После простого `-ExecutePythonScript` редактор остаётся открытым — оборачивать
