@@ -261,13 +261,13 @@ struct FOSPortSmoke
 	 * gun's space - it creeps back along the shroud, CreepCmPerSecond, and swirls round the bore, SwirlCmPerSecond - then
 	 * hands over to the world (the air or the vacuum's rules below).
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
 	float ClingSeconds = 1.5f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
 	float SwirlCmPerSecond = 12.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
 	float CreepCmPerSecond = 3.0f;
 
 	/** In air only: the hot smoke's lift as a share of the local gravity (against it), and how fast the air takes its speed, s. */

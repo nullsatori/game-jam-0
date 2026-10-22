@@ -2,9 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "JamSmokeSim.h"
+#include "OSSmokeSim.h"
 #include "Tasks/Task.h"
-#include "JamMuzzleFx.generated.h"
+#include "OSMuzzleFx.generated.h"
 
 class UHeterogeneousVolumeComponent;
 class UInstancedStaticMeshComponent;
@@ -13,7 +13,7 @@ class UMaterialInterface;
 class UPointLightComponent;
 class UStaticMesh;
 class UTexture2D;
-struct FJamPortSmoke;
+struct FOSPortSmoke;
 
 /** One gun's shot in vacuum: the flash and the powder smoke. Sizes are sprite diameters, cm. */
 USTRUCT(BlueprintType)
@@ -112,13 +112,13 @@ struct FOSMuzzleFx
 	float SmokeTear = 0.2f;
 
 	/**
-	 * Volumetric cloud (jam.Fx.VolumetricSmoke 1): a smoke grid (FJamSmokeSim) of Cells a side of CellCm (the box is
+	 * Volumetric cloud (os.Fx.VolumetricSmoke 1): a smoke grid (FOSSmokeSim) of Cells a side of CellCm (the box is
 	 * Cells x CellCm), drawn voxel for voxel. Docs/RecoilWeapons-SmokeSim.md.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "8", ClampMax = "48"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "8", ClampMax = "48"))
 	int32 Cells = 24;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "1.0"))
 	float CellCm = 3.0f;
 
 	/**
@@ -126,53 +126,53 @@ struct FOSMuzzleFx
 	 * keeps 1 - SmokeBrake of it forward, the rest goes out of the side ports) and out of its own centre, cm/s; the
 	 * muzzle keeps puffing it for EmitSeconds.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.5"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.5"))
 	float SlugLengthCm = 10.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.5"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.5"))
 	float SlugRadiusCm = 4.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float SlugSpeedCm = 350.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float SlugRadialCm = 60.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float EmitSeconds = 0.05f;
 
 	/** Extinction of the dense band, 1/cm (the material's bands are 1/3, 2/3 and all of it). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float DenseExtinction = 0.1f;
 
 	/** A round through a cloud: within RadiusCm it pushes the gas out of its line and along it (cm/s) and throws Clear of it aside at once. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float RoundRadiusCm = 8.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float RoundPushCm = 120.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float RoundAlongCm = 200.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float RoundClear = 0.7f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume")
-	FJamSmokeParams Sim;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume")
+	FOSSmokeParams Sim;
 
 	/** The grid steps this long after the shot (air / vacuum), s, then freezes (any push wakes it for a second). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.1"))
 	float ActiveAirSeconds = 3.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.1"))
 	float ActiveVacuumSeconds = 1.2f;
 
 	/** How hard the material eats the cloud over the second half of its life (thin voxels first), and the life, s. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float Erode = 0.9f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.5"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.5"))
 	float CloudSeconds = 6.0f;
 
 	/** This gun's blast shoves the older clouds ahead of the muzzle along the bore, cm/s (the shotgun). */
@@ -186,10 +186,10 @@ struct FOSMuzzleFx
  * of hot gas - ragged lobes, a few sparks, side jets from a muzzle brake - with
  * a light; the smoke is a few thin puffs, lit by the scene, thrown out fast
  * and then frozen, drifting on without buoyancy, fading over seconds. The
- * smoke keeps the jam's low-res look on purpose: a texel grid per puff, 3
+ * smoke keeps the game's low-res look on purpose: a texel grid per puff, 3
  * density bands with Bayer-dithered steps, a faint scanline fringe on its
  * edge, a heat shimmer behind it for its first 100 ms. The volumetric cloud
- * (jam.Fx.VolumetricSmoke 1) is a small gas simulation (FJamSmokeSim) drawn
+ * (os.Fx.VolumetricSmoke 1) is a small gas simulation (FOSSmokeSim) drawn
  * voxel for voxel (Docs/RecoilWeapons-Fx.md, «Живой дым»).
  *
  * The flash is the gun's: its ~0.1 s of hot gas stays on the muzzle socket, in
@@ -204,7 +204,7 @@ struct FOSMuzzleFx
  * drawn as sprites turned to the owner's camera. Flash and cards are engine
  * planes in two instanced meshes (the flash's on that camera, the cards' at the
  * world's origin); the look is in
- * M_Jam_MuzzleFlash / M_Jam_MuzzleSmoke / M_Jam_MuzzleSmokeVolume
+ * M_OS_MuzzleFlash / M_OS_MuzzleSmoke / M_OS_MuzzleSmokeVolume
  * (Scripts/os_muzzle_fx.py).
  *
  * UOSWeaponsComponent makes this on BeginPlay and calls Shot with the muzzle
@@ -227,61 +227,61 @@ public:
 
 	/** Soft, loaded on BeginPlay: a hard reference roots them in the editor and Scripts/os_muzzle_fx.py could not rebuild them. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx")
-	TSoftObjectPtr<UMaterialInterface> FlashMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/FX/M_Jam_MuzzleFlash.M_Jam_MuzzleFlash")));
+	TSoftObjectPtr<UMaterialInterface> FlashMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/FX/M_OS_MuzzleFlash.M_OS_MuzzleFlash")));
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx")
-	TSoftObjectPtr<UMaterialInterface> SmokeMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/FX/M_Jam_MuzzleSmoke.M_Jam_MuzzleSmoke")));
+	TSoftObjectPtr<UMaterialInterface> SmokeMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/FX/M_OS_MuzzleSmoke.M_OS_MuzzleSmoke")));
 
 	/** Clouds alive at once (volumetric smoke); the oldest is reused. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "1"))
 	int32 MaxClouds = 4;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume")
-	TSoftObjectPtr<UMaterialInterface> CloudMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/JamArt/FX/M_Jam_MuzzleSmokeVolume.M_Jam_MuzzleSmokeVolume")));
+	TSoftObjectPtr<UMaterialInterface> CloudMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/FX/M_OS_MuzzleSmokeVolume.M_OS_MuzzleSmokeVolume")));
 
 	/** Clouds whose grids step in one frame (the youngest); the rest hold still until they are among them again. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "1"))
 	int32 MaxActiveSims = 2;
 
 	/** A push (a round, the pawn, a flyer, a hot case) wakes a frozen cloud's grid for this long, s. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float WakeSeconds = 1.0f;
 
 	/**
 	 * In a vacuum the gas expands freely: the slug keeps this share of its speed out of the bore and swells out of
 	 * its own centre this many times faster (a shell flying apart, not a jet), and the muzzle puffs no stem.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float VacuumThrowShare = 0.3f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float VacuumRadialScale = 2.5f;
 
-	/** How much the gas around a voxel shadows the material's ambient, and the gas toward the key light its key light (FJamSmokeSim::Pack). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	/** How much the gas around a voxel shadows the material's ambient, and the gas toward the key light its key light (FOSSmokeSim::Pack). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float AmbientOcclusion = 0.15f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float KeyShadow = 0.5f;
 
 	/** The drawn density is the gas less this share of its blur (5 cells): the soft cushion goes, rags stay. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "0.9"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "0.9"))
 	float Sharpen = 0.6f;
 
 	/** The key light for the material: its colour x its illuminance at the cloud / pi x this. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float KeyStrength = 0.008f;
 
 	/** ...at most this (a lamp right over the cloud, the flash inside it). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float KeyMax = 3.0f;
 
 	/** The material's room ambient (the bounced light the volume does not get) outside air: none to bounce in space. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float VacuumAmbientShare = 0.0f;
 
 	/** A spent case smokes while hot: its heat's time constant, s (1 when it leaves the port). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx", meta = (ClampMin = "0.05"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx", meta = (ClampMin = "0.05"))
 	float CaseHeatSeconds = 1.4f;
 
 	/**
@@ -301,7 +301,7 @@ public:
 	/** The living clouds in the world: centre, its shot's muzzle, distance from the eye (log lines of the stills). */
 	FString DescribeClouds() const;
 
-	/** Each living cloud's grid atlas (FJamSmokeSim::Pack, raw BGRA) to Saved/SmokeDump/<Name>_<slot>.raw (stills). */
+	/** Each living cloud's grid atlas (FOSSmokeSim::Pack, raw BGRA) to Saved/SmokeDump/<Name>_<slot>.raw (stills). */
 	void DumpClouds(const FString& Name) const;
 
 	/** Remove every cloud (stills). */
@@ -426,14 +426,14 @@ private:
 		float Life = 0.1f;
 	};
 
-	/** One volumetric smoke cloud in the world: a smoke grid drawn by a heterogeneous volume (M_Jam_MuzzleSmokeVolume reads its atlas). */
+	/** One volumetric smoke cloud in the world: a smoke grid drawn by a heterogeneous volume (M_OS_MuzzleSmokeVolume reads its atlas). */
 	struct FCloud
 	{
 		TObjectPtr<UHeterogeneousVolumeComponent> Volume = nullptr;
 		TObjectPtr<UMaterialInstanceDynamic> Material = nullptr;
-		/** The grid's atlas (FJamSmokeSim::Pack), point-sampled by the material. */
+		/** The grid's atlas (FOSSmokeSim::Pack), point-sampled by the material. */
 		TObjectPtr<UTexture2D> Grid = nullptr;
-		TUniquePtr<FJamSmokeSim> Sim;
+		TUniquePtr<FOSSmokeSim> Sim;
 		TArray<FColor> Atlas;
 		int32 Gun = 0;
 		/** The box's centre, world; it moves by whole cells after the gas (and with Carried / Rise). */
@@ -483,7 +483,7 @@ private:
 	void WaitSims() const;
 	void TickClouds(float DeltaTime);
 	void TickHotCases(float DeltaTime);
-	/** A push along Origin + t Direction (world) through every living cloud it crosses but Except (FJamSmokeSim::Impulse); wakes them. */
+	/** A push along Origin + t Direction (world) through every living cloud it crosses but Except (FOSSmokeSim::Impulse); wakes them. */
 	void Blast(const FVector& Origin, const FVector& Direction, float RadiusCm, float Along, float Push, float Clear, const FCloud* Except);
 	/** A card puff at Where, world, thrown along Direction (cm over its life's first moments), in air rising. */
 	FPuff& AddCardPuff(const FVector& Where, const FVector& Direction, float StartCm, float EndCm, float Opacity, float Seconds);

@@ -7,11 +7,11 @@ Rebuilt in place on every run. Both draw a sprite on the engine plane
 mesh; the component turns each plane to the camera and feeds per-instance
 custom data:
 
-  M_Jam_MuzzleFlash  additive, unlit: one ragged lobe of hot gas - an iso-surface
+  M_OS_MuzzleFlash  additive, unlit: one ragged lobe of hot gas - an iso-surface
                      of 4-octave value noise falling off from the centre, its colour
                      cooling from white-yellow to dim red with heat.
                      Data 0 intensity, 1 seed, 2 heat (1 white-hot .. 0), 3 turn (rad).
-  M_Jam_MuzzleSmoke  translucent, two-sided foliage (lit from behind it glows
+  M_OS_MuzzleSmoke  translucent, two-sided foliage (lit from behind it glows
                      through), lit per pixel (Surface ForwardShading: the
                      sun with its shadows, lamps, the flash's light; a few
                      sparse sprites, so cheap enough): a grey-blue puff,
@@ -22,8 +22,8 @@ custom data:
                      Data 0 opacity, 1 seed, 2 spin (rad), 3 tear, 4 shimmer,
                      5 and 6 the grid's texels along and across (set by the component).
 
-  M_Jam_MuzzleSmokeVolume  Volume domain, Subsurface (the only model whose Subsurface Color pin - the
-                     extinction - a heterogeneous volume reads): the smoke grid's atlas (FJamSmokeSim::Pack, a
+  M_OS_MuzzleSmokeVolume  Volume domain, Subsurface (the only model whose Subsurface Color pin - the
+                     extinction - a heterogeneous volume reads): the smoke grid's atlas (FOSSmokeSim::Pack, a
                      transient texture from C++) drawn voxel for voxel. Docs/RecoilWeapons-Fx.md, «Живой дым».
 
 No texture asset: the shapes are maths or the runtime grid, nothing third-party.
@@ -36,7 +36,7 @@ import unreal
 sys.path.insert(0, os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts"))
 import os_build  # noqa: E402
 
-FOLDER = "/Game/JamArt/FX"
+FOLDER = "/Game/OSArt/FX"
 eal = unreal.EditorAssetLibrary
 mel = unreal.MaterialEditingLibrary
 
@@ -217,9 +217,9 @@ def _smoke(m, node, custom, data, scalar, colour, mul):
         unreal.log_warning("muzzle fx: no 2D-offset refraction mode, no heat shimmer")
 
 
-# The volumetric cloud (jam.Fx.VolumetricSmoke 1, Docs/RecoilWeapons-SmokeSim.md, «Правка v2»): a heterogeneous
+# The volumetric cloud (os.Fx.VolumetricSmoke 1, Docs/RecoilWeapons-SmokeSim.md, «Правка v2»): a heterogeneous
 # volume marches this Volume-domain material and lights it with real self-shadowing and scattering. The gas is
-# simulated on the CPU (FJamSmokeSim) and arrives as an atlas (slice z at tile (z % 8, z / 8), 8 tiles across):
+# simulated on the CPU (FOSSmokeSim) and arrives as an atlas (slice z at tile (z % 8, z / 8), 8 tiles across):
 # r the drawn density (the gas less its blur: rags, not a cushion), g heat, b the key light's shadow, a the ambient's.
 # The low-res identity is tied to the screen, not to the grid: the material's pixel is ~5 px at 1080p at any
 # distance (a power of two in cm, from the distance to the eye: it does not swim as the cloud drifts), the grid
@@ -320,13 +320,13 @@ def _volume(m, node, custom, data, scalar, colour, mul):
 
 
 def build():
-    _material("M_Jam_MuzzleFlash", unreal.BlendMode.BLEND_ADDITIVE, _flash)
-    _material("M_Jam_MuzzleSmoke", unreal.BlendMode.BLEND_TRANSLUCENT, _smoke)
+    _material("M_OS_MuzzleFlash", unreal.BlendMode.BLEND_ADDITIVE, _flash)
+    _material("M_OS_MuzzleSmoke", unreal.BlendMode.BLEND_TRANSLUCENT, _smoke)
     # Subsurface, not Unlit or Default Lit: the volume reads its extinction from the Subsurface Color pin
     # (HeterogeneousVolumesLiveShadingUtils.ush, SampleExtinctionCoefficients: not for an Unlit material), and the
     # pin is compiled only for a subsurface shading model. Until 22.10 it was Unlit - no extinction, no
     # self-shadow, no scattering: the cloud was its emission alone (the milky veil).
-    _material("M_Jam_MuzzleSmokeVolume", unreal.BlendMode.BLEND_ADDITIVE, _volume, unreal.MaterialShadingModel.MSM_SUBSURFACE)
+    _material("M_OS_MuzzleSmokeVolume", unreal.BlendMode.BLEND_ADDITIVE, _volume, unreal.MaterialShadingModel.MSM_SUBSURFACE)
 
 
 if __name__ == "__main__":

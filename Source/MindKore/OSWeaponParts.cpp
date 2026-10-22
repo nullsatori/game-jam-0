@@ -3,8 +3,8 @@
 // loading. Members of UOSWeaponsComponent (OSWeapons.h), kept apart from
 // OSWeapons.cpp so the parts and the shooting change in separate files.
 
-#include "JamWeapons.h"
-#include "JamMuzzleFx.h"
+#include "OSWeapons.h"
+#include "OSMuzzleFx.h"
 
 #include "AudioMixerBlueprintLibrary.h"
 #include "Camera/CameraComponent.h"
@@ -1052,8 +1052,8 @@ void UOSWeaponsComponent::UpdateCycleEvents()
 			const int32 Before = Debris.Num();
 			SpawnDebris(Shot.CaseMesh, FTransform(Facing, Gun.TransformPosition(Shot.EjectPort)), Velocity, Spin, 0.012f);
 			++CasesThrown;
-			// Hot: it drags a wisp through the smoke and smokes on the floor (JamMuzzleFx).
-			UJamMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UJamMuzzleFxComponent>();
+			// Hot: it drags a wisp through the smoke and smokes on the floor (OSMuzzleFx).
+			UOSMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UOSMuzzleFxComponent>();
 			if (Fx && Debris.Num() > Before)
 			{
 				Fx->HotCase(Debris.Last().Get());

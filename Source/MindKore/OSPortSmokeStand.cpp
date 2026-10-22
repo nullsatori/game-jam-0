@@ -1,31 +1,31 @@
-// jam.Weapons.PortSmoke: the RMB-93's shroud smoke up close (Docs/RecoilWeapons-Rmb93.md, «Дым из перфорации кожуха»).
+// os.Weapons.PortSmoke: the RMB-93's shroud smoke up close (Docs/RecoilWeapons-Rmb93.md, «Дым из перфорации кожуха»).
 
 #if !UE_BUILD_SHIPPING
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
-#include "JamMuzzleFx.h"
-#include "JamScope.h"
-#include "JamWeapons.h"
-#include "JamZeroGPawn.h"
+#include "OSMuzzleFx.h"
+#include "OSScope.h"
+#include "OSWeapons.h"
+#include "OSZeroGPawn.h"
 #include "MindKore.h"
 #include "TimerManager.h"
 
 namespace
 {
 	/**
-	 * On Lvl_Jam_TestRoom (run with -RenderOffscreen -UseFixedTimeStep -FPS=60): the RMB-93 in hand, the view a little
+	 * On Lvl_OS_TestRoom (run with -RenderOffscreen -UseFixedTimeStep -FPS=60): the RMB-93 in hand, the view a little
 	 * down along the gun, the hall's flicker held. Three quick shots, stills 0.2 / 0.5 / 1 / 2 s after the last
-	 * (HighResShot JamPorts_*); then two more and a 60-degree turn over a second, stills at a third and two thirds of
+	 * (HighResShot OSPorts_*); then two more and a 60-degree turn over a second, stills at a third and two thirds of
 	 * it. The muzzle's cloud is cleared after each shot: the shroud's smoke is the subject. The pawn stands where the map put it. Ends "Port smoke: done".
 	 */
 	void RunPortSmoke(UWorld* World)
 	{
 		APlayerController* Controller = World->GetFirstPlayerController();
-		AJamZeroGPawn* Pawn = Controller ? Cast<AJamZeroGPawn>(Controller->GetPawn()) : nullptr;
+		AOSZeroGPawn* Pawn = Controller ? Cast<AOSZeroGPawn>(Controller->GetPawn()) : nullptr;
 		if (!Pawn || !Pawn->Guns || !Pawn->Guns->Weapons.IsValidIndex(1))
 		{
-			UE_LOG(LogMindKore, Warning, TEXT("Port smoke: needs the AJamZeroGPawn with its guns"));
+			UE_LOG(LogMindKore, Warning, TEXT("Port smoke: needs the AOSZeroGPawn with its guns"));
 			return;
 		}
 		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
@@ -49,21 +49,21 @@ namespace
 		const auto Still = [Controller](const FString& Name)
 		{
 			UE_LOG(LogMindKore, Log, TEXT("Port smoke: %s"), *Name);
-			Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=JamPorts_%s"), *Name));
+			Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=OSPorts_%s"), *Name));
 		};
 		// The shroud is the subject: each shot's muzzle cloud is cleared a frame after it (it would fill the frame).
 		const auto Shoot = [Pawn, Controller, Look, After]()
 		{
 			Controller->SetControlRotation(Look);
 			const bool bFired = Pawn->Fire();
-			After(0.02f, [Pawn]() { if (UJamMuzzleFxComponent* Fx = Pawn->FindComponentByClass<UJamMuzzleFxComponent>()) { Fx->ClearClouds(); } });
+			After(0.02f, [Pawn]() { if (UOSMuzzleFxComponent* Fx = Pawn->FindComponentByClass<UOSMuzzleFxComponent>()) { Fx->ClearClouds(); } });
 			UE_LOG(LogMindKore, Log, TEXT("Port smoke: shot %s (%s)"), bFired ? TEXT("fired") : TEXT("NOT FIRED"), *Pawn->Guns->Describe());
 		};
 		After(2.0f, [Pawn, Controller, Look]()
 		{
-			UJamWeaponsComponent* Guns = Pawn->Guns;
-			Guns->ApplyPickupWeapon(1, JamMakeRmb93(GetDefault<UJamWeaponsComponent>()->Weapons[1]));
-			Guns->Scope->Aims[1] = JamMakeRmb93Aim(GetDefault<UJamScopeComponent>()->Aims[1]);
+			UOSWeaponsComponent* Guns = Pawn->Guns;
+			Guns->ApplyPickupWeapon(1, OSMakeRmb93(GetDefault<UOSWeaponsComponent>()->Weapons[1]));
+			Guns->Scope->Aims[1] = OSMakeRmb93Aim(GetDefault<UOSScopeComponent>()->Aims[1]);
 			Guns->Weapons[1].Reserve = 24;
 			Guns->UnlockWeapon(1);
 			Guns->FinishSwitch();
@@ -96,8 +96,8 @@ namespace
 	}
 
 	FAutoConsoleCommandWithWorld GPortSmoke(
-		TEXT("jam.Weapons.PortSmoke"),
-		TEXT("The RMB-93's shroud smoke up close on Lvl_Jam_TestRoom (HighResShot JamPorts_*; needs a real RHI, -UseFixedTimeStep -FPS=60): three quick shots, stills 0.2-2 s after, two more and a turn."),
+		TEXT("os.Weapons.PortSmoke"),
+		TEXT("The RMB-93's shroud smoke up close on Lvl_OS_TestRoom (HighResShot OSPorts_*; needs a real RHI, -UseFixedTimeStep -FPS=60): three quick shots, stills 0.2-2 s after, two more and a turn."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunPortSmoke));
 }
 #endif

@@ -57,7 +57,7 @@
   60 Гц первые 0.5 с, потом 30 Гц, шаги в фоновой задаче. GPU на полном разрешении —
   0.96 мс на три облака: `DownsampleFactor 1` оставлен.
 - Не сделано: сдвиг сетки «пол в 2 ячейках от низа» (бокс повёрнут); отдельный
-  `jam.Fx.SmokeFullRes` — вместо него обычная `r.HeterogeneousVolumes.DownsampleFactor`;
+  `os.Fx.SmokeFullRes` — вместо него обычная `r.HeterogeneousVolumes.DownsampleFactor`;
   кадры летунов в облаке.
 
 ## Правка v2 (22.10)
@@ -116,24 +116,24 @@ All references are to the current `jam-smoke-world` state.
 
 1. **No internal structure to light.** `VOLUME_HLSL` sums up to 8 gaussians
    (`d += weight * exp(-dot(q,q)/(P[i].w²))`, then `saturate(d)`,
-   `Scripts/jam_muzzle_fx.py:245-254`). For the shotgun, 8 clumps of radius
+   `Scripts/os_muzzle_fx.py:245-254`). For the shotgun, 8 clumps of radius
    ≤ 26 cm (`SmokeEndCm 34 × 0.75`, capped `0.2 × CloudCm`) thrown ≤ 26 cm
    apart overlap almost entirely, so `saturate(d)` is 1 over most of the box:
    one soft ball. Noise (`n - 0.22 - 0.4·Tear`, `×3`) only nibbles its edge.
 2. **Extinction too low to self-shadow.** `Shotgun.CloudExtinction = 0.018`
-   (`JamMuzzleFx.cpp:139`) on the densest band: τ through 60 cm of full band
+   (`OSMuzzleFx.cpp:139`) on the densest band: τ through 60 cm of full band
    ≈ 1.1, through a typical 30 cm ≈ 0.5. Nothing inside is dark; lit from a
    lamp the whole volume in-scatters about equally → a uniformly translucent
    veil. The earlier "×1/3" cut (RecoilWeapons-Fx.md, «Правки после ревью»)
    fixed the white blow-out by removing the only thing that gives a volume
    form: optical thickness.
 3. **Flat ambient glow = milk.** Emissive `albedo × band × Ambient 0.12`
-   (`jam_muzzle_fx.py:368`) is added to every lit voxel regardless of shadow:
+   (`os_muzzle_fx.py:368`) is added to every lit voxel regardless of shadow:
    a constant offset that flattens exactly the contrast the renderer makes.
    Against the beige floor the darkish albedo (0.16, 0.18, 0.22) plus flat glow
    is a grey wash.
 4. **Frozen shape, uniform fade.** `Throw = 1 − e^(−Age/0.12)`,
-   `Grow = 1 − e^(−Age/0.15)` (`JamMuzzleFx.cpp:539-540`): after ~0.4 s nothing
+   `Grow = 1 − e^(−Age/0.15)` (`OSMuzzleFx.cpp:539-540`): after ~0.4 s nothing
    inside the cloud moves; the 3D noise has no time term (`q3 = p/7 + S*17`,
    `.py:257`); the whole volume is multiplied by one `Fade` (`.cpp:544`, applied
    as `F` in `.py:292`) → the cloud dims evenly instead of thinning from its
@@ -155,7 +155,7 @@ All references are to the current `jam-smoke-world` state.
    little shadow there is spans 2 voxels.
 7. **Nothing interacts.** Rounds and the pawn only *subtract* density
    (tunnel masks, `.py:279-289`); spent cases (`UpdateCycleEvents`,
-   `JamWeaponParts.cpp:1040-1052`) are inert; the flash light is the only
+   `OSWeaponParts.cpp:1040-1052`) are inert; the flash light is the only
    "event" the cloud shows.
 
 ## 2. Look target and the feature set
@@ -186,7 +186,7 @@ written at runtime), no Niagara.
 
 ## 3. Implementation
 
-### 3.1 The grid sim (`Source/MindKore/JamSmokeSim.h/.cpp`, new)
+### 3.1 The grid sim (`Source/MindKore/OSSmokeSim.h/.cpp`, new)
 
 Cloud space (the HV box frame), N³ cells of `CellCm`, origin at the box's
 min corner. Fields: `Rho`, `Heat`, `Ux, Uy, Uz` (cm/s), scratch `P, Div, Tmp`,
@@ -195,7 +195,7 @@ min corner. Fields: `Rho`, `Heat`, `Ux, Uy, Uz` (cm/s), scratch `P, Div, Tmp`,
 
 ```cpp
 /** A small smoke grid in a cloud's space: incompressible in air, free-flying in a vacuum. Cells of CellCm, N a side. */
-struct FJamSmokeSim
+struct FOSSmokeSim
 {
 	int32 N = 32;
 	float CellCm = 4.0f;
@@ -242,7 +242,7 @@ struct FJamSmokeSim
 Jacobi solve red-black so slices are independent):
 
 ```cpp
-void FJamSmokeSim::Step(float Dt, const FParams& K)
+void FOSSmokeSim::Step(float Dt, const FParams& K)
 {
 	const float Inv = 1.0f / CellCm;
 	// 1. Forces. Air: hot gas rises against Down, the air damps the gas's own motion. Vacuum: nothing acts.
@@ -287,7 +287,7 @@ the sim for `WakeSeconds` 1.0 s.
 
 **Solids.** At spawn, two traces from the muzzle on `ECC_Visibility` (debris
 ignores it, so shells are not hit): along the bore for `CloudCm`, and along the
-local gravity (`JamGravityAt`) for `CloudCm`. Each hit becomes a plane in cloud
+local gravity (`OSGravityAt`) for `CloudCm`. Each hit becomes a plane in cloud
 space; `RebuildSolids` marks cells behind them. A slug fired at the floor
 splashes radially along the slab and the projection rolls its rim up: the real
 "ground-shot" look. Also: if the floor plane is inside the box, the grid is
@@ -325,7 +325,7 @@ Cost: the Volume material drops from 8 gaussians + 5 noise octaves per voxel
 to one texel load + a few ALU: preshading ≈ 32³ trivial voxels. Upload 128 KB
 per active cloud per frame.
 
-### 3.3 `M_Jam_MuzzleSmokeVolume` — new `VOLUME_HLSL`
+### 3.3 `M_OS_MuzzleSmokeVolume` — new `VOLUME_HLSL`
 
 Inputs: `W` world pos, `C` centre, `BX BY BZ` basis, `H` half cm, `N` cells,
 `Grid` (TextureObject parameter, 2D), `S` seed, `T` age, `L` life, `Th` thin
@@ -364,7 +364,7 @@ float fringe = (band == 1 && g.b > 0.25) ? lerp(1, 0.4, fmod(abs(v.y), 2)) : 0;
 return float4(band / 3, saturate(g.g * 1.4), ember, fringe);
 ```
 
-Material wiring (`_volume` in `jam_muzzle_fx.py`): delete the Puff/Wake
+Material wiring (`_volume` in `os_muzzle_fx.py`): delete the Puff/Wake
 parameters; add `Grid` (`MaterialExpressionTextureObjectParameter`, default
 `/Engine/EngineResources/DefaultTexture`), scalars `Cells 32`, `Age 0`, `Life
 6`, `Thin 1`, `Erode 0.9`, `Time` from `MaterialExpressionTime`.
@@ -379,9 +379,9 @@ The albedo is brighter than now on purpose: with τ ≈ 2–3 through a lump the
 dark side comes from shadow, not from a dark albedo, and the owner's "no blown
 white" is held by `Ambient 0.02` (the old 0.12 was the white).
 
-### 3.4 `JamMuzzleFx` C++ changes
+### 3.4 `OSMuzzleFx` C++ changes
 
-`FJamMuzzleFx` (replaces `CloudVoxels`, `CloudThrowCm`, `TunnelCm`,
+`FOSMuzzleFx` (replaces `CloudVoxels`, `CloudThrowCm`, `TunnelCm`,
 `SmokeSpreadCm`-for-clouds; the card fields stay):
 
 ```cpp
@@ -394,11 +394,11 @@ float DenseExtinction = 0.10f;
 /** A round or a blast through a cloud: push out of its line and along it, cm/s, within RadiusCm. */
 float RoundRadiusCm = 8.0f; float RoundPushCm = 120.0f; float RoundAlongCm = 200.0f;
 float ShoveCm = 0.0f;  // kept
-FJamSmokeSim::FParams Sim;  // Buoyancy, DragSeconds, Vorticity, HeatSeconds, DecayPerSecond, Jacobi
+FOSSmokeSim::FParams Sim;  // Buoyancy, DragSeconds, Vorticity, HeatSeconds, DecayPerSecond, Jacobi
 float ActiveAirSeconds = 3.0f; float ActiveVacuumSeconds = 1.2f; float Erode = 0.9f; float CloudSeconds = 6.0f;
 ```
 
-`FCloud` gains `TUniquePtr<FJamSmokeSim> Sim; TObjectPtr<UTexture2D> Grid;
+`FCloud` gains `TUniquePtr<FOSSmokeSim> Sim; TObjectPtr<UTexture2D> Grid;
 TArray<FColor> Atlas; float Awake; float Scale; FVector RiseVelocity;` and
 loses `Velocity, DriftVelocity, PuffThrow, Wakes`. `FWake`/`AddWake` become
 `Blast(Origin, Dir, RadiusCm, Along, Push, Except)` = `Sim->Impulse` on every
@@ -412,7 +412,7 @@ along ±Y with `SlugSpeedCm · SmokeBrake / 2`. `Carried = GunVelocity` as now.
 Create the transient texture once per slot, `Material->SetTextureParameterValue("Grid", Cloud.Grid)`.
 
 `TickClouds` per living cloud:
-1. `Age += Dt`; `bAir` re-read from `JamAirZoneAt(Centre)` (a cloud drifting
+1. `Age += Dt`; `bAir` re-read from `OSAirZoneAt(Centre)` (a cloud drifting
    out of an air zone turns ballistic: honest).
 2. Active (`Age < ActiveSeconds || Awake > 0`): `Sim->Step(min(Dt, 1/30))`;
    box follow (`Shift`); `Pack(Atlas)`; `UpdateTextureRegions`. At most
@@ -430,9 +430,9 @@ solve: a line impulse in an incompressible gas *is* a tunnel with a vortex
 ring at its mouth); shotgun shove = `Impulse` along the bore in a 400 cm cone
 scaled by distance, as now but into the sim.
 
-### 3.5 Hot shells (`JamWeapons` + `JamMuzzleFx`)
+### 3.5 Hot shells (`OSWeapons` + `OSMuzzleFx`)
 
-`UJamMuzzleFxComponent::HotCase(AActor* Case)`; called from
+`UOSMuzzleFxComponent::HotCase(AActor* Case)`; called from
 `UpdateCycleEvents` right after `SpawnDebris(Shot.CaseMesh, …)` with
 `Debris.Last().Get()`. `TArray<FHotCase>{ TWeakObjectPtr<AActor>, float Heat
 = 1, float Carry }`, heat τ 1.4 s. Per tick, per case with `Heat > 0.15`:
@@ -446,7 +446,7 @@ scaled by distance, as now but into the sim.
   `Opacity 0.18`, `Lift` in air as `PortPuffs`, direction = case velocity · 0.2
   + random. A shell lying on the floor smokes for a second after the shot.
 
-### 3.6 Port smoke of the shroud (`FJamPortSmoke`, `SMOKE_HLSL`)
+### 3.6 Port smoke of the shroud (`FOSPortSmoke`, `SMOKE_HLSL`)
 
 `SMOKE_HLSL`: `BANDS 5 → 3`; add inputs `Tm` (time) and `Ag` (instance data 7,
 0..1 "liveliness" = `1 − Age/Life`): after `pr` is built,
@@ -462,7 +462,7 @@ Throw + RisenVelocity · 0.6)` where `RisenVelocity = Lift · τ · (1 −
 e^(−Age/τ))` — a seep wisp stands up as it rises. Vacuum: no sway, no rise
 (straight, as now).
 
-RMB-93 values (`JamRmb93.cpp`): `ShotPuffs 8 → 10`, `ShotThrowCm 2.5 → 3.5`,
+RMB-93 values (`OSRmb93.cpp`): `ShotPuffs 8 → 10`, `ShotThrowCm 2.5 → 3.5`,
 `SeepPerSecond 5 → 8`, `EndCm 6 → 9`, `Seconds 2.2 → 2.8`, `Opacity 0.1 →
 0.22`, `RiseShare 0.05 → 0.12`, `AirDragSeconds 0.5 → 0.7`.
 
@@ -493,7 +493,7 @@ RMB-93 values (`JamRmb93.cpp`): `ShotPuffs 8 → 10`, `ShotThrowCm 2.5 → 3.5`,
   ≈ 32k × 4 trilinear, projection 12 × 32k, curl/confinement 32k —
   ≈ 6–8 Mflop ≈ 2 ms scalar, **≈ 0.3–0.5 ms wall** on 8 threads per active
   cloud; ≤ 2 active → ≤ 1 ms worst case, 0 when nothing is fresh. Measure with
-  a new `jam.Fx.SmokeCost` (µs per step, mean/max, like `jam.Rmb93.Cost`).
+  a new `os.Fx.SmokeCost` (µs per step, mean/max, like `os.Rmb93.Cost`).
 
 ## 4. Crispness under DLAA + HV downsample
 
@@ -509,7 +509,7 @@ RMB-93 values (`JamRmb93.cpp`): `ShotPuffs 8 → 10`, `ShotThrowCm 2.5 → 3.5`,
 3. **Resolution.** `DownsampleFactor 2` stays the default: the remaining
    softness is a 1-px bilinear edge on a 7–9 px cube, which DLAA on stable
    content sharpens over a few frames; the clouds move slowly (cm/s), so no
-   temporal ghosting. Add `jam.Fx.SmokeFullRes` (sets `DownsampleFactor 1`):
+   temporal ghosting. Add `os.Fx.SmokeFullRes` (sets `DownsampleFactor 1`):
    measure it in the budget still; keep it only if three clouds stay ≤ 1.5 ms.
 4. DLAA cannot exclude a pass; nothing to do there. Stable, quantized,
    high-contrast voxels converge sharp under it; the old soft gradients did not.
@@ -523,25 +523,25 @@ RMB-93 values (`JamRmb93.cpp`): `ShotPuffs 8 → 10`, `ShotThrowCm 2.5 → 3.5`,
 
 ## 5. Verification
 
-Stand (extend `jam.Weapons.Smoke` with moments `room` and `roomspace`):
+Stand (extend `os.Weapons.Smoke` with moments `room` and `roomspace`):
 
-- **room**: `Lvl_Jam_TestRoom` (lit beige, air, gravity), the RMB-93 armed as
-  `jam.Rmb93.Probe` arms it, pawn at rest, look pitched −25° at the floor
+- **room**: `Lvl_OS_TestRoom` (lit beige, air, gravity), the RMB-93 armed as
+  `os.Rmb93.Probe` arms it, pawn at rest, look pitched −25° at the floor
   2.5 m ahead (the owner's screenshot), one shot. First-person stills at
-  **0.05, 0.2, 0.5, 1, 2, 4 s** (`JamSmoke_room_0050ms` …), a witness from the
+  **0.05, 0.2, 0.5, 1, 2, 4 s** (`OSSmoke_room_0050ms` …), a witness from the
   side (eye, muzzle, floor edge in frame) at 0.2, 0.5, 1, 2 s, then a second
   shot through the cloud at 1.5 s with frames 1, 3, 8, 15, 30, and the shells:
   a close witness on the floor at 0.6 and 1.4 s (a shell smoking). Log per
   still: `DescribeClouds` + sim mass, centroid, mean |U|, max heat.
-- **roomspace**: the same shot in `Lvl_Jam_ZeroG` facing black space (the
+- **roomspace**: the same shot in `Lvl_OS_ZeroG` facing black space (the
   `space` variant), same moments: the slug flies apart, thins, freezes, scales.
-- **budget**: `jam.Weapons.Smoke budget` as now (three shotgun clouds,
-  `ProfileGPU`), plus `jam.Fx.SmokeCost` after it; run twice: default and
-  `jam.Fx.SmokeFullRes 1`. Pass: HV pass + composite ≤ 1.5 ms; sim ≤ 0.5 ms
+- **budget**: `os.Weapons.Smoke budget` as now (three shotgun clouds,
+  `ProfileGPU`), plus `os.Fx.SmokeCost` after it; run twice: default and
+  `os.Fx.SmokeFullRes 1`. Pass: HV pass + composite ≤ 1.5 ms; sim ≤ 0.5 ms
   mean per active cloud.
 - Before/after sheets: run the same commands on `main` first (the stand code is
   new, so the owner's screenshot stands in for "before" on `room`; `budget`
-  and `jam.Weapons.Fx` exist on both). `-game -RenderOffscreen -ResX=1920
+  and `os.Weapons.Fx` exist on both). `-game -RenderOffscreen -ResX=1920
   -ResY=1080 -UseFixedTimeStep -FPS=60`, DLAA on (the plugin is on the owner's
   PC), so the stills show the real AA.
 - What to look for, moment by moment: 0.05 s a dense dark slug with ember
@@ -552,10 +552,10 @@ Stand (extend `jam.Weapons.Smoke` with moments `room` and `roomspace`):
   the floor with a thread of smoke; 4 s crumbs and holes, lumps left. In space:
   a shell of gas expanding and thinning, no curl, frozen by 1.2 s, growing and
   fading by density, never by alpha.
-- Regressions: `jam.Rmb93.Probe` (puff counts, heat), `jam.Weapons.Smoke
+- Regressions: `os.Rmb93.Probe` (puff counts, heat), `os.Weapons.Smoke
   foot cling burst sv98` (the old moments still read: tunnel and ring now from
-  the sim), `jam.ZeroG.Probe`, `jam.Weapons.SwitchProbe`.
+  the sim), `os.ZeroG.Probe`, `os.Weapons.SwitchProbe`.
 
 Docs: a new section «Живой дым (22.10)» in `Docs/RecoilWeapons-Fx.md` with
-the owner's words and these numbers; the `FJamPortSmoke` paragraph in
-`RecoilWeapons-Rmb93.md` updated; `jam_muzzle_fx.py` header updated.
+the owner's words and these numbers; the `FOSPortSmoke` paragraph in
+`RecoilWeapons-Rmb93.md` updated; `os_muzzle_fx.py` header updated.

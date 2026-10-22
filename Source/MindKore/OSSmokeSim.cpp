@@ -1,8 +1,8 @@
-#include "JamSmokeSim.h"
+#include "OSSmokeSim.h"
 
 #include "Async/ParallelFor.h"
 
-void FJamSmokeSim::Reset(int32 InN, float InCellCm, bool bInAir, const FVector3f& InDown)
+void FOSSmokeSim::Reset(int32 InN, float InCellCm, bool bInAir, const FVector3f& InDown)
 {
 	N = InN;
 	CellCm = InCellCm;
@@ -23,7 +23,7 @@ void FJamSmokeSim::Reset(int32 InN, float InCellCm, bool bInAir, const FVector3f
 	Hi = FIntVector(-1);
 }
 
-void FJamSmokeSim::UpdateBox()
+void FOSSmokeSim::UpdateBox()
 {
 	// The cells with gas or heat, by slice; then their bounds grown by Margin cells: every step works only there.
 	constexpr int32 Margin = 4;
@@ -61,7 +61,7 @@ void FJamSmokeSim::UpdateBox()
 	Hi = FIntVector(FMath::Min(H.X + Margin, N - 1), FMath::Min(H.Y + Margin, N - 1), FMath::Min(H.Z + Margin, N - 1));
 }
 
-void FJamSmokeSim::RebuildSolids()
+void FOSSmokeSim::RebuildSolids()
 {
 	ParallelFor(N, [this](int32 Z)
 	{
@@ -86,7 +86,7 @@ void FJamSmokeSim::RebuildSolids()
 	});
 }
 
-float FJamSmokeSim::Sample(const TArray<float>& F, const FVector3f& Cells) const
+float FOSSmokeSim::Sample(const TArray<float>& F, const FVector3f& Cells) const
 {
 	const float Max = float(N - 1);
 	const float X = FMath::Clamp(Cells.X, 0.0f, Max), Y = FMath::Clamp(Cells.Y, 0.0f, Max), Z = FMath::Clamp(Cells.Z, 0.0f, Max);
@@ -101,7 +101,7 @@ float FJamSmokeSim::Sample(const TArray<float>& F, const FVector3f& Cells) const
 	return FMath::Lerp(FMath::Lerp(C00, C10, FY), FMath::Lerp(C01, C11, FY), FZ);
 }
 
-void FJamSmokeSim::Inject(const FVector3f& Centre, const FVector3f& Axis, float LengthCm, float RadiusCm, float InRho, float InHeat, const FVector3f& Velocity, float Radial,
+void FOSSmokeSim::Inject(const FVector3f& Centre, const FVector3f& Axis, float LengthCm, float RadiusCm, float InRho, float InHeat, const FVector3f& Velocity, float Radial,
 	const FVector3f& RadialPlane)
 {
 	const FVector3f PlaneN = RadialPlane.GetSafeNormal();
@@ -144,7 +144,7 @@ void FJamSmokeSim::Inject(const FVector3f& Centre, const FVector3f& Axis, float 
 	});
 }
 
-bool FJamSmokeSim::Impulse(const FVector3f& Origin, const FVector3f& Dir, float RadiusCm, float Along, float Push, float Clear)
+bool FOSSmokeSim::Impulse(const FVector3f& Origin, const FVector3f& Dir, float RadiusCm, float Along, float Push, float Clear)
 {
 	const float InvR2 = 1.0f / FMath::Max(RadiusCm * RadiusCm, 1.0f);
 	std::atomic<int32> Touched(0);
@@ -185,7 +185,7 @@ bool FJamSmokeSim::Impulse(const FVector3f& Origin, const FVector3f& Dir, float 
 	return Touched.load() > 0;
 }
 
-void FJamSmokeSim::Confine(float Dt, float Epsilon)
+void FOSSmokeSim::Confine(float Dt, float Epsilon)
 {
 	const float Inv2 = 0.5f / CellCm;
 	const auto At = [this](int32 X, int32 Y, int32 Z) { return Index(FMath::Clamp(X, 0, N - 1), FMath::Clamp(Y, 0, N - 1), FMath::Clamp(Z, 0, N - 1)); };
@@ -224,7 +224,7 @@ void FJamSmokeSim::Confine(float Dt, float Epsilon)
 	});
 }
 
-void FJamSmokeSim::Advect(float Dt)
+void FOSSmokeSim::Advect(float Dt)
 {
 	const float Cells = Dt / CellCm;
 	ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
@@ -270,7 +270,7 @@ void FJamSmokeSim::Advect(float Dt)
 	});
 }
 
-void FJamSmokeSim::Project(float Swell)
+void FOSSmokeSim::Project(float Swell)
 {
 	const float H = CellCm;
 	const float Inv2 = 0.5f / H;
@@ -376,7 +376,7 @@ namespace
 	}
 }
 
-void FJamSmokeSim::Churn(float Dt, float Amount)
+void FOSSmokeSim::Churn(float Dt, float Amount)
 {
 	if (Amount <= 0.0f)
 	{
@@ -398,7 +398,7 @@ void FJamSmokeSim::Churn(float Dt, float Amount)
 	});
 }
 
-void FJamSmokeSim::Step(float Dt, float Age, const FJamSmokeParams& K)
+void FOSSmokeSim::Step(float Dt, float Age, const FOSSmokeParams& K)
 {
 	Jacobi = K.Jacobi;
 	Time += Dt;
@@ -443,7 +443,7 @@ void FJamSmokeSim::Step(float Dt, float Age, const FJamSmokeParams& K)
 	});
 }
 
-void FJamSmokeSim::Shift(const FIntVector& D)
+void FOSSmokeSim::Shift(const FIntVector& D)
 {
 	if (D == FIntVector::ZeroValue)
 	{
@@ -473,7 +473,7 @@ void FJamSmokeSim::Shift(const FIntVector& D)
 	RebuildSolids();
 }
 
-FVector3f FJamSmokeSim::Centroid(float& OutMass) const
+FVector3f FOSSmokeSim::Centroid(float& OutMass) const
 {
 	double Mass = 0.0, X = 0.0, Y = 0.0, Z = 0.0;
 	for (int32 K = 0; K < N; ++K)
@@ -499,7 +499,7 @@ FVector3f FJamSmokeSim::Centroid(float& OutMass) const
 	return FVector3f(float(X / Mass) - C, float(Y / Mass) - C, float(Z / Mass) - C);
 }
 
-float FJamSmokeSim::MeanRadialSpeed() const
+float FOSSmokeSim::MeanRadialSpeed() const
 {
 	float Mass;
 	const FVector3f C = Centroid(Mass) + 0.5f * (N - 1);
@@ -522,7 +522,7 @@ float FJamSmokeSim::MeanRadialSpeed() const
 	return float(Sum / Mass);
 }
 
-void FJamSmokeSim::Stats(float& OutMeanSpeed, float& OutMaxHeat) const
+void FOSSmokeSim::Stats(float& OutMeanSpeed, float& OutMaxHeat) const
 {
 	double Mass = 0.0, Speed = 0.0;
 	OutMaxHeat = 0.0f;
@@ -535,7 +535,7 @@ void FJamSmokeSim::Stats(float& OutMeanSpeed, float& OutMaxHeat) const
 	OutMeanSpeed = Mass > 1e-4 ? float(Speed / Mass) : 0.0f;
 }
 
-void FJamSmokeSim::Pack(TArray<FColor>& Out, const FVector3f& KeyDir, float KeyShadow, float Occlusion, float Sharpen)
+void FOSSmokeSim::Pack(TArray<FColor>& Out, const FVector3f& KeyDir, float KeyShadow, float Occlusion, float Sharpen)
 {
 	const FIntPoint Size = AtlasSize(N);
 	Out.SetNumZeroed(Size.X * Size.Y);

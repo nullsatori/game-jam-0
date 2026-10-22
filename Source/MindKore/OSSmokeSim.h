@@ -2,50 +2,50 @@
 
 #include "CoreMinimal.h"
 #include "Async/ParallelFor.h"
-#include "JamSmokeSim.generated.h"
+#include "OSSmokeSim.generated.h"
 
 /** The gas's behaviour in a smoke grid (Docs/RecoilWeapons-SmokeSim.md). */
 USTRUCT(BlueprintType)
-struct FJamSmokeParams
+struct FOSSmokeParams
 {
 	GENERATED_BODY()
 
 	/** Hot gas rises against the local gravity, cm/s^2 per unit of heat (air only). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Smoke")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke")
 	float Buoyancy = 260.0f;
 
 	/** The air's hold on the gas's own motion, s (air only; a vacuum keeps every speed). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Smoke", meta = (ClampMin = "0.01"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.01"))
 	float DragSeconds = 0.35f;
 
 	/** Vorticity confinement (dimensionless, times the cell): keeps the curls the coarse grid would smear. Halved in a vacuum. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Smoke", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.0"))
 	float Vorticity = 0.35f;
 
 	/** The heat dies with this time constant, s (the embers go out, the rise and the swelling stop). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Smoke", meta = (ClampMin = "0.01"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.01"))
 	float HeatSeconds = 0.5f;
 
 	/**
 	 * The blast swells (air): the pressure solve's volume source, 1/s per unit of heat, dying with SwellSeconds after
 	 * the shot - the slug blooms into a cloud in its first tenth of a second, then only moves.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Smoke", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.0"))
 	float SwellPerSecond = 30.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Smoke", meta = (ClampMin = "0.01"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.01"))
 	float SwellSeconds = 0.1f;
 
 	/** Hot gas churns: a smooth random push, cm/s^2 per unit of heat (the pressure solve keeps only its swirl in air). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Smoke", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.0"))
 	float Turbulence = 600.0f;
 
 	/** Density lost per second (the rest of the dying is the material's erosion). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Smoke", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.0"))
 	float DecayPerSecond = 0.06f;
 
 	/** Red-black Gauss-Seidel sweeps of the pressure solve per step. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Smoke", meta = (ClampMin = "1", ClampMax = "64"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "1", ClampMax = "64"))
 	int32 Jacobi = 12;
 };
 
@@ -54,10 +54,10 @@ struct FJamSmokeParams
  * fluids (semi-Lagrangian advection, a pressure projection) with buoyancy and vorticity confinement - and free-
  * streaming in a vacuum (no pressure, no drag: the slug flies apart and thins). Solids are up to two planes (the
  * floor, a wall). N cells a side of CellCm; positions are cm in the box frame, its centre at the origin. Every loop
- * runs over z-slices in a ParallelFor, only in the box around the gas; the fixed step is the caller's (UJamMuzzleFxComponent:
+ * runs over z-slices in a ParallelFor, only in the box around the gas; the fixed step is the caller's (UOSMuzzleFxComponent:
  * 60 Hz for the first half second, 30 Hz after, in a task off the game thread).
  */
-struct FJamSmokeSim
+struct FOSSmokeSim
 {
 	int32 N = 32;
 	float CellCm = 4.0f;
@@ -94,7 +94,7 @@ struct FJamSmokeSim
 	 */
 	bool Impulse(const FVector3f& Origin, const FVector3f& Dir, float RadiusCm, float Along, float Push, float Clear);
 	/** One step; Age (s since the shot) times the blast's swell. */
-	void Step(float Dt, float Age, const FJamSmokeParams& K);
+	void Step(float Dt, float Age, const FOSSmokeParams& K);
 	/** Move the grid by whole cells (the box follows the gas): the fields shift, what leaves is lost, the planes stay put in the world. */
 	void Shift(const FIntVector& Cells);
 	/** Density centroid, cells from the grid's centre; OutMass the total density. */
