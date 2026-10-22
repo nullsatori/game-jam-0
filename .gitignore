@@ -36,3 +36,7 @@ __pycache__/
 
 # Local art-direction and visual iteration workspace
 .dream-loop/
+
+# Local scratch: previews, renders, concept art, tool output
+/_Local/
+.obsidian/
