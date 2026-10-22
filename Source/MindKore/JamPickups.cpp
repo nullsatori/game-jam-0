@@ -63,6 +63,25 @@ AJamWeaponPickup::AJamWeaponPickup()
 	ActionLabel = LOCTEXT("TakeGun", "Взять оружие");
 }
 
+void AJamWeaponPickup::BeginPlay()
+{
+	Super::BeginPlay();
+	// The class defaults are the pump shotgun as tuned in code, whatever the pawn holds in the slot by now.
+	const UJamWeaponsComponent* Defaults = GetDefault<UJamWeaponsComponent>();
+	const UJamScopeComponent* Sights = GetDefault<UJamScopeComponent>();
+	bHasReplacement = Gun == EJamPickupGun::Rmb93 && Defaults->Weapons.IsValidIndex(WeaponIndex) && Sights->Aims.IsValidIndex(WeaponIndex);
+	if (bHasReplacement)
+	{
+		Replacement = JamMakeRmb93(Defaults->Weapons[WeaponIndex]);
+		ReplacementAim = JamMakeRmb93Aim(Sights->Aims[WeaponIndex]);
+		bHasReplacement = Replacement.ViewMesh != nullptr;
+	}
+	if (Gun != EJamPickupGun::Slot && !bHasReplacement)
+	{
+		UE_LOG(LogMindKore, Warning, TEXT("Weapon pickup %s: no replacement gun for slot %d - it gives the slot's own"), *GetName(), WeaponIndex);
+	}
+}
+
 FText AJamWeaponPickup::RefusalFor(const AActor* Hand) const
 {
 	// Any pawn with guns: the zero-G pawn and the walkers.
@@ -75,6 +94,17 @@ bool AJamWeaponPickup::Give(AActor* Hand)
 	if (!Guns || !Guns->Weapons.IsValidIndex(WeaponIndex))
 	{
 		return false;
+	}
+	if (bHasReplacement)
+	{
+		if (!Guns->ApplyPickupWeapon(WeaponIndex, Replacement))
+		{
+			return false;
+		}
+		if (Guns->Scope && Guns->Scope->Aims.IsValidIndex(WeaponIndex))
+		{
+			Guns->Scope->Aims[WeaponIndex] = ReplacementAim;
+		}
 	}
 	Guns->UnlockWeapon(WeaponIndex);
 	// Taken while holding a body: the body is let go and the new gun drawn (a hull tool in hand stays).

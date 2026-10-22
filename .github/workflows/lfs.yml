@@ -1,0 +1,14 @@
+# Checks the Git LFS rules (Scripts/check_lfs.sh). Reads pointers only: LFS objects
+# are not downloaded, so the check costs no LFS bandwidth.
+name: LFS
+on:
+  push:
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - run: bash Scripts/check_lfs.sh
