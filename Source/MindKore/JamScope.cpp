@@ -37,7 +37,7 @@ UJamScopeComponent::UJamScopeComponent()
 	// 50 cm (owner 18.10: «прицел пистолета пиздец близко»), the gun small under the target; light and
 	// quick, punched out, a wrist roll as it swings in.
 	Pistol.SightRearCm = FVector(3.6f, -1.431f, 5.82f);
-	Pistol.SightFrontCm = FVector(-13.27f, -1.453f, 6.02f);
+	Pistol.SightFrontCm = FVector(-13.303f, -1.4534f, 6.134f);
 	Pistol.EyeCm = 50.0f;
 	Pistol.GunFieldOfView = 100.0f;
 	Pistol.KickScale = 0.55f;
@@ -283,17 +283,28 @@ bool UJamScopeComponent::Build()
 
 	static UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	UMaterialInterface* DotMaterial = SightDotMaterial.LoadSynchronous();
-	for (const FVector& At : SightDotsCm)
+	for (int32 Index = 0; Index < SightDotsCm.Num(); ++Index)
 	{
+		const FVector& At = SightDotsCm[Index];
 		UStaticMeshComponent* Dot = NewObject<UStaticMeshComponent>(GetOwner());
 		Dot->SetStaticMesh(Sphere);
-		Dot->SetMaterial(0, DotMaterial);
+		const bool bFront = Index == SightDotsCm.Num() - 1;
+		if (bFront && DotMaterial)
+		{
+			UMaterialInstanceDynamic* Bright = UMaterialInstanceDynamic::Create(DotMaterial, Dot);
+			Bright->SetScalarParameterValue(TEXT("Glow"), FrontSightDotGlow);
+			Dot->SetMaterial(0, Bright);
+		}
+		else
+		{
+			Dot->SetMaterial(0, DotMaterial);
+		}
 		Dot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Dot->SetCastShadow(false);
 		Dot->SetOnlyOwnerSee(true);
 		Dot->SetupAttachment(Weapons->ActionInView);
 		Dot->SetRelativeLocation(At);
-		Dot->SetRelativeScale3D(FVector(SightDotCm / 100.0f));
+		Dot->SetRelativeScale3D((bFront ? FrontSightDotCm : FVector(SightDotCm)) / 100.0f);
 		Dot->SetVisibility(false);
 		Dot->RegisterComponent();
 		SightDots.Add(Dot);

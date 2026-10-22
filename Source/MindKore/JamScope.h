@@ -221,13 +221,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights")
 	int32 SightDotWeapon = 0;
 
-	/** The dots in that moving part's mesh space, cm (SM_Jam_USP_Slide: the rear sight's two posts, the front blade, each just under its top so the three read as one line when aimed; measured from its vertices: rear posts centred at y -1.877 / -0.985 (the notch's centre -1.431), the front post at y -1.453, its rear face at x -13.295). */
+	/** The dots in that moving part's mesh space, cm (SM_Jam_USP_Slide: the rear sight's two posts and the front blade; measured from its vertices: rear posts centred at y -1.877 / -0.985 (the notch's centre -1.431); the front blade 0.96 mm thick, centred at y -1.4534, its rear face leaning 4 deg (x -13.295 at z 6.02, -13.311 at its top 6.25) with an insert slot at z 6.04..6.23 - the dot in its middle, on the face). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights")
-	TArray<FVector> SightDotsCm = { FVector(3.6f, -1.877f, 5.82f), FVector(3.6f, -0.985f, 5.82f), FVector(-13.27f, -1.453f, 6.02f) };
+	TArray<FVector> SightDotsCm = { FVector(3.6f, -1.877f, 5.82f), FVector(3.6f, -0.985f, 5.82f), FVector(-13.303f, -1.4534f, 6.134f) };
 
 	/** A dot's diameter, cm: a 2 mm insert, half sunk into the sight's face (owner: the first ones were cheap and too big). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights", meta = (ClampMin = "0.01"))
 	float SightDotCm = 0.2f;
+
+	/**
+	 * The last dot's (the front post's) size, cm (depth, width, height): the blade is 0.96 mm thick, so a 2 mm dot stuck
+	 * out of both its sides and from the hip showed as a sliver at its edge (owner 22.10). An upright 0.9 x 1.8 mm insert
+	 * filling the blade's slot (1.9 mm tall) instead - as wide as the blade, twice the area of a round one.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights")
+	FVector FrontSightDotCm = FVector(0.09f, 0.09f, 0.18f);
+
+	/** The front insert's Glow (M_Jam_SightDot's is 6): nearly twice as far from the eye and thinned by TSR, it reads dim at the rear dots' 6. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights", meta = (ClampMin = "0"))
+	float FrontSightDotGlow = 30.0f;
 
 	/** M_Jam_SightDot (Scripts/jam_scope.py). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights")
