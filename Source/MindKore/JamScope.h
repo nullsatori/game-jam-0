@@ -239,7 +239,7 @@ public:
 
 	/** The front insert's Glow (M_Jam_SightDot's is 6): nearly twice as far from the eye and thinned by TSR, it reads dim at the rear dots' 6. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights", meta = (ClampMin = "0"))
-	float FrontSightDotGlow = 15.0f;
+	float FrontSightDotGlow = 30.0f;
 
 	/** M_Jam_SightDot (Scripts/jam_scope.py). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights")
