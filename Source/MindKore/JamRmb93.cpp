@@ -50,14 +50,15 @@ FJamWeapon JamMakeRmb93(const FJamWeapon& PumpShotgun)
 
 	// The pump runs forward: the shot's gas does nothing, the hand throws barrel and fore-end 5.5 cm forward off the
 	// standing breech and pulls them home. The pump's curve and its sound as they are (the clicks at 0.26 and 0.40 s
-	// are inviolable): the forward stop with a 8% bounce, home with a double knock. The gun leans the other way from
-	// the pump's - the stroke is away from the eye - canted onto its left side, swung across and pushed 3 cm out.
+	// are inviolable): the forward stop with a 8% bounce, home with a double knock. The gun barely leans with the
+	// stroke (owner 22.10: the pump's big cant after every shot is too much) - the other way from the pump's, the
+	// stroke being away from the eye: a few degrees onto its left side and half a centimetre out.
 	Gun.ActionTravelCm = 5.5f;
-	Gun.ActionBodyTurn = FRotator(-5.0f, -12.0f, -20.0f);
-	Gun.ActionBodyOffsetCm = FVector(3.0f, -3.0f, 1.5f);
-	// The fore-end thrown into its forward stop (the gun yanked out, the muzzle down) and pulled home (back toward the eye, the muzzle up).
-	Gun.ShotKicks = { { 0.26f, FVector(80.0f, 0.0f, -15.0f), FRotator(-90.0f, -20.0f, -30.0f) },
-		{ 0.4f, FVector(-85.0f, 0.0f, 20.0f), FRotator(110.0f, 25.0f, 40.0f) } };
+	Gun.ActionBodyTurn = FRotator(-1.0f, -2.0f, -3.0f);
+	Gun.ActionBodyOffsetCm = FVector(0.5f, -0.5f, 0.3f);
+	// The fore-end into its forward stop (a twitch out, the muzzle down) and home (back toward the eye, the muzzle up).
+	Gun.ShotKicks = { { 0.26f, FVector(20.0f, 0.0f, -4.0f), FRotator(-20.0f, -4.0f, -6.0f) },
+		{ 0.4f, FVector(-20.0f, 0.0f, 5.0f), FRotator(24.0f, 5.0f, 8.0f) } };
 	// 3.4 kg against the pump's 3.6: a touch quicker on its springs, the same weight to the turns.
 	Gun.PoseSprings = { { 5.8f, 0.5f, 0.0f }, { 5.3f, 0.55f, 0.0f }, { 5.3f, 0.5f, 0.01f },
 		{ 4.3f, 0.5f, 0.03f }, { 4.3f, 0.55f, 0.03f }, { 3.9f, 0.5f, 0.05f } };
