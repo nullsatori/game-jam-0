@@ -94,6 +94,47 @@ float OSSeatLength(const FOSAttachment& Attachment, EOSMountType Type, bool bOn)
 	}
 }
 
+static int32 OSThreadStrokes(const FOSAttachment& A)
+{
+	return FMath::Max(1, FMath::CeilToInt32(FMath::Max(A.ThreadTurns, 0.25f) * 360.0f / FMath::Max(A.ThreadStrokeDeg, 30.0f)));
+}
+
+static float OSThreadShare(const FOSAttachment& A, float U, bool bOn)
+{
+	// The wrist's strokes: N equal turns, each eased in and out, the regrip's pause after it; on, the last one (the
+	// squeeze) takes half again as long. U is 0..1 of the thread's time; the share of the whole turn is returned.
+	const int32 Strokes = OSThreadStrokes(A);
+	const float Last = bOn ? 1.5f : 1.0f;
+	const float Slots = float(Strokes - 1) + Last;
+	float Time = FMath::Clamp(U, 0.0f, 1.0f) * Slots;
+	const int32 Stroke = FMath::Min(FMath::FloorToInt32(Time), Strokes - 1);
+	const float Span = Stroke == Strokes - 1 ? Last : 1.0f;
+	const float Into = FMath::Clamp((Time - Stroke) / Span, 0.0f, 1.0f);
+	const float Move = FMath::Clamp(Into / FMath::Max(1.0f - A.ThreadPauseShare, 0.05f), 0.0f, 1.0f);
+	return (Stroke + Smooth(Move)) / float(Strokes);
+}
+
+static float OSThreadStrokeStart(const FOSAttachment& A, int32 Stroke, bool bOn)
+{
+	const int32 Strokes = OSThreadStrokes(A);
+	const float Slots = float(Strokes - 1) + (bOn ? 1.5f : 1.0f);
+	return float(Stroke) / Slots;
+}
+
+static FTransform OSSeatOffsetOn(const FOSAttachment& A, EOSMountType Type)
+{
+	if (Type != EOSMountType::Muzzle || !A.Mesh)
+	{
+		return A.SeatOffset;
+	}
+	// The muzzle: SeatOffset's turn, then the mesh put so its back face sits on the muzzle and its axis on the bore,
+	// whatever its pivot (owner's playtest 22.10: it went in through the slide).
+	FTransform Seat(A.SeatOffset.GetRotation());
+	const FBox Box = A.Mesh->GetBoundingBox().TransformBy(Seat);
+	Seat.SetTranslation(FVector(-Box.Min.X, -Box.GetCenter().Y, -Box.GetCenter().Z));
+	return Seat;
+}
+
 FOSSeatPose OSSeatPoseAt(const FOSAttachment& A, const FOSWeaponMount& Mount, bool bOn, float T, const FVector& Pouch)
 {
 	FOSSeatPose P;
@@ -114,7 +155,7 @@ FOSSeatPose OSSeatPoseAt(const FOSAttachment& A, const FOSWeaponMount& Mount, bo
 	P.bShown = true;
 	if (Mount.Type == EOSMountType::Muzzle)
 	{
-		// Screwed on along the bore (owner 22.10 14:11): 2.5 turns over 1.2 cm, slowing into the squeeze.
+		// Screwed on along the bore (owner 22.10 14:11), by the wrist's strokes (OSThreadShare), the squeeze last.
 		const FVector Start(A.ThreadTravelCm, 0.0f, 0.0f);
 		const float Turns = A.ThreadTurns * 360.0f;
 		if (bOn)
@@ -125,14 +166,14 @@ FOSSeatPose OSSeatPoseAt(const FOSAttachment& A, const FOSWeaponMount& Mount, bo
 				return P;
 			}
 			const float U = FMath::Clamp((T - A.ApproachSeconds) / A.ThreadSeconds, 0.0f, 1.0f);
-			const float Left = FMath::Square(1.0f - U); // 1 - the eased share: slows to the end
+			const float Left = 1.0f - OSThreadShare(A, U, true);
 			P.Place = Start * Left;
 			P.Turn = FRotator(0.0f, 0.0f, -Turns * Left);
 			return P;
 		}
 		if (T < A.UnthreadSeconds)
 		{
-			const float Out = Smooth(T / A.UnthreadSeconds);
+			const float Out = OSThreadShare(A, T / A.UnthreadSeconds, false);
 			P.Place = Start * Out;
 			P.Turn = FRotator(0.0f, 0.0f, -Turns * Out);
 			return P;
@@ -249,9 +290,10 @@ TArray<FOSAttachment> OSMakeAttachments()
 	Torch.Fits = { TEXT("Pistol"), TEXT("Shotgun"), TEXT("Rmb93") };
 	Torch.Mesh = TorchMesh.Object;
 	Torch.SeatOffset = FTransform(FVector(0.0f, 0.0f, -1.0f));
-	Torch.TorchCandelas = 6000.0f;
-	Torch.TorchConeDeg = 16.0f;
-	Torch.TorchRangeCm = 1500.0f;
+	// A pool, not the room (owner's playtest 22.10: «слишком яркий, всю комнату освещает»): 900 cd, 12 deg, soft edge.
+	Torch.TorchCandelas = 900.0f;
+	Torch.TorchConeDeg = 12.0f;
+	Torch.TorchRangeCm = 1000.0f;
 	Torch.LensOffsetCm = FVector(1.52f, 0.0f, -1.0f);
 
 	// Глушитель (§8): a 2.6 cm tube 12 cm long screwed onto the USP's muzzle, the muzzle moved out to its end;
@@ -909,23 +951,22 @@ void UOSWeaponsComponent::UpdateSeatEvents()
 		const auto At = [T0, T1](float Time) { return SeatCrossed(T0, T1, Time); };
 		if (Type == EOSMountType::Muzzle)
 		{
-			const float Turns = FMath::Max(A->ThreadTurns, 0.5f);
+			const int32 Strokes = OSThreadStrokes(*A);
 			if (Step.bOn)
 			{
 				if (At(0.0f)) { Play(A->PouchSound, 0.5f); }
-				// Three rasping turns (at each whole turn of the thread) and the squeeze.
-				for (int32 Turn = 0; Turn < FMath::CeilToInt32(Turns); ++Turn)
+				// A rasp at each stroke of the wrist, and the squeeze.
+				for (int32 Stroke = 0; Stroke < Strokes; ++Stroke)
 				{
-					const float Share = FMath::Min(Turn / Turns, 1.0f);
-					if (At(A->ApproachSeconds + A->ThreadSeconds * (1.0f - FMath::Sqrt(1.0f - Share)))) { Play(A->RailClick, 0.35f); }
+					if (At(A->ApproachSeconds + A->ThreadSeconds * OSThreadStrokeStart(*A, Stroke, true))) { Play(A->RailClick, 0.3f); }
 				}
 				if (At(A->ApproachSeconds + A->ThreadSeconds)) { Play(A->StopKnock, 0.6f); Kick(A->TightenKick); }
 			}
 			else
 			{
-				for (int32 Turn = 0; Turn < FMath::CeilToInt32(Turns); ++Turn)
+				for (int32 Stroke = 0; Stroke < Strokes; ++Stroke)
 				{
-					if (At(A->UnthreadSeconds * Turn / Turns)) { Play(A->RailClick, 0.3f); }
+					if (At(A->UnthreadSeconds * OSThreadStrokeStart(*A, Stroke, false))) { Play(A->RailClick, 0.3f); }
 				}
 				if (At(A->UnthreadSeconds)) { Play(A->PouchSound, 0.45f); }
 			}
@@ -1026,7 +1067,7 @@ void UOSWeaponsComponent::UpdateModules(const FOSWeapon* Weapon)
 			Module->SetMaterial(0, Shown->Material);
 		}
 		const FTransform Local(Seat.Turn, Seat.Place);
-		Module->SetRelativeTransform(Shown->SeatOffset * Local * Frame);
+		Module->SetRelativeTransform(OSSeatOffsetOn(*Shown, Place.Type) * Local * Frame);
 		Module->SetVisibility(true);
 		if (Shown->TorchCandelas > 0.0f && Seat.bLens && IsSwitchOn(Shown->Id) && SwitchStage == ESwitch::Drawn)
 		{
@@ -1036,7 +1077,7 @@ void UOSWeaponsComponent::UpdateModules(const FOSWeapon* Weapon)
 			if (TorchInView->Intensity != Shown->TorchCandelas)
 			{
 				TorchInView->SetIntensity(Shown->TorchCandelas);
-				TorchInView->SetInnerConeAngle(Shown->TorchConeDeg * 0.6f);
+				TorchInView->SetInnerConeAngle(Shown->TorchConeDeg * 0.35f);
 				TorchInView->SetOuterConeAngle(Shown->TorchConeDeg);
 				TorchInView->SetAttenuationRadius(Shown->TorchRangeCm);
 			}

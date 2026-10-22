@@ -11,6 +11,7 @@
 #include "OSDockZone.h"
 #include "OSOxygen.h"
 #include "OSAttachMenu.h"
+#include "OSLaserSight.h"
 #include "OSSuitProjector.h"
 #include "OSWeapons.h"
 #include "OSZeroGPawn.h"
@@ -184,8 +185,17 @@ void AOSZeroGHUD::DrawHUD()
 		DrawText(Line, FLinearColor(0.85f, 0.85f, 0.8f, 0.6f), CenterX - Width * 0.5f, CenterY + 44.0f, Font);
 	}
 
-	// The attachment menu with no wall in the projector's reach, or a refusal's word: one line in the device's own font
-	// (MK Pribor N, 3 px a cell), the projector's pale core colour, under the centre (Docs/Attachments.md, «Без стены»).
+	// The laser's dot and thread (UOSLaserSightComponent::DrawHud: on the HUD, not smeared by the upscaler).
+	if (const UOSLaserSightComponent* Laser = Pawn->Guns ? Pawn->Guns->LaserSight.Get() : nullptr)
+	{
+		Laser->DrawHud(*this, *Canvas);
+	}
+	// The attachment menu: nodes on the gun's places, leaders and boxes (Docs/Attachments.md, «Меню»); a refusal's word:
+	// one line in the device's own font (MK Pribor N, 3 px a cell), the projector's pale core colour, under the centre.
+	if (UOSAttachMenu* Menu = Pawn->Guns ? Pawn->Guns->AttachMenu.Get() : nullptr)
+	{
+		Menu->DrawHud(*this, *Canvas);
+	}
 	if (const UOSAttachMenu* Menu = Pawn->Guns ? Pawn->Guns->AttachMenu.Get() : nullptr)
 	{
 		if (const FString Line = Menu->GetHudLine(); !Line.IsEmpty())

@@ -5,9 +5,19 @@
 #include "OSSuitProjector.h"
 #include "OSAttachMenu.generated.h"
 
+class AHUD;
+class UCameraComponent;
+class UCanvas;
 class UOSWeaponsComponent;
 class USoundBase;
 struct FOSAttachment;
+
+/**
+ * A world point to the HUD canvas' pixels through the camera: with the camera's first-person field of view (what the
+ * gun in hand is drawn with, OSScope blends it) when bFirstPerson, else the world's. Horizontal field of view across
+ * the canvas, square pixels; false behind the eye.
+ */
+MINDKORE_API bool OSProjectToHud(const UCameraComponent* Camera, const UCanvas& Canvas, const FVector& World, bool bFirstPerson, FVector2D& Out);
 
 /** How the menu last ended (probes, os.Hands.Probe). */
 UENUM()
@@ -26,15 +36,16 @@ enum class EOSAttachMenuOutcome : uint8
 
 /**
  * The attachment menu (Docs/Attachments.md): Tab held with a gun in hand turns the gun over in the hand
- * (the scope's menu pose, OSScope.h) and the suit's projector (UOSSuitProjectorComponent) lays the
- * gun's attachments as light on the wall ahead - MK Pribor N rows, the selection's corners, the soft keys
- * - with a bracket of light on the gun round the place the selected one goes. Everything the light does
- * changes on the device's 12 Hz ticks: Opening (point, line, sweep, squeezed frame, frame: 5 ticks),
- * Open, Closing (dim with the Apply, line, point: 3 ticks). No wall within the projector's reach: the
- * rows go to the HUD as one line (GetHudLine) and only the bracket is lit.
+ * (the scope's menu pose, OSScope.h) and the suit's HUD lays a node on every place of the gun - the rail,
+ * the muzzle, the well - with a leader out to a box beside the gun that lists what goes there (Crysis'
+ * customisation, owner's playtest 22.10: «ноды привязаны к слотам на оружии»). Drawn every frame on the
+ * HUD in MK Pribor N, steady (no projector, no scan distortion); the boxes keep clear of the gun's own
+ * outline on screen and follow its sway smoothed. The state machine still steps on the device's 12 Hz
+ * ticks: Opening (OpenTicks: the leaders grow, the boxes type in), Open, Closing (CloseTicks: fade).
  *
  * Made by UOSWeaponsComponent on BeginPlay; the pawn drives it (Press / Release / Step / ApplyNow / Kill,
- * AOSZeroGPawn::Route). It ticks only while open or while a module it applied is on its way.
+ * AOSZeroGPawn::Route); the zero-G HUD calls DrawHud. It ticks only while open or while a module it
+ * applied is on its way.
  */
 UCLASS(ClassGroup = (OS))
 class MINDKORE_API UOSAttachMenu : public UActorComponent
@@ -44,22 +55,29 @@ class MINDKORE_API UOSAttachMenu : public UActorComponent
 public:
 	UOSAttachMenu();
 
-	/** Ticks of the open and the close (MindKore's projector: point, line, sweep, squeeze, frame / dim, line, point). */
+	/** Device ticks of the open (leaders out, boxes typed in) and the close (fade), 12 Hz. */
 	static constexpr int32 OpenTicks = 5;
 	static constexpr int32 CloseTicks = 3;
-	/** Rows of 72 px from y 96 before «▾ ЕЩЁ N» at y 400 (Docs/Attachments.md, «Отличия от замысла»: 4, not 6). */
-	static constexpr int32 VisibleRows = 4;
 
 	/** The header types at this many signs a second (the weld frame's 45). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Menu")
 	float TypeSignsPerSecond = 45.0f;
 
-	/** The bracket on the gun: its corners' side, cm, and its flight between places, s. */
+	/** The HUD's colour: the projector's pale core, its brightness for the selected line and the dim one. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Menu")
-	float BracketCm = 4.0f;
+	FLinearColor HudColour = FLinearColor(0.62f, 0.74f, 1.0f, 1.0f);
 
+	/** The boxes' back plate (readability over a lit wall). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Menu")
-	float BracketFlightSeconds = 0.3f;
+	FLinearColor PlateColour = FLinearColor(0.0f, 0.01f, 0.03f, 0.55f);
+
+	/** A box's gap from the gun's outline on screen and from the screen's edge, in font cells. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Menu")
+	int32 GapCells = 8;
+
+	/** How fast a box follows its node with the gun's sway, 1/s (higher: stiffer). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Menu")
+	float FollowRate = 10.0f;
 
 	/** After the close the gun fires once its pose is back near rest and not before this (Docs/Vision/Attachments.md §2). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Menu")
@@ -94,8 +112,10 @@ public:
 	int32 GetRowCount() const { return Rows.Num(); }
 	/** The rows' names as the picture shows them, for probes and the log. */
 	FString DescribeRows() const;
-	/** The menu as one HUD line while open with no wall in reach; a refusal's word for a moment; else empty. */
+	/** A refusal's word for a moment (the menu itself is DrawHud's); else empty. */
 	FString GetHudLine() const;
+	/** The nodes, leaders and boxes, on the HUD's canvas (AOSZeroGHUD::DrawHud), every frame while lit. */
+	void DrawHud(AHUD& Hud, UCanvas& Canvas);
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
@@ -124,27 +144,23 @@ private:
 	int64 StateTick = 0;
 	int64 LastTick = MIN_int64;
 	double OpenAt = 0.0;
+	double ClosingAt = 0.0;
 	double ClosedAt = -100.0;
 	int32 Selected = 0;
 	int32 PendingStep = 0;
-	/** The corners jumped this tick: the core laser lights them once. */
-	bool bJumped = false;
 	TArray<FRow> Rows;
 	EOSAttachMenuOutcome LastOutcome = EOSAttachMenuOutcome::None;
 	FString Refusal;
 	double RefusalUntil = 0.0;
-	/** The bracket's flight: from the last place's pixel to the selected one's, from BracketFrom. */
-	FVector2D BracketFromPx = FVector2D::ZeroVector;
-	FVector2D BracketToPx = FVector2D::ZeroVector;
-	float BracketFromSize = 0.0f;
-	int32 BracketMount = INDEX_NONE;
-	double BracketSince = -100.0;
+	/** The boxes' top-left corners on screen, smoothed after their nodes (per mount); reset on open. */
+	TArray<FVector2D> BoxAt;
+	double LastDrawAt = -100.0;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UOSWeaponsComponent> Guns = nullptr;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UOSSuitProjectorComponent> Projector = nullptr;
+	TObjectPtr<UCameraComponent> Camera = nullptr;
 
 	void Open();
 	void BeginClose(bool bApply);
@@ -154,9 +170,8 @@ private:
 	/** The selected row's verb: НАДЕТЬ / СНЯТЬ, СМЕНИТЬ / ВЕРНУТЬ ШТАТНЫЙ. */
 	FText Verb() const;
 	bool ApplySelected();
-	/** The picture for this moment (the device tick Tick, Now on the world's clock) into the projector. */
-	void Compose(int64 Tick, double Now);
-	/** The bracket's corners on the gun (pixels; false when the place is out of the raster). */
-	bool Bracket(double Now, FVector2D& OutCentre, float& OutSize);
-	void Draw(TArray<FOSWeldBox>& Boxes, double Now, float Level) const;
+	/** A point on the gun in view to the HUD's pixels, with the first-person field of view the gun is drawn with. */
+	bool ProjectGun(const UCanvas& Canvas, const FVector& World, FVector2D& Out) const;
+	/** Where on the gun a place's node sits, in the world. */
+	bool MountAnchor(int32 Mount, FVector& Out) const;
 };

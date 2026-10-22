@@ -179,18 +179,29 @@ struct FOSAttachment
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Seat")
 	float UnseatYieldCm = 0.8f;
 
-	/** The muzzle's thread (the suppressor): turns, the travel onto the muzzle, the seconds; off: UnthreadSeconds. */
+	/**
+	 * The muzzle's thread (the suppressor): turns, the travel onto the muzzle, the seconds; off: UnthreadSeconds.
+	 * Turned by the wrist (owner's playtest 22.10: «слишком резко»): strokes of ThreadStrokeDeg, each eased, with
+	 * the regrip's pause (ThreadPauseShare of a stroke's time) between them; the last stroke is the squeeze, slower.
+	 * Its seat is off the mesh's bounds: the module's back face on the muzzle, its axis on the bore, in front of it.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Seat")
-	float ThreadTurns = 2.5f;
+	float ThreadTurns = 1.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Seat")
-	float ThreadTravelCm = 1.2f;
+	float ThreadTravelCm = 1.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Seat")
-	float ThreadSeconds = 1.2f;
+	float ThreadSeconds = 1.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Seat")
-	float UnthreadSeconds = 0.35f;
+	float UnthreadSeconds = 0.9f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Seat")
+	float ThreadStrokeDeg = 120.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Seat")
+	float ThreadPauseShare = 0.3f;
 
 	/** The last quarter turn: the hand's squeeze (cm/s forward, deg/s roll). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Seat")

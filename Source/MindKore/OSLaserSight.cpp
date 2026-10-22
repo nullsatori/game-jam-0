@@ -1,6 +1,10 @@
 #include "OSLaserSight.h"
 
+#include "Camera/CameraComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/Canvas.h"
+#include "GameFramework/HUD.h"
+#include "OSAttachMenu.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -24,6 +28,7 @@ void UOSLaserSightComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	Guns = GetOwner()->FindComponentByClass<UOSWeaponsComponent>();
+	Camera = GetOwner()->FindComponentByClass<UCameraComponent>();
 	const auto Make = [this](const TCHAR* Name, const TCHAR* MeshPath)
 	{
 		UStaticMeshComponent* Part = NewObject<UStaticMeshComponent>(GetOwner(), Name);
@@ -72,7 +77,7 @@ void UOSLaserSightComponent::Wake(bool bAwake)
 
 bool UOSLaserSightComponent::IsThreadShown() const
 {
-	return bLit && Thread && Thread->IsVisible();
+	return bLit && bThreadShown;
 }
 
 void UOSLaserSightComponent::Hide()
@@ -82,7 +87,7 @@ void UOSLaserSightComponent::Hide()
 		Dot->SetVisibility(false);
 		Thread->SetVisibility(false);
 	}
-	bLit = bDotHit = false;
+	bLit = bDotHit = bThreadShown = false;
 }
 
 void UOSLaserSightComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -115,17 +120,8 @@ void UOSLaserSightComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		const float Distance = float(FVector::Dist(From, DotAt));
 		const float Across = UOSWeldProjectorComponent::ViewPixelAngle(Cast<APawn>(GetOwner())) * DotPixels * Distance;
 		// The engine plane is 100 cm across, its face up its Z: turned to the eye.
-		Dot->SetWorldLocationAndRotation(DotAt, FRotationMatrix::MakeFromZ(From - DotAt).ToQuat());
-		Dot->SetWorldScale3D(FVector(Across / 100.0f));
-		Dot->SetVisibility(true);
-		if (DotMID)
-		{
-			DotMID->SetScalarParameterValue(TEXT("Glow"), Glow * Drive);
-		}
-	}
-	else
-	{
-		Dot->SetVisibility(false);
+		(void)Across; // the HUD draws it a constant few pixels across (DrawHud)
+		DotDrive = Drive;
 	}
 	// The thread: only where there is something to scatter it - air round the eye (polled), smoke later.
 	SinceAirPoll += DeltaTime;
@@ -135,19 +131,45 @@ void UOSLaserSightComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		bAir = Guns->IsInAir();
 	}
 	AirShare = FMath::FInterpConstantTo(AirShare, bAir ? 1.0f : 0.0f, DeltaTime, 1.0f / AirFadeSeconds);
-	if (AirShare <= 0.0f)
+	LensAt = Lens.GetLocation();
+	bThreadShown = AirShare > 0.0f;
+	ThreadLevel = ThreadShare * AirShare * Drive;
+}
+
+void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas) const
+{
+	if (!bLit || !Camera)
 	{
-		Thread->SetVisibility(false);
 		return;
 	}
-	const FVector Start = Lens.GetLocation();
-	const FVector Way = DotAt - Start;
-	const float Length = float(Way.Size());
-	Thread->SetWorldLocationAndRotation(Start + Way * 0.5f, FRotationMatrix::MakeFromZ(Way).ToQuat());
-	Thread->SetWorldScale3D(FVector(ThreadCm / 100.0f, ThreadCm / 100.0f, Length / 100.0f));
-	Thread->SetVisibility(true);
-	if (ThreadMID)
+	const float Scale = Canvas.ClipY / 1080.0f;
+	const FLinearColor Core = FLinearColor::LerpUsingHSV(RedColour, FLinearColor(1.0f, 0.85f, 0.8f), 0.35f);
+	FVector2D Dot2D;
+	const bool bDot = bDotHit && OSProjectToHud(Camera, Canvas, DotAt, false, Dot2D);
+	// The thread first, under the dot: a pixel line from the lens, fading toward the dot (the beam spreads and thins).
+	FVector2D Lens2D;
+	if (bThreadShown && bDot && OSProjectToHud(Camera, Canvas, LensAt, true, Lens2D))
 	{
-		ThreadMID->SetScalarParameterValue(TEXT("Glow"), Glow * ThreadShare * AirShare * Drive);
+		const float Pixel = FMath::Max(1.0f, FMath::RoundToFloat(Scale));
+		const FVector2D Way = Dot2D - Lens2D;
+		const int32 Steps = FMath::Clamp(FMath::CeilToInt32(float(Way.Size()) / (Pixel * 2.0f)), 1, 600);
+		for (int32 Step = 0; Step < Steps; ++Step)
+		{
+			const float Share = float(Step) / float(Steps);
+			const FVector2D At = Lens2D + Way * Share;
+			Hud.DrawRect(FLinearColor(RedColour.R, RedColour.G, RedColour.B, FMath::Clamp(ThreadLevel * 2.4f * (1.0f - 0.7f * Share), 0.0f, 1.0f)),
+				FMath::RoundToFloat(At.X / Pixel) * Pixel, FMath::RoundToFloat(At.Y / Pixel) * Pixel, Pixel, Pixel);
+		}
+	}
+	if (bDot)
+	{
+		// The halo, then the core: whole pixels on the screen's grid, the drive's flutter in the halo's alpha only.
+		const float CoreSize = FMath::Max(1.0f, FMath::RoundToFloat(HudDotPixels * Scale));
+		const float HaloSize = CoreSize + 2.0f * FMath::RoundToFloat(HudHaloPixels * Scale);
+		const float X = FMath::RoundToFloat(Dot2D.X);
+		const float Y = FMath::RoundToFloat(Dot2D.Y);
+		Hud.DrawRect(FLinearColor(RedColour.R, RedColour.G, RedColour.B, FMath::Clamp(0.22f * DotDrive, 0.0f, 1.0f)),
+			X - FMath::RoundToFloat(HaloSize * 0.5f), Y - FMath::RoundToFloat(HaloSize * 0.5f), HaloSize, HaloSize);
+		Hud.DrawRect(FLinearColor(Core.R, Core.G, Core.B, 1.0f), X - FMath::RoundToFloat(CoreSize * 0.5f), Y - FMath::RoundToFloat(CoreSize * 0.5f), CoreSize, CoreSize);
 	}
 }

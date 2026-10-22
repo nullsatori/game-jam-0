@@ -4,6 +4,9 @@
 #include "Components/ActorComponent.h"
 #include "OSLaserSight.generated.h"
 
+class AHUD;
+class UCameraComponent;
+class UCanvas;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UOSWeaponsComponent;
@@ -16,6 +19,11 @@ class UStaticMeshComponent;
  * dot on the first thing in the way, a constant few pixels across, 0.5 cm off the surface; the thread runs from the
  * module's lens to it, seen only where there is something to scatter it: in air (the zones, polled every 0.2 s,
  * a 0.3 s fade) - and in the RMB-93's smoke once the smoke exists (stub). Off: hidden, no trace.
+ *
+ * Both are drawn on the HUD (DrawHud), not as meshes in the world (owner's playtest 22.10: «лазер гостит»):
+ * the temporal upscaler smeared a few-pixel dot that moves with the view and flickers every frame. On the HUD
+ * the dot is crisp pixels at the traced point - it is the first thing along the view, so nothing hides it - and
+ * the thread a pixel line from the lens (the gun's first-person projection) to the dot. The meshes stay hidden.
  */
 UCLASS(ClassGroup = (OS))
 class MINDKORE_API UOSLaserSightComponent : public UActorComponent
@@ -39,6 +47,13 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
 	float ThreadShare = 0.25f;
+
+	/** The HUD's dot: its core and halo, in screen pixels at 1080 lines (scaled with the screen). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "1.0"))
+	float HudDotPixels = 3.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
+	float HudHaloPixels = 4.0f;
 
 	/** The dot's Glow (M_OS_SightDot's param), its grain (+-share a frame) and its drive's flutter with a rare drop. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
@@ -74,6 +89,9 @@ public:
 	/** Traces since play began (os.Attach.Cost: one a lit frame). */
 	int32 GetTraceCount() const { return Traces; }
 
+	/** The dot and the thread on the HUD's canvas, every frame while lit (AOSZeroGHUD). */
+	void DrawHud(AHUD& Hud, UCanvas& Canvas) const;
+
 	/** UOSWeaponsComponent: a laser is (or is no longer) on the gun in view and switched on - the tick runs only then. */
 	void Wake(bool bAwake);
 
@@ -94,8 +112,15 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> ThreadMID = nullptr;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UCameraComponent> Camera = nullptr;
+
 	bool bLit = false;
 	bool bDotHit = false;
+	bool bThreadShown = false;
+	FVector LensAt = FVector::ZeroVector;
+	float DotDrive = 1.0f;
+	float ThreadLevel = 0.0f;
 	FVector DotAt = FVector::ZeroVector;
 	bool bAir = false;
 	float AirShare = 0.0f;
