@@ -1,7 +1,7 @@
 # Рысь (RMB-93): арт и табло — работа GPT 21.10
 
 Модель Рыси, её текстуры и газоразрядное табло патронов сделал GPT 20–21.10 в
-локальной копии владельца (`Documents\MKJamStarter`), без коммитов. Эта страница
+локальной копии владельца (`Documents\OuterSpace`), без коммитов. Эта страница
 говорит, что из этого есть, где лежит и как пересобрать. Код ствола и его
 анимации — [RecoilWeapons](RecoilWeapons.md); табло как система —
 [Nixie](Nixie.md); подбор на тестовой карте — [ShipMode](ShipMode.md).
@@ -39,7 +39,7 @@
 `ArtSource/` целиком в `.gitignore` ([Development](Development.md), «Git LFS»):
 скрипты Blender, HLSL табло и его сборщики, `.blend`, FBX, PNG-текстуры,
 рендеры, просмотрщик и проверки GPT лежат только на ПК владельца в
-`Documents\MKJamStarter\ArtSource`. В git — то, что нужно игре и чтению: ассеты
+`Documents\OuterSpace\ArtSource`. В git — то, что нужно игре и чтению: ассеты
 в `Content/`, импорт `Scripts/os_rmb93_assets.py` и `os_nixie_test_room.py`,
 код компонента, эта страница, [Nixie](Nixie.md) и брифы с ревью в
 [Docs/Art/RMB93](Art/RMB93/v01/README.md) (только текст; листы моделлера в PDF,
