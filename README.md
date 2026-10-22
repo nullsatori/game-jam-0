@@ -1,4 +1,4 @@
-# game-jam-0 — «Почини и улети»
+# Outer Space — «Почини и улети»
 
 Игра для геймджема: тема **Trash**, предмет **Rocket**. Unreal Engine 5.8, C++.
 
