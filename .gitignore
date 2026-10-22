@@ -19,7 +19,7 @@ __pycache__/
 /Docs/Planning/MVP-Backlog.md
 
 # Art sources stay out of the repo (LFS quota, Docs/Development.md "Git LFS").
-# Keep them next to the checkout, e.g. ArtSource/; commit the exported .fbx/.png.
+# Commit the exported .fbx/.png into Content/, not the source.
 *.blend
 *.blend1
 *.psd
@@ -32,3 +32,22 @@ __pycache__/
 *.max
 *.ma
 *.mb
+
+# ArtSource/ holds the art sources (renders, exports, .blend). Only the pipeline
+# code and notes there are committed: scripts, shaders, configs, docs.
+/ArtSource/**
+!/ArtSource/**/
+!/ArtSource/**/*.py
+!/ArtSource/**/*.md
+!/ArtSource/**/*.json
+!/ArtSource/**/*.yaml
+!/ArtSource/**/*.txt
+!/ArtSource/**/*.usf
+!/ArtSource/**/*.ush
+!/ArtSource/**/*.js
+!/ArtSource/**/*.html
+!/ArtSource/**/*.svg
+!/ArtSource/**/.gitignore
+
+# Local art-direction and visual iteration workspace
+.dream-loop/
