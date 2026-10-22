@@ -567,6 +567,7 @@ bool UJamWeaponsComponent::ApplyPickupWeapon(int32 Index, const FJamWeapon& Defi
 	Fresh.Lid.State = EJamLidState::Latched;
 	Fresh.Lid.Angle = Fresh.Lid.Speed = 0.0f;
 	Fresh.Lid.bHeldClear = false;
+	Fresh.Lid.bCatchPending = false;
 	Fresh.PortSmoke.Heat = Fresh.PortSmoke.SeepCarry = 0.0f;
 	if (UAudioComponent* Sound = Weapons[Index].MechanismSound.Get()) Sound->Stop();
 	if (CurrentWeapon == Index || ShownWeapon == Index) Holster(true);

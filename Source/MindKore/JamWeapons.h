@@ -193,6 +193,8 @@ struct FJamLid
 	float SinceCatch = 0.0f;
 	/** Up past ClearDeg in this reload: ClearDeg is its lower stop until the catch. */
 	bool bHeldClear = false;
+	/** A reload broken off with it open: the hand shuts it once the pump stroke is through (GetActionCycleSeconds). */
+	bool bCatchPending = false;
 };
 
 /**
