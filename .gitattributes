@@ -1,4 +1,7 @@
 * text=auto
+# cmd misreads labels and goto in a batch file with LF line endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
 
 # Every binary file goes through Git LFS (owner's decision 2026-10-16).
 # Rules and setup: Docs/Development.md, "Git LFS". Scripts/check_lfs.sh (CI)
