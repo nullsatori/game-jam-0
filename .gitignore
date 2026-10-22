@@ -19,7 +19,8 @@ __pycache__/
 /Docs/Planning/MVP-Backlog.md
 
 # Art sources stay out of the repo (LFS quota, Docs/Development.md "Git LFS").
-# Keep them next to the checkout, e.g. ArtSource/; commit the exported .fbx/.png.
+# Keep them next to the checkout in ArtSource/ (ignored whole); commit the exported .fbx/.png.
+/ArtSource/
 *.blend
 *.blend1
 *.psd
