@@ -15,6 +15,8 @@ set "UPROJECT=%ROOT%\MKJamStarter.uproject"
 set "TARGET=MKJamStarterEditor"
 set "CONFIG=Development"
 set "NOPAUSE="
+set "BADARG="
+set "UBT_RAN="
 
 :args
 if "%~1"=="" goto args_done
@@ -24,14 +26,18 @@ if /i "%~1"=="editor" (set "TARGET=MKJamStarterEditor"
 ) else if /i "%~1"=="DebugGame" (set "CONFIG=DebugGame"
 ) else if /i "%~1"=="Shipping" (set "CONFIG=Shipping"
 ) else if /i "%~1"=="-nopause" (set "NOPAUSE=1"
-) else (
-    echo Unknown argument "%~1". Usage: build.bat [editor^|game] [Development^|DebugGame^|Shipping] [-nopause]
-    set "RC=2"
-    goto done
+) else if not defined BADARG (set "BADARG=%~1"
 )
 shift
 goto args
 :args_done
+
+rem Arguments are all read before this check, so -nopause holds even after a bad one.
+if defined BADARG (
+    echo Unknown argument "%BADARG%". Usage: build.bat [editor^|game] [Development^|DebugGame^|Shipping] [-nopause]
+    set "RC=2"
+    goto done
+)
 
 if not exist "%UPROJECT%" (
     echo Not found: "%UPROJECT%"
@@ -76,6 +82,7 @@ echo Started: %TIME%
 echo.
 call "%BUILD_BAT%" %TARGET% Win64 %CONFIG% "-Project=%UPROJECT%" -WaitMutex -NoHotReloadFromIDE
 set "RC=%ERRORLEVEL%"
+set "UBT_RAN=1"
 echo.
 echo Finished: %TIME%
 
@@ -85,7 +92,7 @@ if "%RC%"=="0" (
     echo BUILD OK
 ) else (
     echo BUILD FAILED, exit code %RC%
-    if /i "%TARGET%"=="MKJamStarterEditor" echo If the log says Live Coding is active: close the editor of this checkout or press Ctrl+Alt+F11 in it.
+    if defined UBT_RAN if /i "%TARGET%"=="MKJamStarterEditor" echo If the log says Live Coding is active: close the editor of this checkout or press Ctrl+Alt+F11 in it.
 )
 if not defined NOPAUSE pause
 exit /b %RC%
