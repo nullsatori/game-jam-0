@@ -21,8 +21,19 @@ struct FOSDebugRow
 		Param,
 		/** A group of a tab (Param.Group), folded or open; Param.Owner is its owner, for its reset. */
 		Group,
-		/** A section label of «Главное» (Мир, Взгляд, Рука...). */
+		/** A section label of «Главное» (Мир, Взгляд, Рука...); also «Снаряжение» on «Игрок». */
 		Section,
+		/** A row of action buttons after a label (Docs/DebugMenu.md, «Ряд действий»): «Снаряжение»'s guns and attachments. */
+		Actions,
+	};
+	/** One button of an Actions row: its label and state read on paint (cheap: the menu is open), a click runs it. */
+	struct FAction
+	{
+		TFunction<FString()> Label;
+		/** Lit (the accent) when true: the gun open, the attachment on a gun. */
+		TFunction<bool()> IsOn;
+		TFunction<void()> Run;
+		FString Tip;
 	};
 	EKind Kind = EKind::Param;
 	/** Group: Param.Group; section: its title. */
@@ -34,6 +45,8 @@ struct FOSDebugRow
 	/** Group: how many parameters it has (shown or not), and their keys (for its changed count). */
 	int32 Count = 0;
 	TArray<FString> Keys;
+	/** Actions: the buttons. */
+	TArray<FAction> Actions;
 };
 
 /**

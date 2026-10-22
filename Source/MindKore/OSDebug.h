@@ -176,6 +176,9 @@ public:
 	int32 GetLastSessionChanges() const { return LastSessionChanges; }
 	FOSDebugImport RestoreLastSession();
 	const FString& GetConfigName() const { return ConfigName; }
+	/** The gear changed by a command (os.Guns.*, os.Attach.*, the «Снаряжение» buttons): exports carry "gear" from then on. */
+	void NoteGearChanged() { bGearChanged = true; }
+	bool IsGearChanged() const { return bGearChanged; }
 	void SetConfigName(const FString& Name) { ConfigName = Name; }
 	/** The checkout's commit (.git), "?" without one (a packaged build). */
 	static const FString& GetBuildHash();
@@ -261,6 +264,7 @@ private:
 	TArray<FStep> RedoSteps;
 	TArray<FString> Pins;
 	FString ConfigName;
+	bool bGearChanged = false;
 	int32 LastSessionChanges = 0;
 	bool bAutosaveArmed = false;
 	FString PendingConfigFile;

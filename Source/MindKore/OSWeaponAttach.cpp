@@ -4,6 +4,7 @@
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -12,6 +13,7 @@
 #include "Materials/MaterialInterface.h"
 #include "MindKore.h"
 #include "OSAttachMenu.h"
+#include "OSDebug.h"
 #include "OSLaserSight.h"
 #include "OSScope.h"
 #include "OSShip.h"
@@ -1298,9 +1300,13 @@ bool OSSwapGun(UOSWeaponsComponent& Guns, int32 Index, const FString& To)
 #if !UE_BUILD_SHIPPING
 namespace
 {
-	/** The player's guns: the zero-G pawn's or a walker's. */
-	UOSWeaponsComponent* PlayerGuns(UWorld* World)
+	/** The player's guns: the zero-G pawn's or a walker's; the debug menu told the gear has changed (its presets' "gear"). */
+	UOSWeaponsComponent* PlayerGuns(UWorld* World, bool bChanges = true)
 	{
+		if (UOSDebugSubsystem* Debug = bChanges && World && World->GetGameInstance() ? World->GetGameInstance()->GetSubsystem<UOSDebugSubsystem>() : nullptr)
+		{
+			Debug->NoteGearChanged();
+		}
 		APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
 		APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
 		UOSWeaponsComponent* Guns = Pawn ? Pawn->FindComponentByClass<UOSWeaponsComponent>() : nullptr;
@@ -1459,7 +1465,7 @@ namespace
 		TEXT("os.Attach.List: the guns, their places, what is on them, the pouch."),
 		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
 		{
-			if (UOSWeaponsComponent* Guns = PlayerGuns(World))
+			if (UOSWeaponsComponent* Guns = PlayerGuns(World, false))
 			{
 				TArray<FString> Lines;
 				Guns->DescribeGear().ParseIntoArrayLines(Lines);
