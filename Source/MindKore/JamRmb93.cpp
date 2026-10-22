@@ -12,6 +12,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Containers/Ticker.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
@@ -185,6 +186,8 @@ namespace
 		FRotator PitchBase = FRotator::ZeroRotator;
 		/** Stage 9 put the lid upright. */
 		bool bLidPlaced = false;
+		/** Gravity where the pawn stands (as the lid feels it): none on Lvl_Jam_ZeroG away from a zone - the gravity steps are skipped there. */
+		bool bGravity = true;
 		int32 Passed = 0;
 		int32 Failed = 0;
 		int32 Stage = 0;
@@ -421,6 +424,15 @@ namespace
 				// over the top by it - honestly. So once the pawn stands, the lid is put upright, at rest, and let go.
 				if (!bLidPlaced && Since() >= 1.5f)
 				{
+					// As UJamWeaponsComponent::GetGunGravity: the walking character in the world's, the zero-G pawn in the zones'.
+					const APawn* Pawn = Controller->GetPawn();
+					const float Gravity = Cast<ACharacter>(Pawn) ? FMath::Abs(World->GetGravityZ() * JamGetGravityScale())
+						: (Pawn ? JamGravityAt(World.Get(), Pawn->GetActorLocation()).Acceleration.Size() : 0.0f);
+					bGravity = Gravity > 100.0f;
+					if (!bGravity)
+					{
+						UE_LOG(LogMindKore, Log, TEXT("Rmb93 probe: SKIP the gravity steps - %.0f cm/s^2 at the pawn (Lvl_Jam_TestRoom has gravity)"), Gravity);
+					}
 					FJamLid& Free = G->Weapons[1].Lid;
 					Free.State = EJamLidState::Free;
 					Free.Angle = Free.SpringRestDeg;
@@ -429,7 +441,10 @@ namespace
 				}
 				else if (Since() >= 2.5f)
 				{
-					Check(L.Angle >= L.OpenStopDeg - 0.5f, FString::Printf(TEXT("gravity, level: from upright it lies on the rear sight (%.1f deg)"), L.Angle));
+					if (bGravity)
+					{
+						Check(L.Angle >= L.OpenStopDeg - 0.5f, FString::Printf(TEXT("gravity, level: from upright it lies on the rear sight (%.1f deg)"), L.Angle));
+					}
 					Next();
 				}
 				break;
@@ -437,7 +452,10 @@ namespace
 				Pitch(0.0f, 45.0f, 0.3f);
 				if (Since() >= 2.0f)
 				{
-					Check(L.Angle < L.ClearDeg, FString::Printf(TEXT("gravity, looking up: it falls back onto its kicker (%.1f deg)"), L.Angle));
+					if (bGravity)
+					{
+						Check(L.Angle < L.ClearDeg, FString::Printf(TEXT("gravity, looking up: it falls back onto its kicker (%.1f deg)"), L.Angle));
+					}
 					Controller->SetControlRotation(Level);
 					// Full, the lid open: a reload only shuts it.
 					G->Weapons[1].Ammo = G->Weapons[1].MagazineSize;
