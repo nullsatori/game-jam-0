@@ -140,14 +140,15 @@ FOSWeapon OSMakeRmb93(const FOSWeapon& PumpShotgun)
 	Smoke.BoreZCm = 0.75f;
 	// Soft wisps that leave the holes gently and envelop the gun (Docs/RecoilWeapons-SmokeSim.md, «Правка v2»): many,
 	// thin, barely thrown, clinging to the shroud for 1.5 s.
-	Smoke.ShotPuffs = 16;
+	Smoke.ShotPuffs = 32;
 	Smoke.ShotThrowCm = 0.3f;
-	Smoke.SeepPerSecond = 12.0f;
+	Smoke.SeepPerSecond = 24.0f;
 	Smoke.SeepThrowCm = 0.3f;
 	Smoke.StartCm = 1.5f;
 	Smoke.EndCm = 9.0f;
 	Smoke.Seconds = 2.2f;
-	Smoke.Opacity = 0.35f;
+	Smoke.Opacity = 0.18f;
+	Smoke.SwirlCmPerSecond = 20.0f;
 	Smoke.RiseShare = 0.08f;
 	Smoke.AirDragSeconds = 0.7f;
 	Smoke.ClingSeconds = 1.5f;

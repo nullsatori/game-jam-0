@@ -262,15 +262,15 @@ public:
 	float AmbientOcclusion = 0.15f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
-	float KeyShadow = 0.5f;
+	float KeyShadow = 1.2f;
 
 	/** The drawn density is the gas less this share of its blur (5 cells): the soft cushion goes, rags stay. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "0.9"))
-	float Sharpen = 0.6f;
+	float Sharpen = 0.75f;
 
 	/** The key light for the material: its colour x its illuminance at the cloud / pi x this. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
-	float KeyStrength = 0.008f;
+	float KeyStrength = 0.014f;
 
 	/** ...at most this (a lamp right over the cloud, the flash inside it). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
@@ -309,7 +309,7 @@ public:
 
 	/** Oldest puffs go first past this. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx", meta = (ClampMin = "1"))
-	int32 MaxPuffs = 160;
+	int32 MaxPuffs = 320;
 
 	/**
 	 * A shot of gun Weapon from Muzzle (world; X along the bore, Y out of the gun's side),

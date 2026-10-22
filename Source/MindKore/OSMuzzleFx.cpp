@@ -158,7 +158,7 @@ UOSMuzzleFxComponent::UOSMuzzleFxComponent()
 		Gun.CloudSeconds = Seconds;
 	};
 	Cloud(Pistol, 20, 3.0f, 10.0f, 7.0f, 600.0f, 60.0f, 0.009f, 220.0f, 0.6f, 0.3f, 0.35f, 0.05f, 4, 2.0f, 0.35f, 6.0f, 100.0f, 160.0f, 4.0f);
-	Cloud(Shotgun, 32, 5.0f, 28.0f, 22.0f, 800.0f, 140.0f, 0.007f, 500.0f, 0.8f, 0.4f, 0.8f, 0.03f, 4, 3.0f, 0.35f, 10.0f, 140.0f, 220.0f, 6.0f);
+	Cloud(Shotgun, 32, 5.0f, 32.0f, 26.0f, 800.0f, 140.0f, 0.007f, 160.0f, 0.8f, 0.4f, 0.5f, 0.03f, 4, 3.0f, 0.35f, 10.0f, 140.0f, 220.0f, 6.0f);
 	Cloud(Sniper, 22, 98.0f / 22.0f, 12.0f, 9.0f, 650.0f, 75.0f, 0.007f, 240.0f, 0.6f, 0.35f, 0.4f, 0.04f, 4, 2.5f, 0.35f, 8.0f, 120.0f, 260.0f, 5.0f);
 	// The blast's swell and the jet's length (not in the design: a slug of a few cells slid as a blob and lost its
 	// momentum within 0.2 s on a 4 cm grid; a ball blown up in the first tenth and a jet that keeps pushing travel).
@@ -516,6 +516,9 @@ namespace
 	/** The jet: how far the bore is traced for its hit, and the share of the slug's speed that reaches it. */
 	constexpr float JetReachCm = 300.0f;
 	constexpr float ImpactSpeedShare = 0.6f;
+	/** The splash's plume rolling back toward the shooter, cm/s. */
+	constexpr float BackRollCm = 420.0f;
+	constexpr float BackDriftCm = 90.0f;
 
 #if !UE_BUILD_SHIPPING
 	/** os.Fx.SmokeCost: what the grids cost on the game thread since the last call. */
@@ -671,6 +674,18 @@ void UOSMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, co
 		const FVector3f NormalLocal(Cloud->Basis.UnrotateVector(BoreHit.ImpactNormal));
 		const float Speed = Gun.SlugSpeedCm * ImpactSpeedShare * Throw;
 		Sim.Inject(BirthLocal, NormalLocal, Gun.SlugRadiusCm * 0.8f, Gun.SlugLengthCm, 1.0f, 1.0f, BoreLocal * Speed, Gun.SlugRadialCm * Radial, NormalLocal);
+		// The plume comes back: the gas thrown off the surface rolls up and back toward the shooter (the muzzle's side),
+		// a second, hot lobe on the near side of the splash - so the cloud rises in front of the gun and the player can
+		// walk into it (v3: from first person the splash alone sat small, 2.5 m off).
+		const FVector3f Back = (MuzzleLocal - BirthLocal - NormalLocal * ((MuzzleLocal - BirthLocal) | NormalLocal)).GetSafeNormal();
+		Sim.Inject(BirthLocal + Back * Gun.SlugLengthCm * 0.8f + NormalLocal * Gun.SlugRadiusCm * 0.5f, Back, Gun.SlugLengthCm, Gun.SlugRadiusCm * 0.8f, 0.8f, 1.0f,
+			(Back * BackRollCm + NormalLocal * BackRollCm * 0.6f) * Throw, Gun.SlugRadialCm * 0.5f * Radial);
+		// And the whole cloud drifts back toward the shooter (the air takes it, AirDragSeconds): inside the grid the
+		// roll alone was eaten by the pressure solve and the drag within a few tenths.
+		if (bAir)
+		{
+			Cloud->Carried += Cloud->Basis.RotateVector(FVector(Back)) * BackDriftCm;
+		}
 	}
 	else
 	{
@@ -963,7 +978,7 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 			// The grid's own radial speed is smeared within a few steps (semi-Lagrangian self-advection), so the slug's
 			// expansion speed sets the rate when it is the larger.
 			const float Radial = FMath::Max(Sim.MeanRadialSpeed(), G.SlugRadialCm * VacuumRadialScale * 0.5f);
-			Cloud.ExpandRate = Sim.bAir ? 0.0f : FMath::Clamp(Radial / (0.5f * Sim.N * G.CellCm), 0.05f, 1.0f);
+			Cloud.ExpandRate = Sim.bAir ? 0.0f : FMath::Clamp(Radial / (0.5f * Sim.N * G.CellCm), 0.05f, 0.35f);
 		}
 		else
 		{
@@ -987,7 +1002,8 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		Material->SetScalarParameterValue(TEXT("Age"), Cloud.Age);
 		Material->SetScalarParameterValue(TEXT("Life"), G.CloudSeconds);
 		Material->SetScalarParameterValue(TEXT("Thin"), 1.0f / FMath::Cube(Cloud.Scale));
-		Material->SetScalarParameterValue(TEXT("Erode"), G.Erode);
+		// In a vacuum the thinning by the growth does the dying; erosion on top of it left nothing by 2 s.
+		Material->SetScalarParameterValue(TEXT("Erode"), Sim.bAir ? G.Erode : G.Erode * 0.35f);
 		// The fresh slug comes up over its first FadeInSeconds: hot gas at the muzzle is clear, the flash covers it; at
 		// full density the flash lit a ball half a metre from the eye into a cream block over half the frame.
 		Material->SetScalarParameterValue(TEXT("Gain"), (Cloud.bJet ? 0.0f : 0.2f) + (Cloud.bJet ? 1.0f : 0.8f) * FMath::SmoothStep(0.0f, FadeInSeconds, Cloud.Age));
@@ -1318,7 +1334,8 @@ void UOSMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 					? Puff.Lift * Puff.LiftDragSeconds * (T - Puff.LiftDragSeconds * (1.0f - FMath::Exp(-T / Puff.LiftDragSeconds)))
 					: FVector::ZeroVector;
 			};
-			Puff.WorldPos += Rise(Puff.Age) - Rise(Before);
+			// The rise only as the gun lets go (v3: the wisps went straight up instead of hugging the shroud).
+			Puff.WorldPos += (Rise(Puff.Age) - Rise(Before)) * (1.0f - Cling);
 			if (Puff.LiftDragSeconds <= 0.0f)
 			{
 				Puff.WorldPos += Puff.GunVelocity * (1.0f - Cling) * DeltaTime;

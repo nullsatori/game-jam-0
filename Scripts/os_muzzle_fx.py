@@ -259,7 +259,8 @@ float dens = g.r * Th * Gn - erode;
 int band = (int)min(floor(saturate(dens) * 4 + th), 4);
 if (band < 1) return 0;
 float flick = frac(sin(dot(q, float3(12.9898, 78.233, 37.719)) + floor(Tm * 24) * 0.618) * 43758.5453);
-float ember = (g.g > 0.7 + 0.25 * th) ? saturate(g.g - 0.6) * 2.5 * (0.4 + 0.6 * flick) : 0;
+// Few: the hottest of the hot, a sparse hash (a ball of embers read as a lit grid, v3).
+float ember = (g.g > 0.82 + 0.15 * th && hv > 0.8) ? saturate(g.g - 0.75) * 4 * (0.4 + 0.6 * flick) : 0;
 return float4(SHARE[band], saturate(g.g * 1.4), ember, g.b * g.a);
 """
 
