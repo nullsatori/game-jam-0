@@ -217,49 +217,50 @@ def _smoke(m, node, custom, data, scalar, colour, mul):
         unreal.log_warning("muzzle fx: no 2D-offset refraction mode, no heat shimmer")
 
 
-# The volumetric cloud (jam.Fx.VolumetricSmoke 1, Docs/RecoilWeapons-SmokeSim.md): a heterogeneous volume
-# (engine, experimental) marches this Volume-domain material and lights it with real self-shadowing and
-# scattering. The gas is simulated on the CPU (FJamSmokeSim) and arrives as an atlas texture, one texel a
-# voxel (slice z at tile (z % 8, z / 8), 8 tiles across): r density, g heat, b churn, a solid. The material
-# loads the texel of the voxel the sample falls in - no filtering, so every voxel is a flat cube - and cuts its
-# density into 3 bands with a 3D ordered dither on the voxel grid; erosion over the second half of the life
-# eats thin voxels first (a per-voxel threshold), the hottest voxels of a fresh slug glow as flickering
-# embers, thin moving voxels get a cool/warm scanline fringe. Returns (extinction share, warm share, ember,
-# fringe). Everything in box space (CloudX/Y/Z, cm).
+# The volumetric cloud (jam.Fx.VolumetricSmoke 1, Docs/RecoilWeapons-SmokeSim.md, «Правка v2»): a heterogeneous
+# volume marches this Volume-domain material and lights it with real self-shadowing and scattering. The gas is
+# simulated on the CPU (FJamSmokeSim) and arrives as an atlas (slice z at tile (z % 8, z / 8), 8 tiles across):
+# r the drawn density (the gas less its blur: rags, not a cushion), g heat, b the key light's shadow, a the ambient's.
+# The low-res identity is tied to the screen, not to the grid: the material's pixel is ~5 px at 1080p at any
+# distance (a power of two in cm, from the distance to the eye: it does not swim as the cloud drifts), the grid
+# sampled trilinearly at the pixel's centre and cut into 4 bands - a very thin lowest one (a veil, not a step into
+# grey) - with a 3D Bayer dither on the pixel grid. Erosion from 0.5 s eats thin pixels first (a per-pixel
+# threshold); the hottest pixels of the fresh core glow as flickering embers. Returns (extinction share, warm
+# share, ember, lit = key shadow x ambient shadow). Everything in box space (CloudX/Y/Z, cm).
 VOLUME_HLSL = """
 const float M[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+const float SHARE[5] = { 0, 0.1, 0.35, 0.65, 1 };
 float3 d = W - C;
 float3 l = float3(dot(d, BX), dot(d, BY), dot(d, BZ));
-float3 u = l / (2 * H) + 0.5;
+if (any(abs(l) >= H)) return 0;
+float eye = length(l - E.xyz);
+// The eye clears: nothing this close (flying through a cloud never fills the lens).
+if (eye < E.w) return 0;
+float cell = exp2(floor(log2(max(1.0, eye * Px))));
+float3 q = floor(l / cell);
+float3 u = ((q + 0.5) * cell) / (2 * H) + 0.5;
 if (any(u < 0) || any(u >= 1)) return 0;
 int n = (int)(N + 0.5);
-// A voxel's texel: slice z at tile (z % 8, z / 8) of the atlas.
-#define CELL(q) Grid.Load(int3((q).x + ((q).z % 8) * n, (q).y + ((q).z / 8) * n, 0))
-int3 v = min(int3(floor(u * n)), n - 1);
-float4 g = CELL(v);
-#undef CELL
-// 3D ordered dither on the voxel grid; a per-voxel hash: its own erosion threshold.
-float th = (M[((v.x + v.z) & 3) + 4 * ((v.y + 2 * v.z) & 3)] + 0.5) / 16;
-float hv = frac(sin(dot(float3(v) + S * 31, float3(127.1, 311.7, 74.7))) * 43758.5453);
-// Erosion: a floor rising over the second half of the life, higher for voxels with a high hash - thin voxels
-// fail first, holes open, lumps outlast the rest. No uniform fade.
-float erode = Er * saturate((T / L - 0.45) / 0.55) * (0.35 + 0.65 * hv);
+float3 p = u * n - 0.5;
+// Trilinear: the texture's bilinear filter within a slice (two taps), a lerp between the two slices (8 loads cost
+// 3.8 ms for three clouds). The tile's UV stays half a texel inside it: no bleed from the next slice.
+float2 aw = float2(8 * n, ((n + 7) / 8) * n);
+float2 xy = clamp(p.xy, 0, n - 1) + 0.5;
+float zf = clamp(p.z, 0, n - 1);
+int z0 = (int)floor(zf);
+int z1 = min(z0 + 1, n - 1);
+float4 g = lerp(Grid.SampleLevel(GridSampler, (xy + float2((z0 % 8) * n, (z0 / 8) * n)) / aw, 0),
+                Grid.SampleLevel(GridSampler, (xy + float2((z1 % 8) * n, (z1 / 8) * n)) / aw, 0), zf - z0);
+int3 qi = int3(q);
+float th = (M[((qi.x + qi.z) & 3) + 4 * ((qi.y + 2 * qi.z) & 3)] + 0.5) / 16;
+float hv = frac(sin(dot(q + S * 31, float3(127.1, 311.7, 74.7))) * 43758.5453);
+float erode = Er * saturate((T - 0.5) / max(L - 0.5, 0.1)) * (0.35 + 0.65 * hv);
 float dens = g.r * Th * Gn - erode;
-// 3 bands (thin / mid / dense), the dither deciding between neighbouring bands per voxel.
-float band = min(floor(saturate(dens) * 3 + th), 3);
+int band = (int)min(floor(saturate(dens) * 4 + th), 4);
 if (band < 1) return 0;
-// The eye clears: voxels this close are gone (flying through a cloud never fills the lens).
-if (length(l - E.xyz) < E.w) return 0;
-// g.b: the room's light the volume does not get (bounced, the sky) as the cloud shadows it - the gas above and
-// around the voxel, worked out on the CPU (FJamSmokeSim::Pack). A lit crown, a dark belly, dark folds.
-float lit = g.b;
-// Embers: the hottest voxels of the fresh core glow and flicker out one by one (a 24 Hz hash per voxel).
-float flick = frac(sin(dot(float3(v), float3(12.9898, 78.233, 37.719)) + floor(Tm * 24) * 0.618) * 43758.5453);
-float ember = (g.g > 0.62 + 0.3 * th) ? saturate(g.g - 0.5) * 2 * (0.4 + 0.6 * flick) : 0;
-// The fringe only on thin voxels that move (churn): the crumbling rim glitters, still smoke does not.
-float fringe = (band == 1 && g.a > 0.25) ? 1 - 0.6 * (v.y & 1) : 0;
-// z: ember (+) or fringe (-), never both on one voxel.
-return float4(band / 3, saturate(g.g * 1.4), ember > 0 ? ember : -fringe, lit);
+float flick = frac(sin(dot(q, float3(12.9898, 78.233, 37.719)) + floor(Tm * 24) * 0.618) * 43758.5453);
+float ember = (g.g > 0.7 + 0.25 * th) ? saturate(g.g - 0.6) * 2.5 * (0.4 + 0.6 * flick) : 0;
+return float4(SHARE[band], saturate(g.g * 1.4), ember, g.b * g.a);
 """
 
 
@@ -272,9 +273,9 @@ def _volume(m, node, custom, data, scalar, colour, mul):
         vec[name] = colour(name, unreal.LinearColor(0, 0, 0, 0))
     grid = node(unreal.MaterialExpressionTextureObjectParameter, parameter_name="Grid",
                 texture=unreal.load_asset("/Engine/EngineResources/DefaultTexture"))
-    inputs = {"W": world, "H": scalar("HalfCm", 64.0), "N": scalar("Cells", 32.0), "S": scalar("Seed", 0.0),
+    inputs = {"W": world, "H": scalar("HalfCm", 80.0), "N": scalar("Cells", 32.0), "S": scalar("Seed", 0.0),
               "T": scalar("Age", 0.0), "L": scalar("Life", 6.0), "Th": scalar("Thin", 1.0), "Er": scalar("Erode", 0.9),
-              "Gn": scalar("Gain", 1.0), "Tm": node(unreal.MaterialExpressionTime), "Grid": grid}
+              "Gn": scalar("Gain", 1.0), "Px": scalar("PixelPerCm", 0.01227), "Tm": node(unreal.MaterialExpressionTime), "Grid": grid}
     rgba = {"C": "CloudCentre", "BX": "CloudX", "BY": "CloudY", "BZ": "CloudZ", "E": "Eye"}
     n = node(unreal.MaterialExpressionCustom, code=VOLUME_HLSL, description="Cloud",
              output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT4,
@@ -292,38 +293,29 @@ def _volume(m, node, custom, data, scalar, colour, mul):
         mel.connect_material_expressions(n, "", c, "")
         return c
 
-    band, warm, glowbits, lit = channel(0), channel(1), channel(2), channel(3)
-    # Grey-warm powder gas; the hot core warmer. Its light: the scene's lamps and the flash (the volume's own
-    # scattering, single, with real self-shadow), plus the self-shadowed ambient below.
+    share, warm, ember, lit = channel(0), channel(1), channel(2), channel(3)
+    # Grey-blue powder gas, a warm fresh core.
     albedo = node(unreal.MaterialExpressionLinearInterpolate)
-    tint = colour("Colour", unreal.LinearColor(0.55, 0.52, 0.48, 1.0))
+    tint = colour("Colour", unreal.LinearColor(0.50, 0.52, 0.56, 1.0))
     mel.connect_material_expressions(tint, "", albedo, "A")
-    mel.connect_material_expressions(colour("WarmColour", unreal.LinearColor(0.60, 0.48, 0.36, 1.0)), "", albedo, "B")
+    mel.connect_material_expressions(colour("WarmColour", unreal.LinearColor(0.62, 0.50, 0.38, 1.0)), "", albedo, "B")
     mel.connect_material_expressions(warm, "", albedo, "Alpha")
     mel.connect_material_property(albedo, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    # Volume domain: the Subsurface Color pin is the extinction. The volume integrates it (and the emission) per
-    # local unit - a grid cell, UnitCm long (HeterogeneousVolumesLiveShadingPipeline.usf: StepSize = world /
-    # LocalToWorldScale) - so both are per cm times UnitCm. (The old cloud's "0.018 1/cm" was per 5 cm voxel.)
-    unit = scalar("UnitCm", 4.0)
-    sigma = mul(mul(band, scalar("Extinction", 0.1)), unit)
+    # Volume domain: the Subsurface Color pin is the extinction, integrated per local unit (a grid cell, UnitCm long:
+    # HeterogeneousVolumesLiveShadingPipeline.usf, StepSize = world / LocalToWorldScale), so per cm times UnitCm.
+    unit = scalar("UnitCm", 5.0)
+    sigma = mul(mul(share, scalar("Extinction", 0.04)), unit)
     mel.connect_material_property(sigma, "", unreal.MaterialProperty.MP_SUBSURFACE_COLOR)
-    # The ambient as scattering: sigma x albedo x radiance x lit, so a thick lump shows albedo x radiance on its
-    # lit crown whatever its extinction, and its shadowed belly and folds go dark.
-    ambient = mul(mul(mul(sigma, albedo), colour("AmbientColour", unreal.LinearColor(1.0, 0.85, 0.70, 1.0))),
-                  mul(lit, mul(scalar("Ambient", 1.0), scalar("AmbientShare", 1.0))))
-    ember = node(unreal.MaterialExpressionMax)
-    mel.connect_material_expressions(glowbits, "", ember, "A")
-    mel.connect_material_expressions(scalar("Zero", 0.0), "", ember, "B")
-    fringe = node(unreal.MaterialExpressionMax)
-    mel.connect_material_expressions(mul(glowbits, scalar("MinusOne", -1.0)), "", fringe, "A")
-    mel.connect_material_expressions(scalar("ZeroF", 0.0), "", fringe, "B")
-    bits = node(unreal.MaterialExpressionAdd)
-    mel.connect_material_expressions(mul(ember, colour("EmberColour", unreal.LinearColor(2.2, 0.55, 0.10, 1.0))), "", bits, "A")
-    mel.connect_material_expressions(mul(mul(mul(fringe, band), scalar("Fringe", 0.02)),
-                                         colour("FringeColour", unreal.LinearColor(0.35, 0.55, 0.80, 1.0))), "", bits, "B")
+    # The key light (C++: the brightest light at the cloud, the flash while it burns) as scattering, shadowed by the
+    # gas toward it and around - a lit rim, a dark belly - plus a faint ambient (the old 0.12 was the milk). Embers.
+    light = node(unreal.MaterialExpressionAdd)
+    mel.connect_material_expressions(colour("KeyColour", unreal.LinearColor(1.0, 0.9, 0.8, 1.0)), "", light, "A")
+    mel.connect_material_expressions(mul(colour("AmbientColour", unreal.LinearColor(0.7, 0.75, 0.85, 1.0)),
+                                         mul(scalar("Ambient", 0.02), scalar("AmbientShare", 1.0))), "", light, "B")
+    scatter = mul(mul(mul(sigma, albedo), light), mul(lit, scalar("Key", 1.0)))
     glow = node(unreal.MaterialExpressionAdd)
-    mel.connect_material_expressions(ambient, "", glow, "A")
-    mel.connect_material_expressions(mul(bits, unit), "", glow, "B")
+    mel.connect_material_expressions(scatter, "", glow, "A")
+    mel.connect_material_expressions(mul(mul(ember, colour("EmberColour", unreal.LinearColor(2.2, 0.55, 0.10, 1.0))), unit), "", glow, "B")
     mel.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 

@@ -137,15 +137,19 @@ FJamWeapon JamMakeRmb93(const FJamWeapon& PumpShotgun)
 	// The shroud's 16 holes (ActionMesh space, the shroud rides the barrel): four rings along it, two holes a side each, above and below the bore.
 	FJamPortSmoke& Smoke = Gun.PortSmoke;
 	Smoke.BoreZCm = 0.75f;
-	// Matched to the shot's cloud (Docs/RecoilWeapons-SmokeSim.md, 3.6): denser, longer, rising wisps.
-	Smoke.ShotPuffs = 10;
-	Smoke.ShotThrowCm = 3.5f;
-	Smoke.SeepPerSecond = 8.0f;
+	// Soft wisps that leave the holes gently and envelop the gun (Docs/RecoilWeapons-SmokeSim.md, «Правка v2»): many,
+	// thin, barely thrown, clinging to the shroud for 1.5 s.
+	Smoke.ShotPuffs = 16;
+	Smoke.ShotThrowCm = 0.3f;
+	Smoke.SeepPerSecond = 12.0f;
+	Smoke.SeepThrowCm = 0.3f;
+	Smoke.StartCm = 1.5f;
 	Smoke.EndCm = 9.0f;
-	Smoke.Seconds = 2.8f;
-	Smoke.Opacity = 0.22f;
-	Smoke.RiseShare = 0.12f;
+	Smoke.Seconds = 2.2f;
+	Smoke.Opacity = 0.35f;
+	Smoke.RiseShare = 0.08f;
 	Smoke.AirDragSeconds = 0.7f;
+	Smoke.ClingSeconds = 1.5f;
 	for (const float X : { 38.15f, 41.05f, 43.95f, 46.85f })
 	{
 		for (const float Y : { 1.21f, -1.21f })

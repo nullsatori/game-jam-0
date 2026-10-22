@@ -81,8 +81,13 @@ struct FJamSmokeSim
 
 	void Reset(int32 InN, float InCellCm, bool bInAir, const FVector3f& InDown);
 	void RebuildSolids();
-	/** Gas in an ellipsoid at Centre (cm): LengthCm along Axis, RadiusCm across (semi-axes; a flat top, lumpy); density, heat (each at most), moving at Velocity plus Radial cm/s out of its centre. */
-	void Inject(const FVector3f& Centre, const FVector3f& Axis, float LengthCm, float RadiusCm, float InRho, float InHeat, const FVector3f& Velocity, float Radial);
+	/**
+	 * Gas in an ellipsoid at Centre (cm): LengthCm along Axis, RadiusCm across (semi-axes; a flat top, lumpy); density,
+	 * heat (each at most), moving at Velocity plus Radial cm/s out of its centre - within the plane across RadialPlane
+	 * when that is not zero (a splash spreading along a surface).
+	 */
+	void Inject(const FVector3f& Centre, const FVector3f& Axis, float LengthCm, float RadiusCm, float InRho, float InHeat, const FVector3f& Velocity, float Radial,
+		const FVector3f& RadialPlane = FVector3f::ZeroVector);
 	/**
 	 * A push along the line Origin + t Dir (t > 0, cm): Along cm/s down it, Push cm/s out of it, within RadiusCm
 	 * (gaussian); Clear (0..1) of the density on the line is thrown aside at once (a round's tunnel). True if it touched gas.
@@ -99,11 +104,12 @@ struct FJamSmokeSim
 	/** Mean |U| (cm/s) and the hottest cell (log lines). */
 	void Stats(float& OutMeanSpeed, float& OutMaxHeat) const;
 	/**
-	 * The atlas for the material: 8 tiles across, ceil(N / 8) down, each N x N (slice z at tile (z % 8, z / 8)); R density,
-	 * G heat, B the ambient's shadow (1 lit: exp(-Occlusion x the gas above toward Up, box frame, and around), A churn
-	 * (|curl| / 40 /s). Solid cells hold no gas, so the material needs no flag for them.
+	 * The atlas for the material: 8 tiles across, ceil(N / 8) down, each N x N (slice z at tile (z % 8, z / 8)).
+	 * R the drawn density: the gas less Sharpen x its blur (5 cells a side) - the low, soft cushion goes, rags and
+	 * strands stay. G heat. B the key light's shadow: exp(-KeyShadow x the gas toward KeyDir, box frame, 1 to 10
+	 * cells). A the ambient's: exp(-Occlusion x the gas around, 2 cells each way). Solid cells hold no gas.
 	 */
-	void Pack(TArray<FColor>& Out, const FVector3f& Up, float Occlusion) const;
+	void Pack(TArray<FColor>& Out, const FVector3f& KeyDir, float KeyShadow, float Occlusion, float Sharpen);
 	static FIntPoint AtlasSize(int32 InN) { return FIntPoint(8 * InN, ((InN + 7) / 8) * InN); }
 
 private:

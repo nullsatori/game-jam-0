@@ -257,9 +257,24 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float VacuumRadialScale = 2.5f;
 
-	/** How much the gas above and around a voxel shadows the material's room ambient (FJamSmokeSim::Pack). */
+	/** How much the gas around a voxel shadows the material's ambient, and the gas toward the key light its key light (FJamSmokeSim::Pack). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
-	float AmbientOcclusion = 0.5f;
+	float AmbientOcclusion = 0.15f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	float KeyShadow = 0.5f;
+
+	/** The drawn density is the gas less this share of its blur (5 cells): the soft cushion goes, rags stay. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "0.9"))
+	float Sharpen = 0.6f;
+
+	/** The key light for the material: its colour x its illuminance at the cloud / pi x this. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	float KeyStrength = 0.008f;
+
+	/** ...at most this (a lamp right over the cloud, the flash inside it). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	float KeyMax = 3.0f;
 
 	/** The material's room ambient (the bounced light the volume does not get) outside air: none to bounce in space. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -354,7 +369,28 @@ private:
 		float LiftDragSeconds = 0.0f;
 		/** A rising wisp sways across its rise (cm) and stands up along it; 0 in a vacuum. */
 		float SwayCm = 0.0f;
+		/** Opacity comes up over this long (no pop). */
+		float FadeInSeconds = 0.05f;
+		/**
+		 * A shroud wisp clinging to the gun (ClingSeconds > 0): a path in Anchor's space round the bore (at BoreZ on
+		 * the part's X axis) from Port - its angle Theta, radius Radius, creeping back, swirling - followed in the world
+		 * with weight e^(-Age / ClingSeconds), the rest of its motion the world's. WorldPos is where it is.
+		 */
+		TWeakObjectPtr<const USceneComponent> Anchor;
+		FVector Port = FVector::ZeroVector;
+		float BoreZ = 0.0f;
+		float Theta = 0.0f;
+		float Radius = 0.0f;
+		float SwirlRadPerSecond = 0.0f;
+		float CreepCmPerSecond = 0.0f;
+		float OutCm = 0.0f;
+		float ClingSeconds = 0.0f;
+		FVector WorldPos = FVector::ZeroVector;
+		FVector PrevAttached = FVector::ZeroVector;
+		FVector AlongWorld = FVector::ForwardVector;
 	};
+	/** A clinging wisp's point on its path in the gun's space at Age. */
+	static FVector ClingPath(const FPuff& Puff, float Age);
 
 	/** A camera-facing sprite at Location, XAxis along its length (projected on the view plane); all in camera space. */
 	static FTransform Sprite(const FVector& Location, const FVector& XAxis, float LengthCm, float WidthCm);
@@ -422,6 +458,12 @@ private:
 		bool bFrozen = false;
 		/** The grid's steps run off the game thread (launched at the end of TickClouds); its result - the shift the box
 		 *  owes the gas and a packed atlas - is taken on the game thread after the wait. */
+		/** The key light toward which the grid's shadow is packed (box frame) and its colour x strength for the material. */
+		FVector3f KeyDir = FVector3f::UpVector;
+		FLinearColor KeyColour = FLinearColor::White;
+		FString KeyName;
+		/** The gas was born at the bore's hit (or ahead of the muzzle) after a card jet: it fades in from nothing. */
+		bool bJet = false;
 		mutable UE::Tasks::FTask Pending;
 		FIntVector PendingShift = FIntVector::ZeroValue;
 		bool bPendingAtlas = false;
@@ -451,6 +493,12 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UObject>> CloudObjects;
 	FVector LastEye = FVector::ZeroVector;
+	/** The lights a cloud may take as its key, refreshed every second. */
+	TArray<TWeakObjectPtr<class ULightComponent>> KeyLights;
+	float KeyLightsAge = 1e6f;
+	FString LastKeyName;
+	/** The brightest light at Where, by its brightness over the distance squared (a directional light by its own). */
+	void PickKey(const FVector& Where, const FQuat& Basis, FVector3f& OutDir, FLinearColor& OutColour);
 	TArray<FHotCase> HotCases;
 
 	TArray<FPuff> Puffs;

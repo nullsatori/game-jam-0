@@ -1,10 +1,12 @@
-﻿#include "JamMuzzleFx.h"
+#include "JamMuzzleFx.h"
 
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
 #include "Components/HeterogeneousVolumeComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Components/DirectionalLightComponent.h"
+#include "UObject/UObjectIterator.h"
 #include "Components/SphereComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
@@ -155,15 +157,15 @@ UJamMuzzleFxComponent::UJamMuzzleFxComponent()
 		Gun.RoundAlongCm = RoundAlong;
 		Gun.CloudSeconds = Seconds;
 	};
-	Cloud(Pistol, 20, 3.0f, 10.0f, 7.0f, 450.0f, 40.0f, 0.12f, 220.0f, 0.5f, 0.3f, 0.35f, 0.05f, 4, 2.0f, 0.35f, 6.0f, 100.0f, 160.0f, 4.0f);
-	Cloud(Shotgun, 24, 128.0f / 24.0f, 22.0f, 16.0f, 600.0f, 90.0f, 0.14f, 260.0f, 0.6f, 0.4f, 0.5f, 0.03f, 4, 3.0f, 0.35f, 10.0f, 140.0f, 220.0f, 6.0f);
-	Cloud(Sniper, 22, 98.0f / 22.0f, 12.0f, 9.0f, 500.0f, 50.0f, 0.10f, 240.0f, 0.5f, 0.35f, 0.4f, 0.04f, 4, 2.5f, 0.35f, 8.0f, 120.0f, 260.0f, 5.0f);
+	Cloud(Pistol, 20, 3.0f, 10.0f, 7.0f, 600.0f, 60.0f, 0.009f, 220.0f, 0.6f, 0.3f, 0.35f, 0.05f, 4, 2.0f, 0.35f, 6.0f, 100.0f, 160.0f, 4.0f);
+	Cloud(Shotgun, 32, 5.0f, 28.0f, 22.0f, 800.0f, 140.0f, 0.007f, 500.0f, 0.8f, 0.4f, 0.8f, 0.03f, 4, 3.0f, 0.35f, 10.0f, 140.0f, 220.0f, 6.0f);
+	Cloud(Sniper, 22, 98.0f / 22.0f, 12.0f, 9.0f, 650.0f, 75.0f, 0.007f, 240.0f, 0.6f, 0.35f, 0.4f, 0.04f, 4, 2.5f, 0.35f, 8.0f, 120.0f, 260.0f, 5.0f);
 	// The blast's swell and the jet's length (not in the design: a slug of a few cells slid as a blob and lost its
 	// momentum within 0.2 s on a 4 cm grid; a ball blown up in the first tenth and a jet that keeps pushing travel).
 	Pistol.EmitSeconds = 0.06f;
 	Shotgun.EmitSeconds = 0.1f;
 	Sniper.EmitSeconds = 0.08f;
-	Shotgun.Sim.SwellPerSecond = 35.0f;
+	Shotgun.Sim.SwellPerSecond = 55.0f;
 	Shotgun.ShoveCm = 90.0f;
 	Guns = { Pistol, Shotgun, Sniper };
 }
@@ -375,12 +377,34 @@ void UJamMuzzleFxComponent::PortPuffs(const FJamPortSmoke& Vent, const USceneCom
 		Puff.Spin = FMath::FRandRange(-0.4f, 0.4f);
 		Puff.Lift = Lift;
 		Puff.LiftDragSeconds = bAir ? Vent.AirDragSeconds : 0.0f;
-		Puff.SwayCm = bAir ? 1.4f : 0.0f;
+		// Enveloping the gun: a path round the bore in the part's space, long along the barrel, fading in.
+		Puff.Stretch = FMath::FRandRange(2.0f, 3.0f);
+		Puff.FadeInSeconds = 0.15f;
+		Puff.Anchor = &Action;
+		Puff.Port = Port;
+		Puff.BoreZ = Vent.BoreZCm;
+		Puff.Theta = FMath::Atan2(Port.Z - Vent.BoreZCm, Port.Y);
+		Puff.Radius = FVector2D(Port.Y, Port.Z - Vent.BoreZCm).Size();
+		Puff.SwirlRadPerSecond = Vent.SwirlCmPerSecond / FMath::Max(Puff.Radius + 1.0f, 1.0f) * (FMath::RandBool() ? 1.0f : -1.0f) * FMath::FRandRange(0.7f, 1.0f);
+		Puff.CreepCmPerSecond = Vent.CreepCmPerSecond * FMath::FRandRange(0.6f, 1.0f);
+		Puff.OutCm = ThrowCm;
+		Puff.ClingSeconds = Vent.ClingSeconds * FMath::FRandRange(0.8f, 1.2f);
+		Puff.WorldPos = Shroud.TransformPosition(ClingPath(Puff, Puff.Age));
+		Puff.PrevAttached = Puff.WorldPos;
+		Puff.AlongWorld = Shroud.GetRotation().GetAxisX();
 	}
 	if (Puffs.Num() > MaxPuffs)
 	{
 		Puffs.RemoveAt(0, Puffs.Num() - MaxPuffs);
 	}
+}
+
+FVector UJamMuzzleFxComponent::ClingPath(const FPuff& Puff, float Age)
+{
+	// Out of the hole a little (OutCm, easing in), round the bore (swirl easing in over 0.3 s), creeping back along it.
+	const float Angle = Puff.Theta + Puff.SwirlRadPerSecond * (Age - 0.3f * (1.0f - FMath::Exp(-Age / 0.3f)));
+	const float Radius = Puff.Radius + 0.6f + Puff.OutCm * (1.0f - FMath::Exp(-Age / 0.4f));
+	return FVector(Puff.Port.X - Puff.CreepCmPerSecond * Age, Radius * FMath::Cos(Angle), Puff.BoreZ + Radius * FMath::Sin(Angle));
 }
 
 FTransform UJamMuzzleFxComponent::Sprite(const FVector& Location, const FVector& XAxis, float LengthCm, float WidthCm)
@@ -427,10 +451,29 @@ FString UJamMuzzleFxComponent::DescribeClouds() const
 			Cloud.Sim->Stats(Speed, MaxHeat);
 			// The gas's centre in the world (the box's centre is a whole number of cells off it).
 			const FVector Gas = Cloud.Centre + Cloud.Basis.RotateVector(FVector(Centroid) * Cloud.Sim->CellCm);
-			Line += FString::Printf(TEXT(" [gun %d age %.2f %s%s, gas at %s, %.0f cm from its muzzle at the shot, %.0f cm from the eye, mass %.0f, mean |U| %.0f cm/s, heat %.2f, box %.0f cm x%.2f, carried %s cm/s]"),
-				Cloud.Gun, Cloud.Age, Cloud.Sim->bAir ? TEXT("air") : TEXT("vacuum"), Cloud.bFrozen ? TEXT(" frozen") : TEXT(""), *Gas.ToCompactString(),
+			// The view's transmittance through the gas's centre (continuous density x the dense band's extinction).
+			float Tau = 0.0f;
+			{
+				const FJamSmokeSim& S = *Cloud.Sim;
+				const FVector3f From(Cloud.Basis.UnrotateVector(Eye - Cloud.Centre));
+				const FVector3f To(FVector3f(Centroid) * S.CellCm);
+				const FVector3f Dir = (To - From).GetSafeNormal();
+				const float Half = 0.5f * S.N * S.CellCm;
+				for (float T = 0.0f; T < (To - From).Size() + Half * 2.0f; T += S.CellCm * 0.5f)
+				{
+					const FVector3f P = From + Dir * T;
+					if (P.GetAbsMax() < Half)
+					{
+						const FJamMuzzleFx& G = Guns[Cloud.Gun];
+						const float Erode = G.Erode * FMath::Clamp((Cloud.Age - 0.5f) / FMath::Max(G.CloudSeconds - 0.5f, 0.1f), 0.0f, 1.0f) * 0.675f;
+						Tau += FMath::Max(S.Sample(S.Rho, (P + Half) / S.CellCm - 0.5f) / FMath::Cube(Cloud.Scale) - Erode, 0.0f) * G.DenseExtinction * S.CellCm * 0.5f;
+					}
+				}
+			}
+			Line += FString::Printf(TEXT(" [gun %d age %.2f T %.2f %s%s, gas at %s, %.0f cm from its muzzle at the shot, %.0f cm from the eye, mass %.0f, mean |U| %.0f cm/s, heat %.2f, box %.0f cm x%.2f, carried %s cm/s, key %s]"),
+				Cloud.Gun, Cloud.Age, FMath::Exp(-Tau), Cloud.Sim->bAir ? TEXT("air") : TEXT("vacuum"), Cloud.bFrozen ? TEXT(" frozen") : TEXT(""), *Gas.ToCompactString(),
 				FVector::Dist(Gas, Cloud.Muzzle), FVector::Dist(Gas, Eye), Mass, Speed, MaxHeat, Cloud.Sim->N * Cloud.Sim->CellCm, Cloud.Scale,
-				*Cloud.Carried.ToCompactString());
+				*Cloud.Carried.ToCompactString(), *FString::Printf(TEXT("%s (%.2f, %.2f, %.2f)"), *Cloud.KeyName, Cloud.KeyColour.R, Cloud.KeyColour.G, Cloud.KeyColour.B));
 		}
 	}
 	return Line;
@@ -463,13 +506,16 @@ int32 UJamMuzzleFxComponent::GetCloudCount() const
 namespace
 {
 	/**
-	 * The grids step at a fixed rate - the same gas at 30, 60 or 144 fps (AGENTS.md, В«Р§Р°СЃС‚РѕС‚Р° РєР°РґСЂРѕРІВ») - of 60 Hz while
+	 * The grids step at a fixed rate - the same gas at 30, 60 or 144 fps (AGENTS.md, «Частота кадров») - of 60 Hz while
 	 * the slug is fast (FastSeconds after the shot), 30 Hz after: the slow churn does not need more, and a step costs.
 	 */
 	constexpr float SimStep = 1.0f / 60.0f;
 	constexpr float SlowStep = 1.0f / 30.0f;
 	constexpr float FastSeconds = 0.5f;
-	constexpr float FadeInSeconds = 0.12f;
+	constexpr float FadeInSeconds = 0.15f;
+	/** The jet: how far the bore is traced for its hit, and the share of the slug's speed that reaches it. */
+	constexpr float JetReachCm = 300.0f;
+	constexpr float ImpactSpeedShare = 0.6f;
 
 #if !UE_BUILD_SHIPPING
 	/** jam.Fx.SmokeCost: what the grids cost on the game thread since the last call. */
@@ -517,7 +563,7 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, c
 		Volume->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		// The box about its centre (by default it grows from a corner: a cloud cut to one octant).
 		Volume->bPivotAtCentroid = true;
-		// Voxel-exact: the lighting cache (self-shadow) on the grid's own cells, steps of a cell.
+		// The lighting cache (self-shadow) on the grid's own cells; the march step is r.HeterogeneousVolumes.StepSize (DefaultEngine.ini, 4 cm).
 		Volume->LightingDownsampleFactor = 1.0f;
 		Volume->StepFactor = 1.0f;
 		Volume->ShadowStepFactor = 1.0f;
@@ -542,8 +588,45 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, c
 	Cloud->Bore = Bore;
 	// A fixed skew off the bore: no voxel axis along the view down the shot (view-long columns drew a cross, 19.10).
 	Cloud->Basis = BoreQuat * FQuat(FVector::UpVector, FMath::DegreesToRadians(23.0f)) * FQuat(FVector::ForwardVector, FMath::DegreesToRadians(17.0f));
-	// The gas goes forward: the muzzle sits in the back of the box (it follows the gas from then on).
-	Cloud->Centre = Cloud->Muzzle + Bore * BoxCm * (Gun.SmokeBrake > 0.0f ? 0.05f : 0.2f);
+	// Jet, then grid (Docs/RecoilWeapons-SmokeSim.md, «Правка v2»): the bore traced JetReachCm; the first tenth of a
+	// second the gas is a card jet from the muzzle to what it hits, and the grid is born there - on the floor or wall
+	// the gas splashes along it - or, with nothing hit, ahead of the muzzle. A brake's side jets keep the grid on the muzzle.
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(JamSmokeSolids), false, GetOwner());
+	FHitResult BoreHit;
+	Cloud->bJet = Gun.SmokeBrake <= 0.0f;
+	const bool bHit = Cloud->bJet && World->LineTraceSingleByChannel(BoreHit, Cloud->Muzzle, Cloud->Muzzle + Bore * JetReachCm, ECC_Visibility, Query);
+	const float AheadCm = FMath::Min(60.0f, BoxCm * 0.35f);
+	const FVector Birth = !Cloud->bJet ? Cloud->Muzzle
+		: bHit ? BoreHit.ImpactPoint + BoreHit.ImpactNormal * Gun.SlugRadiusCm * 0.6f
+		: Cloud->Muzzle + Bore * AheadCm;
+	// The box: on a surface, the hit low in it (the gas spreads along and rises); in the open a little behind the
+	// slug's way on; with a brake about the muzzle.
+	Cloud->Centre = !Cloud->bJet ? Cloud->Muzzle + Bore * BoxCm * 0.05f
+		: bHit ? BoreHit.ImpactPoint + BoreHit.ImpactNormal * BoxCm * 0.3f
+		: Birth + Bore * BoxCm * 0.1f;
+	if (Cloud->bJet && Smoke)
+	{
+		// The jet: stretched cards thrown along the bore to the hit (or the birth) within ~0.12 s.
+		const float Reach = FVector::Dist(Cloud->Muzzle, Birth);
+		for (int32 Index = 0; Index < 8; ++Index)
+		{
+			FPuff& Puff = Puffs.AddDefaulted_GetRef();
+			Puff.Origin = Cloud->Muzzle;
+			Puff.Bore = BoreQuat;
+			Puff.Direction = FVector::ForwardVector;
+			Puff.Along = FVector::ForwardVector;
+			Puff.SpreadCm = Reach * (Index + 0.5f) / 8.0f * 1.15f;
+			Puff.StartCm = 4.0f;
+			Puff.EndCm = Gun.SlugRadiusCm * FMath::FRandRange(0.6f, 1.0f);
+			Puff.Stretch = 3.0f;
+			Puff.Tear = 0.5f;
+			Puff.Opacity = 0.35f;
+			Puff.Life = 0.18f * FMath::FRandRange(0.8f, 1.2f);
+			Puff.FadeInSeconds = 0.01f;
+			Puff.Seed = FMath::FRand();
+			Puff.Spin = FMath::FRandRange(-0.4f, 0.4f);
+		}
+	}
 	// Nothing ties it to the shooter: the gun's velocity at the shot is the centre of mass's (kept in a vacuum, the air takes it).
 	Cloud->Carried = GunVelocity;
 	Cloud->Rise = FVector::ZeroVector;
@@ -560,11 +643,10 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, c
 	Sim.Reset(Gun.Cells, Gun.CellCm, bAir, FVector3f(Cloud->Basis.UnrotateVector(Gravity.GetSafeNormal())));
 	// The floor and a wall: what the bore and the gravity meet within the box become planes the gas cannot enter
 	// (Visibility: loose cases and magazines ignore it).
-	FCollisionQueryParams Query(SCENE_QUERY_STAT(JamSmokeSolids), false, GetOwner());
 	for (const FVector& Direction : { Bore, Gravity.GetSafeNormal() })
 	{
 		FHitResult Hit;
-		if (!Direction.IsNearlyZero() && World->LineTraceSingleByChannel(Hit, Cloud->Muzzle, Cloud->Muzzle + Direction * BoxCm, ECC_Visibility, Query))
+		if (!Direction.IsNearlyZero() && World->LineTraceSingleByChannel(Hit, Birth - Direction * Gun.SlugRadiusCm, Birth + Direction * BoxCm, ECC_Visibility, Query))
 		{
 			const FVector3f Normal(Cloud->Basis.UnrotateVector(Hit.ImpactNormal));
 			const FVector3f Point(Cloud->Basis.UnrotateVector(Hit.ImpactPoint - Cloud->Centre));
@@ -577,11 +659,24 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, c
 	Sim.RebuildSolids();
 	// The slug: out of the bore (a brake lets 1 - SmokeBrake on forward and throws the rest out of both side ports).
 	const FVector3f MuzzleLocal(Cloud->Basis.UnrotateVector(Cloud->Muzzle - Cloud->Centre));
+	const FVector3f BirthLocal(Cloud->Basis.UnrotateVector(Birth - Cloud->Centre));
 	const FVector3f BoreLocal(Cloud->Basis.UnrotateVector(Bore));
 	const float Throw = bAir ? 1.0f : VacuumThrowShare;
 	const float Radial = bAir ? 1.0f : VacuumRadialScale;
-	Sim.Inject(MuzzleLocal + BoreLocal * Gun.SlugLengthCm, BoreLocal, Gun.SlugLengthCm, Gun.SlugRadiusCm, 1.0f, 1.0f,
-		BoreLocal * Gun.SlugSpeedCm * (1.0f - Gun.SmokeBrake) * Throw, Gun.SlugRadialCm * Radial);
+	if (bHit)
+	{
+		// The splash: the slug arrives on the surface still driving into it (ImpactSpeedShare of its speed). The
+		// surface stops the normal part and the pressure solve turns it into a disc rolling out along the surface (an
+		// outward push in the plane alone is divergent: the solve took it out), plus a little spread of its own.
+		const FVector3f NormalLocal(Cloud->Basis.UnrotateVector(BoreHit.ImpactNormal));
+		const float Speed = Gun.SlugSpeedCm * ImpactSpeedShare * Throw;
+		Sim.Inject(BirthLocal, NormalLocal, Gun.SlugRadiusCm * 0.8f, Gun.SlugLengthCm, 1.0f, 1.0f, BoreLocal * Speed, Gun.SlugRadialCm * Radial, NormalLocal);
+	}
+	else
+	{
+		Sim.Inject(Cloud->bJet ? BirthLocal : MuzzleLocal + BoreLocal * Gun.SlugLengthCm, BoreLocal, Gun.SlugLengthCm, Gun.SlugRadiusCm, 1.0f, 1.0f,
+			BoreLocal * Gun.SlugSpeedCm * (1.0f - Gun.SmokeBrake) * Throw, Gun.SlugRadialCm * Radial);
+	}
 	if (Gun.SmokeBrake > 0.0f)
 	{
 		for (const float Side : { 1.0f, -1.0f })
@@ -590,13 +685,13 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, c
 			Sim.Inject(MuzzleLocal + Port * Gun.SlugLengthCm, Port, Gun.SlugLengthCm, Gun.SlugRadiusCm, 1.0f, 1.0f, Port * Gun.SlugSpeedCm * Gun.SmokeBrake * 0.5f * Throw, Gun.SlugRadialCm * 0.5f * Radial);
 		}
 	}
-	// The grid's texture, one per slot (point-sampled: each texel is a voxel).
+	// The grid's texture, one per slot (bilinear: the material samples the gas smooth and quantizes it to its own pixel).
 	const FIntPoint Size = FJamSmokeSim::AtlasSize(Gun.Cells);
 	if (!Cloud->Grid || Cloud->Grid->GetSizeX() != Size.X || Cloud->Grid->GetSizeY() != Size.Y)
 	{
 		UTexture2D* Grid = UTexture2D::CreateTransient(Size.X, Size.Y, PF_B8G8R8A8);
 		Grid->SRGB = false;
-		Grid->Filter = TF_Nearest;
+		Grid->Filter = TF_Bilinear;
 		Grid->NeverStream = true;
 		Grid->UpdateResource();
 		Cloud->Grid = Grid;
@@ -605,12 +700,77 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, c
 	}
 	// The atlas of the fresh slug right away: until the first upload the texture held the slot's last cloud (or, new,
 	// uninitialised memory) - a frame of stray glowing voxels.
-	const FVector3f Up = Sim.Down.IsNearlyZero() ? FVector3f(Cloud->Basis.UnrotateVector(FVector::UpVector)) : -Sim.Down;
-	Sim.Pack(Cloud->Atlas, Up, AmbientOcclusion);
+	PickKey(Cloud->Centre, Cloud->Basis, Cloud->KeyDir, Cloud->KeyColour);
+	Sim.Pack(Cloud->Atlas, Cloud->KeyDir, KeyShadow, AmbientOcclusion, Sharpen);
 	Cloud->PendingShift = FIntVector::ZeroValue;
 	Cloud->bPendingAtlas = true;
 	Cloud->Volume->SetVolumeResolution(FIntVector(Gun.Cells));
 	Cloud->Volume->SetVisibility(true);
+}
+
+void UJamMuzzleFxComponent::PickKey(const FVector& Where, const FQuat& Basis, FVector3f& OutDir, FLinearColor& OutColour)
+{
+	UWorld* World = GetWorld();
+	if (KeyLightsAge > 1.0f)
+	{
+		KeyLightsAge = 0.0f;
+		KeyLights.Reset();
+		for (TObjectIterator<ULightComponent> It; It; ++It)
+		{
+			if (It->GetWorld() == World)
+			{
+				KeyLights.Add(*It);
+			}
+		}
+	}
+	float Best = 0.0f;
+	FVector Dir = FVector::UpVector;
+	FLinearColor Colour = FLinearColor(0.6f, 0.65f, 0.75f);
+	FString Name = TEXT("none");
+	for (const TWeakObjectPtr<ULightComponent>& Each : KeyLights)
+	{
+		const ULightComponent* L = Each.Get();
+		if (!L || !L->IsVisible() || !L->bAffectsWorld || L->Intensity <= 0.0f)
+		{
+			continue;
+		}
+		const float Brightness = L->ComputeLightBrightness();
+		float Score;
+		FVector Toward;
+		if (L->IsA<UDirectionalLightComponent>())
+		{
+			Toward = -L->GetDirection();
+			Score = Brightness;
+		}
+		else
+		{
+			const ULocalLightComponent* Local = Cast<ULocalLightComponent>(L);
+			const FVector Offset = L->GetComponentLocation() - Where;
+			const float Cm = Offset.Size();
+			if (!Local || Cm > Local->AttenuationRadius)
+			{
+				continue;
+			}
+			Toward = Offset / FMath::Max(Cm, 1.0f);
+			const UPointLightComponent* Point = Cast<UPointLightComponent>(L);
+			Score = Point && !Point->bUseInverseSquaredFalloff
+				? Brightness * FMath::Pow(1.0f - Cm / Local->AttenuationRadius, Point->LightFalloffExponent) * 10.0f
+				: Brightness / FMath::Max(FMath::Square(Cm / 100.0f), 0.1f);
+		}
+		if (Score > Best)
+		{
+			Best = Score;
+			Dir = Toward;
+			Colour = L->GetLightColor();
+			Name = GetNameSafe(L->GetOwner());
+		}
+	}
+	// As bright as the light makes a surface there (its illuminance, lux, over pi): the cloud's lit side sits with the
+	// floor's under the same lamp; the flash, close, lights the fresh gas from inside.
+	OutDir = FVector3f(Basis.UnrotateVector(Dir));
+	// Capped: a lamp right over the cloud or the flash inside it would burn it white (owner: never blown-out white).
+	OutColour = Colour * FMath::Min(Best / UE_PI * KeyStrength, KeyMax);
+	LastKeyName = Name;
 }
 
 void UJamMuzzleFxComponent::Blast(const FVector& Origin, const FVector& Direction, float RadiusCm, float Along, float Push, float Clear, const FCloud* Except)
@@ -830,7 +990,21 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 		Material->SetScalarParameterValue(TEXT("Erode"), G.Erode);
 		// The fresh slug comes up over its first FadeInSeconds: hot gas at the muzzle is clear, the flash covers it; at
 		// full density the flash lit a ball half a metre from the eye into a cream block over half the frame.
-		Material->SetScalarParameterValue(TEXT("Gain"), 0.2f + 0.8f * FMath::SmoothStep(0.0f, FadeInSeconds, Cloud.Age));
+		Material->SetScalarParameterValue(TEXT("Gain"), (Cloud.bJet ? 0.0f : 0.2f) + (Cloud.bJet ? 1.0f : 0.8f) * FMath::SmoothStep(0.0f, FadeInSeconds, Cloud.Age));
+		// The key light: the brightest at the cloud now (the flash while it burns); the grid's shadow is packed toward it.
+		// Eased (tau 0.25 s, the same at any frame rate): a change of key light never pops.
+		{
+			FVector3f Dir;
+			FLinearColor Colour;
+			PickKey(Cloud.Centre, Cloud.Basis, Dir, Colour);
+			const float Ease = 1.0f - FMath::Exp(-DeltaTime / 0.25f);
+			Cloud.KeyDir = (Cloud.KeyDir + (Dir - Cloud.KeyDir) * Ease).GetSafeNormal(UE_SMALL_NUMBER, Dir);
+			Cloud.KeyColour = Cloud.KeyColour + (Colour - Cloud.KeyColour) * Ease;
+			Cloud.KeyName = LastKeyName;
+		}
+		Material->SetVectorParameterValue(TEXT("KeyColour"), Cloud.KeyColour);
+		// The drawn pixel: ~5 px at 1080p at any distance (the bodycam's FOV 134: 4.71 view widths per distance).
+		Material->SetScalarParameterValue(TEXT("PixelPerCm"), 5.0f / 1920.0f * 4.71f);
 		Material->SetScalarParameterValue(TEXT("AmbientShare"), Sim.bAir ? 1.0f : VacuumAmbientShare);
 		Material->SetScalarParameterValue(TEXT("Seed"), Cloud.Seed);
 		// The volume integrates per local unit (a cell here, HeterogeneousVolumesLiveShadingPipeline.usf: StepSize is
@@ -869,9 +1043,9 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 	{
 		FCloud* Cloud = L.Cloud;
 		const FJamMuzzleFx G = Guns[Cloud->Gun];
-		const FVector3f Up = Cloud->Sim->Down.IsNearlyZero() ? FVector3f(Cloud->Basis.UnrotateVector(FVector::UpVector)) : -Cloud->Sim->Down;
-		const float Occlusion = AmbientOcclusion;
-		Cloud->Pending = UE::Tasks::Launch(UE_SOURCE_LOCATION, [Cloud, G, L, Up, Occlusion]()
+		const FVector3f KeyDir = Cloud->KeyDir;
+		const float Occlusion = AmbientOcclusion, Shadow = KeyShadow, Sharp = Sharpen;
+		Cloud->Pending = UE::Tasks::Launch(UE_SOURCE_LOCATION, [Cloud, G, L, KeyDir, Occlusion, Shadow, Sharp]()
 		{
 			FJamSmokeSim& Sim = *Cloud->Sim;
 			for (int32 Step = 0; Step < L.Steps; ++Step)
@@ -880,7 +1054,7 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 				// The muzzle keeps puffing for EmitSeconds (from where it was at the shot, carried with the gas): the gas
 				// still leaving the bore behind the blast's ball, a narrower stem. In a vacuum none: the slug flies apart
 				// on its own, and a stem behind it drew a streak the box could not follow.
-				if (At < G.EmitSeconds && Sim.bAir)
+				if (At < G.EmitSeconds && Sim.bAir && !Cloud->bJet)
 				{
 					const FVector3f From(Cloud->Basis.UnrotateVector(Cloud->Muzzle + Cloud->Carried * At - Cloud->Centre));
 					const FVector3f BoreLocal(Cloud->Basis.UnrotateVector(Cloud->Bore));
@@ -908,7 +1082,7 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 				Cloud->PendingShift = FIntVector(FMath::RoundToInt(Off.X), FMath::RoundToInt(Off.Y), FMath::RoundToInt(Off.Z));
 				Sim.Shift(Cloud->PendingShift);
 			}
-			Sim.Pack(Cloud->Atlas, Up, Occlusion);
+			Sim.Pack(Cloud->Atlas, KeyDir, Shadow, Occlusion, Sharp);
 			Cloud->bPendingAtlas = true;
 		});
 	}
@@ -1009,8 +1183,8 @@ void UJamMuzzleFxComponent::TickHotCases(float DeltaTime)
 
 namespace
 {
-	/** A smoke texel's size per cm from the eye: ~6 px of 1920 at the bodycam's FOV 134 (2 tan 67 deg = 4.71 view widths per distance). */
-	constexpr float TexelPerCm = 6.0f / 1920.0f * 4.71f;
+	/** A smoke texel's size per cm from the eye: ~5 px of 1920 at the bodycam's FOV 134 (2 tan 67 deg = 4.71 view widths per distance). */
+	constexpr float TexelPerCm = 5.0f / 1920.0f * 4.71f;
 }
 
 void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -1031,6 +1205,7 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 #endif
 	WaitSims();
 	TickHotCases(DeltaTime);
+	KeyLightsAge += DeltaTime;
 	TickClouds(DeltaTime);
 #if !UE_BUILD_SHIPPING
 	if (bGrids)
@@ -1116,10 +1291,38 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	const FTransform Camera = View->GetComponentTransform();
 	for (int32 Index = Puffs.Num() - 1; Index >= 0; --Index)
 	{
-		Puffs[Index].Age += DeltaTime;
-		if (Puffs[Index].Age >= Puffs[Index].Life)
+		FPuff& Puff = Puffs[Index];
+		const float Before = Puff.Age;
+		Puff.Age += DeltaTime;
+		if (Puff.Age >= Puff.Life)
 		{
 			Puffs.RemoveAt(Index);
+			continue;
+		}
+		if (Puff.ClingSeconds > 0.0f)
+		{
+			// A clinging wisp follows its path on the gun with a weight dying from 1 (the gun's motion and its own creep
+			// and swirl), then the world takes it: in air its rise against the drag, in a vacuum the gun's velocity kept.
+			const float Cling = FMath::Exp(-Puff.Age / Puff.ClingSeconds);
+			if (const USceneComponent* Anchor = Puff.Anchor.Get())
+			{
+				const FTransform Gun = Anchor->GetComponentTransform();
+				const FVector Attached = Gun.TransformPosition(ClingPath(Puff, Puff.Age));
+				Puff.WorldPos += (Attached - Puff.PrevAttached) * Cling;
+				Puff.PrevAttached = Attached;
+				Puff.AlongWorld = Gun.GetRotation().GetAxisX();
+			}
+			const auto Rise = [&Puff](float T)
+			{
+				return Puff.LiftDragSeconds > 0.0f
+					? Puff.Lift * Puff.LiftDragSeconds * (T - Puff.LiftDragSeconds * (1.0f - FMath::Exp(-T / Puff.LiftDragSeconds)))
+					: FVector::ZeroVector;
+			};
+			Puff.WorldPos += Rise(Puff.Age) - Rise(Before);
+			if (Puff.LiftDragSeconds <= 0.0f)
+			{
+				Puff.WorldPos += Puff.GunVelocity * (1.0f - Cling) * DeltaTime;
+			}
 		}
 	}
 	for (const FPuff& Puff : Puffs)
@@ -1137,7 +1340,13 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 			- FVector(Puff.BackCm * Throw, 0.0f, 0.0f));
 		// A wisp drawn out along the shot at the time (or its brake jet)...
 		FVector Along = Puff.Bore.RotateVector(Puff.Along);
-		if (Puff.LiftDragSeconds > 0.0f)
+		if (Puff.ClingSeconds > 0.0f)
+		{
+			// ...a clinging one where its path put it, long along the barrel.
+			World = Puff.WorldPos;
+			Along = Puff.AlongWorld;
+		}
+		else if (Puff.LiftDragSeconds > 0.0f)
 		{
 			// ...or, rising in air, stood up along its rise and swaying across it on a sinuous path.
 			const FVector RisenVelocity = Puff.Lift * Puff.LiftDragSeconds * (1.0f - FMath::Exp(-Puff.Age / Puff.LiftDragSeconds));
@@ -1149,7 +1358,7 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		const FVector Location = Camera.InverseTransformPosition(World);
 		const float Width = FMath::Lerp(Puff.StartCm, Puff.EndCm, Grow);
 		const int32 Instance = Smoke->AddInstance(Sprite(Location, Camera.InverseTransformVectorNoScale(Along), Width * Puff.Stretch, Width) * Camera, /*bWorldSpace=*/true);
-		const float Opacity = Puff.Opacity * FMath::Min(Puff.Age / 0.05f, 1.0f) * FMath::Pow(1.0f - X, 1.5f);
+		const float Opacity = Puff.Opacity * FMath::SmoothStep(0.0f, Puff.FadeInSeconds, Puff.Age) * FMath::Pow(1.0f - X, 1.5f);
 		// Heat shimmer behind a fresh puff, gone by 100 ms.
 		const float Shimmer = FMath::Max(0.0f, 1.0f - Puff.Age / 0.1f);
 		// The material's texel grid, in texels along and across: a texel about 6 px on

@@ -101,8 +101,10 @@ float FJamSmokeSim::Sample(const TArray<float>& F, const FVector3f& Cells) const
 	return FMath::Lerp(FMath::Lerp(C00, C10, FY), FMath::Lerp(C01, C11, FY), FZ);
 }
 
-void FJamSmokeSim::Inject(const FVector3f& Centre, const FVector3f& Axis, float LengthCm, float RadiusCm, float InRho, float InHeat, const FVector3f& Velocity, float Radial)
+void FJamSmokeSim::Inject(const FVector3f& Centre, const FVector3f& Axis, float LengthCm, float RadiusCm, float InRho, float InHeat, const FVector3f& Velocity, float Radial,
+	const FVector3f& RadialPlane)
 {
+	const FVector3f PlaneN = RadialPlane.GetSafeNormal();
 	const float InvL = 1.0f / FMath::Max(LengthCm, 0.1f);
 	const float InvR = 1.0f / FMath::Max(RadiusCm, 0.1f);
 	ParallelFor(N, [&](int32 Z)
@@ -131,7 +133,8 @@ void FJamSmokeSim::Inject(const FVector3f& Centre, const FVector3f& Axis, float 
 				const float Jitter = float((H >> 4) & 0xFF) / 255.0f - 0.5f;
 				Rho[I] = FMath::Max(Rho[I], InRho * W * Lump);
 				Heat[I] = FMath::Max(Heat[I], InHeat * W);
-				const FVector3f V = Velocity * (1.0f + 0.3f * Jitter) + Q.GetSafeNormal() * Radial;
+				const FVector3f Out = PlaneN.IsNearlyZero() ? Q.GetSafeNormal() : (Q - PlaneN * (Q | PlaneN)).GetSafeNormal();
+				const FVector3f V = Velocity * (1.0f + 0.3f * Jitter) + Out * Radial;
 				const float B = FMath::Min(W * 2.0f, 1.0f);
 				Ux[I] = FMath::Lerp(Ux[I], V.X, B);
 				Uy[I] = FMath::Lerp(Uy[I], V.Y, B);
@@ -532,21 +535,44 @@ void FJamSmokeSim::Stats(float& OutMeanSpeed, float& OutMaxHeat) const
 	OutMeanSpeed = Mass > 1e-4 ? float(Speed / Mass) : 0.0f;
 }
 
-void FJamSmokeSim::Pack(TArray<FColor>& Out, const FVector3f& Up, float Occlusion) const
+void FJamSmokeSim::Pack(TArray<FColor>& Out, const FVector3f& KeyDir, float KeyShadow, float Occlusion, float Sharpen)
 {
 	const FIntPoint Size = AtlasSize(N);
 	Out.SetNumZeroed(Size.X * Size.Y);
 	const auto Byte = [](float V) { return uint8(FMath::Clamp(FMath::RoundToInt(V * 255.0f), 0, 255)); };
 	const auto At = [this](const FIntVector& Q) { return Rho[Index(FMath::Clamp(Q.X, 0, N - 1), FMath::Clamp(Q.Y, 0, N - 1), FMath::Clamp(Q.Z, 0, N - 1))]; };
-	// The ambient's shadow per voxel (the material's room light the volume does not get): the gas above it (toward
-	// Up, 1 to 7 cells) and around it (2 cells each way). Worked out here once per voxel instead of per ray step.
-	const float Steps[4] = { 1.0f, 2.0f, 4.0f, 7.0f };
-	const float Weights[4] = { 1.0f, 1.0f, 1.5f, 2.0f };
-	FIntVector UpCells[4];
-	for (int32 S = 0; S < 4; ++S)
+	// The blur of the density for the sharpening: a box of 5 cells, separable (T0 -> T1 -> T2).
+	const auto BoxPass = [this](const TArray<float>& From, TArray<float>& To, const FIntVector& Axis)
 	{
-		const FVector3f U = Up * Steps[S];
-		UpCells[S] = FIntVector(FMath::RoundToInt(U.X), FMath::RoundToInt(U.Y), FMath::RoundToInt(U.Z));
+		ParallelFor(N, [&](int32 Z)
+		{
+			for (int32 Y = 0; Y < N; ++Y)
+			{
+				for (int32 X = 0; X < N; ++X)
+				{
+					float Sum = 0.0f;
+					for (int32 K = -2; K <= 2; ++K)
+					{
+						const FIntVector Q = FIntVector(X, Y, Z) + Axis * K;
+						Sum += From[Index(FMath::Clamp(Q.X, 0, N - 1), FMath::Clamp(Q.Y, 0, N - 1), FMath::Clamp(Q.Z, 0, N - 1))];
+					}
+					To[Index(X, Y, Z)] = Sum * 0.2f;
+				}
+			}
+		});
+	};
+	BoxPass(Rho, T0, FIntVector(1, 0, 0));
+	BoxPass(T0, T1, FIntVector(0, 1, 0));
+	BoxPass(T1, T2, FIntVector(0, 0, 1));
+	// The key light's shadow: the gas toward it, 1 to 10 cells (the steps rounded to cells once).
+	constexpr int32 KeySteps = 6;
+	const float Steps[KeySteps] = { 1.0f, 2.0f, 3.0f, 5.0f, 7.0f, 10.0f };
+	const float Weights[KeySteps] = { 1.0f, 1.0f, 1.0f, 1.5f, 2.0f, 2.5f };
+	FIntVector KeyCells[KeySteps];
+	for (int32 S = 0; S < KeySteps; ++S)
+	{
+		const FVector3f U = KeyDir * Steps[S];
+		KeyCells[S] = FIntVector(FMath::RoundToInt(U.X), FMath::RoundToInt(U.Y), FMath::RoundToInt(U.Z));
 	}
 	ParallelFor(N, [&](int32 Z)
 	{
@@ -556,20 +582,22 @@ void FJamSmokeSim::Pack(TArray<FColor>& Out, const FVector3f& Up, float Occlusio
 			for (int32 X = 0; X < N; ++X)
 			{
 				const int32 I = Index(X, Y, Z);
-				float Lit = 1.0f;
+				float Key = 1.0f, Ambient = 1.0f;
 				if (Rho[I] > 0.004f)
 				{
 					const FIntVector C(X, Y, Z);
-					float Above = 0.0f;
-					for (int32 S = 0; S < 4; ++S)
+					float Toward = 0.0f;
+					for (int32 S = 0; S < KeySteps; ++S)
 					{
-						Above += At(C + UpCells[S]) * Weights[S];
+						Toward += At(C + KeyCells[S]) * Weights[S];
 					}
 					const float Around = At(C + FIntVector(2, 0, 0)) + At(C - FIntVector(2, 0, 0)) + At(C + FIntVector(0, 2, 0))
 						+ At(C - FIntVector(0, 2, 0)) + At(C + FIntVector(0, 0, 2)) + At(C - FIntVector(0, 0, 2));
-					Lit = FMath::Exp(-Occlusion * (Above + 0.25f * Around));
+					Key = FMath::Exp(-KeyShadow * Toward);
+					Ambient = FMath::Exp(-Occlusion * Around);
 				}
-				Out[(OY + Y) * Size.X + OX + X] = FColor(Byte(Rho[I]), Byte(Heat[I]), Byte(Lit), Byte(Curl[I] / 40.0f));
+				const float Drawn = FMath::Max(0.0f, Rho[I] - Sharpen * T2[I]) / FMath::Max(1.0f - Sharpen, 0.05f);
+				Out[(OY + Y) * Size.X + OX + X] = FColor(Byte(Drawn), Byte(Heat[I]), Byte(Key), Byte(Ambient));
 			}
 		}
 	});
