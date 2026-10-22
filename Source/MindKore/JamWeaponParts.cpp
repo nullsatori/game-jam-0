@@ -176,14 +176,14 @@ void UJamWeaponsComponent::SetupWeaponParts()
 		{ 0.71f, 0.06f, -2.0f, 0.0f }, { 0.75f, 0.0f, 0.0f, 0.0f } });
 	Pistol.MagEjectSpinDeg = 320.0f;
 	Pistol.MagInSoundSeconds = 0.86f;
-	// Muzzle up and canted, raised toward the middle: the well faces the eye. Where
+	// Muzzle up and canted, toward the middle and 3 cm up (owner 22.10: 11 cm up sat too high): the well faces the eye. Where
 	// the pose springs pull, in stages: in; 8% further as the old magazine goes
 	// (0.3 s); back 8% short to meet the new one (0.6 s); home on the seat (0.86 s),
 	// then out at once under the magazine's double knock (owner 19.10: the tail after the
 	// seat halved) - easing off at 0.88 s, fastest mid-way, level by 0.95 s; ready at
 	// 0.97 s (ReloadSeconds), the springs floating it past rest and back.
 	Pistol.ReloadBodyTurn = FRotator(32.0f, -12.0f, 30.0f);
-	Pistol.ReloadBodyOffsetCm = FVector(-3.0f, -6.0f, 11.0f);
+	Pistol.ReloadBodyOffsetCm = FVector(-3.0f, -6.0f, 3.0f);
 	Pistol.ReloadBody = JamMakeCycleCurve({ { 0.0f, 0.0f, 0.0f, 0.0f }, { 0.03f, 1.0f, 0.0f, 0.0f }, { 0.28f, 1.0f, 0.0f, 0.0f },
 		{ 0.32f, 1.08f, 0.0f, 0.0f }, { 0.58f, 1.08f, 0.0f, 0.0f }, { 0.62f, 0.92f, 0.0f, 0.0f },
 		{ 0.84f, 0.92f, 0.0f, 0.0f }, { 0.88f, 1.0f, 0.0f, -2.0f }, { 0.95f, 0.0f, -1.0f, 0.0f } });
