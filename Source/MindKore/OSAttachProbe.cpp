@@ -303,7 +303,7 @@ namespace OSAttachProbe
 		At(2.2f, [Guns, R]()
 		{
 			const FOSWeapon& Usp = Guns->Weapons[0];
-			R->Check(TEXT("R: 20/47"), Usp.Ammo == 20 && Usp.Reserve == 47, Ammo(Usp));
+			R->Check(TEXT("R: 20/40 (the dropped magazine takes its 7)"), Usp.Ammo == 20 && Usp.Reserve == 40, Ammo(Usp));
 			R->Check(TEXT("the clear magazine shows 20"), Guns->RoundsInView->GetInstanceCount() == 20, FString::Printf(TEXT("%d"), Guns->RoundsInView->GetInstanceCount()));
 			FOSWeapon& Edit = Guns->Weapons[0];
 			Edit.Ammo = 18;
