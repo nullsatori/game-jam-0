@@ -119,6 +119,20 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 - `os.Flyer.LogFlaps 1` — в лог каждый слышимый взмах крыла (`os.Flyer.Probe`
   включает сама).
 
+## Каталог команд
+
+Все команды и переменные `os.*` с аргументами и строками помощи — в
+[Console](Console.md). Его пишет `python Scripts/os_console_catalog.py` (Python
+3, без движка: читает `Source/` как текст). Перед слиянием, если правка
+добавила, убрала или переименовала команду или поменяла её строку помощи:
+
+```powershell
+python Scripts/os_console_catalog.py --check
+```
+
+Код выхода 1 — каталог отстал: перезапустить без `--check` и закоммитить
+`Docs/Console.md` в той же правке.
+
 ## Какие пробы гонять
 
 Только те, которые правка может сломать: смена оружия — `SwitchProbe` и
