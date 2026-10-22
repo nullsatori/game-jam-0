@@ -230,11 +230,16 @@ public:
 	float SightDotCm = 0.2f;
 
 	/**
-	 * The last dot's (the front post's) diameter, cm: the blade is 0.96 mm thick, so a 2 mm dot stuck out of both its
-	 * sides and from the hip showed as a sliver at its edge (owner 22.10). It sits in the blade's insert slot instead.
+	 * The last dot's (the front post's) size, cm (depth, width, height): the blade is 0.96 mm thick, so a 2 mm dot stuck
+	 * out of both its sides and from the hip showed as a sliver at its edge (owner 22.10). An upright 0.9 x 1.8 mm insert
+	 * filling the blade's slot (1.9 mm tall) instead - as wide as the blade, twice the area of a round one.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights", meta = (ClampMin = "0.01"))
-	float FrontSightDotCm = 0.09f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights")
+	FVector FrontSightDotCm = FVector(0.09f, 0.09f, 0.18f);
+
+	/** The front insert's Glow (M_Jam_SightDot's is 6): nearly twice as far from the eye and thinned by TSR, it reads dim at the rear dots' 6. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights", meta = (ClampMin = "0"))
+	float FrontSightDotGlow = 15.0f;
 
 	/** M_Jam_SightDot (Scripts/jam_scope.py). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Scope|Sights")

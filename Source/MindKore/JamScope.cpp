@@ -288,13 +288,23 @@ bool UJamScopeComponent::Build()
 		const FVector& At = SightDotsCm[Index];
 		UStaticMeshComponent* Dot = NewObject<UStaticMeshComponent>(GetOwner());
 		Dot->SetStaticMesh(Sphere);
-		Dot->SetMaterial(0, DotMaterial);
+		const bool bFront = Index == SightDotsCm.Num() - 1;
+		if (bFront && DotMaterial)
+		{
+			UMaterialInstanceDynamic* Bright = UMaterialInstanceDynamic::Create(DotMaterial, Dot);
+			Bright->SetScalarParameterValue(TEXT("Glow"), FrontSightDotGlow);
+			Dot->SetMaterial(0, Bright);
+		}
+		else
+		{
+			Dot->SetMaterial(0, DotMaterial);
+		}
 		Dot->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Dot->SetCastShadow(false);
 		Dot->SetOnlyOwnerSee(true);
 		Dot->SetupAttachment(Weapons->ActionInView);
 		Dot->SetRelativeLocation(At);
-		Dot->SetRelativeScale3D(FVector((Index == SightDotsCm.Num() - 1 ? FrontSightDotCm : SightDotCm) / 100.0f));
+		Dot->SetRelativeScale3D((bFront ? FrontSightDotCm : FVector(SightDotCm)) / 100.0f);
 		Dot->SetVisibility(false);
 		Dot->RegisterComponent();
 		SightDots.Add(Dot);
