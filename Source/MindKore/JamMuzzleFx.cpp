@@ -318,6 +318,48 @@ void UJamMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const U
 	}
 }
 
+void UJamMuzzleFxComponent::PortPuffs(const FJamPortSmoke& Vent, const USceneComponent& Action, int32 Count, float ThrowCm, float AgeSpread)
+{
+	if (!Smoke || Count <= 0 || Vent.Ports.IsEmpty())
+	{
+		return;
+	}
+	// Air and gravity once for the lot (a frame's seep or a shot's puff).
+	const FTransform Shroud = Action.GetComponentTransform();
+	const FVector GunVelocity = GetOwner()->GetVelocity();
+	const bool bAir = JamAirZoneAt(GetWorld(), Shroud.GetLocation()) != nullptr;
+	const FVector Lift = bAir ? -JamGravityAt(GetWorld(), Shroud.GetLocation()).Acceleration * Vent.RiseShare : FVector::ZeroVector;
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const FVector& Port = Vent.Ports[FMath::RandHelper(Vent.Ports.Num())];
+		FPuff& Puff = Puffs.AddDefaulted_GetRef();
+		Puff.Origin = Shroud.TransformPosition(Port);
+		Puff.Bore = Shroud.GetRotation();
+		Puff.GunVelocity = GunVelocity;
+		Puff.AirDragSeconds = bAir ? Vent.AirDragSeconds : 0.0f;
+		// Out of the hole, away from the bore it vents, a little every way.
+		Puff.Direction = ((Port - FVector(Port.X, 0.0f, Vent.BoreZCm)).GetSafeNormal() + FMath::VRand() * 0.35f).GetSafeNormal();
+		Puff.Along = Puff.Direction;
+		Puff.SpreadCm = ThrowCm * FMath::FRandRange(0.6f, 1.0f);
+		Puff.DriftCm = Vent.DriftCm * FMath::FRandRange(0.5f, 1.0f);
+		Puff.Stretch = FMath::FRandRange(1.0f, 1.4f);
+		Puff.Tear = 0.3f;
+		Puff.StartCm = Vent.StartCm;
+		Puff.EndCm = Vent.EndCm * FMath::FRandRange(0.7f, 1.0f);
+		Puff.Opacity = Vent.Opacity;
+		Puff.Life = Vent.Seconds * FMath::FRandRange(0.75f, 1.25f);
+		Puff.Age = FMath::FRand() * AgeSpread;
+		Puff.Seed = FMath::FRand();
+		Puff.Spin = FMath::FRandRange(-0.4f, 0.4f);
+		Puff.Lift = Lift;
+		Puff.LiftDragSeconds = bAir ? Vent.AirDragSeconds : 0.0f;
+	}
+	if (Puffs.Num() > MaxPuffs)
+	{
+		Puffs.RemoveAt(0, Puffs.Num() - MaxPuffs);
+	}
+}
+
 FTransform UJamMuzzleFxComponent::Sprite(const FVector& Location, const FVector& XAxis, float LengthCm, float WidthCm)
 {
 	// The engine plane faces +Z and is 100 units across; the camera is at the origin.
@@ -651,7 +693,11 @@ void UJamMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		const float Grow = 1.0f - FMath::Exp(-Puff.Age / 0.15f);
 		// The gun's velocity is kept in a vacuum; in air it dies with AirDragSeconds (as a cloud's).
 		const FVector Carried = Puff.GunVelocity * (Puff.AirDragSeconds > 0.0f ? Puff.AirDragSeconds * (1.0f - FMath::Exp(-Puff.Age / Puff.AirDragSeconds)) : Puff.Age);
-		const FVector World = Puff.Origin + Carried + Puff.Bore.RotateVector(Puff.Direction * (Puff.SpreadCm * Throw + Puff.DriftCm * Puff.Age)
+		// Hot smoke in air: its lift against the air's drag, worked out exactly (v = a tau (1 - e^-t/tau)).
+		const FVector Risen = Puff.LiftDragSeconds > 0.0f
+			? Puff.Lift * Puff.LiftDragSeconds * (Puff.Age - Puff.LiftDragSeconds * (1.0f - FMath::Exp(-Puff.Age / Puff.LiftDragSeconds)))
+			: FVector::ZeroVector;
+		const FVector World = Puff.Origin + Carried + Risen + Puff.Bore.RotateVector(Puff.Direction * (Puff.SpreadCm * Throw + Puff.DriftCm * Puff.Age)
 			- FVector(Puff.BackCm * Throw, 0.0f, 0.0f));
 		const FVector Location = Camera.InverseTransformPosition(World);
 		const float Width = FMath::Lerp(Puff.StartCm, Puff.EndCm, Grow);

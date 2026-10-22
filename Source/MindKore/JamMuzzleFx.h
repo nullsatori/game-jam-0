@@ -10,6 +10,7 @@ class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UPointLightComponent;
 class UStaticMesh;
+struct FJamPortSmoke;
 
 /** One gun's shot in vacuum: the flash and the powder smoke. Sizes are sprite diameters, cm. */
 USTRUCT(BlueprintType)
@@ -228,6 +229,16 @@ public:
 	 */
 	void Shot(int32 Weapon, const FTransform& Muzzle, const USceneComponent* GunMesh);
 
+	/**
+	 * Count card puffs out of a perforated shroud's holes (FJamPortSmoke, the RMB-93's), each out of a hole picked at
+	 * random on Action (the part the shroud rides) as it is now, thrown ThrowCm out across the bore, born up to AgeSpread s
+	 * ago (a seep spread over the frame). In the world from then on, as the muzzle's cards; in air, hot smoke rises.
+	 */
+	void PortPuffs(const FJamPortSmoke& Vent, const USceneComponent& Action, int32 Count, float ThrowCm, float AgeSpread);
+
+	/** Card puffs alive now (probes). */
+	int32 GetPuffCount() const { return Puffs.Num(); }
+
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:
@@ -258,6 +269,9 @@ private:
 		float DriftCm = 0.0f;
 		float Stretch = 1.0f;
 		float Tear = 0.0f;
+		/** In air, hot smoke's lift (world cm/s^2) and the air's hold on it, s: it rises toward Lift x LiftDragSeconds. */
+		FVector Lift = FVector::ZeroVector;
+		float LiftDragSeconds = 0.0f;
 	};
 
 	/** A camera-facing sprite at Location, XAxis along its length (projected on the view plane); all in camera space. */

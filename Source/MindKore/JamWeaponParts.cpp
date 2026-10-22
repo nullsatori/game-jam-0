@@ -417,12 +417,15 @@ void UJamWeaponsComponent::MakePartComponents(USceneComponent& Parent)
 	HammerInView = Make(TEXT("GunHammerInView"));
 	MagInView = Make(TEXT("GunMagInView"));
 	ShellInView = Make(TEXT("GunShellInView"));
+	LidInView = Make(TEXT("GunLidInView"));
 }
 
 float UJamWeaponsComponent::StartReloadTimeline(const FJamWeapon& Weapon)
 {
 	ShellsPlanned = Weapon.ShellMesh ? FMath::Min(Weapon.MagazineSize - Weapon.Ammo, Weapon.Reserve) : 0;
 	bEmptyReload = Weapon.bSlideLocked && Weapon.EmptyReloadSeconds > 0.0f;
+	// A lid still latched is struck open (its knocks with it); one left open by a broken-off reload is only shut at the end.
+	bReloadStrikesLid = Weapon.Lid.State == EJamLidState::Latched;
 	// Locked with rounds in: an empty reload was cut after its seat (a switch). The magazine is in - only the release
 	// is left, so the timeline starts at the seat; its events up to there are not crossed again (PrevReloadTime).
 	ReloadFromSeconds = bEmptyReload && Weapon.Ammo > 0 ? Weapon.MagInSoundSeconds : 0.0f;
@@ -458,7 +461,7 @@ float UJamWeaponsComponent::GetReloadTime() const
 }
 
 void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State, float Since0, float Since1, float Reload0, float Reload1,
-	float ReloadLength, int32 Shells, float DeltaTime, const FSwitchSpan& Switch, bool bEmpty) const
+	float ReloadLength, int32 Shells, float DeltaTime, const FSwitchSpan& Switch, bool bEmpty, bool bLidStrike) const
 {
 	// The empty reload holds the gun up for the slide release on its own stages.
 	const FRuntimeFloatCurve& ReloadBody = bEmpty && Weapon.EmptyReloadBody.GetRichCurveConst()->GetNumKeys() > 0 ? Weapon.EmptyReloadBody : Weapon.ReloadBody;
@@ -588,6 +591,24 @@ void UJamWeaponsComponent::StepPose(const FJamWeapon& Weapon, FPoseState& State,
 					}
 				}
 			}
+			// A loading lid (JamWeaponLid.cpp): the palm on its latch, and the hand pressing it shut at the end.
+			if (Weapon.Lid.Mesh)
+			{
+				for (const FJamPoseKick& Each : Weapon.Lid.StrikeKicks)
+				{
+					if (bLidStrike && Crossed(R0, R1, Each.Time))
+					{
+						Kick(Each);
+					}
+				}
+				for (const FJamPoseKick& Each : Weapon.Lid.LatchKicks)
+				{
+					if (Crossed(R0, R1, ReloadLength - Weapon.Lid.CloseSeconds + Each.Time))
+					{
+						Kick(Each);
+					}
+				}
+			}
 		}
 		for (int32 Axis = 0; Axis < 3; ++Axis)
 		{
@@ -692,7 +713,7 @@ void UJamWeaponsComponent::UpdatePose(const FJamWeapon& Weapon, float DeltaTime)
 		PosePrevReload = ReloadFromSeconds; // a release-only reload starts at the seat: the knocks before it are not replayed
 	}
 	StepPose(Weapon, Pose, PosePrevSince, Since, PosePrevReload, Reload, float(ReloadEndSeconds - ReloadStartSeconds), ShellsPlanned, DeltaTime,
-		PoseSwitch, bEmptyReload);
+		PoseSwitch, bEmptyReload, bReloadStrikesLid);
 	PosePrevSince = Since;
 	PosePrevReload = Reload;
 }
@@ -914,8 +935,11 @@ void UJamWeaponsComponent::UpdateParts(const FJamWeapon* Weapon, float SinceShot
 		SetPart(HammerInView, nullptr, false);
 		SetPart(MagInView, nullptr, false);
 		SetPart(ShellInView, nullptr, false);
+		SetPart(LidInView, nullptr, false);
 		return;
 	}
+	// The lid is always there (its swing is UpdateLid's, after this).
+	SetPart(LidInView, Weapon->Lid.Mesh, true);
 	SetPart(HammerInView, Weapon->HammerMesh, true);
 	HammerInView->SetRelativeLocationAndRotation(Weapon->HammerPivot,
 		FQuat(FVector::RightVector, FMath::DegreesToRadians(Weapon->HammerTurnDeg * GetSlideAndHammer(*Weapon, SinceShot).Y)));
@@ -1011,12 +1035,14 @@ void UJamWeaponsComponent::UpdateCycleEvents()
 		const float Since = Shot.SinceShot;
 		if (Shot.CaseMesh && Crossed(Prev, Since, Shot.EjectSeconds))
 		{
-			// Out of the port to the right and up, end over end about the line of sight.
+			// Out of the port: to the right and up, end over end about the line of sight - or out of the bottom.
 			const FVector Velocity = GetOwner()->GetVelocity() + View.TransformVectorNoScale(Shot.EjectVelocity * FMath::FRandRange(0.85f, 1.15f)
 				+ FVector(FMath::FRandRange(-20.0f, 20.0f), 0.0f, FMath::FRandRange(-25.0f, 25.0f)));
-			const FVector Spin = View.GetUnitAxis(EAxis::X) * FMath::FRandRange(900.0f, 1600.0f) * (FMath::RandBool() ? 1.0f : -1.0f)
-				+ FMath::VRand() * 300.0f;
-			const FRotator Facing = FRotationMatrix::MakeFromXZ(View.GetUnitAxis(EAxis::Y), View.GetUnitAxis(EAxis::Z)).Rotator()
+			// Out of the bottom (the RMB-93): lying along the bore as it was in the chamber, end over end about the gun's Y.
+			const FVector Spin = (Shot.bEjectAlongBore ? Gun.GetUnitAxis(EAxis::Y) : View.GetUnitAxis(EAxis::X))
+				* FMath::FRandRange(900.0f, 1600.0f) * (Shot.bEjectAlongBore ? 0.6f : 1.0f) * (FMath::RandBool() ? 1.0f : -1.0f) + FMath::VRand() * 300.0f;
+			const FRotator Facing = (Shot.bEjectAlongBore ? Gun.Rotator()
+				: FRotationMatrix::MakeFromXZ(View.GetUnitAxis(EAxis::Y), View.GetUnitAxis(EAxis::Z)).Rotator())
 				+ FRotator(FMath::FRandRange(-15.0f, 15.0f), FMath::FRandRange(-20.0f, 20.0f), 0.0f);
 			SpawnDebris(Shot.CaseMesh, FTransform(Facing, Gun.TransformPosition(Shot.EjectPort)), Velocity, Spin, 0.012f);
 			++CasesThrown;
