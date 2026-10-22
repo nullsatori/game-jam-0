@@ -88,6 +88,9 @@ void UOSLaserSightComponent::Hide()
 void UOSLaserSightComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+#if !UE_BUILD_SHIPPING
+	const FOSAttachCostScope Timed(GOSAttachCost.LaserSeconds, GOSAttachCost.LaserMaxSeconds, GOSAttachCost.LaserFrames);
+#endif
 	FTransform Lens;
 	const FOSWeapon* Weapon = Guns ? Guns->GetWeapon() : nullptr;
 	if (!Weapon || !Dot || !Guns->GetLaserLens(Lens) || !Guns->ViewModel || !Guns->ViewModel->GetAttachParent())

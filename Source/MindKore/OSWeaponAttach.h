@@ -316,3 +316,33 @@ MINDKORE_API void OSApplyGear(UOSWeaponsComponent& Guns, const TArray<FString>& 
  * stays open; attachments move over where they fit (TransferAttachments). False: an unknown name or slot.
  */
 MINDKORE_API bool OSSwapGun(UOSWeaponsComponent& Guns, int32 Index, const FString& To);
+
+/** os.Attach.Cost: the laser's ticks and the clear magazine's rebuilds, summed since the last call (defined and summed outside Shipping only). */
+struct FOSAttachCost
+{
+	double LaserSeconds = 0.0;
+	double LaserMaxSeconds = 0.0;
+	int64 LaserFrames = 0;
+	double ClearSeconds = 0.0;
+	double ClearMaxSeconds = 0.0;
+	int64 ClearRebuilds = 0;
+	int64 SinceFrame = 0;
+};
+extern MINDKORE_API FOSAttachCost GOSAttachCost;
+
+/** Times its scope into one of GOSAttachCost's sums. */
+struct FOSAttachCostScope
+{
+	double& Sum;
+	double& Max;
+	int64& Count;
+	double Start;
+	FOSAttachCostScope(double& InSum, double& InMax, int64& InCount) : Sum(InSum), Max(InMax), Count(InCount), Start(FPlatformTime::Seconds()) {}
+	~FOSAttachCostScope()
+	{
+		const double Spent = FPlatformTime::Seconds() - Start;
+		Sum += Spent;
+		Max = FMath::Max(Max, Spent);
+		++Count;
+	}
+};

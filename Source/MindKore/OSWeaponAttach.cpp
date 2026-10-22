@@ -1116,14 +1116,23 @@ void UOSWeaponsComponent::UpdateClearMagazine()
 	{
 		Inside->SetRelativeTransform(Unstretch);
 	}
-	if (UMaterialInterface* Clear = Mag->ClearMaterial.LoadSynchronous())
+#if !UE_BUILD_SHIPPING
+	const FOSAttachCostScope Timed(GOSAttachCost.ClearSeconds, GOSAttachCost.ClearMaxSeconds, GOSAttachCost.ClearRebuilds);
+#endif
+	if (!bClearMagMaterialTried)
 	{
-		MagInView->SetMaterial(0, Clear);
+		bClearMagMaterialTried = true;
+		ClearMagMaterial = Mag->ClearMaterial.LoadSynchronous();
+		if (!ClearMagMaterial)
+		{
+			// M_OS_ClearMag is the PC's (Docs/Attachments.md, «Ждёт ПК»): an engine translucent one until then.
+			UE_LOG(LogMindKore, Warning, TEXT("Attach: no %s - the clear magazine is the engine's translucent stand-in"), *Mag->ClearMaterial.ToString());
+			ClearMagMaterial = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/EngineMaterials/Widget3DPassThrough_Translucent.Widget3DPassThrough_Translucent"));
+		}
 	}
-	else if (UMaterialInterface* Fallback = LoadObject<UMaterialInterface>(nullptr, TEXT("/Engine/EngineMaterials/Widget3DPassThrough_Translucent.Widget3DPassThrough_Translucent")))
+	if (ClearMagMaterial && MagInView->GetMaterial(0) != ClearMagMaterial)
 	{
-		// M_OS_ClearMag is the PC's (Docs/Attachments.md, «Ждёт ПК»): an engine translucent one until then.
-		MagInView->SetMaterial(0, Fallback);
+		MagInView->SetMaterial(0, ClearMagMaterial);
 	}
 	// A staggered double stack down the well from the lips: 9.3 mm a row, the rows 2 mm either side (owner 22.10 14:19).
 	const FVector Down = Weapon.StockMagTravelCm.IsNearlyZero() ? FVector(0.0f, 0.0f, -1.0f) : Weapon.StockMagTravelCm.GetSafeNormal();
@@ -1298,8 +1307,23 @@ bool OSSwapGun(UOSWeaponsComponent& Guns, int32 Index, const FString& To)
 }
 
 #if !UE_BUILD_SHIPPING
+FOSAttachCost GOSAttachCost;
+
 namespace
 {
+	FAutoConsoleCommand GOSAttachCostCommand(TEXT("os.Attach.Cost"),
+		TEXT("os.Attach.Cost: what the laser (its tick: a trace, the dot and the thread) and the clear magazine's rebuilds cost since the last call, then start over."),
+		FConsoleCommandDelegate::CreateLambda([]()
+		{
+			FOSAttachCost& C = GOSAttachCost;
+			const int64 Frames = int64(GFrameCounter) - C.SinceFrame;
+			UE_LOG(LogMindKore, Display, TEXT("Attach cost: %lld frames; laser awake %lld of them, avg %.2f us, max %.1f us (asleep: no tick, 0); clear magazine %lld rebuilds, avg %.2f us, max %.1f us"),
+				Frames, C.LaserFrames, C.LaserSeconds / double(FMath::Max<int64>(C.LaserFrames, 1)) * 1e6, C.LaserMaxSeconds * 1e6,
+				C.ClearRebuilds, C.ClearSeconds / double(FMath::Max<int64>(C.ClearRebuilds, 1)) * 1e6, C.ClearMaxSeconds * 1e6);
+			C = FOSAttachCost();
+			C.SinceFrame = int64(GFrameCounter);
+		}));
+
 	/** The player's guns: the zero-G pawn's or a walker's; the debug menu told the gear has changed (its presets' "gear"). */
 	UOSWeaponsComponent* PlayerGuns(UWorld* World, bool bChanges = true)
 	{

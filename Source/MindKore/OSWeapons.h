@@ -1325,6 +1325,10 @@ private:
 	FName LastSwitchChoice;
 	int32 ClearMagRounds = -1;
 	FName ClearMagId;
+	/** The clear magazine's body (M_OS_ClearMag, or the engine's translucent stand-in): loaded on the first rebuild, once. */
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> ClearMagMaterial = nullptr;
+	bool bClearMagMaterialTried = false;
 };
 
 /**
