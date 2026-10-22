@@ -26,6 +26,7 @@
 #include "OSScope.h"
 #include "OSLadder.h"
 #include "OSWeapons.h"
+#include "OSSuitProjector.h"
 #include "OSWeldProjector.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -99,6 +100,9 @@ AOSZeroGPawn::AOSZeroGPawn()
 	WeldProjector->SetupAttachment(Camera);
 	// Under the lens, as MindKore's projector sits under the bodycam's.
 	WeldProjector->SetRelativeLocation(FVector(0.0f, 0.0f, -6.0f));
+	SuitProjector = CreateDefaultSubobject<UOSSuitProjectorComponent>(TEXT("SuitProjector"));
+	SuitProjector->SetupAttachment(Camera);
+	SuitProjector->SetRelativeLocation(FVector(0.0f, 0.0f, -6.0f));
 
 	// A plate struck: the armour hit cue (CC0 donors, see CREDITS.md).
 	static ConstructorHelpers::FObjectFinder<USoundBase> Crash(

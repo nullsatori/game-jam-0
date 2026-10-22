@@ -17,6 +17,7 @@ class UInputMappingContext;
 class UOSHullToolsComponent;
 class UOSOxygenComponent;
 class UOSWeldProjectorComponent;
+class UOSSuitProjectorComponent;
 class UOSWeaponsComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
@@ -229,6 +230,10 @@ public:
 	/** The suit's projector under the lens: lays the weld frame of a breach in view onto the hull as red laser light. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "OS")
 	TObjectPtr<UOSWeldProjectorComponent> WeldProjector = nullptr;
+
+	/** The same projector as a device of the suit (its own lasers in its own frame): the attachment menu draws with it (Docs/Attachments.md). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "OS")
+	TObjectPtr<UOSSuitProjectorComponent> SuitProjector = nullptr;
 
 	// --- view ---------------------------------------------------------------
 
