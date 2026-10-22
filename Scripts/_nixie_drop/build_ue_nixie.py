@@ -71,7 +71,17 @@ def build(destination='/Game/JamArt/Materials/Instruments/Nixie'):
     sdf.set_editor_property('address_x',unreal.TextureAddress.TA_CLAMP)
     sdf.set_editor_property('address_y',unreal.TextureAddress.TA_CLAMP)
     assert all(textures.values())
-    mel.delete_all_material_expressions(mat)
+    # delete_all_material_expressions leaves nodes behind (22.10: three SP_AfterglowSeconds, 70 nodes for 38 made,
+    # and the engine read an old copy's default). Clear until empty; failing that, start from a fresh asset at the
+    # same path (every reference is by path: the RMB93 mesh and the showcase use the instance, re-parented below).
+    for _ in range(4):
+        if mel.get_num_material_expressions(mat)==0: break
+        mel.delete_all_material_expressions(mat)
+    if mel.get_num_material_expressions(mat)>0:
+        unreal.log_warning('Nixie: %d expressions survived delete_all; recreating M_Jam_Nixie'%mel.get_num_material_expressions(mat))
+        assert eal.delete_asset(destination+'/M_Jam_Nixie')
+        mat=tools.create_asset('M_Jam_Nixie',destination,unreal.Material,unreal.MaterialFactoryNew())
+        assert mat and mel.get_num_material_expressions(mat)==0
     mat.set_editor_property('use_material_attributes',True)
     mat.set_editor_property('shading_model',unreal.MaterialShadingModel.MSM_CLEAR_COAT)
     # The glow changes in place (ignition, afterglow, warm-up) and the cathodes sit behind the face (parallax):
@@ -131,6 +141,7 @@ def build(destination='/Game/JamArt/Materials/Instruments/Nixie'):
     link(node('MaterialExpressionConstant',r=0.),'',attrs,'Specular')
     errors=list(mel.recompile_material(mat))
     assert not errors, errors
+    assert mel.get_num_material_expressions(mat)==index, 'stale nodes: %d in the graph, %d made'%(mel.get_num_material_expressions(mat),index)
     mi_path=destination+'/MI_Jam_Nixie_RMB93'
     mi=unreal.load_asset(mi_path) if eal.does_asset_exist(mi_path) else tools.create_asset('MI_Jam_Nixie_RMB93',destination,unreal.MaterialInstanceConstant,unreal.MaterialInstanceConstantFactoryNew())
     mel.set_material_instance_parent(mi,mat)
