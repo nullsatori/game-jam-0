@@ -309,3 +309,10 @@ MINDKORE_API FText OSMountName(EOSMountType Type);
  */
 MINDKORE_API void OSReadGear(const UOSWeaponsComponent& Guns, TArray<FString>& OutGuns, TArray<FString>& OutAttachments);
 MINDKORE_API void OSApplyGear(UOSWeaponsComponent& Guns, const TArray<FString>& InGuns, const TArray<FString>& InAttachments);
+
+/**
+ * Put another gun into slot Index (os.Guns.Swap, a preset's gear): "Rmb93" the RMB-93 built from the pump's class
+ * defaults, "Slot"/"Shotgun" the slot's own gun back - like AOSWeaponPickup with Gun = Rmb93, aim included. Open
+ * stays open; attachments move over where they fit (TransferAttachments). False: an unknown name or slot.
+ */
+MINDKORE_API bool OSSwapGun(UOSWeaponsComponent& Guns, int32 Index, const FString& To);

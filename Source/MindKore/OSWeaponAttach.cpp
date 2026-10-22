@@ -6,10 +6,14 @@
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInterface.h"
 #include "MindKore.h"
 #include "OSAttachMenu.h"
 #include "OSLaserSight.h"
+#include "OSScope.h"
 #include "OSShip.h"
 #include "OSWeapons.h"
 #include "OSZeroGPawn.h"
@@ -1206,9 +1210,9 @@ void OSApplyGear(UOSWeaponsComponent& Guns, const TArray<FString>& InGuns, const
 	// The guns as named: the RMB-93 by its Id swaps the pump out (os.Guns.Give does the same); the rest locked.
 	for (const FString& Id : InGuns)
 	{
-		if (GEngine && Guns.FindWeapon(Id) == INDEX_NONE && Guns.GetWorld())
+		if (Guns.FindWeapon(Id) == INDEX_NONE)
 		{
-			GEngine->Exec(Guns.GetWorld(), *FString::Printf(TEXT("os.Guns.Swap 2 %s"), *Id));
+			OSSwapGun(Guns, 1, Id);
 		}
 	}
 	for (int32 Gun = 0; Gun < Guns.Weapons.Num(); ++Gun)
@@ -1245,5 +1249,227 @@ void OSApplyGear(UOSWeaponsComponent& Guns, const TArray<FString>& InGuns, const
 		}
 	}
 }
+
+bool OSSwapGun(UOSWeaponsComponent& Guns, int32 Index, const FString& To)
+{
+	const UOSWeaponsComponent* Defaults = GetDefault<UOSWeaponsComponent>();
+	const UOSScopeComponent* Sights = GetDefault<UOSScopeComponent>();
+	if (!Guns.Weapons.IsValidIndex(Index) || !Defaults->Weapons.IsValidIndex(Index))
+	{
+		return false;
+	}
+	FOSWeapon Fresh;
+	FOSGunAim Aim = Sights->Aims.IsValidIndex(Index) ? Sights->Aims[Index] : FOSGunAim();
+	if (To.Equals(TEXT("Rmb93"), ESearchCase::IgnoreCase) && Index == 1)
+	{
+		Fresh = OSMakeRmb93(Defaults->Weapons[Index]);
+		Aim = OSMakeRmb93Aim(Aim);
+	}
+	else if (To.Equals(TEXT("Slot"), ESearchCase::IgnoreCase) || To.Equals(Defaults->Weapons[Index].Id.ToString(), ESearchCase::IgnoreCase))
+	{
+		Fresh = Defaults->Weapons[Index];
+	}
+	else
+	{
+		UE_LOG(LogMindKore, Warning, TEXT("Swap: no gun %s for slot %d (Rmb93 into 2, Slot)"), *To, Index + 1);
+		return false;
+	}
+	if (Guns.Weapons[Index].Id == Fresh.Id)
+	{
+		return true;
+	}
+	const bool bWasOpen = Guns.Weapons[Index].bUnlocked;
+	if (!Guns.ApplyPickupWeapon(Index, Fresh))
+	{
+		return false;
+	}
+	if (Guns.Scope && Guns.Scope->Aims.IsValidIndex(Index))
+	{
+		Guns.Scope->Aims[Index] = Aim;
+	}
+	if (bWasOpen)
+	{
+		Guns.UnlockWeapon(Index);
+	}
+	UE_LOG(LogMindKore, Log, TEXT("Swap: slot %d is %s now"), Index + 1, *Guns.Weapons[Index].Name.ToString());
+	return true;
+}
+
+#if !UE_BUILD_SHIPPING
+namespace
+{
+	/** The player's guns: the zero-G pawn's or a walker's. */
+	UOSWeaponsComponent* PlayerGuns(UWorld* World)
+	{
+		APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
+		APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+		UOSWeaponsComponent* Guns = Pawn ? Pawn->FindComponentByClass<UOSWeaponsComponent>() : nullptr;
+		if (!Guns)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("os.Guns / os.Attach: the player has no guns"));
+		}
+		return Guns;
+	}
+
+	/** The guns a key names: "all", a slot 1..3, an Id or a name; for Give the RMB-93's Id swaps it into slot 2 first. */
+	TArray<int32> NamedGuns(UOSWeaponsComponent& Guns, const FString& Key, bool bSwapIn)
+	{
+		TArray<int32> Out;
+		if (Key.Equals(TEXT("all"), ESearchCase::IgnoreCase))
+		{
+			for (int32 Gun = 0; Gun < Guns.Weapons.Num(); ++Gun)
+			{
+				Out.Add(Gun);
+			}
+			return Out;
+		}
+		int32 Gun = Guns.FindWeapon(Key);
+		if (Gun == INDEX_NONE && bSwapIn && OSSwapGun(Guns, 1, Key))
+		{
+			Gun = 1;
+		}
+		if (Gun == INDEX_NONE)
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("os.Guns: no gun %s (1..3, Pistol, Shotgun, Rmb93, Sniper, all)"), *Key);
+		}
+		else
+		{
+			Out.Add(Gun);
+		}
+		return Out;
+	}
+
+	TArray<FName> NamedAttachments(const UOSWeaponsComponent& Guns, const FString& Key)
+	{
+		TArray<FName> Out;
+		for (const FOSAttachment& Each : Guns.Attachments)
+		{
+			if (Key.Equals(TEXT("all"), ESearchCase::IgnoreCase) || Each.Id.ToString().Equals(Key, ESearchCase::IgnoreCase))
+			{
+				Out.Add(Each.Id);
+			}
+		}
+		if (Out.IsEmpty())
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("os.Attach: no attachment %s (Laser, Torch, Suppressor, BigMag, all)"), *Key);
+		}
+		return Out;
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GOSGunsGive(TEXT("os.Guns.Give"),
+		TEXT("os.Guns.Give <slot|Id|name|all>: open a gun (1..3, Pistol, Shotgun, Rmb93 - swaps it into 2 -, Sniper)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			if (UOSWeaponsComponent* Guns = PlayerGuns(World))
+			{
+				for (const int32 Gun : NamedGuns(*Guns, Args.Num() > 0 ? Args[0] : TEXT("all"), true))
+				{
+					Guns->UnlockWeapon(Gun);
+				}
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GOSGunsTake(TEXT("os.Guns.Take"),
+		TEXT("os.Guns.Take <slot|Id|name|all>: close a gun - put away if in hand; its rounds and attachments stay with it."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			if (UOSWeaponsComponent* Guns = PlayerGuns(World))
+			{
+				for (const int32 Gun : NamedGuns(*Guns, Args.Num() > 0 ? Args[0] : TEXT("all"), false))
+				{
+					Guns->LockWeapon(Gun);
+				}
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GOSGunsSwap(TEXT("os.Guns.Swap"),
+		TEXT("os.Guns.Swap <slot> <Rmb93|Slot>: another gun into the slot, as the RMB-93 pickup does (2 Rmb93; Slot: the slot's own back)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			UOSWeaponsComponent* Guns = PlayerGuns(World);
+			if (Guns && Args.Num() >= 2)
+			{
+				OSSwapGun(*Guns, FCString::Atoi(*Args[0]) - 1, Args[1]);
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GOSAttachGive(TEXT("os.Attach.Give"),
+		TEXT("os.Attach.Give <Id|all> [bag]: into the pouch; onto the gun in hand when a free place fits (bag: the pouch only)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			if (UOSWeaponsComponent* Guns = PlayerGuns(World))
+			{
+				const bool bBag = Args.Num() > 1 && Args[1].Equals(TEXT("bag"), ESearchCase::IgnoreCase);
+				const TArray<FName> Ids = NamedAttachments(*Guns, Args.Num() > 0 ? Args[0] : TEXT("all"));
+				for (const FName Id : Ids)
+				{
+					// "all" never rolls four on at once: the pouch, then the menu.
+					Guns->GiveAttachment(Id, bBag || Ids.Num() > 1);
+				}
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GOSAttachTake(TEXT("os.Attach.Take"),
+		TEXT("os.Attach.Take <Id|all>: off the gun at once and out of the pouch."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			if (UOSWeaponsComponent* Guns = PlayerGuns(World))
+			{
+				for (const FName Id : NamedAttachments(*Guns, Args.Num() > 0 ? Args[0] : TEXT("all")))
+				{
+					Guns->TakeAttachment(Id);
+				}
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GOSAttachMount(TEXT("os.Attach.Mount"),
+		TEXT("os.Attach.Mount <Id> [slot|gun Id]: onto the gun at once, no motion (default the gun in hand); given first if not carried."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			UOSWeaponsComponent* Guns = PlayerGuns(World);
+			if (!Guns || Args.IsEmpty())
+			{
+				return;
+			}
+			const int32 Gun = Args.Num() > 1 ? Guns->FindWeapon(Args[1]) : Guns->CurrentWeapon;
+			for (const FName Id : NamedAttachments(*Guns, Args[0]))
+			{
+				Guns->GiveAttachment(Id, true);
+				if (!Guns->MountAttachment(Id, Gun))
+				{
+					UE_LOG(LogMindKore, Warning, TEXT("os.Attach.Mount: %s does not go on gun %d - in the pouch"), *Id.ToString(), Gun + 1);
+				}
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GOSAttachUnmount(TEXT("os.Attach.Unmount"),
+		TEXT("os.Attach.Unmount <Id|all>: off its gun at once, into the pouch."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			if (UOSWeaponsComponent* Guns = PlayerGuns(World))
+			{
+				for (const FName Id : NamedAttachments(*Guns, Args.Num() > 0 ? Args[0] : TEXT("all")))
+				{
+					Guns->UnmountAttachment(Id);
+				}
+			}
+		}));
+
+	FAutoConsoleCommandWithWorld GOSAttachList(TEXT("os.Attach.List"),
+		TEXT("os.Attach.List: the guns, their places, what is on them, the pouch."),
+		FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
+		{
+			if (UOSWeaponsComponent* Guns = PlayerGuns(World))
+			{
+				TArray<FString> Lines;
+				Guns->DescribeGear().ParseIntoArrayLines(Lines);
+				for (const FString& Line : Lines)
+				{
+					UE_LOG(LogMindKore, Display, TEXT("Gear: %s"), *Line);
+				}
+			}
+		}));
+}
+#endif
 
 #undef LOCTEXT_NAMESPACE
