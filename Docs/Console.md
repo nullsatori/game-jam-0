@@ -11,7 +11,19 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 89 команд, 8 переменных.
+Всего: 99 команд, 8 переменных.
+
+## `os.Attach`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Attach.Cost` | — | os.Attach.Cost: what the laser (its tick: a trace, the dot and the thread) and the clear magazine's rebuilds cost since the last call, then start over. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Attach.Give` | `<Id\|all> [bag]` | os.Attach.Give <Id\|all> [bag]: into the pouch; onto the gun in hand when a free place fits (bag: the pouch only). *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Attach.List` | — | os.Attach.List: the guns, their places, what is on them, the pouch. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Attach.Mount` | `<Id> [slot\|gun Id]` | os.Attach.Mount <Id> [slot\|gun Id]: onto the gun at once, no motion (default the gun in hand); given first if not carried. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Attach.Probe` | — | os.Attach.Probe: the attachment menu, seating, the laser, the torch, the suppressor, the RMB-93 swap and the 20-round magazine, step by step (Lvl_OS_TestRoom, -nullrhi); PASS/FAIL per line. *не в Shipping* | `Source/MindKore/OSAttachProbe.cpp` |
+| `os.Attach.Take` | `<Id\|all>` | os.Attach.Take <Id\|all>: off the gun at once and out of the pouch. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Attach.Unmount` | `<Id\|all>` | os.Attach.Unmount <Id\|all>: off its gun at once, into the pouch. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
 
 ## `os.Audio`
 
@@ -84,7 +96,10 @@
 
 | Команда | Аргументы | Что делает | Файл |
 |---|---|---|---|
+| `os.Guns.Give` | `<slot\|Id\|name\|all>` | os.Guns.Give <slot\|Id\|name\|all>: open a gun (1..3, Pistol, Shotgun, Rmb93 - swaps it into 2 -, Sniper). *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
 | `os.Guns.RmbProbe` | — | The RMB rule step by step: aim with a gun out, grab (unarmed) with a loose body in reach, the hands when unarmed, a gun drawn while holding (Lvl_OS_ZeroG). | `Source/MindKore/OSScope.cpp` |
+| `os.Guns.Swap` | `<slot> <Rmb93\|Slot>` | os.Guns.Swap <slot> <Rmb93\|Slot>: another gun into the slot, as the RMB-93 pickup does (2 Rmb93; Slot: the slot's own back). *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Guns.Take` | `<slot\|Id\|name\|all>` | os.Guns.Take <slot\|Id\|name\|all>: close a gun - put away if in hand; its rounds and attachments stay with it. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
 
 ## `os.Hands`
 
