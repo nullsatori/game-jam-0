@@ -251,7 +251,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "100.0"))
 	float DustCubeCm = 1200.0f;
 
-	/** Edge of one speck's cube, cm (each 0.6-1.3 of it); the material draws a pinpoint mote about 0.15 of it across. */
+	/** Edge of one speck's cube, cm (each 0.6-1.3 of it); the material draws a hard dot 1-2.5 screen pixels across (Scripts/jam_dust.py). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|ZeroG|View", meta = (ClampMin = "0.1"))
 	float DustSpeckCm = 3.0f;
 
