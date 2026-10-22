@@ -778,8 +778,9 @@ struct FJamWeapon
 /**
  * The guns of a jam pawn - the zero-G pawn and the test room's character
  * carry the same one: 1 pistol, 2 shotgun, 3 sniper; unlocks, magazines and
- * reserves, R reload, 1/2/3 and the wheel select, automatic fire while LMB is
- * held (the pawn binds LMB: it also throws).
+ * reserves, R reload (never by itself), 1/2/3 and the wheel select, one shot per
+ * LMB click - fire while held only for a bAutomatic gun, none by default (the pawn
+ * binds LMB: it also throws).
  *
  * Each pellet is a round flying at ProjectileSpeed with a tracer (or a
  * hitscan at 0): every tick its path is traced on the Shot channel and a hit
@@ -953,7 +954,7 @@ public:
 	/**
 	 * Fire the current gun from Start along Direction (the pawn's view). OutRecoil
 	 * is the kick on the shooter, kg cm/s, for the pawn to apply. False when it
-	 * cannot fire now (nothing unlocked, interval, reload, empty or the slide locked - which starts a reload).
+	 * cannot fire now (nothing unlocked, interval, reload, empty or the slide locked; neither starts a reload: R does).
 	 */
 	bool Fire(const FVector& Start, const FVector& Direction, FVector& OutRecoil);
 

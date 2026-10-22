@@ -146,7 +146,8 @@ UJamWeaponsComponent::UJamWeaponsComponent()
 	Pistol.HammerSound = PistolHammer.Object;
 	Pistol.MagOutSound = PistolMagOut.Object;
 	Pistol.MagInSound = PistolMagIn.Object;
-	Pistol.bAutomatic = true;
+	// One shot per click on every gun (owner 22.10: no fire while LMB is held); bAutomatic stays for a gun that wants it.
+	Pistol.bAutomatic = false;
 	// Near real muzzle velocities (owner 19.10: slow rounds made the flesh walls answer late): 9 mm 350 m/s.
 	Pistol.ProjectileSpeed = 35000.0f;
 	Pistol.KickPitchDeg = 1.2f;
@@ -728,19 +729,16 @@ bool UJamWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, 
 	if (Weapon->bSlideLocked)
 	{
 		// Held open by the slide stop: the slide out of battery keeps the disconnector down, so the trigger moves
-		// dead - no shot, no hammer fall and no click (a real USP is silent here). The reload starts, as on empty.
+		// dead - no shot, no hammer fall and no click (a real USP is silent here). Only R reloads (owner 22.10: no auto reload).
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s - the slide is locked open, the trigger is dead"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString());
-		Reload();
 		Weapon->FireReadySince = Weapon->SinceShot + Weapon->FireInterval;
 		return false;
 	}
 	if (Weapon->Ammo <= 0)
 	{
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s is empty"), *GetNameSafe(GetOwner()), *Weapon->Name.ToString());
-		// The dry click, once per interval while the trigger is held (no reserve: no reload to stop it); the
-		// reload starts first, the cycle being through, so it does not wait out the click's interval.
+		// The dry click, once per pull; only R reloads (owner 22.10: no auto reload).
 		PlayGunSound(Weapon->EmptySound);
-		Reload();
 		Weapon->FireReadySince = Weapon->SinceShot + Weapon->FireInterval;
 		return false;
 	}
