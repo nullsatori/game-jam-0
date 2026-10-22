@@ -54,7 +54,8 @@ struct FJamSmokeParams
  * fluids (semi-Lagrangian advection, a pressure projection) with buoyancy and vorticity confinement - and free-
  * streaming in a vacuum (no pressure, no drag: the slug flies apart and thins). Solids are up to two planes (the
  * floor, a wall). N cells a side of CellCm; positions are cm in the box frame, its centre at the origin. Every loop
- * runs over z-slices in a ParallelFor; the fixed step is the caller's (UJamMuzzleFxComponent steps it at 60 Hz).
+ * runs over z-slices in a ParallelFor, only in the box around the gas; the fixed step is the caller's (UJamMuzzleFxComponent:
+ * 60 Hz for the first half second, 30 Hz after, in a task off the game thread).
  */
 struct FJamSmokeSim
 {

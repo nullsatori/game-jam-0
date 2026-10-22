@@ -22,7 +22,11 @@ custom data:
                      Data 0 opacity, 1 seed, 2 spin (rad), 3 tear, 4 shimmer,
                      5 and 6 the grid's texels along and across (set by the component).
 
-No texture: the shapes are maths, nothing third-party.
+  M_Jam_MuzzleSmokeVolume  Volume domain, Subsurface (the only model whose Subsurface Color pin - the
+                     extinction - a heterogeneous volume reads): the smoke grid's atlas (FJamSmokeSim::Pack, a
+                     transient texture from C++) drawn voxel for voxel. Docs/RecoilWeapons-Fx.md, «Живой дым».
+
+No texture asset: the shapes are maths or the runtime grid, nothing third-party.
 """
 import os
 import sys

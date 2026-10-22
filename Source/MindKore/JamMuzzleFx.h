@@ -186,9 +186,11 @@ struct FJamMuzzleFx
  * of hot gas - ragged lobes, a few sparks, side jets from a muzzle brake - with
  * a light; the smoke is a few thin puffs, lit by the scene, thrown out fast
  * and then frozen, drifting on without buoyancy, fading over seconds. The
- * smoke keeps the jam's low-res look on purpose: a texel grid per puff, 5
+ * smoke keeps the jam's low-res look on purpose: a texel grid per puff, 3
  * density bands with Bayer-dithered steps, a faint scanline fringe on its
- * edge, a heat shimmer behind it for its first 100 ms.
+ * edge, a heat shimmer behind it for its first 100 ms. The volumetric cloud
+ * (jam.Fx.VolumetricSmoke 1) is a small gas simulation (FJamSmokeSim) drawn
+ * voxel for voxel (Docs/RecoilWeapons-Fx.md, «Живой дым»).
  *
  * The flash is the gun's: its ~0.1 s of hot gas stays on the muzzle socket, in
  * the gun's own space, through the kick. The smoke is the world's (owner 19.10,
@@ -313,6 +315,9 @@ public:
 
 	/** Card puffs alive now (probes). */
 	int32 GetPuffCount() const { return Puffs.Num(); }
+
+	/** Spent cases still hot (stills). */
+	int32 GetHotCaseCount() const { return HotCases.Num(); }
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 

@@ -469,6 +469,7 @@ namespace
 	constexpr float SimStep = 1.0f / 60.0f;
 	constexpr float SlowStep = 1.0f / 30.0f;
 	constexpr float FastSeconds = 0.5f;
+	constexpr float FadeInSeconds = 0.12f;
 
 #if !UE_BUILD_SHIPPING
 	/** jam.Fx.SmokeCost: what the grids cost on the game thread since the last call. */
@@ -602,6 +603,12 @@ void UJamMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, c
 		CloudObjects.Add(Grid);
 		Cloud->Material->SetTextureParameterValue(TEXT("Grid"), Grid);
 	}
+	// The atlas of the fresh slug right away: until the first upload the texture held the slot's last cloud (or, new,
+	// uninitialised memory) - a frame of stray glowing voxels.
+	const FVector3f Up = Sim.Down.IsNearlyZero() ? FVector3f(Cloud->Basis.UnrotateVector(FVector::UpVector)) : -Sim.Down;
+	Sim.Pack(Cloud->Atlas, Up, AmbientOcclusion);
+	Cloud->PendingShift = FIntVector::ZeroValue;
+	Cloud->bPendingAtlas = true;
 	Cloud->Volume->SetVolumeResolution(FIntVector(Gun.Cells));
 	Cloud->Volume->SetVisibility(true);
 }
@@ -821,6 +828,9 @@ void UJamMuzzleFxComponent::TickClouds(float DeltaTime)
 		Material->SetScalarParameterValue(TEXT("Life"), G.CloudSeconds);
 		Material->SetScalarParameterValue(TEXT("Thin"), 1.0f / FMath::Cube(Cloud.Scale));
 		Material->SetScalarParameterValue(TEXT("Erode"), G.Erode);
+		// The fresh slug comes up over its first FadeInSeconds: hot gas at the muzzle is clear, the flash covers it; at
+		// full density the flash lit a ball half a metre from the eye into a cream block over half the frame.
+		Material->SetScalarParameterValue(TEXT("Gain"), 0.2f + 0.8f * FMath::SmoothStep(0.0f, FadeInSeconds, Cloud.Age));
 		Material->SetScalarParameterValue(TEXT("AmbientShare"), Sim.bAir ? 1.0f : VacuumAmbientShare);
 		Material->SetScalarParameterValue(TEXT("Seed"), Cloud.Seed);
 		// The volume integrates per local unit (a cell here, HeterogeneousVolumesLiveShadingPipeline.usf: StepSize is
@@ -987,10 +997,10 @@ void UJamMuzzleFxComponent::TickHotCases(float DeltaTime)
 		if (!bInCloud)
 		{
 			// Out of the clouds (on the floor, in clean air): a thread of card puffs while it is hot.
-			Hot.Carry += 8.0f * Hot.Heat * DeltaTime;
+			Hot.Carry += 14.0f * Hot.Heat * DeltaTime;
 			for (; Hot.Carry >= 1.0f; Hot.Carry -= 1.0f)
 			{
-				FPuff& Puff = AddCardPuff(Where, Velocity * 0.02f + FMath::VRand() * 0.5f, 0.8f, 5.0f, 0.18f * FMath::Min(Hot.Heat * 1.5f, 1.0f), 1.6f);
+				FPuff& Puff = AddCardPuff(Where, Velocity * 0.02f + FMath::VRand() * 0.5f, 1.5f, 10.0f, 0.45f * FMath::Min(Hot.Heat * 1.5f, 1.0f), 1.8f);
 				Puff.Age = FMath::FRand() * DeltaTime;
 			}
 		}
@@ -1299,7 +1309,7 @@ namespace
 		const auto Eye = [Pawn]() { return Pawn->Camera->GetComponentLocation(); };
 		const auto Still = [Pawn, Controller, Fx, Eye](const FString& Name)
 		{
-			UE_LOG(LogMindKore, Log, TEXT("Smoke moments: %s - eye %s, pawn %.0f cm/s;%s"), *Name, *Eye().ToCompactString(), Pawn->GetVelocity().Size(), *Fx->DescribeClouds());
+			UE_LOG(LogMindKore, Log, TEXT("Smoke moments: %s - eye %s, pawn %.0f cm/s, %d card puff(s), %d hot case(s);%s"), *Name, *Eye().ToCompactString(), Pawn->GetVelocity().Size(), Fx->GetPuffCount(), Fx->GetHotCaseCount(), *Fx->DescribeClouds());
 			Fx->DumpClouds(Name);
 			Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=JamSmoke_%s"), *Name));
 		};
@@ -1400,6 +1410,8 @@ namespace
 			After(2.0f, [ArmRmb, Place, Pawn, At, Look, bSpace]() { if (!bSpace) { *At = Pawn->Body->GetComponentLocation(); } ArmRmb(); Place(*At, Look); });
 			After(4.0f, [Pawn, Place, At, Look]() { Place(*At, Look); Pawn->Fire(); }); // the shaders' warm-up
 			After(8.0f, [ArmRmb, Place, At, Look]() { ArmRmb(); Place(*At, Look); });
+			// The warm-up shot's cost (first-time work, shaders) logged apart: the shots after it are the measure.
+			After(8.5f, [Controller]() { Controller->ConsoleCommand(TEXT("jam.Fx.SmokeCost")); });
 			// A: one shot, stills 0.05..4 s, witnesses from the side, the shell on the floor.
 			After(9.0f, [Fire, Track, Still, Side, After, Eye, Frame, Look, Tag, Hold, Pawn]()
 			{
@@ -1432,14 +1444,28 @@ namespace
 			});
 			// B: a shot, a second through its cloud at 1.5 s (its frames), then settled.
 			After(16.0f, [ArmRmb, Place, At, Look]() { ArmRmb(); Place(*At, Look); });
-			After(17.0f, [Fire, Frames, Still, After, Tag, Hold]()
+			After(17.0f, [Fire, Frames, Still, After, Tag, Hold, Pawn, Controller, Eye, Look]()
 			{
 				Fire(Tag + TEXT("_b_shot1"));
-				After(1.5f, [Fire, Frames, Still, After, Tag, Hold]()
+				After(1.5f, [Fire, Frames, Still, After, Tag, Hold, Pawn, Controller, Eye, Look]()
 				{
 					Hold();
 					Fire(Tag + TEXT("_b_shot2"));
 					Frames(Tag + TEXT("_b_shot2"));
+					// The hull smoking on the floor, first person (the card puffs are drawn for their owner only); the
+					// view back on the cloud before the settled still.
+					for (const float T : { 0.8f, 1.2f })
+					{
+						After(T, [Pawn, Controller, Eye, Still, Tag, T]()
+						{
+							if (const AActor* Case = Pawn->Guns->GetLastDebris())
+							{
+								Controller->SetControlRotation((Case->GetActorLocation() - Eye()).Rotation());
+							}
+							Still(FString::Printf(TEXT("%s_b_shell_%04dms"), *Tag, FMath::RoundToInt(T * 1000.0f)));
+						});
+					}
+					After(1.3f, [Controller, Look]() { Controller->SetControlRotation(Look); });
 					After(1.5f, [Still, Tag, Hold]() { Hold(); Still(Tag + TEXT("_b_shot2_settled_1500ms")); });
 				});
 			});
@@ -1645,7 +1671,7 @@ namespace
 
 	FAutoConsoleCommandWithWorldAndArgs GSmokeMoments(
 		TEXT("jam.Weapons.Smoke"),
-		TEXT("Stills of the smoke's moments in play on Lvl_Jam_Range (run with -UseFixedTimeStep -FPS=60): on foot, holding on, a pistol burst, an SV-98 shot drifting off and back (or only those named: foot, cling, burst, sv98). 'budget': three shotgun clouds on the jam.Weapons.Fx stand, then ProfileGPU."),
+		TEXT("Stills of the smoke's moments in play on Lvl_Jam_Range (run with -UseFixedTimeStep -FPS=60): on foot, holding on, a pistol burst, an SV-98 shot drifting off and back (or only those named: foot, cling, burst, sv98). 'budget': three shotgun clouds on the jam.Weapons.Fx stand, then ProfileGPU. 'room': the RMB-93 at the floor of Lvl_Jam_TestRoom, 'roomspace': the same shot on Lvl_Jam_ZeroG into the black."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunSmokeMoments));
 
 	FAutoConsoleCommandWithWorld GClearSmoke(
