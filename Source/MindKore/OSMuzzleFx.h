@@ -260,7 +260,15 @@ public:
 	 * the gun with this time constant, s; in a vacuum it keeps it.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx", meta = (ClampMin = "0.05"))
-	float AirDragSeconds = 1.5f;
+	float AirDragSeconds = 0.2f;
+
+	/**
+	 * The volume's drawn pixel, cm: fixed in the world for a cloud's whole life (v5: a pixel picked from the distance to
+	 * the eye jumped 2x at thresholds and the cloud re-pixelated as you walked). The march step
+	 * (r.HeterogeneousVolumes.StepSize, in cells) must stay at most half of it, or the pixels alias as the view turns.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.5"))
+	float VoxelPixelCm = 2.5f;
 
 	/** Voxels this close to the eye fade out (cm): flying through a cloud never fills the lens. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
@@ -367,6 +375,8 @@ private:
 		float ClingSeconds = 0.0f;
 		FVector WorldPos = FVector::ZeroVector;
 		FVector PrevAttached = FVector::ZeroVector;
+		/** The anchor's transform last frame: its motion is split off the path's and inherited only in part. */
+		FTransform PrevGun;
 		FVector AlongWorld = FVector::ForwardVector;
 		/** Its own velocity once the gun lets go (a vacuum: on outward, straight), world cm/s. */
 		FVector Velocity = FVector::ZeroVector;
@@ -463,6 +473,8 @@ private:
 		{
 			FVector Origin = FVector::ZeroVector;
 			FVector Direction = FVector::ForwardVector;
+			/** The gun's velocity at the shot: the vent rides on with the gun while it blows. */
+			FVector GunVelocity = FVector::ZeroVector;
 			FOSGasVent Vent;
 			/** How far its front has got, cm (the grid's task moves it). */
 			float FrontCm = 0.0f;
@@ -471,6 +483,10 @@ private:
 		mutable UE::Tasks::FTask Pending;
 		FIntVector PendingShift = FIntVector::ZeroValue;
 		bool bPendingAtlas = false;
+		/** The box's moves made while a step was in flight, box frame: owed to the floor planes once it is done. */
+		FVector3f PlaneMove = FVector3f::ZeroVector;
+		/** A step still in flight: the game thread never waits for it (v5) - the grid, the atlas and the planes wait. */
+		bool IsBusy() const { return Pending.IsValid() && !Pending.IsCompleted(); }
 	};
 
 	/** A case still hot. */
@@ -498,7 +514,7 @@ private:
 	/** Keeps the clouds' components and materials alive (FCloud is not reflected). */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UObject>> CloudObjects;
-	FVector LastEye = FVector::ZeroVector;
+	FVector LastBody = FVector::ZeroVector;
 	/** The lights a cloud may take as its key, refreshed every second. */
 	TArray<TWeakObjectPtr<class ULightComponent>> KeyLights;
 	float KeyLightsAge = 1e6f;

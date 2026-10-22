@@ -221,14 +221,14 @@ def _smoke(m, node, custom, data, scalar, colour, mul):
 # volume marches this Volume-domain material and lights it with real self-shadowing and scattering. The gas is
 # simulated on the CPU (FOSSmokeSim) and arrives as an atlas (slice z at tile (z % 8, z / 8), 8 tiles across):
 # r the drawn density (the gas less its blur: rags, not a cushion), g heat, b the key light's shadow, a the ambient's.
-# The low-res identity is tied to the screen, not to the grid: the material's pixel is ~5 px at 1080p at any
-# distance (a power of two in cm, from the distance to the eye: it does not swim as the cloud drifts), the grid
-# sampled trilinearly at the pixel's centre and cut into 4 bands - a very thin lowest one (a veil, not a step into
-# grey) - with a 3D Bayer dither on the pixel grid. Erosion from 0.5 s eats thin pixels first (a per-pixel
+# The low-res identity: the material's pixel is a fixed cube in the box, PixelCm (C++ VoxelPixelCm, 2.5 cm; v5 - a
+# pixel picked from the distance to the eye jumped 2x at thresholds and the cloud re-pixelated as you walked), the
+# grid sampled trilinearly at the pixel's centre and cut into 4 bands - a very thin lowest one (a veil, not a step
+# into grey) - with a hashed threshold per pixel (v5: a 4x4 Bayer summed along a ray drew view-dependent patterns).
+# The march step must stay at most half the pixel (r.HeterogeneousVolumes.StepSize, DefaultEngine.ini). Erosion from 0.5 s eats thin pixels first (a per-pixel
 # threshold); the hottest pixels of the fresh core glow as flickering embers. Returns (extinction share, warm
 # share, ember, lit = key shadow x ambient shadow). Everything in box space (CloudX/Y/Z, cm).
 VOLUME_HLSL = """
-const float M[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
 const float SHARE[5] = { 0, 0.1, 0.35, 0.65, 1 };
 float3 d = W - C;
 float3 l = float3(dot(d, BX), dot(d, BY), dot(d, BZ));
@@ -236,7 +236,7 @@ if (any(abs(l) >= H)) return 0;
 float eye = length(l - E.xyz);
 // The eye clears: nothing this close (flying through a cloud never fills the lens).
 if (eye < E.w) return 0;
-float cell = exp2(floor(log2(max(1.0, eye * Px))));
+float cell = Px;
 float3 q = floor(l / cell);
 float3 u = ((q + 0.5) * cell) / (2 * H) + 0.5;
 if (any(u < 0) || any(u >= 1)) return 0;
@@ -252,7 +252,7 @@ int z1 = min(z0 + 1, n - 1);
 float4 g = lerp(Grid.SampleLevel(GridSampler, (xy + float2((z0 % 8) * n, (z0 / 8) * n)) / aw, 0),
                 Grid.SampleLevel(GridSampler, (xy + float2((z1 % 8) * n, (z1 / 8) * n)) / aw, 0), zf - z0);
 int3 qi = int3(q);
-float th = (M[((qi.x + qi.z) & 3) + 4 * ((qi.y + 2 * qi.z) & 3)] + 0.5) / 16;
+float th = frac(sin(dot(q + S * 17, float3(269.5, 183.3, 246.1))) * 43758.5453);
 float hv = frac(sin(dot(q + S * 31, float3(127.1, 311.7, 74.7))) * 43758.5453);
 float erode = Er * saturate((T - 0.25) / max(L - 0.25, 0.1)) * (0.35 + 0.65 * hv);
 float dens = g.r * Th * Gn - erode;
@@ -276,7 +276,7 @@ def _volume(m, node, custom, data, scalar, colour, mul):
                 texture=unreal.load_asset("/Engine/EngineResources/DefaultTexture"))
     inputs = {"W": world, "H": scalar("HalfCm", 80.0), "N": scalar("Cells", 32.0), "S": scalar("Seed", 0.0),
               "T": scalar("Age", 0.0), "L": scalar("Life", 6.0), "Th": scalar("Thin", 1.0), "Er": scalar("Erode", 0.9),
-              "Gn": scalar("Gain", 1.0), "Px": scalar("PixelPerCm", 0.01227), "Tm": node(unreal.MaterialExpressionTime), "Grid": grid}
+              "Gn": scalar("Gain", 1.0), "Px": scalar("PixelCm", 2.5), "Tm": node(unreal.MaterialExpressionTime), "Grid": grid}
     rgba = {"C": "CloudCentre", "BX": "CloudX", "BY": "CloudY", "BZ": "CloudZ", "E": "Eye"}
     n = node(unreal.MaterialExpressionCustom, code=VOLUME_HLSL, description="Cloud",
              output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT4,

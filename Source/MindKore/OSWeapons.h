@@ -310,7 +310,7 @@ struct FOSPortSmoke
 	 * hands over to the world (the air or the vacuum's rules below).
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
-	float ClingSeconds = 1.5f;
+	float ClingSeconds = 0.4f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
 	float SwirlCmPerSecond = 12.0f;

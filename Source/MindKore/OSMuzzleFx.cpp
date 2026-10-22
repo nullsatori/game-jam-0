@@ -277,11 +277,10 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 	const FVector Bore = Muzzle.GetRotation().GetAxisX();
 	if (CVarVolumetricSmoke.GetValueOnGameThread() != 0 && CloudMaterial.LoadSynchronous())
 	{
-		WaitSims();
-		// The round leaves from the eye along the view: through every older cloud in its way it throws the gas on
-		// its line aside and drives a jet down it (the pressure solve rolls its mouth into a vortex ring); a
-		// shotgun blast out of the muzzle shoves the older clouds ahead of it on.
-		Blast(View->GetComponentLocation(), View->GetForwardVector(), Gun.RoundRadiusCm, Gun.RoundAlongCm, Gun.RoundPushCm, Gun.RoundClear, nullptr);
+		// The round leaves the muzzle along the aim: through every older cloud in its way it throws the gas on its
+		// line aside and drives a jet down it (the pressure solve rolls its mouth into a vortex ring); a shotgun blast
+		// out of the muzzle shoves the older clouds ahead of it on. No wait: a cloud mid-step misses the push.
+		Blast(Muzzle.GetLocation(), View->GetForwardVector(), Gun.RoundRadiusCm, Gun.RoundAlongCm, Gun.RoundPushCm, Gun.RoundClear, nullptr);
 		if (Gun.ShoveCm > 0.0f)
 		{
 			for (FCloud& Cloud : Clouds)
@@ -360,6 +359,7 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 				FCloud::FJet& Jet = Cloud->Jets.AddDefaulted_GetRef();
 				Jet.Origin = Frame.TransformPosition(Vent.Location);
 				Jet.Direction = Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal());
+				Jet.GunVelocity = GetOwner()->GetVelocity();
 				Jet.Vent = Vent;
 			}
 			continue;
@@ -406,7 +406,7 @@ void UOSMuzzleFxComponent::EmitWisp(const FOSGasVent& Vent, const FOSPortSmoke& 
 	Puff.Origin = Where;
 	Puff.Bore = Frame.GetRotation();
 	Puff.GunVelocity = GetOwner()->GetVelocity();
-	Puff.AirDragSeconds = bAir ? Look.AirDragSeconds : 0.0f;
+	Puff.AirDragSeconds = bAir ? AirDragSeconds : 0.0f;
 	Puff.StartCm = Look.StartCm;
 	Puff.EndCm = Look.EndCm * FMath::FRandRange(0.7f, 1.0f);
 	Puff.Opacity = Look.Opacity;
@@ -440,6 +440,7 @@ void UOSMuzzleFxComponent::EmitWisp(const FOSGasVent& Vent, const FOSPortSmoke& 
 		Puff.Velocity = bAir ? FVector::ZeroVector : Frame.TransformVectorNoScale(Out) * SpeedCm * 0.6f + Puff.GunVelocity;
 		Puff.WorldPos = Frame.TransformPosition(ClingPath(Puff, Puff.Age));
 		Puff.PrevAttached = Puff.WorldPos;
+		Puff.PrevGun = Frame;
 		Puff.AlongWorld = Frame.GetRotation().GetAxisX();
 	}
 	else
@@ -633,6 +634,13 @@ void UOSMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, co
 	{
 		Cloud = Algo::MaxElementBy(Clouds, [](const FCloud& Each) { return Each.Age; });
 	}
+	// The slot's last step may still run (the game thread does not wait for steps otherwise).
+	if (Cloud->Pending.IsValid())
+	{
+		Cloud->Pending.Wait();
+		Cloud->Pending = UE::Tasks::FTask();
+	}
+	Cloud->PlaneMove = FVector3f::ZeroVector;
 	const FQuat BoreQuat = Muzzle.GetRotation();
 	const FVector Bore = BoreQuat.GetAxisX();
 	const float BoxCm = Gun.Cells * Gun.CellCm;
@@ -769,7 +777,7 @@ void UOSMuzzleFxComponent::Blast(const FVector& Origin, const FVector& Direction
 {
 	for (FCloud& Cloud : Clouds)
 	{
-		if (Cloud.Age < 0.0f || &Cloud == Except)
+		if (Cloud.Age < 0.0f || &Cloud == Except || Cloud.IsBusy())
 		{
 			continue;
 		}
@@ -793,8 +801,13 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 {
 	UWorld* World = GetWorld();
 	const FVector Eye = View->GetComponentLocation();
-	const FVector EyeStep = Eye - LastEye;
-	LastEye = Eye;
+	// The body, not the eye, parts the gas: its capsule where it overlaps the box, along its own step.
+	const FVector Body = GetOwner()->GetActorLocation();
+	const FVector BodyStep = Body - LastBody;
+	LastBody = Body;
+	float BodyRadius = 0.0f, BodyHalfHeight = 0.0f;
+	GetOwner()->GetSimpleCollisionCylinder(BodyRadius, BodyHalfHeight);
+	BodyRadius = FMath::Clamp(BodyRadius, 15.0f, 45.0f);
 #if !UE_BUILD_SHIPPING
 	// Tuning overrides (os.Fx.SmokeTune): the fields on every gun when the string changes, the material's every frame.
 	static FString TuneApplied;
@@ -848,7 +861,7 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 	// The last frame's steps: their box shift and atlas (TickComponent waited for them).
 	for (FCloud& Cloud : Clouds)
 	{
-		if (Cloud.Age < 0.0f || !Cloud.bPendingAtlas)
+		if (Cloud.Age < 0.0f || Cloud.IsBusy() || !Cloud.bPendingAtlas)
 		{
 			continue;
 		}
@@ -892,8 +905,7 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		}
 		const FOSMuzzleFx& G = Guns[Cloud.Gun];
 		FOSSmokeSim& Sim = *Cloud.Sim;
-		// A grown vacuum cloud's cells are grown too (a push or a wake works at them).
-		Sim.CellCm = G.CellCm * Cloud.Scale;
+		const bool bBusy = Cloud.IsBusy();
 		Cloud.Age += DeltaTime;
 		if (Cloud.Age >= G.CloudSeconds)
 		{
@@ -901,9 +913,14 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 			Cloud.Volume->SetVisibility(false);
 			continue;
 		}
-		// Out of an air zone the gas turns ballistic, into one the air takes it: read every frame.
-		Sim.bAir = OSAirZoneAt(World, Cloud.Centre) != nullptr;
-		Sim.Down = FVector3f(Cloud.Basis.UnrotateVector(OSGravityAt(World, Cloud.Centre).Acceleration.GetSafeNormal()));
+		if (!bBusy)
+		{
+			// A grown vacuum cloud's cells are grown too (a push or a wake works at them).
+			Sim.CellCm = G.CellCm * Cloud.Scale;
+			// Out of an air zone the gas turns ballistic, into one the air takes it: read every frame.
+			Sim.bAir = OSAirZoneAt(World, Cloud.Centre) != nullptr;
+			Sim.Down = FVector3f(Cloud.Basis.UnrotateVector(OSGravityAt(World, Cloud.Centre).Acceleration.GetSafeNormal()));
+		}
 		if (Sim.bAir)
 		{
 			Cloud.Carried *= FMath::Exp(-DeltaTime / AirDragSeconds);
@@ -913,17 +930,26 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		if (!Move.IsNearlyZero(0.01f))
 		{
 			Cloud.Centre += Move;
-			const FVector3f MoveLocal(Cloud.Basis.UnrotateVector(Move));
+			Cloud.PlaneMove += FVector3f(Cloud.Basis.UnrotateVector(Move));
+		}
+		if (!bBusy && !Cloud.PlaneMove.IsNearlyZero(0.01f))
+		{
 			for (FPlane4f& Plane : Sim.Planes)
 			{
-				Plane.W -= Plane.GetSafeNormal() | MoveLocal;
+				Plane.W -= Plane.GetSafeNormal() | Cloud.PlaneMove;
 			}
+			Cloud.PlaneMove = FVector3f::ZeroVector;
 			if (!Sim.Planes.IsEmpty())
 			{
 				Sim.RebuildSolids();
 			}
 		}
-		if (Stepping.Contains(&Cloud))
+		if (bBusy)
+		{
+			// Mid-step: its time piles up for the next launch (at most 4 steps: a long hitch slows the gas instead).
+			Cloud.StepCarry += DeltaTime;
+		}
+		else if (Stepping.Contains(&Cloud))
 		{
 			Cloud.bFrozen = false;
 			Cloud.Rise = FVector::ZeroVector;
@@ -963,11 +989,13 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 			Cloud.Scale += Cloud.ExpandRate * DeltaTime;
 		}
 		const float Half = 0.5f * Sim.N * G.CellCm * Cloud.Scale;
-		// The pawn passing through parts it (and the voxels by the eye fade).
+		// The body passing through parts the gas where its capsule overlaps the box, as fast as it moves, along its own
+		// step only (v4 pushed from the eye; the voxels by the eye still fade in the material).
 		const FVector EyeLocal = Cloud.Basis.UnrotateVector(Eye - Cloud.Centre);
-		if (EyeLocal.GetAbsMax() < Half && EyeStep.Size() > 1.0f && EyeStep.Size() < 200.0f && DeltaTime > 0.0f)
+		const FVector BodyLocal = Cloud.Basis.UnrotateVector(Body - Cloud.Centre);
+		if (!bBusy && BodyLocal.GetAbsMax() < Half + BodyRadius && BodyStep.Size() > 0.5f && BodyStep.Size() < 200.0f && DeltaTime > 0.0f)
 		{
-			Blast(Eye - EyeStep, EyeStep.GetSafeNormal(), 18.0f, EyeStep.Size() / DeltaTime * 0.5f, 40.0f, 0.0f, nullptr, EyeStep.Size() + 18.0f);
+			Blast(Body - BodyStep, BodyStep.GetSafeNormal(), BodyRadius, BodyStep.Size() / DeltaTime * 0.5f, 40.0f, 0.0f, nullptr, BodyStep.Size() + BodyRadius);
 		}
 		UMaterialInstanceDynamic* Material = Cloud.Material;
 		Material->SetVectorParameterValue(TEXT("CloudCentre"), FLinearColor(FVector3f(Cloud.Centre)));
@@ -995,7 +1023,7 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		}
 		Material->SetVectorParameterValue(TEXT("KeyColour"), Cloud.KeyColour);
 		// The drawn pixel: ~5 px at 1080p at any distance (the bodycam's FOV 134: 4.71 view widths per distance).
-		Material->SetScalarParameterValue(TEXT("PixelPerCm"), 5.0f / 1920.0f * 4.71f);
+		Material->SetScalarParameterValue(TEXT("PixelCm"), VoxelPixelCm * Cloud.Scale);
 		Material->SetScalarParameterValue(TEXT("AmbientShare"), Sim.bAir ? 1.0f : VacuumAmbientShare);
 		Material->SetScalarParameterValue(TEXT("Seed"), Cloud.Seed);
 		// The volume integrates per local unit (a cell here, HeterogeneousVolumesLiveShadingPipeline.usf: StepSize is
@@ -1036,7 +1064,10 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		const FOSMuzzleFx G = Guns[Cloud->Gun];
 		const FVector3f KeyDir = Cloud->KeyDir;
 		const float Occlusion = AmbientOcclusion, Shadow = KeyShadow, Sharp = Sharpen;
-		Cloud->Pending = UE::Tasks::Launch(UE_SOURCE_LOCATION, [Cloud, G, L, KeyDir, Occlusion, Shadow, Sharp]()
+		// The box as of the launch: the game thread moves it on while the step runs.
+		const FVector Centre = Cloud->Centre;
+		const FQuat Basis = Cloud->Basis;
+		Cloud->Pending = UE::Tasks::Launch(UE_SOURCE_LOCATION, [Cloud, G, L, KeyDir, Occlusion, Shadow, Sharp, Centre, Basis]()
 		{
 			FOSSmokeSim& Sim = *Cloud->Sim;
 			for (int32 Step = 0; Step < L.Steps; ++Step)
@@ -1057,8 +1088,8 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 					const float Speed = V.SpeedCm * Flow;
 					const float From = Jet.FrontCm;
 					Jet.FrontCm = V.SpeedCm * V.DecaySeconds * (1.0f - Flow);
-					const FVector3f Mouth(Cloud->Basis.UnrotateVector(Jet.Origin + Cloud->Carried * At - Cloud->Centre));
-					const FVector3f Dir(Cloud->Basis.UnrotateVector(FMath::VRandCone(Jet.Direction, FMath::DegreesToRadians(FMath::Max(V.ConeDeg, 0.5f)))));
+					const FVector3f Mouth(Basis.UnrotateVector(Jet.Origin + Jet.GunVelocity * At - Centre));
+					const FVector3f Dir(Basis.UnrotateVector(FMath::VRandCone(Jet.Direction, FMath::DegreesToRadians(FMath::Max(V.ConeDeg, 0.5f)))));
 					const float Mid = 0.5f * (From + Jet.FrontCm);
 					const float Half = FMath::Max(0.5f * (Jet.FrontCm - From), Sim.CellCm * 0.7f);
 					const float Radius = FMath::Max(V.WidthCm * 0.5f + 0.22f * Mid, Sim.CellCm * 0.8f);
@@ -1188,6 +1219,8 @@ namespace
 {
 	/** A smoke texel's size per cm from the eye: ~5 px of 1920 at the bodycam's FOV 134 (2 tan 67 deg = 4.71 view widths per distance). */
 	constexpr float TexelPerCm = 5.0f / 1920.0f * 4.71f;
+	/** A clinging wisp takes this share of the gun's own move (v5: walking, the wisps trail the barrel). */
+	constexpr float ClingInherit = 0.5f;
 }
 
 void UOSMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -1206,7 +1239,13 @@ void UOSMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 		bGrids |= Cloud.Pending.IsValid();
 	}
 #endif
-	WaitSims();
+	for (const FCloud& Cloud : Clouds)
+	{
+		if (Cloud.Pending.IsValid() && Cloud.Pending.IsCompleted())
+		{
+			Cloud.Pending = UE::Tasks::FTask();
+		}
+	}
 	TickHotCases(DeltaTime);
 	KeyLightsAge += DeltaTime;
 	TickClouds(DeltaTime);
@@ -1328,10 +1367,16 @@ void UOSMuzzleFxComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 			if (const USceneComponent* Anchor = Puff.Anchor.Get())
 			{
 				const FTransform Gun = Anchor->GetComponentTransform();
-				const FVector Attached = Gun.TransformPosition(ClingPath(Puff, Puff.Age));
-				const FVector Step = (Attached - Puff.PrevAttached) * Cling;
+				const FVector Path = ClingPath(Puff, Puff.Age);
+				const FVector Attached = Gun.TransformPosition(Path);
+				// The path's own creep and swirl (on the gun as it was), and the gun's move since: half of it inherited
+				// (v5: walking, the wisps rode along with the barrel; now they trail behind it). Velocities, never a jump.
+				const FVector Own = Puff.PrevGun.TransformPosition(Path) - Puff.PrevAttached;
+				const FVector Carry = Attached - Puff.PrevGun.TransformPosition(Path);
+				const FVector Step = (Own + Carry * ClingInherit) * Cling;
 				Puff.WorldPos += Step;
 				Puff.PrevAttached = Attached;
+				Puff.PrevGun = Gun;
 				// Drawn out along its own path (a streak round and back along the barrel), the barrel's axis when still.
 				Puff.AlongWorld = Step.SizeSquared() > 1e-4f ? Step.GetSafeNormal() : Gun.GetRotation().GetAxisX();
 			}

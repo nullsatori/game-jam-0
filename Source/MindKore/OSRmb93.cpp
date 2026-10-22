@@ -150,7 +150,7 @@ FOSWeapon OSMakeRmb93(const FOSWeapon& PumpShotgun)
 	Smoke.SwirlCmPerSecond = 20.0f;
 	Smoke.RiseShare = 0.08f;
 	Smoke.AirDragSeconds = 0.7f;
-	Smoke.ClingSeconds = 1.5f;
+	Smoke.ClingSeconds = 0.45f;
 	for (const float X : { 38.15f, 41.05f, 43.95f, 46.85f })
 	{
 		for (const float Y : { 1.21f, -1.21f })
