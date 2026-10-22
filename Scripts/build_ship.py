@@ -1,13 +1,13 @@
-"""Builds /Game/Jam/Maps/Lvl_Jam_Ship, the grey blockout of «Почини и улети» (editor Python, headless).
+"""Builds /Game/OS/Maps/Lvl_OS_Ship, the grey blockout of «Почини и улети» (editor Python, headless).
 
 RETIRED since 18.10: the map is edited by hand in the editor, and this script
 destroys every actor before building - it would wipe that work. It refuses to
-run unless JAM_REBUILD_SHIP_WIPES_HAND_EDITS=1 is set (Docs/LevelPipeline.md).
+run unless OS_REBUILD_SHIP_WIPES_HAND_EDITS=1 is set (Docs/LevelPipeline.md).
 
 Run (an existing map is rebuilt in place; the editor stays open after
 a plain -ExecutePythonScript, so wrap it in a script that ends with
 unreal.SystemLibrary.quit_editor()):
-  UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  UnrealEditor-Cmd.exe <path>/OuterSpace.uproject
       -ExecutePythonScript="<path>/Scripts/build_ship.py" -unattended -nop4 -nosplash -nullrhi
 
 Everything is in centimetres, the ship along +X with its centre at the origin.
@@ -21,19 +21,19 @@ import sys
 
 import unreal
 
-if os.environ.get("JAM_REBUILD_SHIP_WIPES_HAND_EDITS") != "1":
-    raise SystemExit("build_ship.py: Lvl_Jam_Ship is edited by hand since 18.10 and this script deletes every actor."
-                     " Not run. Set JAM_REBUILD_SHIP_WIPES_HAND_EDITS=1 only to throw the hand edits away (Docs/LevelPipeline.md).")
+if os.environ.get("OS_REBUILD_SHIP_WIPES_HAND_EDITS") != "1":
+    raise SystemExit("build_ship.py: Lvl_OS_Ship is edited by hand since 18.10 and this script deletes every actor."
+                     " Not run. Set OS_REBUILD_SHIP_WIPES_HAND_EDITS=1 only to throw the hand edits away (Docs/LevelPipeline.md).")
 
-# The shared living wall material (Scripts/jam_living_wall.py), found next to this script.
+# The shared living wall material (Scripts/os_living_wall.py), found next to this script.
 SCRIPTS = os.path.join(unreal.Paths.convert_relative_path_to_full(unreal.Paths.project_dir()), "Scripts")
 sys.path.insert(0, SCRIPTS)
-import jam_build  # noqa: E402
-import jam_flesh  # noqa: E402
-import jam_living_wall  # noqa: E402
-import jam_sky  # noqa: E402
+import os_build  # noqa: E402
+import os_flesh  # noqa: E402
+import os_living_wall  # noqa: E402
+import os_sky  # noqa: E402
 
-MAP = "/Game/Jam/Maps/Lvl_Jam_Ship"
+MAP = "/Game/OS/Maps/Lvl_OS_Ship"
 CUBE = unreal.load_asset("/Engine/BasicShapes/Cube.Cube")
 CYL = unreal.load_asset("/Engine/BasicShapes/Cylinder.Cylinder")
 SPHERE = unreal.load_asset("/Engine/BasicShapes/Sphere.Sphere")
@@ -46,13 +46,13 @@ tools = unreal.AssetToolsHelpers.get_asset_tools()
 les = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
 eas = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 ues = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
-MATS = "/Game/Jam/Materials"
-EXPOSURE_BIAS = 0.0  # tuned on rendered frames (jam.Ship.Shots)
+MATS = "/Game/OS/Materials"
+EXPOSURE_BIAS = 0.0  # tuned on rendered frames (os.Ship.Shots)
 rng = random.Random(11)
 
 
 def log(msg):
-    unreal.log("JAMSHIP: " + msg)
+    unreal.log("OSSHIP: " + msg)
 
 
 def V(x, y, z):
@@ -101,7 +101,7 @@ def tint(name, rgb):
         mi = tools.create_asset(name, MATS, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
         mel.set_material_instance_parent(mi, unreal.load_asset("/Engine/BasicShapes/BasicShapeMaterial"))
     mel.set_material_instance_vector_parameter_value(mi, "Color", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
-    jam_build.save(path)
+    os_build.save(path)
     log("made " + path)
     return mi
 
@@ -125,7 +125,7 @@ def emissive_base(name, two_sided):
     mel.connect_material_expressions(strength, "", times, "B")
     mel.connect_material_property(times, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     mel.recompile_material(m)
-    jam_build.save(path)
+    os_build.save(path)
     log("made " + path)
     return m
 
@@ -140,7 +140,7 @@ def glow(name, base, rgb, intensity):
         mel.set_material_instance_parent(mi, base)
     mel.set_material_instance_vector_parameter_value(mi, "Color", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
     mel.set_material_instance_scalar_parameter_value(mi, "Intensity", intensity)
-    jam_build.save(path)
+    os_build.save(path)
     log("made " + path)
     return mi
 
@@ -215,28 +215,28 @@ settings = world.get_world_settings()
 settings.modify()
 settings.set_editor_property("global_gravity_set", True)
 settings.set_editor_property("global_gravity_z", 0.0)
-settings.set_editor_property("default_game_mode", unreal.JamShipGameMode.static_class())
+settings.set_editor_property("default_game_mode", unreal.OSShipGameMode.static_class())
 
 # Role colours (the zero-G map's, plus new ones).
-HULL = tint("MI_Jam_Hull", (0.38, 0.4, 0.43))
-ANCHOR = tint("MI_Jam_Anchor", (0.45, 0.46, 0.48))
-JUNK = tint("MI_Jam_Junk", (0.32, 0.27, 0.22))
-PART = tint("MI_Jam_ShipPart", (0.95, 0.42, 0.05))
-PLATE = tint("MI_Jam_HullPlate", (0.55, 0.65, 0.75))
-FUEL = tint("MI_Jam_Fuel", (0.95, 0.8, 0.1))
-OXYGEN = tint("MI_Jam_O2", (0.1, 0.35, 0.95))
-DOCK = tint("MI_Jam_Dock", (0.2, 0.9, 0.3))
-ROCK = tint("MI_Jam_Rock", (0.33, 0.31, 0.28))
-FLESH = tint("MI_Jam_Flesh", (0.45, 0.05, 0.08))  # dark saturated red-pink: stays fleshy under the teal key
-EMISSIVE = emissive_base("M_Jam_Emissive", False)
-EMISSIVE_2S = emissive_base("M_Jam_Emissive2S", True)
-STAR = glow("MI_Jam_Star", EMISSIVE, (0.1, 0.75, 1.0), 12.0)  # teal like its light; still blooms
-STARS = glow("MI_Jam_Stars", EMISSIVE, (0.85, 0.9, 1.0), 25.0)
-DOME = glow("MI_Jam_SkyDome", EMISSIVE_2S, (0.035, 0.02, 0.07), 1.0)
-EYE = glow("MI_Jam_EyeGlow", EMISSIVE, (0.7, 0.03, 0.02), 6.0)
-LAMP = glow("MI_Jam_PanelLamp", EMISSIVE, (1.0, 0.02, 0.01), 2.0)
-CARGO = tint("MI_Jam_Cargo", (0.9, 0.75, 0.3))
-CABIN = tint("MI_Jam_Cabin", (0.55, 0.53, 0.5))
+HULL = tint("MI_OS_Hull", (0.38, 0.4, 0.43))
+ANCHOR = tint("MI_OS_Anchor", (0.45, 0.46, 0.48))
+JUNK = tint("MI_OS_Junk", (0.32, 0.27, 0.22))
+PART = tint("MI_OS_ShipPart", (0.95, 0.42, 0.05))
+PLATE = tint("MI_OS_HullPlate", (0.55, 0.65, 0.75))
+FUEL = tint("MI_OS_Fuel", (0.95, 0.8, 0.1))
+OXYGEN = tint("MI_OS_O2", (0.1, 0.35, 0.95))
+DOCK = tint("MI_OS_Dock", (0.2, 0.9, 0.3))
+ROCK = tint("MI_OS_Rock", (0.33, 0.31, 0.28))
+FLESH = tint("MI_OS_Flesh", (0.45, 0.05, 0.08))  # dark saturated red-pink: stays fleshy under the teal key
+EMISSIVE = emissive_base("M_OS_Emissive", False)
+EMISSIVE_2S = emissive_base("M_OS_Emissive2S", True)
+STAR = glow("MI_OS_Star", EMISSIVE, (0.1, 0.75, 1.0), 12.0)  # teal like its light; still blooms
+STARS = glow("MI_OS_Stars", EMISSIVE, (0.85, 0.9, 1.0), 25.0)
+DOME = glow("MI_OS_SkyDome", EMISSIVE_2S, (0.035, 0.02, 0.07), 1.0)
+EYE = glow("MI_OS_EyeGlow", EMISSIVE, (0.7, 0.03, 0.02), 6.0)
+LAMP = glow("MI_OS_PanelLamp", EMISSIVE, (1.0, 0.02, 0.01), 2.0)
+CARGO = tint("MI_OS_Cargo", (0.9, 0.75, 0.3))
+CABIN = tint("MI_OS_Cabin", (0.55, 0.53, 0.5))
 
 # --- light: an alien star, a rim from the other side, a dim violet sky -----------------------------
 # Key: a teal-cyan star - cold and clearly not our Sun, it reads well against the
@@ -262,10 +262,10 @@ rim_light.set_editor_property("forward_shading_priority", 0)
 # 2026-10-18 (was 100 m across, 2 km away against the key light's direction).
 block("Star_Disc", V(108852.8, -111334.1, 97070.0), (90000, 90000, 90000), None, SPHERE, STAR, shadow=False, collide=False)
 sky_dome = block("Sky_Dome", V(0, 0, 0), (600000, 600000, 600000), None, SPHERE, DOME, shadow=False, collide=False)
-# The star map (Scripts/jam_sky.py) on a dome just inside the violet one, hidden from
+# The star map (Scripts/os_sky.py) on a dome just inside the violet one, hidden from
 # reflection and sky-light captures: the camera sees the stars, the SkyLight keeps
 # capturing the violet dome, so the scene light is unchanged.
-stars_dome = block("Sky_Stars", V(0, 0, 0), (590000, 590000, 590000), None, SPHERE, jam_sky.material(log), shadow=False, collide=False)
+stars_dome = block("Sky_Stars", V(0, 0, 0), (590000, 590000, 590000), None, SPHERE, os_sky.material(log), shadow=False, collide=False)
 stars_comp = stars_dome.get_editor_property("static_mesh_component")
 stars_comp.set_editor_property("visible_in_reflection_captures", False)
 stars_comp.set_editor_property("visible_in_real_time_sky_captures", False)
@@ -335,7 +335,7 @@ def hull(prefix, origin, rotation, x0, count, breaches):
                     c = V(centre[0], centre[1] + t[1] * off, centre[2] + t[2] * off)
                     block("%s_Seg%02d_Side%d_Edge%+d" % (prefix, k, i, sign), xf.transform_location(c), (SEG, strip, THICK),
                           world_rot, material=HULL)
-                # The breach frame: X along the hull, Z out of it (AJamPlateSocket; the segment's own Z may point in).
+                # The breach frame: X along the hull, Z out of it (AOSPlateSocket; the segment's own Z may point in).
                 out = xf.transform_direction(V(*n))
                 holes.append((xf.transform_location(V(*centre)), unreal.MathLibrary.make_rot_from_zx(out, xf.transform_direction(V(1, 0, 0)))))
             else:
@@ -363,7 +363,7 @@ block("RearChunk_Cap", rear.transform_location(V(510, 0, 0)), (870, 870, THICK),
       unreal.MathLibrary.compose_rotators(R(pitch=90.0), REAR_ROT), CYL, HULL)
 block("RearChunk_Engine", rear.transform_location(V(700, 0, 0)), (300, 300, 350),
       unreal.MathLibrary.compose_rotators(R(pitch=90.0), REAR_ROT), CYL, ANCHOR)
-grapple = spawn(unreal.JamToolPickup, rear.transform_location(V(950, 0, 0)), REAR_ROT, "Pickup_Grapple")
+grapple = spawn(unreal.OSToolPickup, rear.transform_location(V(950, 0, 0)), REAR_ROT, "Pickup_Grapple")
 grapple.set_actor_scale3d(V(0.6, 0.6, 1.2))
 grapple.get_editor_property("mesh").set_material(0, PART)
 label_text("GRAPPLE", rear.transform_location(V(950, 0, 120)), 0, 40)
@@ -409,47 +409,47 @@ block("Airlock_WallR", V(1300, 110, -25), (200, 20, 250), material=CABIN)
 block("Airlock_Ceiling", V(1300, 0, 110), (200, 240, 20), material=CABIN)
 wall_with_door("Airlock_Outer", 1200, 120, 100)
 door("Door_Inner", 1400)
-door("Door_Outer", 1200, "Jam.Suit", "Нужен скафандр")
+door("Door_Outer", 1200, "OS.Suit", "Нужен скафандр")
 AMBER = (1.0, 0.62, 0.28)
 point_light("Light_Cabin_Front", V(1850, 0, 120), AMBER, 4.0, 900.0)
 point_light("Light_Cabin_Back", V(1550, 0, 120), AMBER, 2.5, 900.0)
 point_light("Light_Airlock", V(1300, 0, 80), AMBER, 2.0, 500.0)
 point_light("Light_Emergency", V(1450, -230, 120), (1.0, 0.0, 0.0), 10.0, 600.0, shadows=False)
 
-cabin_zone = spawn(unreal.JamGravityZone, V(1700, 0, 0), None, "Gravity_Cabin")
+cabin_zone = spawn(unreal.OSGravityZone, V(1700, 0, 0), None, "Gravity_Cabin")
 set_extent(cabin_zone, "zone", (300, 250, 150))
 cabin_zone.set_editor_property("refill_per_second", 20.0)
-airlock_zone = spawn(unreal.JamGravityZone, V(1300, 0, -25), None, "Gravity_Airlock")
+airlock_zone = spawn(unreal.OSGravityZone, V(1300, 0, -25), None, "Gravity_Airlock")
 set_extent(airlock_zone, "zone", (100, 100, 125))
 airlock_zone.set_editor_property("refill_per_second", 20.0)
 
-# Tag Cabin: AJamShipGameMode wakes the player here after death (Scripts/tag_cabin_start.py on a hand-edited map).
+# Tag Cabin: AOSShipGameMode wakes the player here after death (Scripts/tag_cabin_start.py on a hand-edited map).
 spawn(unreal.PlayerStart, V(1650, 0, FLOOR + 100), R(), "PlayerStart").set_editor_property("tags", ["Cabin"])
-locker = spawn(unreal.JamSuitLocker, V(1500, 215, FLOOR + 100), R(yaw=-90.0), "SuitLocker")
+locker = spawn(unreal.OSSuitLocker, V(1500, 215, FLOOR + 100), R(yaw=-90.0), "SuitLocker")
 locker.set_actor_scale3d(V(0.6, 0.4, 2.0))
 locker.get_editor_property("mesh").set_material(0, OXYGEN)
 label_text("SUIT", V(1500, 200, 70), -90, 25)
 
 # --- the interior to clean, the sockets, the docks ----------------------------------------------
-clean = spawn(unreal.JamCleanZone, V(90, 0, 0), None, "Clean_Hull")
+clean = spawn(unreal.OSCleanZone, V(90, 0, 0), None, "Clean_Hull")
 set_extent(clean, "zone", (1090, 380, 380))
 sockets = []
 for j, (centre, rot) in enumerate(holes):
-    s = spawn(unreal.JamPlateSocket, centre, rot, "Socket_Breach%d" % j)
+    s = spawn(unreal.OSPlateSocket, centre, rot, "Socket_Breach%d" % j)
     s.set_editor_property("clean_zone", clean)
     sockets.append(s)
-fuel_dock = spawn(unreal.JamDockZone, V(-1350, 0, 0), None, "Dock_Fuel")
+fuel_dock = spawn(unreal.OSDockZone, V(-1350, 0, 0), None, "Dock_Fuel")
 set_extent(fuel_dock, "zone", (300, 300, 300))
 fuel_dock.set_editor_property("required_tag", "Ship.Fuel")
 fuel_dock.set_editor_property("required_count", 2)
 label_text("FUEL", V(-1350, 0, 380), 180, 50)
-nav_dock = spawn(unreal.JamDockZone, V(1000, 0, 0), None, "Dock_Nav")
+nav_dock = spawn(unreal.OSDockZone, V(1000, 0, 0), None, "Dock_Nav")
 set_extent(nav_dock, "zone", (150, 200, 200))
 nav_dock.set_editor_property("required_tag", "Ship.Nav")
 nav_dock.set_editor_property("required_count", 1)
 label_text("NAV", V(1000, 0, 230), 180, 30)
 
-panel = spawn(unreal.JamShipPanel, V(1950, 0, FLOOR + 50), R(yaw=180.0), "Panel")
+panel = spawn(unreal.OSShipPanel, V(1950, 0, FLOOR + 50), R(yaw=180.0), "Panel")
 panel.set_editor_property("hull_sockets", sockets)
 panel.set_editor_property("fuel_dock", fuel_dock)
 panel.set_editor_property("nav_dock", nav_dock)
@@ -459,18 +459,18 @@ label_text("HULL  FUEL  NAV", V(1920, 0, FLOOR + 115), 180, 12)
 
 for j in range(12):
     # 160 cm apart along the hull so no two start overlapping, and no start drift
-    # (Jam.NoDrift): the hull stays dirty until the player cleans it.
+    # (OS.NoDrift): the hull stays dirty until the player cleans it.
     # Within 240 cm of the hull's axis: a corner spot (y, z both ~250) put a box into the
     # octagon's diagonal panel, and the overlap threw it out through the hull.
     ra, rr = rng.uniform(0, 2 * math.pi), rng.uniform(0, 240)
     prop("Junk_Foreign_%02d" % j, V(-850 + 160 * j, rr * math.cos(ra), rr * math.sin(ra)),
          rng.choice([CUBE, CYL]), (rng.uniform(30, 80), rng.uniform(30, 80), rng.uniform(30, 80)),
-         rng.uniform(5, 60), JUNK, ["Junk.Foreign", "Jam.NoDrift"], rot=R(rng.uniform(0, 360), rng.uniform(0, 360)))
+         rng.uniform(5, 60), JUNK, ["Junk.Foreign", "OS.NoDrift"], rot=R(rng.uniform(0, 360), rng.uniform(0, 360)))
 
 # --- hull plates in the junk around the ship --------------------------------------------------------
 for j, loc in enumerate([V(-1500, 2500, 1000), V(3000, -2000, -1200), V(-2800, -1500, -1500)]):
     # 3 x 3 m over 2.5 x 2.5 m holes: the plate rests on the edge around the hole (Docs/HullRepair.md).
-    prop("HullPlate_%d" % j, loc, CUBE, (300, 300, 20), 60, PLATE, ["Hull.Plate", "Jam.NoDrift"])
+    prop("HullPlate_%d" % j, loc, CUBE, (300, 300, 20), 60, PLATE, ["Hull.Plate", "OS.NoDrift"])
 
 # --- the floating room fragment with the pistol --------------------------------------------------------
 ROOM = (2500.0, 3000.0, 800.0)   # 6 x 4 x 3 m, open on -Y (toward the ship)
@@ -480,7 +480,7 @@ block("Room_Ceiling", V(rx, ry, rz + 150), (600, 400, 20), material=CABIN)
 block("Room_Back", V(rx, ry + 200, rz), (600, 20, 300), material=CABIN)
 block("Room_SideA", V(rx - 300, ry, rz), (20, 400, 300), material=CABIN)
 block("Room_SideB", V(rx + 300, ry, rz), (20, 400, 300), material=CABIN)
-pistol = spawn(unreal.JamWeaponPickup, V(rx, ry + 150, rz - 50), R(yaw=-90.0), "Pickup_Pistol")
+pistol = spawn(unreal.OSWeaponPickup, V(rx, ry + 150, rz - 50), R(yaw=-90.0), "Pickup_Pistol")
 pistol.set_actor_scale3d(V(0.6, 0.4, 1.8))
 pistol.set_editor_property("weapon_index", 0)
 pistol.get_editor_property("mesh").set_material(0, PART)
@@ -512,36 +512,36 @@ while count < 25:
 for ix in range(10):
     for iz in range(5):
         size = rng.uniform(440, 520)
-        r = spawn(unreal.JamBreakableRock, V(-1800 + 400 * ix + rng.uniform(-60, 60), -4500 + rng.uniform(-150, 150),
+        r = spawn(unreal.OSBreakableRock, V(-1800 + 400 * ix + rng.uniform(-60, 60), -4500 + rng.uniform(-150, 150),
                                               -800 + 400 * iz + rng.uniform(-60, 60)), R(rng.uniform(0, 360)), "Rock_%d_%d" % (ix, iz))
         r.set_actor_scale3d(V(size / 100.0, size / 100.0 * rng.uniform(0.8, 1.1), size / 100.0))
         r.get_editor_property("mesh").set_material(0, ROCK)
 for j, loc in enumerate([V(0, -6000, 0), V(300, -6200, 200)]):
-    prop("FuelTank_%d" % j, loc, CYL, (120, 120, 300), 300, FUEL, ["Ship.Fuel", "Jam.NoDrift"])
+    prop("FuelTank_%d" % j, loc, CYL, (120, 120, 300), 300, FUEL, ["Ship.Fuel", "OS.NoDrift"])
 label_text("FUEL TANKS", V(150, -6000, 350), 90, 50)
 
 # --- the planetoid: living, breathable, walkable --------------------------------------------------
-# The mesh, its relief, caves and craters come from Scripts/blender/jam_planet.py
-# (imported by Scripts/jam_import_meshes.py); every spot on it from
+# The mesh, its relief, caves and craters come from Scripts/blender/os_planet.py
+# (imported by Scripts/os_import_meshes.py); every spot on it from
 # Scripts/planet_layout.json (planet-local cm). Within 8 m over its highest point
 # the player walks on it (radial gravity 980 toward the centre; the view's up eases
 # to the local up), within 10 m breathing restores oxygen; that reaches down into
 # the caves too. A jump, then Space again in the air, is a jet leap off it.
 with open(os.path.join(SCRIPTS, "planet_layout.json"), encoding="utf-8") as f:
     LAYOUT = json.load(f)
-FLESH_SET = jam_flesh.materials(log)  # the gritty flesh (Docs/LivingWall.md, Materials)
+FLESH_SET = os_flesh.materials(log)  # the gritty flesh (Docs/LivingWall.md, Materials)
 PLANET = (0.0, 16000.0, -1000.0)        # clear of the ship, the junk and the belt: the near surface ~73 m from the ship
 PR = LAYOUT["surface_max_cm"]           # its highest point over the centre
-planet = eas.spawn_actor_from_object(unreal.load_asset("/Game/JamArt/Meshes/Planet/SM_Jam_Planet"), V(*PLANET), R())
+planet = eas.spawn_actor_from_object(unreal.load_asset("/Game/OSArt/Meshes/Planet/SM_OS_Planet"), V(*PLANET), R())
 planet.set_actor_label("Planetoid")
 planet.get_editor_property("static_mesh_component").set_material(0, FLESH_SET["PlanetSkin"])
-walk_shell = spawn(unreal.JamGravityZone, V(*PLANET), None, "Gravity_Planetoid")
+walk_shell = spawn(unreal.OSGravityZone, V(*PLANET), None, "Gravity_Planetoid")
 walk_shell.set_editor_property("sphere_radius_cm", PR + 800.0)
 walk_shell.set_editor_property("radial", True)
 walk_shell.set_editor_property("gravity_cm", 980.0)
 walk_shell.set_editor_property("refill_per_second", 5.0)
 walk_shell.set_editor_property("hud_text", unreal.Text("Можно дышать"))
-air_shell = spawn(unreal.JamGravityZone, V(*PLANET), None, "Air_Planetoid")
+air_shell = spawn(unreal.OSGravityZone, V(*PLANET), None, "Air_Planetoid")
 air_shell.set_editor_property("sphere_radius_cm", PR + 1000.0)
 air_shell.set_editor_property("walk", False)
 air_shell.set_editor_property("refill_per_second", 5.0)
@@ -568,7 +568,7 @@ probe_rot = unreal.MathLibrary.make_rot_from_z(V(*probe_up))
 block("Probe_Body", probe_at, (200, 120, 120), probe_rot, material=ANCHOR)
 block("Probe_Wing", on_surface("probe_wing", 40.0)[0], (300, 20, 80), probe_rot, material=ANCHOR)
 nav_at, nav_up = on_surface("nav", 150.0)
-prop("NavModule", nav_at, CUBE, (100, 100, 100), 80, PART, ["Ship.Nav", "Jam.NoDrift"])
+prop("NavModule", nav_at, CUBE, (100, 100, 100), 80, PART, ["Ship.Nav", "OS.NoDrift"])
 label_text("NAV MODULE", on_surface("nav", 300.0)[0], 90, 30)
 # The cocoon (Docs/LivingWall.md): four living walls and a roof, 2.6 m, around the
 # module; their fronts (+Y) face out. Getting the module takes the shotgun and
@@ -578,13 +578,13 @@ nav_x, nav_y = nav_frame.get_forward_vector(), nav_frame.get_right_vector()
 COCOON, COCOON_HALF = 260.0, 130.0
 cocoon_sides = [(nav_x, V(*nav_up)), (nav_x * -1.0, V(*nav_up)), (nav_y, V(*nav_up)), (nav_y * -1.0, V(*nav_up)), (V(*nav_up), nav_x)]
 probe_side = max(range(4), key=lambda k: cocoon_sides[k][0].x)  # the side facing +X, away from the old probe's wreck
-WALL_MAT = jam_living_wall.material(log)
+WALL_MAT = os_living_wall.material(log)
 for j, (out, along) in enumerate(cocoon_sides):
-    w = spawn(unreal.JamLivingWall, nav_at + out * COCOON_HALF, unreal.MathLibrary.make_rot_from_yz(out, along), "Cocoon_%d" % j)
+    w = spawn(unreal.OSLivingWall, nav_at + out * COCOON_HALF, unreal.MathLibrary.make_rot_from_yz(out, along), "Cocoon_%d" % j)
     w.set_editor_property("width_cm", COCOON)
     w.set_editor_property("height_cm", COCOON)
     w.set_editor_property("wall_material", WALL_MAT)
-    jam_flesh.skin_wall(w, FLESH_SET)
+    os_flesh.skin_wall(w, FLESH_SET)
     # A 1 m module passes a hole only if its clear radius is over 71 cm: these
     # walls tear wider and wait longer than the default (a pawn-sized hole).
     w.set_editor_property("burst_margin_cm", 80.0)  # 70 left the module a 66-74 cm clear radius: too close to its 71
@@ -593,9 +593,9 @@ for j, (out, along) in enumerate(cocoon_sides):
     w.set_editor_property("thin_spot_count", 1 if j < 4 else 0)
     w.set_editor_property("thin_spot_seed", j + 1)
     if j == probe_side:
-        w.set_editor_property("tags", ["Jam.WallProbe"])
+        w.set_editor_property("tags", ["OS.WallProbe"])
 gun_at, gun_up = on_surface("shotgun", 100.0)
-shotgun = spawn(unreal.JamWeaponPickup, gun_at, unreal.MathLibrary.make_rot_from_z(V(*gun_up)), "Pickup_Shotgun")
+shotgun = spawn(unreal.OSWeaponPickup, gun_at, unreal.MathLibrary.make_rot_from_z(V(*gun_up)), "Pickup_Shotgun")
 shotgun.set_actor_scale3d(V(0.6, 0.4, 1.8))
 shotgun.set_editor_property("weapon_index", 1)
 shotgun.get_editor_property("mesh").set_material(0, PART)
@@ -604,12 +604,12 @@ label_text("SHOTGUN", on_surface("shotgun", 250.0)[0], 90, 30)
 
 def round_wall(label, at, front, up, tag, margin, widest):
     """A round living wall 4 m across (Docs/LivingWall.md): a crater's membrane or a cave plug."""
-    w = spawn(unreal.JamLivingWall, at, unreal.MathLibrary.make_rot_from_yz(V(*front), V(*up)), label)
+    w = spawn(unreal.OSLivingWall, at, unreal.MathLibrary.make_rot_from_yz(V(*front), V(*up)), label)
     w.set_editor_property("width_cm", 400.0)
     w.set_editor_property("height_cm", 400.0)
     w.set_editor_property("round", True)
     w.set_editor_property("wall_material", WALL_MAT)
-    jam_flesh.skin_wall(w, FLESH_SET, round_=True)
+    os_flesh.skin_wall(w, FLESH_SET, round_=True)
     w.set_editor_property("burst_margin_cm", margin)
     w.set_editor_property("burst_max_radius_cm", widest)
     w.set_editor_property("max_stun_seconds", 3.0)
@@ -622,28 +622,28 @@ for crater in LAYOUT["craters"]:
     up = crater["up"]
     # A pawn-sized hole for a few seconds, like the cocoon's: the pawn drops through it.
     round_wall("Crater_" + crater["name"], on_planet([crater["pos"][k] + up[k] * 5.0 for k in range(3)]), up, tangent_of(up),
-               "Jam.Crater", 70.0, 110.0)
+               "OS.Crater", 70.0, 110.0)
 # Cave plugs: round walls across the tunnel throats (front along the tunnel).
 for plug in LAYOUT["plugs"]:
     # Shot at eye level, the hole must reach the floor 1.5 m lower: a wider blast than a crater's
     # (the ragged outline is 0.7-1.3 of it in places).
-    round_wall("CavePlug_" + plug["name"], on_planet(plug["pos"]), plug["forward"], plug["up"], "Jam.CavePlug", 110.0, 170.0)
+    round_wall("CavePlug_" + plug["name"], on_planet(plug["pos"]), plug["forward"], plug["up"], "OS.CavePlug", 110.0, 170.0)
 # Behind both plugs of T1 and under crater C1's membrane: oxygen (the cargo is placed with the rest below).
 oxygen = LAYOUT["prizes"][1]
-canister = spawn(unreal.JamOxygenCanister, on_planet(oxygen["pos"]), None, "O2_Canister_Cave")
+canister = spawn(unreal.OSOxygenCanister, on_planet(oxygen["pos"]), None, "O2_Canister_Cave")
 canister.get_editor_property("body").set_material(0, OXYGEN)
 zero_damping(canister.get_editor_property("body"))
-canister.set_editor_property("tags", ["Jam.NoDrift"])
+canister.set_editor_property("tags", ["OS.NoDrift"])
 
 # Finale placeholders: tentacles arching out of the ground, the eye. No behaviour.
-TENTACLE = unreal.load_asset("/Game/JamArt/Meshes/Planet/SM_Jam_Tentacle")
+TENTACLE = unreal.load_asset("/Game/OSArt/Meshes/Planet/SM_OS_Tentacle")
 for j in range(4):
     at, up = on_surface("tentacle%d" % j, 0.0)
     t = eas.spawn_actor_from_object(TENTACLE, at, unreal.MathLibrary.make_rot_from_zx(V(*up), V(*tangent_of(up))))
     t.set_actor_label("Tentacle_%d" % j)
     t.get_editor_property("static_mesh_component").set_material(0, FLESH_SET["Suckers"])
 eye_at, eye_up = on_surface("eye", 50.0)
-eye = eas.spawn_actor_from_object(unreal.load_asset("/Game/JamArt/Meshes/Planet/SM_Jam_PlanetEye"), eye_at,
+eye = eas.spawn_actor_from_object(unreal.load_asset("/Game/OSArt/Meshes/Planet/SM_OS_PlanetEye"), eye_at,
                                   unreal.MathLibrary.make_rot_from_x(V(*eye_up)))
 eye.set_actor_label("Eye")
 # Placed and scaled by the owner in the editor on 2026-10-18; a rebuild keeps it there.
@@ -659,14 +659,14 @@ for j, rgb in enumerate([(1.0, 0.45, 0.6), (1.0, 0.55, 0.25), (1.0, 0.4, 0.55), 
 cargo_spots = [V(500, 200, -200), V(rx - 150, ry + 100, rz - 100), rear.transform_location(V(0, 0, 0)),
                V(-500, -6100, -300), on_planet(LAYOUT["prizes"][0]["pos"]), V(-1400, -300, 600)]
 for j, loc in enumerate(cargo_spots):
-    c = spawn(unreal.JamCargo, loc, None, "Cargo_%d" % j)
+    c = spawn(unreal.OSCargo, loc, None, "Cargo_%d" % j)
     c.get_editor_property("body").set_material(0, CARGO)
     zero_damping(c.get_editor_property("body"))
-    c.set_editor_property("tags", ["Cargo", "Jam.NoDrift"])
+    c.set_editor_property("tags", ["Cargo", "OS.NoDrift"])
 
-# --- flyers: their habitats (Scripts/jam_flyers.py, Docs/Flyers.md) ---
-import jam_flyers  # noqa: E402
-jam_flyers.place(MAP, log)
+# --- flyers: their habitats (Scripts/os_flyers.py, Docs/Flyers.md) ---
+import os_flyers  # noqa: E402
+os_flyers.place(MAP, log)
 
 # --- save -------------------------------------------------------------------------------------------------
 assert ues.get_editor_world().get_outer().get_path_name() == MAP

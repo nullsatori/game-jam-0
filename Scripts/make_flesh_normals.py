@@ -3,7 +3,7 @@
 Run with any Python that has numpy and Pillow, outside the editor:
   python -I Scripts/make_flesh_normals.py <src_dir> <out_dir>
 src_dir is the owner's texture set's lowres_256 folder. Writes 1024 px
-T_Jam_Gritty_<Name>_N.png for every flesh map (owner 18.10: «добавить объёма
+T_OS_Gritty_<Name>_N.png for every flesh map (owner 18.10: «добавить объёма
 через карты нормалей»): the height is the owner's height candidate where there
 is one (Muscle, Tendon), else the colour map's luminance band-passed - fine
 detail (blur 1 minus blur 4 texels) plus larger forms (blur 4 minus blur 16),
@@ -21,13 +21,13 @@ from PIL import Image
 SIZE = 1024
 SOURCES = {
     # name: (relative path, strength, colour map (band-pass luminance), tiles)
-    "Muscle": ("height_candidates/T_Jam_Gritty_Muscle_H.png", 4.0, False, True),
-    "Tendon": ("height_candidates/T_Jam_Gritty_Tendon_H.png", 3.5, False, True),
-    "PlanetSkin": ("maps/T_Jam_Gritty_PlanetSkin_BC.png", 5.0, True, True),
-    "Membrane": ("maps/T_Jam_Gritty_Membrane_BC.png", 3.0, True, True),
-    "Suckers": ("maps/T_Jam_Gritty_Suckers_BC.png", 5.0, True, True),
-    "PlanetEye": ("maps/T_Jam_Gritty_PlanetEye_BC.png", 3.0, True, False),
-    "MuscleEnd": ("maps/T_Jam_Gritty_MuscleEnd_BC.png", 4.0, True, False),
+    "Muscle": ("height_candidates/T_OS_Gritty_Muscle_H.png", 4.0, False, True),
+    "Tendon": ("height_candidates/T_OS_Gritty_Tendon_H.png", 3.5, False, True),
+    "PlanetSkin": ("maps/T_OS_Gritty_PlanetSkin_BC.png", 5.0, True, True),
+    "Membrane": ("maps/T_OS_Gritty_Membrane_BC.png", 3.0, True, True),
+    "Suckers": ("maps/T_OS_Gritty_Suckers_BC.png", 5.0, True, True),
+    "PlanetEye": ("maps/T_OS_Gritty_PlanetEye_BC.png", 3.0, True, False),
+    "MuscleEnd": ("maps/T_OS_Gritty_MuscleEnd_BC.png", 4.0, True, False),
 }
 
 
@@ -80,7 +80,7 @@ def main(src, out):
         factor = SIZE // height.shape[0]
         big = upscale(height, factor, tiles)
         # The strength is per texel at 256: one 256 texel is `factor` texels at 1024.
-        Image.fromarray(normal_map(big, strength * height.shape[0] / 64.0 * factor)).save(os.path.join(out, "T_Jam_Gritty_%s_N.png" % name))
+        Image.fromarray(normal_map(big, strength * height.shape[0] / 64.0 * factor)).save(os.path.join(out, "T_OS_Gritty_%s_N.png" % name))
         print("wrote", name, big.shape)
 
 

@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 
-// Jam lift: copied verbatim from MKBodyResponseComponent.h, the only part of
+// OS lift: copied verbatim from MKBodyResponseComponent.h, the only part of
 // the body response the glass pane and the vitals use. The body response
 // itself (ragdoll, balance, get-up) is not lifted.
 

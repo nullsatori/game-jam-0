@@ -3,7 +3,7 @@
 **Актуальность:** редакционная сверка 21.10.2026 — отделены исторические сведения и обновлены ссылки. Источник сведений о ручной карте — прежний анализ пакета `b44e03e` и скриптов, описанный ниже. Соответствие нынешней карте в редакторе и игре заново не проверялось.
 
 Основная локация целевого [MVP](Vision/MVP.md): карта
-`/Game/Jam/Maps/Lvl_Jam_Ship` (стартовая и редакторская по умолчанию). Первую
+`/Game/OS/Maps/Lvl_OS_Ship` (стартовая и редакторская по умолчанию). Первую
 версию построил скрипт `Scripts/build_ship.py`; с 18.10 карта правится руками в
 редакторе. Остальные карты на месте. Эта страница описывает известное состояние
 карты и его ограничения; старые координаты вынесены в [архив раскладки](Archive/Ship-Layout-Generated.md).
@@ -12,13 +12,13 @@
 
 **Не пересобирать.** Скрипт загружает карту и удаляет все акторы, то есть
 стирает всё, что сделано руками (каюта, шлюз, лестница, импорт корпуса). Без
-переменной окружения `JAM_REBUILD_SHIP_WIPES_HAND_EDITS=1` он отказывается
+переменной окружения `OS_REBUILD_SHIP_WIPES_HAND_EDITS=1` он отказывается
 работать. Как добавлять на карту скриптом, не трогая ручное, —
 [LevelPipeline](LevelPipeline.md). Ниже — команда для истории; раскладка
 исходного блок-аута сохранена в [архиве](Archive/Ship-Layout-Generated.md).
 
 ```
-UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/build_ship.py" -unattended -nop4 -nosplash -nullrhi
+UnrealEditor-Cmd.exe <path>/OuterSpace.uproject -ExecutePythonScript="<path>/Scripts/build_ship.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 После простого `-ExecutePythonScript` редактор остаётся открытым — оборачивать
@@ -26,7 +26,7 @@ UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/S
 фиксированным сидом: каждый раз та же карта.
 
 С 18.10 карту меняли только скрипты, которые трогают свои акторы и не
-пересобирают остальное: `Scripts/jam_flyers.py` (летуны, стена брошенного
+пересобирают остальное: `Scripts/os_flyers.py` (летуны, стена брошенного
 корабля), `Scripts/tag_cabin_start.py` (тег `Cabin` на старте каюты для
 возрождения, [ShipMode](ShipMode.md)), `Scripts/setup_airlock_doors.py`
 (двери шлюза импортированного корабля), и одна правка `Start Awake` у
@@ -35,11 +35,11 @@ UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/S
 ## Нынешняя карта (что видно без редактора)
 
 Открыть карту здесь нельзя; ниже — то, что видно по таблице имён пакета
-`Lvl_Jam_Ship.umap` (коммит b44e03e: имена классов, свойств, тегов и метки
+`Lvl_OS_Ship.umap` (коммит b44e03e: имена классов, свойств, тегов и метки
 акторов) и по скриптам выше. Это косвенно: позиций и связей так не видно.
 
 - Корабль игрока — импорт `MindKore_Ship_R3_Blockout` (объект `root_3`; по
-  `jam_flyers.py` — x 3220…7220, шлюз на борту −Y у x 5560). Рядом —
+  `os_flyers.py` — x 3220…7220, шлюз на борту −Y у x 5560). Рядом —
   брошенный корабль `MindKore_Ship_02_Blockout` (`root_0`) у пояса обломков.
   Акторы блок-аута скрипта (`Hull_Seg*`, `RearChunk_*`, `Rock_*`, `Junk_*`,
   `Cargo_0..5`, `Socket_Breach0..2`, `Dock_Fuel`, `Dock_Nav`, `Clean_Hull`,
@@ -52,16 +52,16 @@ UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/S
   `bEllipticalCylinder`, `Priority`, `bPullAlongActorDown` в пакете нет: ни у
   одной зоны они не отличаются от умолчания — граница каюты к зоне не
   подключена, овалов нет, приоритеты все 0 (решает меньшая зона).
-- Ключ `Jam.Suit` с причиной «Нужен скафандр» стоит у одной `AMKDoor` (в
+- Ключ `OS.Suit` с причиной «Нужен скафандр» стоит у одной `AMKDoor` (в
   скрипте это `Door_Outer`); `setup_airlock_doors.py` делает двери
   `Airlock_D8`/`D9` («Дверь шлюза») без ключа. Какую дверь игрок проходит
   на самом деле, отсюда не видно.
 - Живых стен скрипта нет: ни меток `Cocoon_*`, `Crater_*`, `CavePlug_*`, ни
-  тегов `Jam.Crater`, `Jam.CavePlug`, `Jam.WallProbe`. Единственная
-  `AJamLivingWall` — `Flesh_WreckDoor` на брошенном корабле (см. «Ограничения»).
+  тегов `OS.Crater`, `OS.CavePlug`, `OS.WallProbe`. Единственная
+  `AOSLivingWall` — `Flesh_WreckDoor` на брошенном корабле (см. «Ограничения»).
   Строки «Кокон», «Кратеры», «Пещеры», «Секция B» в раскладке и
-  `jam.Ship.Caves` относятся к собранной скриптом карте; на нынешней проба
-  не найдёт стен (`Caves probe: needs ... a Jam.Crater and a Jam.CavePlug wall`).
+  `os.Ship.Caves` относятся к собранной скриптом карте; на нынешней проба
+  не найдёт стен (`Caves probe: needs ... a OS.Crater and a OS.CavePlug wall`).
 - `NavModule` спит со старта (`bStartAwake` появился в пакете в b44e03e).
 
 ## Историческая раскладка

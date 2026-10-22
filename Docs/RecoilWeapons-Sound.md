@@ -8,7 +8,7 @@
 щас взрывы саунддизайнеры делают», «упорись в саунд-дизайн», и про помпу —
 «большая пауза в середине, нужно более резво передергивать». Ниже — v2.
 
-**Где обработка.** Офлайн, `Scripts/jam_space_shots.py` (numpy + ffmpeg,
+**Где обработка.** Офлайн, `Scripts/os_space_shots.py` (numpy + ffmpeg,
 детерминированно, шум с зерном): в игре ровно те файлы, что слушает владелец.
 Сабмикс для вакуума не заводили — он менял бы и попадания, и всё остальное. В воздухе
 звуки ствола посылаются в комнату каюты (раздел [«В воздухе»](#в-воздухе-2010-ветка-jam-air-sound)).
@@ -67,7 +67,7 @@ RT60: пистолет 1.5 с, дробовик 2.6, СВ-98 3.4, механиз
 ## Стволы: что выбрано и почему
 
 Владелец 18.10 послушал варианты: «все выстрелы берем С». В игре — C каждого
-ствола под прежними именами ассетов (`SW_Jam_Shot_Pistol`, `…_Shotgun`, `…_SV98`);
+ствола под прежними именами ассетов (`SW_OS_Shot_Pistol`, `…_Shotgun`, `…_SV98`);
 A и B остались только в `Saved/Listen`.
 
 | Ствол | В игре (C) | Варианты в `Saved/Listen` |
@@ -105,21 +105,21 @@ A и B остались только в `Saved/Listen`.
 
 ## Курок, магазины, патроны (крючки `jam-anim2`)
 
-Звуки на крючки анимации `FJamWeapon` (`JamWeaponParts.cpp` играет их сам), тем же
+Звуки на крючки анимации `FOSWeapon` (`OSWeaponParts.cpp` играет их сам), тем же
 шаблоном `mech()`: щелчок −4 полутона (у СВ-98 −5), удар на октаву ниже на том же
 месте, саб под тяжёлым ходом, ревер RT60 1.1 с. Каждый кусок начинается за 15–30 мс
 до своего щелчка, так что щелчок приходит через 25–40 мс после крючка.
 
 | Звук | Крючок, с | Донор (CC0) | LUFS | Пик, dBFS |
 |---|---|---|---|---|
-| `SW_Jam_Hammer_Pistol` | `HammerSoundSeconds` 0.085 после выстрела | 508243 «1911 .45 Hammer Cocking», shelbyshark — два тика 70 мс | −30 (под выстрелом) | −10.4 |
-| `SW_Jam_MagOut_Pistol` | `MagEjectSeconds` 0.36 от начала перезарядки | 854460 «A Glock handgun having its magazine removed and re-inserted», serøutōnin--deprivəd | −24 | −5.0 |
-| `SW_Jam_MagIn_Pistol` | `MagInSoundSeconds` 0.86 | то же, досыл магазина, саб под ударом | −21 | −3.9 |
-| `SW_Jam_MagOut_SV98` | 0.5 | 725397 «An M16 Rifle being reloaded while empty», serøutōnin--deprivəd — магазин выходит | −22.4 | −6.1 |
-| `SW_Jam_MagIn_SV98` | 1.25 | то же, магазин сел, саб | −20 | −5.1 |
-| `SW_Jam_SlideRelease_Pistol` | `SlideReleaseSoundSeconds` 0.9583 = 0.975 − 0.0167 пустой перезарядки | 842731 «Glock17_Slide», Stoniac — рычаг задержки (+2.5 мс в файле), затвор выходит из выреза (+16.7 мс, на 0.975), 20 мс его бега | −29 | −8.5 |
-| `SW_Jam_SlideHome_Pistol` | `SlideHomeSoundSeconds` 0.9952 = 1.0 − 0.0048 | тот же дубль: удар затвора в крайнее переднее (+4.8 мс, на 1.0) и звон рамы, саб под ударом | −20.9 (LUFS-M max −17, как у досыла) | −1.0 |
-| `SW_Jam_Shell_Shotgun` | `ShellSeatSeconds` каждого патрона: 0.25 + n × 0.42 + 0.30 = 0.55, 0.97, 1.39 … | 108793 «shell load.ogg», CeebFrack, саб под досылом | −22 | −1.0 |
+| `SW_OS_Hammer_Pistol` | `HammerSoundSeconds` 0.085 после выстрела | 508243 «1911 .45 Hammer Cocking», shelbyshark — два тика 70 мс | −30 (под выстрелом) | −10.4 |
+| `SW_OS_MagOut_Pistol` | `MagEjectSeconds` 0.36 от начала перезарядки | 854460 «A Glock handgun having its magazine removed and re-inserted», serøutōnin--deprivəd | −24 | −5.0 |
+| `SW_OS_MagIn_Pistol` | `MagInSoundSeconds` 0.86 | то же, досыл магазина, саб под ударом | −21 | −3.9 |
+| `SW_OS_MagOut_SV98` | 0.5 | 725397 «An M16 Rifle being reloaded while empty», serøutōnin--deprivəd — магазин выходит | −22.4 | −6.1 |
+| `SW_OS_MagIn_SV98` | 1.25 | то же, магазин сел, саб | −20 | −5.1 |
+| `SW_OS_SlideRelease_Pistol` | `SlideReleaseSoundSeconds` 0.9583 = 0.975 − 0.0167 пустой перезарядки | 842731 «Glock17_Slide», Stoniac — рычаг задержки (+2.5 мс в файле), затвор выходит из выреза (+16.7 мс, на 0.975), 20 мс его бега | −29 | −8.5 |
+| `SW_OS_SlideHome_Pistol` | `SlideHomeSoundSeconds` 0.9952 = 1.0 − 0.0048 | тот же дубль: удар затвора в крайнее переднее (+4.8 мс, на 1.0) и звон рамы, саб под ударом | −20.9 (LUFS-M max −17, как у досыла) | −1.0 |
+| `SW_OS_Shell_Shotgun` | `ShellSeatSeconds` каждого патрона: 0.25 + n × 0.42 + 0.30 = 0.55, 0.97, 1.39 … | 108793 «shell load.ogg», CeebFrack, саб под досылом | −22 | −1.0 |
 
 ### Затворная задержка USP (20.10, ветка `jam-slide-sound`)
 
@@ -138,7 +138,7 @@ Glock на +12 % высоты, B11). Теперь — свои звуки из �
 удар на октаву ниже, саб 110→55 Гц под ударом, ревер механизмов RT60 1.1 с. Уровень
 удара — по громкости досыла магазина в пике (LUFS-M max −17; цель −22 LUFS, лимитер
 файла снимает 4.3 дБ), щелчок на 8 дБ тише удара, как в доноре (пики −12 и −3 дБ на
-1 мс). Сборка — `Scripts/jam_slide_sounds.py` (берёт `jam_space_shots.mech`; где в
+1 мс). Сборка — `Scripts/os_slide_sounds.py` (берёт `os_space_shots.mech`; где в
 файле щелчок — loudest 2 мс выше 800 Гц на готовом файле, его и вычитают из ключа).
 Вариант B (только для прослушки) — те же куски на −7 полутонов: крупнее и темнее,
 щелчок на 19.2 мс, удар на 5.3 мс.
@@ -160,10 +160,10 @@ Glock на +12 % высоты, B11). Теперь — свои звуки из �
 слышно. Но у настоящего ствола захват затвора внутри выстрела и отдельно не слышен;
 пустой ствол показывают затвор, оставшийся сзади, и мёртвый беззвучный спуск, а курок
 щёлкает через 17 мс после захвата (0.068 с). Отличать последний выстрел на слух — это
-новое поле звука захвата в `FJamWeapon`, по слову владельца. Спуск с затвором на
+новое поле звука захвата в `FOSWeapon`, по слову владельца. Спуск с затвором на
 задержке беззвучен — у настоящего USP разобщитель опущен, щелчка нет.
 
-Проверка в игре — `jam.Weapons.SlideTake` (запись мастера, [Probes](Probes.md)):
+Проверка в игре — `os.Weapons.SlideTake` (запись мастера, [Probes](Probes.md)):
 последний выстрел (1.0 с), R — пустая перезарядка (2.5 с), снова последний
 выстрел (5.0 с), магазин в запертый ствол и R — только сброс (6.6 с). Каждый кадр — в
 `SlideTake.csv`, время действий — в лог; щелчки в записи — loudest 2 мс выше 800 Гц.
@@ -192,8 +192,8 @@ RMS −25.3 dBFS:
 каждый звук отдельно, `Saved/Listen`. Пересборка:
 
 ```
-python Scripts/jam_slide_sounds.py .work/donors <wav для игры> Saved/Listen <Saved/Listen ветки звука>
-JAM_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePythonScript="<repo>/Scripts/jam_import_audio.py" -unattended -nop4 -nosplash -nullrhi
+python Scripts/os_slide_sounds.py .work/donors <wav для игры> Saved/Listen <Saved/Listen ветки звука>
+OS_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe OuterSpace.uproject -ExecutePythonScript="<repo>/Scripts/os_import_audio.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 Прослушка в игровом времени (через лимитер −1 dBFS, как мастер):
@@ -223,24 +223,24 @@ JAM_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe MKJamStarter.uproject -Ex
 ## Лимитер на мастере
 
 Владелец 18.10: «ставь лимитер». `Config/DefaultEngine.ini`,
-`[/Script/Engine.AudioSettings] MasterSubmix=/Game/JamArt/Audio/Mix/SM_Jam_Master`:
-главный сабмикс игры — `SM_Jam_Master`, в его цепочке один эффект,
-`SMX_Jam_MasterLimiter` (`SubmixEffectDynamicsProcessorPreset`): тип Limiter,
+`[/Script/Engine.AudioSettings] MasterSubmix=/Game/OSArt/Audio/Mix/SM_OS_Master`:
+главный сабмикс игры — `SM_OS_Master`, в его цепочке один эффект,
+`SMX_OS_MasterLimiter` (`SubmixEffectDynamicsProcessorPreset`): тип Limiter,
 пик (Peak), связка каналов по пику (одно усиление на оба уха), порог −1 dB, колено
 0, look-ahead 5 мс, атака 1 мс, отпуск 60 мс, вход и выход 0 дБ, цифровой режим.
-Ассеты делает `Scripts/jam_master_limiter.py` (headless). Через него идёт весь
+Ассеты делает `Scripts/os_master_limiter.py` (headless). Через него идёт весь
 звук игры, не только стволы.
 
-Проба `jam.Audio.LimiterProbe [Gain] [TestThresholdDb]` (`JamAudioProbe.cpp`):
+Проба `os.Audio.LimiterProbe [Gain] [TestThresholdDb]` (`OSAudioProbe.cpp`):
 пишет в лог главный сабмикс живого аудиоустройства и его цепочку, затем 4 с
-записывает выход мастера (`Saved/BouncedWavFiles/JamLimiterProbe.wav`), пока
+записывает выход мастера (`Saved/BouncedWavFiles/OSLimiterProbe.wav`), пока
 пистолет стреляет 8 раз по 0.15 с, а СВ-98 — 3 раза через 0.1 с. Запуск:
-`-game -nullrhi -ExecCmds="jam.Audio.LimiterProbe 0.5 -12"
+`-game -nullrhi -ExecCmds="os.Audio.LimiterProbe 0.5 -12"
 -ini:Engine:[Audio]:UnfocusedVolumeMultiplier=1.0` (без последнего ключа запись
 фонового окна — тишина). Результаты 18.10:
 
-- лог движка: `Creating Master Submix 'SM_Jam_Master'`; проба: `device master
-  submix /Game/JamArt/Audio/Mix/SM_Jam_Master…, 1 effect(s)`, `SMX_Jam_MasterLimiter:
+- лог движка: `Creating Master Submix 'SM_OS_Master'`; проба: `device master
+  submix /Game/OSArt/Audio/Mix/SM_OS_Master…, 1 effect(s)`, `SMX_OS_MasterLimiter:
   ESubmixEffectDynamicsProcessorType::Limiter, threshold -1.0 dB, look-ahead 5.0 ms,
   attack 1.0 ms, release 60.0 ms, bypass 0`;
 - лимитер в тракте: при усилении 0.5 без лимитера (мастер подменён ключом
@@ -255,9 +255,9 @@ JAM_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe MKJamStarter.uproject -Ex
 - при обычной громкости (усиление 1) запись 16-битная и всё выше 0 dBFS
   обрезает в любом случае; очередь пистолета там −1.5 dBFS без лимитера.
 
-**С 19.10 вместо него — свой брикволл** (`UJamBrickwallPreset`,
-`Source/MindKore/JamBrickwall.h`, ассет `SMX_Jam_MasterBrickwall`, единственный
-эффект `SM_Jam_Master`; делает тот же `Scripts/jam_master_limiter.py`). Движковый
+**С 19.10 вместо него — свой брикволл** (`UOSBrickwallPreset`,
+`Source/MindKore/OSBrickwall.h`, ассет `SMX_OS_MasterBrickwall`, единственный
+эффект `SM_OS_Master`; делает тот же `Scripts/os_master_limiter.py`). Движковый
 динамический процессор следит за огибающей и пропускал суммы выстрелов до 0 dBFS:
 на настройках выше (а мельче атаки 1 мс он не позволяет) проба дала 1816 сэмплов
 выше −1 dBFS, дубль летунов с выстрелами и попаданиями — 62. Брикволл задерживает
@@ -265,21 +265,21 @@ JAM_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe MKJamStarter.uproject -Ex
 просит любой кадр в окне (нужда каждого плавно вводится за окно), отпуск
 экспоненциальный: потолок −1 dBFS, look-ahead 5 мс (столько же задержки у всего
 звука), отпуск 80 мс, без выходного усиления (громкость самого сабмикса 0 дБ).
-Замер 19.10: `jam.Audio.LimiterProbe` (усиление 1) — пик −1.00 dBFS, 0 сэмплов выше
-−1 dBFS; 26-секундный дубль `jam.Flyer.Clip` — пик −1.00, 0 сэмплов выше. Старый
-`SMX_Jam_MasterLimiter` скрипт ещё делает, но в цепочке его нет.
+Замер 19.10: `os.Audio.LimiterProbe` (усиление 1) — пик −1.00 dBFS, 0 сэмплов выше
+−1 dBFS; 26-секундный дубль `os.Flyer.Clip` — пик −1.00, 0 сэмплов выше. Старый
+`SMX_OS_MasterLimiter` скрипт ещё делает, но в цепочке его нет.
 
 ## Синхрон выстрела и звука (ветка `jam-sync`, 19.10)
 
 Владелец 19.10 на `main` eb431e6: «какой-то еще десинк между выстрелом и его звуком
-будто бы». Замер: `jam.Sync.Probe [Shots] [Ffmpeg]` (`JamSyncProbe.cpp`) в
-`-game -windowed -ResX=1280 -ResY=720 -ExecCmds="jam.Sync.Probe 3"
+будто бы». Замер: `os.Sync.Probe [Shots] [Ffmpeg]` (`OSSyncProbe.cpp`) в
+`-game -windowed -ResX=1280 -ResY=720 -ExecCmds="os.Sync.Probe 3"
 -ini:Engine:[Audio]:UnfocusedVolumeMultiplier=1.0` убирает летунов, по очереди берёт
 пистолет, дробовик и СВ-98 и стреляет одиночными через 3.5 с, записывая видео и
-главный сабмикс (`JamClipRecorder`, `Saved/Clips/SyncProbe.mp4/.wav`), а на каждый кадр
+главный сабмикс (`OSClipRecorder`, `Saved/Clips/SyncProbe.mp4/.wav`), а на каждый кадр
 — номер кадра видео, время платформы и позу ствола в камере (`SyncFrames.csv`); в лог
-— время `Fire()` (в нём и `PlaySound2D`, и вспышка `UJamMuzzleFxComponent::Shot`).
-`python Scripts/jam_sync_reduce.py Saved/Clips <лог>` даёт по выстрелу: когда звук
+— время `Fire()` (в нём и `PlaySound2D`, и вспышка `UOSMuzzleFxComponent::Shot`).
+`python Scripts/os_sync_reduce.py Saved/Clips <лог>` даёт по выстрелу: когда звук
 смикширован (огибающая 5 мс на 10 dB выше уровня в момент выстрела; вся полоса и выше
 300 Гц, где щелчок), в каком кадре вспышка, когда пик отдачи. Время звука — до
 устройства: запись идёт после цепочки мастера (5 мс брикволла уже внутри), дальше
@@ -300,9 +300,9 @@ JAM_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe MKJamStarter.uproject -Ex
    касается всех звуков игры.
 2. **Щелчок внутри ассета опаздывал на 14–39 мс.** Тишины в начале нет (первый сэмпл
    выше −40 dBFS — до 0.5 мс: суб слоя начинается в 0), но вырезки доноров в
-   `jam_space_shots.py` начинались раньше атаки донора (231248 — на 14 мс, 427595 — на
+   `os_space_shots.py` начинались раньше атаки донора (231248 — на 14 мс, 427595 — на
    34, 450853 — на 22, 427592 — на 20). Начало вырезки теперь за 2 мс до первого сэмпла
-   донора выше −20 dBFS; полоса выше 300 Гц в `SW_Jam_Shot_*` — от 14.3 / 38.9 / 25.6 мс
+   донора выше −20 dBFS; полоса выше 300 Гц в `SW_OS_Shot_*` — от 14.3 / 38.9 / 25.6 мс
    до 0.6 / 0.7 / 0.0 мс. Длительности после импорта 1.96 / 3.02 / 4.89 с.
 3. **Буфер устройства.** Движок по умолчанию: `AudioCallbackBufferFrameSize=1024`,
    `AudioNumBuffersToEnqueue=1`, 48 кГц; WASAPI просит 1920 кадров (40 мс). Теперь в
@@ -334,11 +334,11 @@ JAM_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe MKJamStarter.uproject -Ex
 что скафандр срезает, — и всё идёт в короткую металлическую комнату. Механизмы — только
 лёгкий подъём высоких и та же комната.
 
-**Где решается.** Одно место: `UJamWeaponsComponent::IsInAir()` — дышит ли владелец
-(`UJamOxygenComponent::IsBreathable`, его каждый тик пишет `AJamShipGameMode::Tick` из
-`JamAirZoneAt`; летуны читают то же самое). Второго писателя нет; нет компонента кислорода
+**Где решается.** Одно место: `UOSWeaponsComponent::IsInAir()` — дышит ли владелец
+(`UOSOxygenComponent::IsBreathable`, его каждый тик пишет `AOSShipGameMode::Tick` из
+`OSAirZoneAt`; летуны читают то же самое). Второго писателя нет; нет компонента кислорода
 (персонаж тестовой комнаты) — вакуум. Каждый звук ствола начинается в
-`PlayShotSound` / `PlayGunSound` (`JamWeaponParts.cpp`) и читает среду один раз, в начале.
+`PlayShotSound` / `PlayGunSound` (`OSWeaponParts.cpp`) и читает среду один раз, в начале.
 
 **Шлюз.** Звук, который уже играет, остаётся в той среде, где начался: хвост комнаты
 ~0.5 с, а шлюз (две двери) так быстро не пройти. Следующий звук после перехода — уже в
@@ -350,13 +350,13 @@ JAM_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe MKJamStarter.uproject -Ex
 
 | | Вакуум | Воздух |
 |---|---|---|
-| Выстрел | `ShotSound` как был | `ShotSound` как был + `ShotAirSound` (`SW_Jam_ShotAir_<ствол>`) с той же высотой; оба с посылом в комнату |
-| Механизмы, магазины, затворная задержка, сухой щелчок, кобура и ремень | как были | через `SEC_Jam_GunAirLift` (EQ +3 дБ на 3.5 кГц, ширина 1.5 октавы) и с посылом в комнату |
+| Выстрел | `ShotSound` как был | `ShotSound` как был + `ShotAirSound` (`SW_OS_ShotAir_<ствол>`) с той же высотой; оба с посылом в комнату |
+| Механизмы, магазины, затворная задержка, сухой щелчок, кобура и ремень | как были | через `SEC_OS_GunAirLift` (EQ +3 дБ на 3.5 кГц, ширина 1.5 октавы) и с посылом в комнату |
 
 Посыл один на все звуки ствола: `AirReverbSend` 0.3. Громкость выстрела-«скафандра» в
 воздухе не трогается: в игре до мастера всё равно хватает запаса (ниже).
 
-**Щелчок воздуха** (`Scripts/jam_air_sounds.py`). Первые миллисекунды того же донора, что
+**Щелчок воздуха** (`Scripts/os_air_sounds.py`). Первые миллисекунды того же донора, что
 у выстрела (231248, 427595, 450853 — CC0, CREDITS), со своими высокими: атака держится
 3–8 мс, затем быстрый спад (τ 22 / 35 / 60 мс), поэтому комната и эхо донора не приходят —
 комнату даёт игра. ФВЧ 700 / 1200 / 1800 Гц (вес — у слоя скафандра), ФНЧ 10–12 кГц (сверху
@@ -366,10 +366,10 @@ JAM_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe MKJamStarter.uproject -Ex
 2D приходит на мастер на 6 дБ тише стерео (замер ниже). Длина 0.12 / 0.18 / 0.25 с, пик
 −1 / −2 / −1 dBFS.
 
-### Комната: своя, а не `SM_Jam_AirReverb`
+### Комната: своя, а не `SM_OS_AirReverb`
 
-`SM_Jam_CabinReverb` ← `SMX_Jam_CabinReverb` (свёртка, блок 256 кадров = 5 мс) ←
-`IR_Jam_Cabin` (`Scripts/jam_air_audio.py`; отсчёты заливает `UJamAudioTools::SetImpulseResponse`
+`SM_OS_CabinReverb` ← `SMX_OS_CabinReverb` (свёртка, блок 256 кадров = 5 мс) ←
+`IR_OS_Cabin` (`Scripts/os_air_audio.py`; отсчёты заливает `UOSAudioTools::SetImpulseResponse`
 — Python их не пишет). Почему не реверб летунов: он на 1.1 с и тёмный (верх гаснет первым) —
 большое пространство, а каюта — 6 × 5 × 3 м металла; щелчку он почти ничего не даёт
 («комната отдельно» в дубле B: +0.0 LU к сухому, звенит 685 мс). И это движковая пластина
@@ -386,15 +386,15 @@ RT60 0.55 с (T20 × 3 по IR в полосе 500 Гц – 4 кГц — 0.54 с
 шумом, не отводами). Энергия IR выше 700 Гц — 81 %, выше 2 кГц — 40 %. Слой ниже 150 Гц в
 комнату не идёт: саб и тело остаются сухими.
 
-Вариант B (только для прослушки): та же схема, но комната — `SM_Jam_AirReverb` летунов
-(`jam.Weapons.AirTake B`).
+Вариант B (только для прослушки): та же схема, но комната — `SM_OS_AirReverb` летунов
+(`os.Weapons.AirTake B`).
 
 ### Уровни и лимитер
 
 Замер на дубле (ниже): **каждый 2D-звук ствола приходит на мастер на 3.1 дБ тише своего
 файла в каждом канале, моно-волна — на 9.1 дБ** (подгонка по корреляции с файлом:
-`SW_Jam_SlideHome_Pistol` −3.1 дБ, моно-щелчок −9.1). Поэтому щелчок в стерео, а моки
-`jam_air_sounds.py` считают с этими −3.1 дБ. Выстрелы-«скафандры» в игре стоят на
+`SW_OS_SlideHome_Pistol` −3.1 дБ, моно-щелчок −9.1). Поэтому щелчок в стерео, а моки
+`os_air_sounds.py` считают с этими −3.1 дБ. Выстрелы-«скафандры» в игре стоят на
 −6.9 / −2.5 / −2.2 dBFS, и щелчок встаёт на них без продавливания брикволла.
 
 Офлайн-моки (`Saved/Listen/air/INDEX.txt`, через лимитер −1 dBFS с −3.1 дБ игры):
@@ -403,9 +403,9 @@ RT60 0.55 с (T20 × 3 по IR в полосе 500 Гц – 4 кГц — 0.54 с
 
 ### Замеры в игре (20.10)
 
-`jam.Weapons.AirTake` (`-game -nullrhi`, со звуком, `UnfocusedVolumeMultiplier=1.0`) на
-`Lvl_Jam_Ship`: одна и та же последовательность в каюте и в 3 м за шлюзом; разбор —
-`Scripts/jam_air_reduce.py`. Дубль A (комната каюты), воздух / вакуум:
+`os.Weapons.AirTake` (`-game -nullrhi`, со звуком, `UnfocusedVolumeMultiplier=1.0`) на
+`Lvl_OS_Ship`: одна и та же последовательность в каюте и в 3 м за шлюзом; разбор —
+`Scripts/os_air_reduce.py`. Дубль A (комната каюты), воздух / вакуум:
 
 | Событие | Пик, dBFS | LUFS-M max | Энергия выше 2 кГц | Брикволл в воздухе, мин. усиление |
 |---|---|---|---|---|
@@ -425,11 +425,11 @@ RT60 0.55 с (T20 × 3 по IR в полосе 500 Гц – 4 кГц — 0.54 с
 визг на ~6 дБ ([Flyers — Микс](Flyers.md)); в воздухе свой выстрел громче ещё на 0.2–2 LU, так
 что свой ствол остаётся громче всего. Вместе с летунами в воздухе не записано.
 
-**Синхрон.** `jam.Weapons.AirTake sync`: 16 одиночных выстрелов пистолета, каюта и улица
+**Синхрон.** `os.Weapons.AirTake sync`: 16 одиночных выстрелов пистолета, каюта и улица
 по очереди; от `Fire()` до звука в записи (огибающая 5 мс на 10 дБ выше прежнего уровня; общий
 сдвиг начала записи в обоих одинаков): воздух 16.5 мс (14.9–16.9, 8 выстрелов), вакуум 21.9
 (21.2–22.6, 8) — с щелчком атака читается раньше, задержки путь воздуха не добавляет.
-`jam.Sync.Probe 3` (вакуум, `Lvl_Jam_ZeroG`, `-RenderOffscreen`), два дубля: звук от `Fire()`
+`os.Sync.Probe 3` (вакуум, `Lvl_OS_ZeroG`, `-RenderOffscreen`), два дубля: звук от `Fire()`
 у пистолета 47 и 53 мс на первом выстреле, 7–23 мс дальше; дробовик 10–18 (выше 300 Гц
 13–21, один раз 40); СВ-98 12–24 — в пределах чисел 19.10, вспышка в том же кадре.
 
@@ -438,15 +438,15 @@ RT60 0.55 с (T20 × 3 по IR в полосе 500 Гц – 4 кГц — 0.54 с
 `AirTake_A.wav`, `AirTake_B.wav`. Время в файлах каждой среды одно: пистолет 0.5 с,
 очередь 2.0, смена на дробовик 4.0, выстрел 5.5, смена на СВ-98 8.0, выстрел 9.5, смена на
 пистолет 14.5, последний патрон 16.0, пустая перезарядка 17.0, комната отдельно 19.0.
-Без игры — `Saved/Listen/air`: каждый щелчок, `IR_Jam_Cabin.wav`, `Mock_<ствол>_air/vacuum.wav`.
+Без игры — `Saved/Listen/air`: каждый щелчок, `IR_OS_Cabin.wav`, `Mock_<ствол>_air/vacuum.wav`.
 
 Пересборка:
 
 ```
-python Scripts/jam_space_shots.py <доноры> <wav для игры> Saved/Listen    # Donor_<id>_dry.wav
-python Scripts/jam_air_sounds.py Saved/Listen .work/air_wav Saved/Listen/air
-JAM_WAV_DIR=.work/air_wav UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePythonScript="<repo>/Scripts/jam_import_audio.py" -unattended -nop4 -nosplash -nullrhi
-JAM_WAV_DIR=.work/air_wav UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePythonScript="<repo>/Scripts/jam_air_audio.py" -unattended -nop4 -nosplash -nullrhi
+python Scripts/os_space_shots.py <доноры> <wav для игры> Saved/Listen    # Donor_<id>_dry.wav
+python Scripts/os_air_sounds.py Saved/Listen .work/air_wav Saved/Listen/air
+OS_WAV_DIR=.work/air_wav UnrealEditor-Cmd.exe OuterSpace.uproject -ExecutePythonScript="<repo>/Scripts/os_import_audio.py" -unattended -nop4 -nosplash -nullrhi
+OS_WAV_DIR=.work/air_wav UnrealEditor-Cmd.exe OuterSpace.uproject -ExecutePythonScript="<repo>/Scripts/os_air_audio.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 Ограничение: в воздушной оболочке планетоида ствол тоже звучит металлической комнатой —
@@ -454,7 +454,7 @@ JAM_WAV_DIR=.work/air_wav UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePyt
 
 ## Подключение
 
-У `FJamWeapon` поля `ShotSound`, `ShotAirSound`, `CycleSound`, `CycleDelaySeconds`, `EmptySound`.
+У `FOSWeapon` поля `ShotSound`, `ShotAirSound`, `CycleSound`, `CycleDelaySeconds`, `EmptySound`.
 `Fire` играет выстрел через `PlayShotSound` 2D с высотой 0.97–1.03 (в воздухе — и
 `ShotAirSound` с той же высотой); все прочие звуки ствола — через `PlayGunSound`
 («В воздухе»). `CycleSound` начинается, когда
@@ -474,8 +474,8 @@ JAM_WAV_DIR=.work/air_wav UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePyt
 Пересборка:
 
 ```
-python Scripts/jam_space_shots.py <доноры> <wav для игры> Saved/Listen
-JAM_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePythonScript="<repo>/Scripts/jam_import_audio.py" -unattended -nop4 -nosplash -nullrhi
+python Scripts/os_space_shots.py <доноры> <wav для игры> Saved/Listen
+OS_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe OuterSpace.uproject -ExecutePythonScript="<repo>/Scripts/os_import_audio.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 `Saved/Listen` (не в репозитории): `<звук>_space.wav` — все варианты (A, B, C);
@@ -489,9 +489,9 @@ JAM_WAV_DIR=<wav для игры> UnrealEditor-Cmd.exe MKJamStarter.uproject -Ex
 Проверка (18.10, `jam-weapons-sound` после слияния `origin/main`): сборка
 (`-NoHotReloadFromIDE`: Live Coding чужого редактора основной копии блокирует
 UBT во всех копиях проекта, а наши модули собираются в свою `Binaries`); импорт
-8 из 8, `SW_Jam_Shot_*` — длительности C (1.97 / 3.06 / 4.81 с).
-`jam.Wall.Probe` (`-game -nullrhi`, звук включён, лимитер на мастере):
-`Пистолет fired … SW_Jam_Shot_Pistol`, `Дробовик fired … SW_Jam_Shot_Shotgun` и
-через 0.150 с `cycle SW_Jam_Pump_Shotgun` — три раза из трёх; ошибок `LogAudio`
+8 из 8, `SW_OS_Shot_*` — длительности C (1.97 / 3.06 / 4.81 с).
+`os.Wall.Probe` (`-game -nullrhi`, звук включён, лимитер на мастере):
+`Пистолет fired … SW_OS_Shot_Pistol`, `Дробовик fired … SW_OS_Shot_Shotgun` и
+через 0.150 с `cycle SW_OS_Pump_Shotgun` — три раза из трёх; ошибок `LogAudio`
 нет. Щелчок пустого магазина пробами не вызывается — не проверен. **На слух в
 игре не проверено** — оценивать по `Saved/Listen`.

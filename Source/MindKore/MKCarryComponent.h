@@ -102,7 +102,7 @@ public:
 	 * UMKHandsComponent::RefreshCarryGate; the carrier only refuses to start a
 	 * grab while it is set. BlueprintReadWrite is historical - no Blueprint may
 	 * write it, or the hands owner and that Blueprint fight every frame.
-	 * Jam lift: nothing in the starter writes it (UMKHandsComponent is not lifted).
+	 * OS lift: nothing in the starter writes it (UMKHandsComponent is not lifted).
 	 */
 	UPROPERTY(Transient, BlueprintReadWrite, Category = "MindKore|Carry")
 	bool bHandsBusy = false;

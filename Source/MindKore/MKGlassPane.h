@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-// Jam lift: MKBodyResponseComponent.h replaced by MKImpactHistory.h - only FMKImpactHistory was used; the body response is not lifted.
+// OS lift: MKBodyResponseComponent.h replaced by MKImpactHistory.h - only FMKImpactHistory was used; the body response is not lifted.
 #include "MKImpactHistory.h"
 #include "MKGlassFracture.h"
 #include "MKGlassShardDebris.h"

@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-// Jam lift: MKHands.h include cut - the hands/slot owner is not lifted; the crowbar is the MK.Crowbar actor tag (MKFastenerCrowbarTag).
+// OS lift: MKHands.h include cut - the hands/slot owner is not lifted; the crowbar is the MK.Crowbar actor tag (MKFastenerCrowbarTag).
 #include "MKInteractable.h"
 #include "MKFastener.generated.h"
 
@@ -18,7 +18,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMKFastenerPried, AMKFastener*, Fast
 UENUM(BlueprintType)
 enum class EMKFastenerOffer : uint8
 {
-	/** Already pried, or no hand. (Jam lift: the "no UMKHandsComponent" case is gone with the hands owner.) */
+	/** Already pried, or no hand. (OS lift: the "no UMKHandsComponent" case is gone with the hands owner.) */
 	None,
 	Available,
 	/** The crowbar has not been taken. */
@@ -37,7 +37,7 @@ enum class EMKFastenerOffer : uint8
 inline FName MKFastenerCrowbarTag() { return FName(TEXT("MK.Crowbar")); }
 
 /**
- * Jam lift: the hands/slot inputs (bHasHands, EMKHandsSlot) cut - MindKore's
+ * OS lift: the hands/slot inputs (bHasHands, EMKHandsSlot) cut - MindKore's
  * hands owner is not lifted, so "crowbar in hand" is one bool. RefuseHandsBusy
  * and RefuseToolNotInHand stay in the enum but this rule no longer returns them.
  */

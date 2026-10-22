@@ -25,7 +25,7 @@
 ## Лом = тег
 
 У MindKore «лом в руках» — слот рук. Здесь это **тег актора `MK.Crowbar`**
-на том, кто взаимодействует (`MKFastenerCrowbarTag()`). `AJamZeroGPawn`
+на том, кто взаимодействует (`MKFastenerCrowbarTag()`). `AOSZeroGPawn`
 переключает его клавишей G (`ToggleCrowbar`, отладочный тумблер — подбора
 лома нет); в игре его надо выдавать при подборе лома
 (`Tags.AddUnique(MKFastenerCrowbarTag())`).

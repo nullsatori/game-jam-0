@@ -12,7 +12,7 @@
 |---|---|
 | `MKTimeDomainState.h` | `FMKTimeDomainState` — чистая машина состояний, тратит только реальное время |
 | `MKTimeDomainSubsystem.h/.cpp` | `UMKTimeDomainSubsystem` — единственный, кто пишет `TimeDilation` |
-| `JamZeroGPawn.cpp` (`UpdateBulletTimePresentation`, `BulletTimePressed/Released`) | порт ~40 строк из `MKCameraBulletTime.cpp`: звук входа/выхода, MID (копия того же кода в legacy `JamCharacter.cpp`) |
+| `OSZeroGPawn.cpp` (`UpdateBulletTimePresentation`, `BulletTimePressed/Released`) | порт ~40 строк из `MKCameraBulletTime.cpp`: звук входа/выхода, MID (копия того же кода в legacy `OSCharacter.cpp`) |
 
 ## Как пользоваться
 
@@ -22,7 +22,7 @@
   досрочный выход по решающему попаданию владельца (в стартере не вызывается).
 - Пост-эффект: `M_MK_BulletTime`, скалярные параметры `Amount` (= альфа
   замедления), `EntryAge`, `ArcVisible` (всегда 0), `Aspect`. В
-  `AJamZeroGPawn` MID лежит в `Camera->PostProcessSettings.WeightedBlendables`,
+  `AOSZeroGPawn` MID лежит в `Camera->PostProcessSettings.WeightedBlendables`,
   вес 1 пока альфа > 0.
 
 ## Зависимости и конфиг

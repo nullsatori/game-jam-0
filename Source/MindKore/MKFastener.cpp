@@ -27,7 +27,7 @@ AMKFastener::AMKFastener()
 
 EMKFastenerOffer AMKFastener::ResolveOffer(const AActor* Hand) const
 {
-	// Jam lift: UMKHandsComponent slot/tool-ready checks cut - the crowbar is the MK.Crowbar tag on the hand.
+	// OS lift: UMKHandsComponent slot/tool-ready checks cut - the crowbar is the MK.Crowbar tag on the hand.
 	if (!Hand)
 	{
 		return EMKFastenerOffer::None;
@@ -44,7 +44,7 @@ FMKInteractionOffer AMKFastener::QueryInteraction(const AActor* Hand) const
 	case EMKFastenerOffer::RefuseNoTool:
 		return FMKInteractionOffer::Refused(ActionLabel, NoToolReason);
 	case EMKFastenerOffer::RefuseHandsBusy:
-		// Jam lift: MKHandsBusyText() (MKHands) replaced by a local text.
+		// OS lift: MKHandsBusyText() (MKHands) replaced by a local text.
 		return FMKInteractionOffer::Refused(ActionLabel, LOCTEXT("HandsBusy", "руки заняты"));
 	case EMKFastenerOffer::RefuseToolNotInHand:
 		return FMKInteractionOffer::Refused(ActionLabel, ToolNotInHandReason);

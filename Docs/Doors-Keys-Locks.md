@@ -35,7 +35,7 @@
   `NavLink` (smart link для ИИ, необязателен).
 - Ключ: `AMKKeyPickup`, `KeyId` = тот же FName, меш (например
   `SM_MK_Yard_KeyTag`, висит **ниже** своего pivot на 0.6–19 см). У того, кто
-  берёт, должен быть `UMKKeyringComponent` (у `AJamZeroGPawn` есть).
+  берёт, должен быть `UMKKeyringComponent` (у `AOSZeroGPawn` есть).
 
 ## Зависимости и конфиг
 
@@ -57,7 +57,7 @@ AIModule, NavigationSystem (путь ИИ, nav link). Конфиг не нуже
 замыкание ссылок проверено: только `/Game/MindKore` и `/Engine`.
 # Шлюз импортированного корабля
 
-На `Lvl_Jam_Ship` створки `D8_CLOSED_Leaf` и `D9_CLOSED_Leaf` подключены
+На `Lvl_OS_Ship` створки `D8_CLOSED_Leaf` и `D9_CLOSED_Leaf` подключены
 к существующим `MKDoor` как `Airlock_D8` (внешняя) и `Airlock_D9` (внутренняя).
 Навести на створку в пределах досягаемости и нажать F: открыть/закрыть.
 Текущая привязка — `IA_ZG_Use` → `F`, подсказка `[F]`.

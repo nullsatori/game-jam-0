@@ -1,4 +1,4 @@
-"""Plot a gun's aim springs from a jam.Scope.Trace log (jam.Scope.AimFrames).
+"""Plot a gun's aim springs from a os.Scope.Trace log (os.Scope.AimFrames).
 
   python -I Scripts/plot_scope_aim.py <log> <out.png> [gun]   (gun: 0 pistol, 1 pump gun, 2 SV-98; default 2)
 """
@@ -78,7 +78,7 @@ for aim, seg in runs.items():
 idle = [seg for seg in segments if int(seg[0][1]) == 1 and seg[-1][0] - seg[0][0] > 3.0]
 if idle:
     seg = max(idle, key=lambda s2: s2[-1][0] - s2[0][0])
-    seg = [r for r in seg if r[0] - seg[0][0] > 2.6]  # after the raise and the look turn (jam.Scope.AimFrames)
+    seg = [r for r in seg if r[0] - seg[0][0] > 2.6]  # after the raise and the look turn (os.Scope.AimFrames)
     fig3, ax3 = plt.subplots(figsize=(9, 4))
     for i, name in enumerate(("pitch", "yaw", "roll")):
         ax3.plot([r[0] - seg[0][0] for r in seg], [r[5 + i] for r in seg], label=name)

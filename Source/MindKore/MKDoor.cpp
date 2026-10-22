@@ -7,7 +7,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
-// Jam lift: MKDeviceHUD.h and MKEnemyCharacter.h includes cut - no device HUD, no MindKore enemy in the starter.
+// OS lift: MKDeviceHUD.h and MKEnemyCharacter.h includes cut - no device HUD, no MindKore enemy in the starter.
 #include "MKKeyring.h"
 #include "Navigation/NavLinkProxy.h"
 #include "Navigation/PathFollowingComponent.h"
@@ -39,7 +39,7 @@ AMKDoor::AMKDoor()
 	// Visibility and must stop on it, not on the frame behind.
 	Leaf->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 
-	// Jam lift: HandleAnchor creation cut - device HUD framing only (see MKDoor.h).
+	// OS lift: HandleAnchor creation cut - device HUD framing only (see MKDoor.h).
 
 	AiOpenVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("AiOpenVolume"));
 	AiOpenVolume->SetupAttachment(Root);
@@ -75,7 +75,7 @@ void AMKDoor::BeginPlay()
 	{
 		AiOpenVolume->SetRelativeLocation(FVector(0.0f, Width * 0.5f, 100.0f));
 		AiOpenVolume->SetBoxExtent(FVector(140.0f, Width * 0.5f + 10.0f, 100.0f));
-		// Jam lift: HandleAnchor placement cut - device HUD framing only.
+		// OS lift: HandleAnchor placement cut - device HUD framing only.
 	}
 	ApplyNavigationFootprint();
 }
@@ -413,7 +413,7 @@ void AMKDoor::Tick(float DeltaSeconds)
 		{
 			AiOpenRetryAccumulator = 0.0f;
 			TArray<AActor*> Near;
-			// Jam lift: AMKEnemyCharacter filter replaced by APawn - any AI pawn; IsOnRouteOf already refuses a pawn without an AAIController, so the player never pushes it.
+			// OS lift: AMKEnemyCharacter filter replaced by APawn - any AI pawn; IsOnRouteOf already refuses a pawn without an AAIController, so the player never pushes it.
 			AiOpenVolume->GetOverlappingActors(Near, APawn::StaticClass());
 			for (AActor* Walker : Near)
 			{

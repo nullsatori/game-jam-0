@@ -1,7 +1,7 @@
 # Рысь (RMB-93): арт и табло — работа GPT 21.10
 
 Модель Рыси, её текстуры и газоразрядное табло патронов сделал GPT 20–21.10 в
-локальной копии владельца (`Documents\MKJamStarter`), без коммитов. Эта страница
+локальной копии владельца (`Documents\OuterSpace`), без коммитов. Эта страница
 говорит, что из этого есть, где лежит и как пересобрать. Код ствола и его
 анимации — [RecoilWeapons](RecoilWeapons.md); табло как система —
 [Nixie](Nixie.md); подбор на тестовой карте — [ShipMode](ShipMode.md).
@@ -17,13 +17,13 @@
 - **Текстуры:** Body BC / N / ORM 4096², Masks 1024²; Counter 512²; атлас цифр
   1024². N — DirectX. Исходные фактуры металла и композита сгенерированы
   (`image_gen`), это не PBR-сканы.
-- **В проекте:** `Content/JamArt/Weapons/RMB93` — `SM_Jam_RMB93_ViewBody`
-  (табло в слоте материала 1), `SM_Jam_RMB93_Action`, `SM_Jam_RMB93_World`,
-  `M_Jam_RMB93_Body` и три текстуры. Импорт —
-  [`Scripts/jam_rmb93_assets.py`](../Scripts/jam_rmb93_assets.py) (берёт FBX и
+- **В проекте:** `Content/OSArt/Weapons/RMB93` — `SM_OS_RMB93_ViewBody`
+  (табло в слоте материала 1), `SM_OS_RMB93_Action`, `SM_OS_RMB93_World`,
+  `M_OS_RMB93_Body` и три текстуры. Импорт —
+  [`Scripts/os_rmb93_assets.py`](../Scripts/os_rmb93_assets.py) (берёт FBX и
   PNG из `ArtSource/Weapons/RMB93/v02/exports` и `textures`).
-- **Табло Nixie:** общий материал `M_Jam_Nixie`, `MI_Jam_Nixie_RMB93`, пример
-  `BP_Jam_NixieDisplay`, компонент `UJamNixieCounterComponent`. Шейдер — HLSL
+- **Табло Nixie:** общий материал `M_OS_Nixie`, `MI_OS_Nixie_RMB93`, пример
+  `BP_OS_NixieDisplay`, компонент `UOSNixieCounterComponent`. Шейдер — HLSL
   `ArtSource/Instruments/Nixie/UE_Nixie.usf`, материал собирает
   `build_ue_nixie.py`, атлас цифр — `build_sdf.py`. Подробно — [Nixie](Nixie.md).
 - **Брифы и ревью:** лист моделлера и контракт ассета v01
@@ -39,8 +39,8 @@
 `ArtSource/` целиком в `.gitignore` ([Development](Development.md), «Git LFS»):
 скрипты Blender, HLSL табло и его сборщики, `.blend`, FBX, PNG-текстуры,
 рендеры, просмотрщик и проверки GPT лежат только на ПК владельца в
-`Documents\MKJamStarter\ArtSource`. В git — то, что нужно игре и чтению: ассеты
-в `Content/`, импорт `Scripts/jam_rmb93_assets.py` и `jam_nixie_test_room.py`,
+`Documents\OuterSpace\ArtSource`. В git — то, что нужно игре и чтению: ассеты
+в `Content/`, импорт `Scripts/os_rmb93_assets.py` и `os_nixie_test_room.py`,
 код компонента, эта страница, [Nixie](Nixie.md) и брифы с ревью в
 [Docs/Art/RMB93](Art/RMB93/v01/README.md) (только текст; листы моделлера в PDF,
 рендеры и сгенерированные картинки — там же на ПК). Ссылки на `ArtSource/` в
@@ -57,10 +57,10 @@
    `ArtSource/Weapons/RMB93/v02/source/` перезаписывают только свои результаты
    v02 — ручную доработку в `.blend` сначала скопировать. Порядок и проверки —
    README модели `ArtSource/Weapons/RMB93/v02/README.md`.
-2. Импорт в UE: `jam_rmb93_assets.build()` в редакторе. Уже импортированные
+2. Импорт в UE: `os_rmb93_assets.build()` в редакторе. Уже импортированные
    ассеты он не трогает, для повторного импорта их сначала удалить.
 3. Табло: `ArtSource/Instruments/Nixie/build_sdf.py`, затем
-   `build_ue_nixie.py` в редакторе; проверка — `jam.Nixie.Probe`.
+   `build_ue_nixie.py` в редакторе; проверка — `os.Nixie.Probe`.
 4. Тестовая карта: `Scripts/build_test_room.py` (вызывает
-   `jam_nixie_test_room.py`); проверка подбора — `jam.Nixie.WeaponProbe`
+   `os_nixie_test_room.py`); проверка подбора — `os.Nixie.WeaponProbe`
    ([Probes](Probes.md)).

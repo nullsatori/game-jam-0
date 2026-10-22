@@ -6,29 +6,36 @@
    Клонировать репозиторий и выполнить в PowerShell `.\Scripts\setup_git.ps1`
    (что он настраивает — в разделе [Git LFS](#git-lfs)). Без него LFS выдаёт
    блокируемые `.uasset`/`.umap` только для чтения: редактор их не сохранит,
-   а скрипты упадут на `jam_build.save`.
-2. Открыть `MKJamStarter.uproject`. Редактор предложит собрать модуль —
-   согласиться. Можно собрать и из PowerShell:
+   а скрипты упадут на `os_build.save`.
+2. Открыть `OuterSpace.uproject`. Редактор предложит собрать модуль —
+   согласиться. Можно собрать и без редактора: `Scripts\build.bat` (двойной
+   клик или из консоли). Он сам находит движок по `EngineAssociation` из
+   `.uproject` через реестр (или берёт `UE_ROOT`, если задана), собирает
+   `OuterSpaceEditor Win64 Development` и ждёт клавишу в конце. Аргументы:
+   `game` — цель игры `OuterSpace` (перед cook), `DebugGame`/`Shipping` —
+   другая конфигурация, `-nopause` — без паузы. Если редактор этого checkout
+   открыт с Live Coding, сборка редактора откажется: закрыть его или нажать в
+   нём Ctrl+Alt+F11. То же вручную из PowerShell:
 
    ```powershell
-   & "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" MKJamStarterEditor Win64 Development -Project="<путь>\MKJamStarter.uproject" -WaitMutex
+   & "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" OuterSpaceEditor Win64 Development -Project="<путь>\OuterSpace.uproject" -WaitMutex
    ```
 
-Карты `Lvl_Jam_ZeroG`, `Lvl_Jam_Range` и `Lvl_Jam_TestRoom` собираются с нуля
+Карты `Lvl_OS_ZeroG`, `Lvl_OS_Range` и `Lvl_OS_TestRoom` собираются с нуля
 скриптами `Scripts/build_zerog.py`, `build_range.py` и `build_test_room.py`:
 
 ```
-UnrealEditor-Cmd.exe <путь>\MKJamStarter.uproject -ExecutePythonScript="<путь>/Scripts/build_zerog.py" -unattended -nop4 -nosplash -nullrhi
+UnrealEditor-Cmd.exe <путь>\OuterSpace.uproject -ExecutePythonScript="<путь>/Scripts/build_zerog.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
-`Lvl_Jam_Ship` с 18.10 правится руками в редакторе. `Scripts/build_ship.py`
+`Lvl_OS_Ship` с 18.10 правится руками в редакторе. `Scripts/build_ship.py`
 пересоздаёт карту с нуля и сотрёт эту работу — не запускать. Добавлять в неё
 можно только скриптами, которые трогают лишь свои акторы (как
-`Scripts/jam_flyers.py`). Перед правкой карты — `git pull`: `.umap` двоичный и не
+`Scripts/os_flyers.py`). Перед правкой карты — `git pull`: `.umap` двоичный и не
 сливается.
 
 Материалы плоти и живой стены скрипты карт берут готовыми. Граф пересобирается
-только с флагом `rebuild=True` (`jam_flesh.materials`, `jam_living_wall.material`)
+только с флагом `rebuild=True` (`os_flesh.materials`, `os_living_wall.material`)
 в отдельном запуске редактора: опустошать граф загруженного мастера нельзя
 (assert `!IsRooted`).
 
@@ -36,25 +43,25 @@ UnrealEditor-Cmd.exe <путь>\MKJamStarter.uproject -ExecutePythonScript="<п�
 
 Арт планетоида и живой стены делают скрипты Blender (`Scripts/blender/*.py`,
 `blender.exe -b --python <скрипт> -- <папка для FBX>`), FBX импортирует
-`Scripts/jam_import_meshes.py`; в репозитории только `.uasset`.
+`Scripts/os_import_meshes.py`; в репозитории только `.uasset`.
 
 Модуль называется `MindKore`: так перенесённый код работает без правок.
-Новый код — файлы `Jam*.h/.cpp` в `Source/MindKore`.
+Новый код — файлы `OS*.h/.cpp` в `Source/MindKore`.
 
 ## Как собрать сдачу
 
-Win64 Development: в ней работают консоль `jam.*` и линии `DrawDebug` (см.
+Win64 Development: в ней работают консоль `os.*` и линии `DrawDebug` (см.
 пробелы). Из PowerShell, при закрытом редакторе этого checkout, после сборки
 редактора из раздела «Открыть и собрать» (cook работает через него):
 
 ```powershell
-$p = "<путь>\MKJamStarter.uproject"
-& "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" MKJamStarter Win64 Development "-Project=$p" -WaitMutex -NoHotReloadFromIDE
-& "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun "-project=$p" -noP4 -platform=Win64 -clientconfig=Development -skipbuild -nocompileeditor -cook -stage -pak -nodebuginfo -map=Lvl_Jam_Ship+Lvl_Jam_Range+Lvl_Jam_ZeroG+Lvl_Jam_TestRoom "-stagingdirectory=<папка вне репозитория>" -unattended -utf8output
+$p = "<путь>\OuterSpace.uproject"
+& "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" OuterSpace Win64 Development "-Project=$p" -WaitMutex -NoHotReloadFromIDE
+& "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun "-project=$p" -noP4 -platform=Win64 -clientconfig=Development -skipbuild -nocompileeditor -cook -stage -pak -nodebuginfo -map=Lvl_OS_Ship+Lvl_OS_Range+Lvl_OS_ZeroG+Lvl_OS_TestRoom "-stagingdirectory=<папка вне репозитория>" -unattended -utf8output
 ```
 
-Сдаётся папка `<папка>\Windows` целиком, запуск — `MKJamStarter.exe`
-(стартовая карта `Lvl_Jam_Ship`). Упаковку в репозиторий не класть.
+Сдаётся папка `<папка>\Windows` целиком, запуск — `OuterSpace.exe`
+(стартовая карта `Lvl_OS_Ship`). Упаковку в репозиторий не класть.
 
 Замер 19.10 на машине разработки: `Build.bat` — ~55 с, `BuildCookRun` — 27 с
 (полный cook 1135 пакетов за 9 с: шейдеры уже в DDC). Первый cook на этой машине,
@@ -63,7 +70,7 @@ $p = "<путь>\MKJamStarter.uproject"
 Shipping — ~500 МБ без PDB.
 
 Проверено в упакованной Development: все четыре карты грузятся без
-`SkipPackage` и `Failed to find object`; `jam.Ship.Probe` и `jam.Hull.Probe`
+`SkipPackage` и `Failed to find object`; `os.Ship.Probe` и `os.Hull.Probe`
 проходят те же шаги, что в редакторе; проектор скафандра (light function)
 рисует надписи; объёмный дым (Heterogeneous Volumes) рисуется.
 
@@ -71,7 +78,7 @@ Shipping — ~500 МБ без PDB.
 
 - **Shipping** стартует и 60 с работает без падения (что карта загружена, видно
   лишь косвенно, по памяти процесса), но лога в нём нет, а
-  кадры `jam.Hull.Stills` через `-ExecCmds` не появились: пробы в Shipping не
+  кадры `os.Hull.Stills` через `-ExecCmds` не появились: пробы в Shipping не
   проверить. В Shipping нет `DrawDebug*` (`UE_ENABLE_DEBUG_DRAWING`): пропадают
   трос сцепки, линия крюка и просчёт траектории по Shift. Поэтому сдавать
   Development, пока эти линии не сделаны мешами (как линии стяжки).
@@ -80,7 +87,7 @@ Shipping — ~500 МБ без PDB.
   `Config/DefaultGame.ini`. Новый такой путь — добавить туда его папку, иначе в
   упаковке `SkipPackage ... does not exist`, хотя в редакторе всё работает.
   Ассеты из `ConstructorHelpers::FObjectFinder` записи не требуют.
-- `jam.Flyer.Probe <Habitat>` в упаковке находит стаю только по имени актора:
+- `os.Flyer.Probe <Habitat>` в упаковке находит стаю только по имени актора:
   метки (label) есть лишь в редакторе.
 
 ## MCP-плагины
@@ -94,7 +101,7 @@ Editor-плагина. В git их нет (обе папки в `.gitignore`; д
    Node.js. Из корня репозитория, при закрытом редакторе:
 
    ```powershell
-   npx -y ue-mcp@1.4.8-beta.2 deploy MKJamStarter.uproject
+   npx -y ue-mcp@1.4.8-beta.2 deploy OuterSpace.uproject
    ```
 
 2. **VibeUE**, снимок `dc051be7c49b08e613ca7a2196fe9f39c9b52119` из
@@ -116,7 +123,7 @@ Editor-плагина. В git их нет (обе папки в `.gitignore`; д
 - Путь к проекту в `.mcp.json` относительный, поэтому клиент запускать из
   корня репозитория. Иначе — свой абсолютный путь к `.uproject` в локальной
   настройке клиента (для Claude Code: `claude mcp add --scope local ue-mcp -- npx -y
-  ue-mcp@1.4.8-beta.2 <путь>/MKJamStarter.uproject`).
+  ue-mcp@1.4.8-beta.2 <путь>/OuterSpace.uproject`).
 - `ue-mcp.yml` — общая настройка сервера: `server.mode: in-process`, сервер
   живёт вместе с клиентом и не подключается к чужому редактору. Личные
   правки — в `ue-mcp.local.yml`, он не коммитится.
@@ -143,7 +150,7 @@ Editor-плагина. В git их нет (обе папки в `.gitignore`; д
    (от него DLSS зависит). Остальные плагины архива (Streamline, NIS,
    генерация кадров) проекту не нужны. Файлы `.pdb` можно не копировать.
 3. Собрать проект и открыть редактор. Проверка: в консоли
-   `r.NGX.DLSS.Enable` отвечает `1`, в `Saved/Logs/MKJamStarter.log` есть `LogDLSS: NVIDIA NGX DLSS supported DLSS-SR=1` и `NGXPerfQuality=DLAA(5)`.
+   `r.NGX.DLSS.Enable` отвечает `1`, в `Saved/Logs/OuterSpace.log` есть `LogDLSS: NVIDIA NGX DLSS supported DLSS-SR=1` и `NGXPerfQuality=DLAA(5)`.
 
 Вернуть TSR: удалить блок DLSS в `Config/DefaultEngine.ini`. В упаковку
 DLSS попадает, только если плагин стоит на машине, которая собирает сдачу.
@@ -152,7 +159,7 @@ DLSS попадает, только если плагин стоит на маш
 
 - Все двоичные файлы (`.uasset`, `.umap`, `.fbx`, `.wav`, `.png` и т. д.)
   идут через LFS, список типов — в `.gitattributes`. Новый арт кладётся в
-  `Content/JamArt/`. Новый двоичный тип сначала добавить в `.gitattributes`.
+  `Content/OSArt/`. Новый двоичный тип сначала добавить в `.gitattributes`.
 - `.uasset` и `.umap` блокируемые. Перед правкой —
   `git lfs lock <файл>`, после push — `git lfs unlock <файл>`. Кто что держит:
   `git lfs locks`. Push с правкой чужого заблокированного файла отклоняется.
