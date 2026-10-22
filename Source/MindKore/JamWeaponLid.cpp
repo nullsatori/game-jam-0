@@ -20,7 +20,7 @@ namespace
 	constexpr float LidStepSeconds = 1.0f / 240.0f;
 
 	/** Rounds a held reload pose loads (jam.Weapons.ReloadPoseAt), as JamWeaponParts.cpp's. */
-	constexpr int32 PoseShells = 2;
+	constexpr int32 LidPoseShells = 2;
 
 	float LastKey(const FRuntimeFloatCurve& Curve)
 	{
@@ -28,7 +28,7 @@ namespace
 		return Rich && Rich->GetNumKeys() > 0 ? Rich->GetLastKey().Time : 0.0f;
 	}
 
-	bool Crossed(float Before, float Now, float At)
+	bool LidCrossed(float Before, float Now, float At)
 	{
 		return Before < At && Now >= At;
 	}
@@ -121,19 +121,19 @@ namespace
 			{
 				if (bStrike && Lid.State == EJamLidState::Latched)
 				{
-					Out.bStrikeSound |= Crossed(R0, R1, Lid.StrikeSeconds - Lid.StrikeSoundLead);
-					if (Crossed(R0, R1, Lid.StrikeSeconds))
+					Out.bStrikeSound |= LidCrossed(R0, R1, Lid.StrikeSeconds - Lid.StrikeSoundLead);
+					if (LidCrossed(R0, R1, Lid.StrikeSeconds))
 					{
 						Lid.State = EJamLidState::Free;
 						Lid.Speed = 0.0f; // the kicker throws it
 						Out.bStruck = true;
 					}
 				}
-				if (Lid.State == EJamLidState::Free && Lid.Angle < Lid.ClearDeg && Crossed(R0, R1, Lead))
+				if (Lid.State == EJamLidState::Free && Lid.Angle < Lid.ClearDeg && LidCrossed(R0, R1, Lead))
 				{
 					Lid.Speed = FMath::Max(Lid.Speed, Flick);
 				}
-				if (Lid.State == EJamLidState::Free && Crossed(R0, R1, ReloadLength - Lid.CloseSeconds))
+				if (Lid.State == EJamLidState::Free && LidCrossed(R0, R1, ReloadLength - Lid.CloseSeconds))
 				{
 					Lid.State = EJamLidState::Hand;
 					Lid.CatchAngle = Lid.Angle;
@@ -150,7 +150,7 @@ namespace
 				// The hand's press runs to its end even when the reload is broken off under it.
 				const float Before = Lid.SinceCatch;
 				Lid.SinceCatch += Dt;
-				Out.bLatchSound |= Crossed(Before, Lid.SinceCatch, Lid.LatchSeconds - Lid.LatchSoundLead);
+				Out.bLatchSound |= LidCrossed(Before, Lid.SinceCatch, Lid.LatchSeconds - Lid.LatchSoundLead);
 				const float Angle = Lid.CatchAngle * JamEvalCycle(Lid.Close, Lid.SinceCatch);
 				Lid.Speed = (Angle - Lid.Angle) / Dt;
 				Lid.Angle = Angle;
@@ -214,11 +214,13 @@ const FJamLid* UJamWeaponsComponent::GetShownLid() const
 
 FVector UJamWeaponsComponent::GetGunGravity()
 {
-	// A zone's gravity changes only at its edge: read four times a second, not every frame.
+	// A zone's gravity changes only at its edge: read four times a second, not every frame - and at once when the menu's
+	// scale changes (otherwise the lid swings a quarter second in the old gravity).
 	const double Now = GetWorld()->GetTimeSeconds();
-	if (GunGravitySeconds < 0.0 || Now < GunGravitySeconds || Now - GunGravitySeconds >= 0.25)
+	if (GunGravitySeconds < 0.0 || Now < GunGravitySeconds || Now - GunGravitySeconds >= 0.25 || GunGravityScale != JamGetGravityScale())
 	{
 		GunGravitySeconds = Now;
+		GunGravityScale = JamGetGravityScale();
 		// The test room's character walks in the world's gravity; the zero-G pawn is in the zones' (or none).
 		GunGravity = Cast<ACharacter>(GetOwner())
 			? FVector(0.0f, 0.0f, GetWorld()->GetGravityZ() * JamGetGravityScale())
@@ -251,7 +253,7 @@ void UJamWeaponsComponent::UpdateLid(FJamWeapon& Weapon, const FTransform& GunWo
 		FLidPull Pull;
 		Pull.Accel = GunWorld.GetRotation().UnrotateVector(Gravity);
 		FLidRun Run;
-		RunLid(Still, 0.0f, HeldAt, Lead, 2.0f * Lead + PoseShells * Weapon.ReloadSeconds, true, Pull, HeldAt, Run);
+		RunLid(Still, 0.0f, HeldAt, Lead, 2.0f * Lead + LidPoseShells * Weapon.ReloadSeconds, true, Pull, HeldAt, Run);
 		LidInView->SetRelativeLocationAndRotation(Lid.HingeCm, FQuat(FVector::RightVector, FMath::DegreesToRadians(Still.Angle)));
 		LidTrackFrames = 0;
 		return;

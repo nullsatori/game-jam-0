@@ -1085,7 +1085,7 @@ private:
 	void UpdatePortSmoke(FJamWeapon& Weapon, float DeltaTime);
 	/** The shot's share: the barrel's heat and the puff out of the holes. */
 	void PortSmokeShot(FJamWeapon& Weapon);
-	/** The local gravity the lid feels, world cm/s^2: the zones' (JamGravityAt), the world's for a walking character; read every 0.25 s. */
+	/** The local gravity the lid feels, world cm/s^2: the zones' (JamGravityAt), the world's for a walking character; read every 0.25 s and at once when the global scale changes. */
 	FVector GetGunGravity();
 	/** The reload in progress strikes the lid open (it began latched). */
 	bool bReloadStrikesLid = true;
@@ -1103,6 +1103,7 @@ private:
 	int32 LidKnocks = 0;
 	FVector GunGravity = FVector::ZeroVector;
 	double GunGravitySeconds = -1.0;
+	float GunGravityScale = -1.0f;
 	TWeakObjectPtr<UJamMuzzleFxComponent> MuzzleFx;
 	void SpawnDebris(UStaticMesh* Mesh, const FTransform& Where, const FVector& Velocity, const FVector& SpinDegPerSec, float MassKg);
 

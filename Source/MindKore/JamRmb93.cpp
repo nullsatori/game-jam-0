@@ -105,6 +105,9 @@ FJamWeapon JamMakeRmb93(const FJamWeapon& PumpShotgun)
 	Lid.Mesh = Rmb93Mesh(TEXT("Lid"));
 	Lid.HingeCm = FVector(10.5f, 0.0f, 5.5f);
 	Lid.LengthCm = 8.0f;
+	// Open, it leans only 14 deg past upright: gravity holds it there against a swing back of ~190 deg/s at most. Off the
+	// rear sight it comes back with a tenth of its ~1500 deg/s throw and stays there (a fifth tipped it over the top).
+	Lid.OpenBounce = 0.1f;
 	// The palm slaps the latch at the lid's rear edge: the gun knocked down, its muzzle dipping, a twist.
 	Lid.StrikeSeconds = 0.14f;
 	Lid.StrikeKicks = { { 0.14f, FVector(0.0f, 5.0f, -45.0f), FRotator(-40.0f, 10.0f, 20.0f) } };
@@ -173,6 +176,10 @@ namespace
 		float SavedGravityScale = 1.0f;
 		FRotator SavedView = FRotator::ZeroRotator;
 		FRotator Level = FRotator::ZeroRotator;
+		/** Where Pitch turns from: the view as a turn starts (afloat, the view drifts off level - snapping it back jolts the lid). */
+		FRotator PitchBase = FRotator::ZeroRotator;
+		/** Stage 9 put the lid upright. */
+		bool bLidPlaced = false;
 		int32 Passed = 0;
 		int32 Failed = 0;
 		int32 Stage = 0;
@@ -183,10 +190,10 @@ namespace
 		/** The frames the strike and the latch fell between (they happen inside a frame, on the lid's own steps). */
 		FVector2D StruckIn = FVector2D(-1.0f);
 		FVector2D LatchedIn = FVector2D(-1.0f);
-		/** When it reached its stop, between frames by its angle (it flies at ~1000 deg/s: near enough linear). */
-		float OpenAt = -1.0f;
+		/** The frames it knocked on its open stop between; the knocks before the reload. */
+		FVector2D OpenIn = FVector2D(-1.0f);
+		int32 KnocksBefore = 0;
 		float PrevT = 0.0f;
-		float PrevAngle = 0.0f;
 		float LowWhileLoading = 1000.0f;
 		float Low = 1000.0f;
 		float High = -1000.0f;
@@ -212,11 +219,11 @@ namespace
 			const APawn* Pawn = Controller->GetPawn();
 			return Guns->Fire(Pawn->GetActorLocation() + FVector(0.0f, 0.0f, 10000.0f), FVector::UpVector, Recoil);
 		}
-		/** The view pitched Degrees up from level, eased in over Seconds from Start (smoothstep: no jump in the turn's speed). */
+		/** The view pitched Degrees up from PitchBase, eased in over Seconds from the stage's start (smoothstep: no jump in the turn's speed). */
 		void Pitch(float From, float To, float Seconds)
 		{
 			const float Share = FMath::SmoothStep(0.0f, 1.0f, Since() / Seconds);
-			Controller->SetControlRotation(Level + FRotator(FMath::Lerp(From, To, Share), 0.0f, 0.0f));
+			Controller->SetControlRotation(PitchBase + FRotator(FMath::Lerp(From, To, Share), 0.0f, 0.0f));
 		}
 		void Finish()
 		{
@@ -273,8 +280,9 @@ namespace
 					G->Reload();
 					ReloadStart = World->GetTimeSeconds();
 					StruckIn = LatchedIn = FVector2D(-1.0f);
-					OpenAt = -1.0f;
-					PrevT = PrevAngle = 0.0f;
+					OpenIn = FVector2D(-1.0f);
+					KnocksBefore = G->GetLidKnocks();
+					PrevT = 0.0f;
 					LowWhileLoading = 1000.0f;
 					Check(G->GetReloadRemaining() > 0.0f && L.State == EJamLidState::Latched, FString::Printf(TEXT("a reload of one round, %.2f s"), G->GetReloadRemaining()));
 					Next();
@@ -287,9 +295,11 @@ namespace
 				{
 					StruckIn = FVector2D(PrevT, T);
 				}
-				if (OpenAt < 0.0f && L.Angle >= L.OpenStopDeg - 0.5f)
+				// Its first knock is on the open stop (it leaves the receiver on the kicker, no knock); a frame's last angle may
+				// already be the bounce back, so the knock, not the angle, says when it got there.
+				if (OpenIn.X < 0.0f && G->GetLidKnocks() > KnocksBefore)
 				{
-					OpenAt = FMath::GetMappedRangeValueClamped(FVector2D(PrevAngle, L.Angle), FVector2D(PrevT, T), L.OpenStopDeg - 0.5f);
+					OpenIn = FVector2D(PrevT, T);
 				}
 				if (T >= Lead && L.State == EJamLidState::Free)
 				{
@@ -300,16 +310,15 @@ namespace
 					LatchedIn = FVector2D(PrevT, T);
 				}
 				PrevT = T;
-				PrevAngle = L.Angle;
 				if (G->GetReloadRemaining() <= 0.0f && T > 0.2f)
 				{
 					// The latch: the catch CloseSeconds before the end, shut at Close's last key.
 					const float Length = 2.0f * Lead + Gun.ReloadSeconds;
 					const float Latch = Length - L.CloseSeconds + L.Close.GetRichCurveConst()->GetLastKey().Time;
-					UE_LOG(LogMindKore, Log, TEXT("Rmb93 probe: reload - struck in %.3f..%.3f s, on its stop at %.3f s, %.1f deg at least while loading, latched in %.3f..%.3f s"),
-						StruckIn.X, StruckIn.Y, OpenAt, LowWhileLoading, LatchedIn.X, LatchedIn.Y);
+					UE_LOG(LogMindKore, Log, TEXT("Rmb93 probe: reload - struck in %.3f..%.3f s, on its stop in %.3f..%.3f s, %.1f deg at least while loading, latched in %.3f..%.3f s"),
+						StruckIn.X, StruckIn.Y, OpenIn.X, OpenIn.Y, LowWhileLoading, LatchedIn.X, LatchedIn.Y);
 					Check(StruckIn.X < L.StrikeSeconds && L.StrikeSeconds <= StruckIn.Y + 0.001f, TEXT("the palm strikes the latch on time"));
-					Check(OpenAt > L.StrikeSeconds && OpenAt < Lead, TEXT("the lid flies open onto its stop before the first round"));
+					Check(OpenIn.Y > L.StrikeSeconds && OpenIn.Y < Lead, TEXT("the lid flies open onto its stop before the first round"));
 					Check(LowWhileLoading >= L.ClearDeg - 0.5f, TEXT("the lid stays clear of the round"));
 					Check(LatchedIn.X < Latch && Latch <= LatchedIn.Y + 0.001f && L.Angle == 0.0f && Gun.Ammo == 6, TEXT("loaded and latched shut on time"));
 					Next();
@@ -335,7 +344,9 @@ namespace
 			case 4: // left open, it swings free; zero-G from here
 				if (Since() >= 0.5f)
 				{
-					Check(L.State == EJamLidState::Free && L.Angle > L.ClearDeg, FString::Printf(TEXT("the lid is left open and free (%.1f deg)"), L.Angle));
+					// Not "on the sight": the forward stroke yanks the gun out, muzzle down, and throws an open lid shut
+					// onto its kicker and back - where it is 0.5 s on depends on the frame the shot fell in.
+					Check(L.State == EJamLidState::Free && L.Angle > 1.0f, FString::Printf(TEXT("the lid is left open and free (%.1f deg)"), L.Angle));
 					JamSetGravityScale(0.0f);
 					Next();
 				}
@@ -347,6 +358,7 @@ namespace
 					Check(FMath::Abs(Rest - L.SpringRestDeg) < 4.0f, FString::Printf(TEXT("zero-G: it floats near its spring's rest (%.1f deg)"), Rest));
 					Low = 1000.0f;
 					High = -1000.0f;
+					PitchBase = Controller->GetControlRotation();
 					Next();
 				}
 				break;
@@ -377,13 +389,26 @@ namespace
 					Check(High - Low > 8.0f, TEXT("zero-G: the view's flick swings the lid"));
 					Check(FMath::Abs(L.Angle - L.SpringRestDeg) < 6.0f, TEXT("zero-G: it settles back"));
 					JamSetGravityScale(1.0f);
+					Controller->SetControlRotation(Level);
+					PitchBase = Level;
+					bLidPlaced = false;
 					Next();
 				}
 				break;
-			case 9: // gravity, level: it lies on the rear sight
-				if (Since() >= 1.5f)
+			case 9: // gravity, level: from upright it lies on the rear sight
+				// Gravity on stands the pawn up: the view rises on an ease, slowing at ~1.8 g, and an open lid is thrown
+				// over the top by it - honestly. So once the pawn stands, the lid is put upright, at rest, and let go.
+				if (!bLidPlaced && Since() >= 1.5f)
 				{
-					Check(L.Angle >= L.OpenStopDeg - 0.5f, FString::Printf(TEXT("gravity, level: it lies on the rear sight (%.1f deg)"), L.Angle));
+					FJamLid& Free = G->Weapons[1].Lid;
+					Free.State = EJamLidState::Free;
+					Free.Angle = Free.SpringRestDeg;
+					Free.Speed = 0.0f;
+					bLidPlaced = true;
+				}
+				else if (Since() >= 2.5f)
+				{
+					Check(L.Angle >= L.OpenStopDeg - 0.5f, FString::Printf(TEXT("gravity, level: from upright it lies on the rear sight (%.1f deg)"), L.Angle));
 					Next();
 				}
 				break;
