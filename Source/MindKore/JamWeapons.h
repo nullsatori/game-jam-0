@@ -7,6 +7,7 @@
 #include "JamWeapons.generated.h"
 
 class UAudioComponent;
+class UJamMuzzleFxComponent;
 class UJamScopeComponent;
 class UJamNixieCounterComponent;
 class UMaterialInterface;
@@ -48,6 +49,226 @@ struct FJamCycleKey
 MINDKORE_API FRuntimeFloatCurve JamMakeCycleCurve(std::initializer_list<FJamCycleKey> Keys);
 /** The curve at Seconds; 0 when it has no keys. */
 MINDKORE_API float JamEvalCycle(const FRuntimeFloatCurve& Curve, float Seconds);
+
+/** Where a hinged lid is: held shut by its latch, swinging free on its hinge, or pressed shut by the hand. */
+UENUM()
+enum class EJamLidState : uint8
+{
+	Latched,
+	Free,
+	Hand,
+};
+
+/**
+ * A loading lid hinged on the gun in view (the RMB-93's top loading window, JamRmb93.cpp,
+ * Docs/RecoilWeapons-Rmb93.md). Angles are degrees open, 0 shut; positive turns the lid's free
+ * (rear) edge up about the hinge's Y. Unlatched it is a body on its hinge: a kicker spring
+ * throws it open, a weak torsion spring and the local gravity pull on it, the gun's own motion
+ * (the mouse, the pose springs, the kick, the pawn) swings it, and it knocks against its stops.
+ */
+USTRUCT(BlueprintType)
+struct FJamLid
+{
+	GENERATED_BODY()
+
+	/** The lid, its origin on the hinge axis, turning about its own Y; none: no lid. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	TObjectPtr<UStaticMesh> Mesh = nullptr;
+
+	/** The hinge in ViewMesh's space, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	FVector HingeCm = FVector::ZeroVector;
+
+	/** Hinge to the free edge, cm: a flat plate, its centre of mass half-way, its inertia m L^2 / 3. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.5"))
+	float LengthCm = 8.0f;
+
+	/** Where it stops open: it leans on the rear sight. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "1.0", ClampMax = "179.0"))
+	float OpenStopDeg = 104.0f;
+
+	/** Share of the speed it comes back off the open stop / off the receiver with. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float OpenBounce = 0.2f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ShutBounce = 0.2f;
+
+	/**
+	 * The torsion spring in the hinge pulls toward SpringRestDeg (a little short of the stop), as stiff as SpringHz
+	 * would ring the lid alone: weak, so gravity puts the lid where it lies and in low gravity it floats, swinging with the gun.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	float SpringRestDeg = 95.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.0"))
+	float SpringHz = 1.2f;
+
+	/** The kicker under the lid: a stiff leaf pushing it open over its first KickerDeg (KickerHz as SpringHz). Its throw is the lid's flight open. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.0"))
+	float KickerDeg = 40.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.0"))
+	float KickerHz = 6.0f;
+
+	/** The hinge's friction as a damping ratio of SpringHz' swing (viscous, 1/s = 2 x Damping x 2 pi SpringHz). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.0"))
+	float Damping = 0.15f;
+
+	/** How much of the gun's motion reaches it: 1 is the honest share, 0 a lid that only feels gravity and its springs. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.0"))
+	float InertiaScale = 1.0f;
+
+	/**
+	 * The view's kick, which is drawn and not simulated, reaches an open lid as this jump of its speed at the shot, deg/s
+	 * (the gun jerked back: the lid swings on toward its stop). The pawn's own push and the gun's real motion come through InertiaScale.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	float ShotSpeedDeg = 600.0f;
+
+	/** Once it has been up there in a reload, the lid cannot swing lower than this until the hand takes it: it rests on the round and the hand. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.0"))
+	float ClearDeg = 62.0f;
+
+	/** Seconds into a reload the palm strikes the latch (a reload that starts with the lid latched). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.0"))
+	float StrikeSeconds = 0.14f;
+
+	/** Seconds before a reload's end the hand catches the lid and presses it shut along Close. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.0"))
+	float CloseSeconds = 0.22f;
+
+	/** Seconds since the catch -> share of the angle it was caught at; its last key: shut and latched. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	FRuntimeFloatCurve Close;
+
+	/** Seconds since the catch the latch snaps (its sound and LatchKicks). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.0"))
+	float LatchSeconds = 0.1f;
+
+	/** Knocks on the pose springs: the palm on the latch (seconds into the reload), the lid pressed shut (seconds since the catch). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	TArray<FJamPoseKick> StrikeKicks;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	TArray<FJamPoseKick> LatchKicks;
+
+	/** The latch struck (started StrikeSoundLead s before StrikeSeconds: its click on the moment). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	TObjectPtr<USoundBase> StrikeSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	float StrikeSoundLead = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.1"))
+	float StrikeSoundPitch = 1.0f;
+
+	/** The lid knocking on a stop: only when it really hits one (5% of StopSoundFullDegPerSec), louder the faster (full at it). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	TObjectPtr<USoundBase> StopSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.1"))
+	float StopSoundPitch = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "1.0"))
+	float StopSoundFullDegPerSec = 900.0f;
+
+	/** The latch snapping shut (started LatchSoundLead s before LatchSeconds). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	TObjectPtr<USoundBase> LatchSound = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	float LatchSoundLead = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid", meta = (ClampMin = "0.1"))
+	float LatchSoundPitch = 1.0f;
+
+	/** Runtime, the gun's own (it outlives a switch or a broken-off reload: an open lid stays open until a reload shuts it). */
+	EJamLidState State = EJamLidState::Latched;
+	float Angle = 0.0f;
+	/** deg/s, opening positive. */
+	float Speed = 0.0f;
+	/** The hand's catch: the angle it was caught at and seconds since. */
+	float CatchAngle = 0.0f;
+	float SinceCatch = 0.0f;
+	/** Up past ClearDeg in this reload: ClearDeg is its lower stop until the catch. */
+	bool bHeldClear = false;
+};
+
+/**
+ * Smoke out of the holes of a perforated barrel shroud (the RMB-93's, Docs/RecoilWeapons-Rmb93.md): a
+ * puff out of the holes at each shot, then, while the barrel is hot, a thin seep out of them that the
+ * gun leaves behind as it moves. In a vacuum it floats on with the shooter's velocity; in air it is
+ * slowed by it and, where there is gravity, hot smoke rises. Drawn as UJamMuzzleFxComponent's card puffs.
+ */
+USTRUCT(BlueprintType)
+struct FJamPortSmoke
+{
+	GENERATED_BODY()
+
+	/** The holes, in ActionMesh's space (the shroud rides the action), cm; none: no port smoke. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke")
+	TArray<FVector> Ports;
+
+	/** The bore's height in ActionMesh's space, cm: each hole faces away from it, across the bore. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke")
+	float BoreZCm = 0.0f;
+
+	/** Heat a shot adds and how it dies (an exponential, s): the seep goes as the heat. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float HeatPerShot = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.1"))
+	float HeatSeconds = 4.0f;
+
+	/** The seep holds at most this much heat's worth (a long burst does not fog the view). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float MaxHeat = 3.0f;
+
+	/** Puffs out of the holes at the shot, thrown this far, and seeping puffs per second per unit of heat. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0"))
+	int32 ShotPuffs = 8;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float ShotThrowCm = 2.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float SeepPerSecond = 5.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float SeepThrowCm = 0.8f;
+
+	/** A puff's diameter out of the hole and at the end of its life, its life (each 0.75..1.25), peak opacity and drift, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float StartCm = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float EndCm = 6.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.1"))
+	float Seconds = 2.2f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float Opacity = 0.1f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float DriftCm = 1.5f;
+
+	/** In air only: the hot smoke's lift as a share of the local gravity (against it), and how fast the air takes its speed, s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float RiseShare = 0.05f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke", meta = (ClampMin = "0.05"))
+	float AirDragSeconds = 0.5f;
+
+	/** Runtime: the heat as of HeatTime (world seconds), and the share of a seeping puff not yet let out. */
+	float Heat = 0.0f;
+	double HeatTime = 0.0;
+	float SeepCarry = 0.0f;
+
+	/** The heat at world time Now. */
+	float HeatAt(double Now) const { return Heat * FMath::Exp(-float(Now - HeatTime) / HeatSeconds); }
+};
 
 /** One gun. Impulses are kg cm/s (velocity change = impulse / mass). */
 USTRUCT(BlueprintType)
@@ -204,6 +425,10 @@ struct FJamWeapon
 	/** The case's speed on top of the shooter's, cm/s in the camera's frame (X forward, Y right, Z up). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Parts")
 	FVector EjectVelocity = FVector(-40.0f, 220.0f, 120.0f);
+
+	/** The case leaves lying along the bore, tumbling end over end about the gun's Y (out of the bottom: the RMB-93); else across, about the view's X. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Parts")
+	bool bEjectAlongBore = false;
 
 	/**
 	 * The magazine, on ViewMesh in its frame, moved by MagTravelCm x MagTravel (seconds
@@ -403,6 +628,14 @@ struct FJamWeapon
 	/** Each round pushed into the tube, at its ShellSeatSeconds. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
 	TObjectPtr<USoundBase> ShellInsertSound = nullptr;
+
+	/** A hinged loading lid (the RMB-93's top window): struck open at a reload's start, pressed shut at its end. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Lid")
+	FJamLid Lid;
+
+	/** Smoke out of a perforated shroud's holes (the RMB-93's). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Smoke")
+	FJamPortSmoke PortSmoke;
 
 	/**
 	 * Putting the gun away and drawing it (owner 19.10: the pistol to a holster on the right
@@ -641,6 +874,14 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
 	TObjectPtr<UStaticMeshComponent> ShellInView = nullptr;
 
+	/** A hinged loading lid (FJamWeapon::Lid), on ViewModel at its hinge (JamWeaponLid.cpp). */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Jam|Weapons")
+	TObjectPtr<UStaticMeshComponent> LidInView = nullptr;
+
+	/** The lid of the gun in view, or null (none, or no gun shown); and its knocks on a stop since play began (probes). */
+	const FJamLid* GetShownLid() const;
+	int32 GetLidKnocks() const { return LidKnocks; }
+
 	/** Spent cases and dropped magazines kept in the world at most; the oldest goes first. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapons|Parts", meta = (ClampMin = "0"))
 	int32 MaxDebris = 48;
@@ -837,6 +1078,33 @@ private:
 	void UpdateCycleEvents();
 	/** Reload events crossed since the last tick: the magazine let go and seated, a round counted, their sounds. */
 	void UpdatePartEvents(float DeltaTime);
+	// JamWeaponLid.cpp: the hinged lid and the shroud's smoke.
+	/** The lid of Weapon (shown) this frame: the hand's events, its swing on its hinge as GunWorld (the gun posed, without the drawn kick) moves. */
+	void UpdateLid(FJamWeapon& Weapon, const FTransform& GunWorld, float DeltaTime);
+	/** The shroud's seep while the barrel is hot (FJamPortSmoke), from the gun in view. */
+	void UpdatePortSmoke(FJamWeapon& Weapon, float DeltaTime);
+	/** The shot's share: the barrel's heat and the puff out of the holes. */
+	void PortSmokeShot(FJamWeapon& Weapon);
+	/** The local gravity the lid feels, world cm/s^2: the zones' (JamGravityAt), the world's for a walking character; read every 0.25 s and at once when the global scale changes. */
+	FVector GetGunGravity();
+	/** The reload in progress strikes the lid open (it began latched). */
+	bool bReloadStrikesLid = true;
+	/** A shot since the lid's last update (ShotSpeedDeg). */
+	bool bLidShot = false;
+	/** The lid's frame a tick ago and before (finite differences: the hinge's acceleration and the gun's spin). */
+	int32 LidTrackWeapon = INDEX_NONE;
+	int32 LidTrackFrames = 0;
+	FVector LidPrevHinge = FVector::ZeroVector;
+	FVector LidPrevVelocity = FVector::ZeroVector;
+	FQuat LidPrevRotation = FQuat::Identity;
+	FVector LidPrevSpin = FVector::ZeroVector;
+	float LidPrevReload = -1.0f;
+	double LidLastKnockSeconds = -1.0;
+	int32 LidKnocks = 0;
+	FVector GunGravity = FVector::ZeroVector;
+	double GunGravitySeconds = -1.0;
+	float GunGravityScale = -1.0f;
+	TWeakObjectPtr<UJamMuzzleFxComponent> MuzzleFx;
 	void SpawnDebris(UStaticMesh* Mesh, const FTransform& Where, const FVector& Velocity, const FVector& SpinDegPerSec, float MassKg);
 
 	TArray<FRound> Rounds;
@@ -871,7 +1139,7 @@ private:
 	};
 	/** Step the pose springs over shot time Since0..Since1 and reload time Reload0..Reload1 (< 0: none). */
 	void StepPose(const FJamWeapon& Weapon, FPoseState& State, float Since0, float Since1, float Reload0, float Reload1,
-		float ReloadLength, int32 Shells, float DeltaTime, const FSwitchSpan& Switch = FSwitchSpan(), bool bEmpty = false) const;
+		float ReloadLength, int32 Shells, float DeltaTime, const FSwitchSpan& Switch = FSwitchSpan(), bool bEmpty = false, bool bLidStrike = true) const;
 	/** Run the switch this frame; returns the gun to show (null: away) and the span the springs step over. */
 	const FJamWeapon* UpdateSwitch(float DeltaTime, bool bHandsBusy, FSwitchSpan& OutSpan);
 	/** Unarmed at once: no gun in view, the next draw from away. */
@@ -918,8 +1186,9 @@ private:
 };
 
 /**
- * The RMB-93 «Рысь» in the pump shotgun's slot (JamRmb93.cpp): built from the pump shotgun's
- * definition with its own meshes, pump travel and Nixie counter. A pickup with Gun = Rmb93 puts it in.
+ * The RMB-93 «Рысь» in the pump shotgun's slot (JamRmb93.cpp, Docs/RecoilWeapons-Rmb93.md): built from the pump
+ * shotgun's definition with its own meshes, forward pump stroke, bottom ejection, top loading window with its
+ * hinged lid, perforated shroud and Nixie counter. A pickup with Gun = Rmb93 puts it in.
  */
 MINDKORE_API FJamWeapon JamMakeRmb93(const FJamWeapon& PumpShotgun);
 
