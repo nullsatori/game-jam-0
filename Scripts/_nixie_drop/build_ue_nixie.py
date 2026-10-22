@@ -26,8 +26,8 @@ DEFAULTS = {
     'SP_MeshCellCm': .085, 'SP_MeshWireCm': .0055, 'SP_MeshOpacity': 1., 'SP_MeshGlow': .5,
     'SP_DustScatter': 1.2,
     # v6 (owner 22.10): slow enough to read at a 75 px face in HIP, bright enough for bloom; the change's
-    # blink and the orange-to-red cooling are in the shader. v5 was .09 / .045 / .6 / .30.
-    'SP_IgniteSeconds': .28, 'SP_AfterglowSeconds': .35, 'SP_StrikeOvershoot': 1.2, 'SP_WarmupSeconds': .6,
+    # blink and the orange-to-red cooling are in the shader. v5 was .09 / .045 / .6 / .30; afterglow .35 read as ghosting (owner).
+    'SP_IgniteSeconds': .28, 'SP_AfterglowSeconds': .14, 'SP_StrikeOvershoot': 1.2, 'SP_WarmupSeconds': .6,
     # A lit 0 blinks at this rate once ignited (the empty magazine); 0: steady. The RMB93 instance sets 1.4.
     'SP_EmptyBlinkHz': 0.,
 }

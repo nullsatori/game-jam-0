@@ -115,7 +115,7 @@ float pulse=smoothstep(0.0,.06,phase)*(1.0-smoothstep(.52,.62,phase));
 float emptyGain=lerp(1.0,lerp(.10,1.0,pulse),empty);                                    // dips to a faint gas, never fully dark
 float emptyStrike=1.0+.5*exp(-phase/.04)*empty;                                         // each re-strike runs hot for a moment
 float cool=saturate(tChange/max(AfterglowSeconds,.001));                                 // 0 just switched off .. 1 cold
-float prevFade=(1.0-cool)*(1.0-cool)*changed;                                           // a wire cooling: fast at first, then lingering
+float prevFade=pow(1.0-cool,3.0)*changed;                                               // a wire cooling: gone quickly (owner 22.10: a long one read as ghosting)
 float3 prevColor=lerp(float3(1.0,.30,.05),float3(1.0,.06,.004),saturate(cool*1.6));     // orange through red to dark
 
 // ---- Stack rank of the lit and the previous digit (front 0 .. back 9).
@@ -206,6 +206,6 @@ float innerRim=exp(-pow((abs(UV.x-.5)-.365)/.035,2.0))*volume*.12;
 float3 optics=max(GlassEchoStrength,0.0)*echo*ignite*DischargeColor
     +max(EdgeRadiance,0.0)*innerRim*DischargeColor
     +max(DustScatter,0.0)*glass.b*volume*DischargeColor;                  // dust on the glass lit from inside
-float3 afterglow=prevCore*prevShadow*prevFade*on*max(CoreIntensity,0.0)*.9*prevColor;
+float3 afterglow=prevCore*prevShadow*prevFade*on*max(CoreIntensity,0.0)*.55*prevColor;
 float3 tube=(wire*emptyStrike+gas+caught+plate)*transmit*power*emptyGain+afterglow*transmit;
 return aperture*(1.0-fresnel)*flicker*(tube+optics*power*emptyGain);

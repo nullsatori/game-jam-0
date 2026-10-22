@@ -24,7 +24,7 @@ DEFAULTS = {
     'SegmentFlickerStrength': .14, 'SegmentFlickerRate': 2.5, 'SegmentFlickerScale': 14., 'FlickerPhase': 0.,
     'FlickerStrength': .006, 'CathodeShadow': .85, 'CathodeBounce': 1.4,
     'MeshCellCm': .085, 'MeshWireCm': .0055, 'MeshOpacity': 1., 'MeshGlow': .5, 'DustScatter': 1.2,
-    'IgniteSeconds': .28, 'AfterglowSeconds': .35, 'StrikeOvershoot': 1.2, 'WarmupSeconds': .6,
+    'IgniteSeconds': .28, 'AfterglowSeconds': .14, 'StrikeOvershoot': 1.2, 'WarmupSeconds': .6,
     'EmptyBlinkHz': 0.,
 }
 CORE, DISCHARGE, HALO = np.array((1., .27, .045)), np.array((1., .065, .002)), np.array((1., .025, .001))
@@ -164,7 +164,7 @@ def shade_v5(T, P, uv, wpos, camvec, digit, prev, now, change_time, power_time, 
     empty_gain = 1 + ((.10 + .90 * pulse) - 1) * empty
     empty_strike = 1 + .5 * np.exp(-phase / .04) * empty
     cool = min(max(t_change / max(P['AfterglowSeconds'], .001), 0), 1)
-    prev_fade = (1 - cool) ** 2 * changed
+    prev_fade = (1 - cool) ** 3 * changed
     prev_color = np.array((1., .30, .05)) + (np.array((1., .06, .004)) - np.array((1., .30, .05))) * min(cool * 1.6, 1)
     rank_lit = sum(r for r, d in enumerate(ORDER) if abs(d - digit) < .5)
     z_lit = depth0 + rank_lit * spacing
@@ -233,7 +233,7 @@ def shade_v5(T, P, uv, wpos, camvec, digit, prev, now, change_time, power_time, 
     echo = coverage(cell(T, digit, echo_uv), pixel * .5, 0) * (1 - core)
     rim = np.exp(-((np.abs(uv[..., 0] - .5) - .365) / .035) ** 2) * volume * .12
     optics = E(P['GlassEchoStrength'] * echo * ignite, DISCHARGE) + E(P['EdgeRadiance'] * rim, DISCHARGE) + E(P['DustScatter'] * glass[..., 2] * volume, DISCHARGE)
-    after = E(prev_core * prev_shadow * prev_fade * on * P['CoreIntensity'] * .9, prev_color)
+    after = E(prev_core * prev_shadow * prev_fade * on * P['CoreIntensity'] * .55, prev_color)
     tube = (wire * empty_strike + gas + caught + plate) * (transmit * power * empty_gain)[..., None] + after * transmit[..., None]
     emissive = aperture * (1 - fres)[..., None] * flick * (tube + optics * power * empty_gain)
     return emissive, base, fres
