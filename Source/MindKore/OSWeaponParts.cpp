@@ -5,6 +5,8 @@
 
 #include "OSWeapons.h"
 
+#include "OSAttachMenu.h"
+
 #include "AudioMixerBlueprintLibrary.h"
 #include "Camera/CameraComponent.h"
 #include "Components/AudioComponent.h"
@@ -810,6 +812,11 @@ bool UOSWeaponsComponent::IsWeaponReady() const
 	{
 		return false;
 	}
+	// Not with the attachment menu up, a module on its way, or the gun still coming back from the menu's pose (OSAttachMenu.h).
+	if (IsSeating() || (AttachMenu && !AttachMenu->IsGunFree()))
+	{
+		return false;
+	}
 	return SwitchStage == ESwitch::Drawn;
 }
 
@@ -951,7 +958,11 @@ void UOSWeaponsComponent::UpdateParts(const FOSWeapon* Weapon, float SinceShot)
 	const float Time = GetReloadTime();
 	const bool bMagGone = Time >= Weapon->MagEjectSeconds && Time < Weapon->MagInSeconds;
 	SetPart(MagInView, Weapon->MagMesh, !bMagGone);
-	MagInView->SetRelativeTransform(Time >= 0.0f ? GetMagPose(*Weapon, Time) : FTransform::Identity);
+	// A longer magazine in the stock mesh's place is that mesh stretched along the well about its top (OSWeaponAttach.cpp).
+	const FVector Stretch(1.0f, 1.0f, Weapon->MagStretch);
+	const FTransform Stretched(FQuat::Identity, Weapon->MagPivot - Weapon->MagPivot * Stretch, Stretch);
+	MagInView->SetRelativeTransform(Weapon->MagStretch != 1.0f ? Stretched * (Time >= 0.0f ? GetMagPose(*Weapon, Time) : FTransform::Identity)
+		: (Time >= 0.0f ? GetMagPose(*Weapon, Time) : FTransform::Identity));
 
 	// The round being loaded: which one and how far along it is.
 	bool bShell = false;
@@ -1009,10 +1020,15 @@ void UOSWeaponsComponent::PlayShotSound(const FOSWeapon& Weapon, float Pitch)
 {
 	// A tail already playing keeps its medium: the room's tail is ~0.5 s, and no one crosses the airlock (two doors) that fast.
 	const bool bAir = IsInAir();
-	StartGunSound(Weapon.ShotSound, 1.0f, Pitch, 0.0f, bAir, /*bLift=*/false);
+	// A muzzle device on (the suppressor): its own shot, or the gun's at its volume until that sound exists.
+	const int32 Index = Weapons.IndexOfByPredicate([&Weapon](const FOSWeapon& Each) { return &Each == &Weapon; });
+	const FOSAttachment* Device = GetActiveOn(Index, EOSMountType::Muzzle);
+	USoundBase* Own = Device ? Device->ShotSoundOverride.LoadSynchronous() : nullptr;
+	const float Volume = Device && !Own ? Device->ShotVolume : 1.0f;
+	StartGunSound(Own ? Own : Weapon.ShotSound.Get(), Volume, Pitch, 0.0f, bAir, /*bLift=*/false);
 	if (bAir)
 	{
-		StartGunSound(Weapon.ShotAirSound, 1.0f, Pitch, 0.0f, bAir, /*bLift=*/false);
+		StartGunSound(Weapon.ShotAirSound, Device ? Device->ShotVolume : 1.0f, Pitch, 0.0f, bAir, /*bLift=*/false);
 	}
 }
 
@@ -1123,7 +1139,17 @@ void UOSWeaponsComponent::UpdatePartEvents(float DeltaTime)
 		const FVector Velocity = GetOwner()->GetVelocity() + Gun.TransformVectorNoScale(Weapon.MagTravelCm) * Speed;
 		// The flick: tumbling about the gun's Y, plus a little wobble.
 		const FVector Spin = Gun.GetUnitAxis(EAxis::Y) * Weapon.MagEjectSpinDeg * FMath::FRandRange(0.75f, 1.25f) + FMath::VRand() * 40.0f;
-		SpawnDebris(Weapon.MagMesh, MagInView->GetComponentTransform(), Velocity, Spin, 0.25f);
+		if (bMagSwap)
+		{
+			// A magazine attachment swapped (owner 22.10 14:16): the one out goes to the pouch with its rounds, not
+			// to the floor; the other comes in by the same path.
+			MagSwapKeep = Weapon.Ammo;
+			SwapMagazine(Weapon, MagSwapTo);
+		}
+		else
+		{
+			SpawnDebris(Weapon.MagMesh, MagInView->GetComponentTransform(), Velocity, Spin, 0.25f);
+		}
 		Play(Weapon.MagOutSound);
 		// Its rounds leave with it (review 19.10: they stayed in Ammo until the reload's end); a reload
 		// abandoned before the seat leaves the gun empty.
@@ -1133,10 +1159,22 @@ void UOSWeaponsComponent::UpdatePartEvents(float DeltaTime)
 	if (!Weapon.ShellMesh && Crossed(PrevReloadTime, Time, Weapon.MagInSoundSeconds))
 	{
 		// The fresh magazine seated: the rounds count now, not at the reload's end - a switch after the seat keeps them.
-		const int32 Moved = FMath::Min(Weapon.MagazineSize - Weapon.Ammo, Weapon.Reserve);
-		Weapon.Ammo += Moved;
+		if (bMagSwap && !bEmptyReload)
+		{
+			// A swap keeps the gun's rounds (7/60 stays 7/60), cut to the size with the rest back in the reserve (18/40 -> 12/46).
+			Weapon.Ammo = FMath::Min(MagSwapKeep, Weapon.MagazineSize);
+			Weapon.Reserve += MagSwapKeep - Weapon.Ammo;
+			MagSwapKeep = 0;
+		}
+		else
+		{
+			// A swap on the slide stop is an empty reload: the new one comes full and the slide goes home.
+			MagSwapKeep = 0;
+			const int32 Moved = FMath::Min(Weapon.MagazineSize - Weapon.Ammo, Weapon.Reserve);
+			Weapon.Ammo += Moved;
+			Weapon.Reserve -= Moved;
+		}
 		UpdateCounterAmmo();
-		Weapon.Reserve -= Moved;
 		Play(Weapon.MagInSound);
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s magazine in, %d/%d"), *GetNameSafe(GetOwner()), *Weapon.Name.ToString(), Weapon.Ammo, Weapon.Reserve);
 	}

@@ -196,7 +196,7 @@ void UOSMuzzleFxComponent::BeginPlay()
 	Light->RegisterComponent();
 }
 
-void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const USceneComponent* GunMesh)
+void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const USceneComponent* GunMesh, float FlashScale, float SmokeScale)
 {
 	if (!Smoke || !Guns.IsValidIndex(Weapon))
 	{
@@ -213,14 +213,14 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 	// the muzzle; the rest are yellow-orange gas from the first frame, dimmer, so
 	// the burst reads as hot gas and not a white disc.
 	FlashBits.Reset();
-	const auto Lobe = [this](const FVector& Direction, float ReachCm, float SizeCm, float Stretch, float Brightness, float Heat)
+	const auto Lobe = [this, FlashScale](const FVector& Direction, float ReachCm, float SizeCm, float Stretch, float Brightness, float Heat)
 	{
 		FFlashBit& Bit = FlashBits.AddDefaulted_GetRef();
 		Bit.Direction = Direction;
-		Bit.ReachCm = ReachCm;
-		Bit.SizeCm = SizeCm;
+		Bit.ReachCm = ReachCm * FlashScale;
+		Bit.SizeCm = SizeCm * FMath::Sqrt(FlashScale);
 		Bit.Stretch = Stretch;
-		Bit.Brightness = Brightness;
+		Bit.Brightness = Brightness * FlashScale;
 		Bit.Heat = Heat;
 		Bit.Seed = FMath::FRand();
 		Bit.Angle = FMath::FRand() * UE_TWO_PI;
@@ -246,7 +246,7 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 			}
 		}
 	}
-	for (int32 Index = 0; Index < Gun.Sparks; ++Index)
+	for (int32 Index = 0; Index < FMath::RoundToInt32(Gun.Sparks * FlashScale); ++Index)
 	{
 		FFlashBit& Spark = FlashBits.AddDefaulted_GetRef();
 		Spark.Direction = (FMath::VRand() + FVector(Gun.FlashForward + 0.5f, 0.0f, 0.0f)).GetSafeNormal();
@@ -280,8 +280,9 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 		SpawnCloud(Weapon, Muzzle, GunVelocity);
 		return;
 	}
-	const int32 Ports = FMath::RoundToInt(Gun.SmokePuffs * Gun.SmokeBrake);
-	for (int32 Index = 0; Index < Gun.SmokePuffs; ++Index)
+	const int32 PuffCount = FMath::RoundToInt32(Gun.SmokePuffs * SmokeScale);
+	const int32 Ports = FMath::RoundToInt(PuffCount * Gun.SmokeBrake);
+	for (int32 Index = 0; Index < PuffCount; ++Index)
 	{
 		FPuff& Puff = Puffs.AddDefaulted_GetRef();
 		Puff.Origin = Muzzle.GetLocation();
@@ -307,7 +308,7 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 		Puff.BackCm = Gun.SmokeBackCm * FMath::FRandRange(0.5f, 1.0f);
 		Puff.StartCm = Gun.SmokeStartCm;
 		Puff.EndCm = Gun.SmokeEndCm * FMath::FRandRange(0.7f, 1.0f);
-		Puff.Opacity = Gun.SmokeOpacity;
+		Puff.Opacity = Gun.SmokeOpacity * FMath::Min(SmokeScale, 1.0f);
 		Puff.Life = Gun.SmokeSeconds * FMath::FRandRange(0.75f, 1.25f);
 		Puff.Seed = FMath::FRand();
 		Puff.Spin = FMath::FRandRange(-0.4f, 0.4f);

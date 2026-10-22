@@ -4,6 +4,7 @@
 #include "Components/ActorComponent.h"
 #include "Curves/CurveFloat.h"
 #include "OSScope.h"
+#include "OSWeaponAttach.h"
 #include "OSWeapons.generated.h"
 
 class UAudioComponent;
@@ -17,38 +18,10 @@ class USoundEffectSourcePresetChain;
 class USoundSubmixBase;
 class UStaticMesh;
 class UStaticMeshComponent;
-
-/** One key of a moving part's curve: seconds, share of the travel/turn, slopes in share per second (cubic, broken tangents). */
-/** A knock on the gun in view at a moment of its cycle or reload: the springs' velocity jumps by this much. */
-USTRUCT(BlueprintType)
-struct FOSPoseKick
-{
-	GENERATED_BODY()
-
-	/** Seconds after the shot / the reload's start / the round's start, as the list it is in says. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Pose")
-	float Time = 0.0f;
-
-	/** cm/s, camera frame (X forward, Y right, Z up). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Pose")
-	FVector Move = FVector::ZeroVector;
-
-	/** deg/s: pitch (muzzle up), yaw (right), roll (clockwise from behind). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Pose")
-	FRotator Turn = FRotator::ZeroRotator;
-};
-
-struct FOSCycleKey
-{
-	float Time;
-	float Value;
-	float Arrive;
-	float Leave;
-};
-
-MINDKORE_API FRuntimeFloatCurve OSMakeCycleCurve(std::initializer_list<FOSCycleKey> Keys);
-/** The curve at Seconds; 0 when it has no keys. */
-MINDKORE_API float OSEvalCycle(const FRuntimeFloatCurve& Curve, float Seconds);
+class UInstancedStaticMeshComponent;
+class USpotLightComponent;
+class UOSAttachMenu;
+class UOSLaserSightComponent;
 
 /** Where a hinged lid is: held shut by its latch, swinging free on its hinge, or pressed shut by the hand. */
 UENUM()
@@ -280,6 +253,28 @@ struct FOSWeapon
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon")
 	FText Name;
+
+	/** Which gun this is, whatever slot it is in (attachments fit by it, the preset's gear names it): Pistol, Shotgun, Rmb93, Sniper. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon")
+	FName Id;
+
+	/** The places attachments go (Docs/Attachments.md): the USP's rail, muzzle and magazine; the pump's rail; the RMB-93's rail and top; none on the SV-98. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Attach")
+	TArray<FOSWeaponMount> Mounts;
+
+	/** The stock magazine, kept while another is in its place (a magazine attachment). */
+	UPROPERTY(VisibleInstanceOnly, Transient, Category = "OS|Weapon|Attach")
+	TObjectPtr<UStaticMesh> StockMagMesh = nullptr;
+
+	UPROPERTY(VisibleInstanceOnly, Transient, Category = "OS|Weapon|Attach")
+	int32 StockMagazineSize = 0;
+
+	UPROPERTY(VisibleInstanceOnly, Transient, Category = "OS|Weapon|Attach")
+	FVector StockMagTravelCm = FVector::ZeroVector;
+
+	/** The magazine's mesh stretched along the well (a longer one in the stock mesh's place until the PC's mesh): 1 stock. */
+	UPROPERTY(VisibleInstanceOnly, Transient, Category = "OS|Weapon|Attach")
+	float MagStretch = 1.0f;
 
 	/** Per pellet, before the hit zone's multiplier. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon", meta = (ClampMin = "0.0"))
@@ -1034,6 +1029,95 @@ public:
 	/** The HUD line: «[n] Name ammo/reserve» (and the reload; also while a hull tool is out), or «без оружия» (holding a body, none unlocked). */
 	FString Describe() const;
 
+	// --- Attachments (OSWeaponAttach.cpp, Docs/Attachments.md) ---
+
+	/** Every attachment there is (the test set: OSMakeAttachments); the pouch and the guns' mounts name them by Id. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapons|Attach")
+	TArray<FOSAttachment> Attachments;
+
+	/** The pouch on the belt: attachments carried and not on a gun (no limit, Docs/Vision/Attachments.md §12). */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "OS|Weapons|Attach")
+	TArray<FName> Carried;
+
+	/** The attachment menu on the suit's projector (Tab held): made on BeginPlay. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "OS|Weapons|Attach")
+	TObjectPtr<UOSAttachMenu> AttachMenu = nullptr;
+
+	/** The laser's dot and thread in the world, while a laser on the gun in view is on. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "OS|Weapons|Attach")
+	TObjectPtr<UOSLaserSightComponent> LaserSight = nullptr;
+
+	/** One module in view per mount of the shown gun (index = mount), on ViewModel; and the torch's light. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "OS|Weapons|Attach")
+	TArray<TObjectPtr<UStaticMeshComponent>> ModulesInView;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "OS|Weapons|Attach")
+	TObjectPtr<USpotLightComponent> TorchInView = nullptr;
+
+	/** The clear magazine's rounds, follower and spring, on MagInView (rebuilt on the ammo's events, never per tick). */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "OS|Weapons|Attach")
+	TObjectPtr<UInstancedStaticMeshComponent> RoundsInView = nullptr;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "OS|Weapons|Attach")
+	TObjectPtr<UStaticMeshComponent> FollowerInView = nullptr;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "OS|Weapons|Attach")
+	TObjectPtr<UStaticMeshComponent> SpringInView = nullptr;
+
+	const FOSAttachment* FindAttachment(FName Id) const;
+	/** The gun and the mount Id is on, or false. */
+	bool FindMounted(FName Id, int32& OutWeapon, int32& OutMount) const;
+	/** Carried or on a gun. */
+	bool HasAttachment(FName Id) const;
+	/** A gun index by its slot (1..3), its Id or its name; INDEX_NONE. */
+	int32 FindWeapon(const FString& Key) const;
+	/** The mount of Weapon an attachment of Type would go on (free first, else the first of the type); INDEX_NONE. */
+	int32 FindMountFor(int32 Weapon, const FOSAttachment& Attachment) const;
+
+	/** Close a gun (os.Guns.Take): put away if in hand, its rounds kept; its attachments stay on it. */
+	void LockWeapon(int32 Index);
+	/** Into the pouch; and rolled onto the gun in hand when it has a free place that fits (not bBagOnly; Docs/Vision/Attachments.md §4). False: unknown, or had already. */
+	bool GiveAttachment(FName Id, bool bBagOnly = false);
+	/** Off the gun at once and out of the pouch. */
+	bool TakeAttachment(FName Id);
+	/** Onto Weapon at once (no motion; a command, a preset): out of the pouch, what was on that place into it. */
+	bool MountAttachment(FName Id, int32 Weapon, int32 Mount = INDEX_NONE);
+	/** Off its gun at once, into the pouch. */
+	bool UnmountAttachment(FName Id);
+
+	/**
+	 * The menu's Apply (UOSAttachMenu): Id onto mount Mount of the gun in hand, rolled on by the hand from the pouch
+	 * (NAME_None: what is there taken off). What was on that place goes back to the pouch first, on its way off. A
+	 * magazine place swaps the magazine through the reload (Docs/Attachments.md, «Магазин»). False: nothing to do.
+	 */
+	bool ApplyAttachment(int32 Mount, FName Id);
+	/** A module is on its way on or off (or a magazine is being swapped): the gun stays in the menu's pose. */
+	bool IsSeating() const;
+	/** The motion's seconds left, all steps. */
+	float GetSeatRemaining() const;
+
+	/** Tab tapped: the switch of the shown gun's switched attachments (laser, torch) - on/off together. False: none on the gun. */
+	bool ToggleSwitch();
+	bool IsSwitchOn(FName Id) const { return !SwitchOff.Contains(Id); }
+	/** The menu's selection of a switched attachment: the tap's from now on. */
+	void NoteSwitchChoice(FName Id) { LastSwitchChoice = Id; }
+
+	/** The laser's lens in the world, while a laser is seated on the gun in view, switched on and lit; false otherwise. */
+	bool GetLaserLens(FTransform& OutLens) const;
+	/** The attachment on the shown gun's place of Type, or null. */
+	const FOSAttachment* GetShownOn(EOSMountType Type) const;
+	/** The attachment on gun Weapon's place of Type that does its work now (seated), or null. */
+	const FOSAttachment* GetActiveOn(int32 Weapon, EOSMountType Type) const;
+
+	/** A knock on the gun in view's pose springs (cm/s, deg/s in the camera's frame): the menu's row nod, the seat's knocks. */
+	void KickPose(const FVector& Move, const FRotator& Turn);
+
+	/** os.Attach.List: the guns, their places, what is on them, the pouch. */
+	FString DescribeGear() const;
+
+	/** The mount's seat in ViewModel's space (a socket's moved with the mesh): the menu's bracket, the modules. */
+	FTransform GetMountFrame(const FOSWeaponMount& Mount) const;
+
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:
@@ -1197,6 +1281,50 @@ private:
 	double ReloadEndSeconds = 0.0;
 	/** R pressed during the shot's cycle: the reload starts when it is through (a shot or a switch drops it). */
 	bool bReloadQueued = false;
+
+	// OSWeaponAttach.cpp.
+	/** Fill the guns' Ids, mounts and the attachments' catalog; from the constructor. */
+	void SetupAttachments();
+	/** The modules, the torch and the clear magazine's insides, on ViewModel / MagInView; from BeginPlay. */
+	void MakeAttachmentComponents();
+	/** The seat's knocks and sounds crossed this frame (before the pose springs step). */
+	void UpdateSeatEvents();
+	/** The gun's give under the hand (camera frame), added to its pose this frame. */
+	void GetSeatYield(FVector& OutPlace, FRotator& OutTurn) const;
+	/** The shown gun's modules where they are now, the torch on its switch (after ViewModel is posed). */
+	void UpdateModules(const FOSWeapon* Weapon);
+	/** The clear magazine's rounds, follower and spring for Ammo rounds (on the ammo's events). */
+	void UpdateClearMagazine();
+	/** The magazine place's swap at the reload's eject and seat (UpdatePartEvents). */
+	void SwapMagazine(FOSWeapon& Weapon, FName Id);
+	/** Stop a seat in progress where it is: its end state at once (a switch, a grab, a command). */
+	void FinishSeat();
+	/** A gun replaced in its slot (ApplyPickupWeapon): the old one's attachments onto the new where they fit, else into the pouch. */
+	void TransferAttachments(const FOSWeapon& Old, FOSWeapon& Fresh);
+
+	struct FSeatStep
+	{
+		int32 Mount = INDEX_NONE;
+		FName Id;
+		bool bOn = true;
+		/** Seconds after the seat's start this step begins. */
+		float Start = 0.0f;
+		float Length = 0.0f;
+	};
+	/** The motion running on the gun in view: up to two steps (the old module off, the new one on). */
+	TArray<FSeatStep> SeatSteps;
+	int32 SeatWeapon = INDEX_NONE;
+	double SeatStartSeconds = 0.0;
+	float SeatPrevTime = -1.0f;
+	/** A magazine place being swapped by the reload running (NAME_None: back to the stock one), and the rounds kept through it. */
+	bool bMagSwap = false;
+	FName MagSwapTo;
+	int32 MagSwapKeep = 0;
+	/** Switched off (Tab tapped); on by default. The tap's attachment when a gun has two (NoteSwitchChoice). */
+	TSet<FName> SwitchOff;
+	FName LastSwitchChoice;
+	int32 ClearMagRounds = -1;
+	FName ClearMagId;
 };
 
 /**
