@@ -147,7 +147,7 @@ FOSWeapon OSMakeRmb93(const FOSWeapon& PumpShotgun)
 	Smoke.StartCm = 1.5f;
 	Smoke.EndCm = 9.0f;
 	Smoke.Seconds = 2.2f;
-	Smoke.Opacity = 0.18f;
+	Smoke.Opacity = 0.36f;
 	Smoke.SwirlCmPerSecond = 20.0f;
 	Smoke.RiseShare = 0.08f;
 	Smoke.AirDragSeconds = 0.7f;

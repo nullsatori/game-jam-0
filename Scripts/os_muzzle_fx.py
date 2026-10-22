@@ -254,7 +254,7 @@ float4 g = lerp(Grid.SampleLevel(GridSampler, (xy + float2((z0 % 8) * n, (z0 / 8
 int3 qi = int3(q);
 float th = (M[((qi.x + qi.z) & 3) + 4 * ((qi.y + 2 * qi.z) & 3)] + 0.5) / 16;
 float hv = frac(sin(dot(q + S * 31, float3(127.1, 311.7, 74.7))) * 43758.5453);
-float erode = Er * saturate((T - 0.5) / max(L - 0.5, 0.1)) * (0.35 + 0.65 * hv);
+float erode = Er * saturate((T - 0.25) / max(L - 0.25, 0.1)) * (0.35 + 0.65 * hv);
 float dens = g.r * Th * Gn - erode;
 int band = (int)min(floor(saturate(dens) * 4 + th), 4);
 if (band < 1) return 0;

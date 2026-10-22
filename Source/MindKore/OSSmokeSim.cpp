@@ -596,7 +596,11 @@ void FOSSmokeSim::Pack(TArray<FColor>& Out, const FVector3f& KeyDir, float KeySh
 					Key = FMath::Exp(-KeyShadow * Toward);
 					Ambient = FMath::Exp(-Occlusion * Around);
 				}
-				const float Drawn = FMath::Max(0.0f, Rho[I] - Sharpen * T2[I]) / FMath::Max(1.0f - Sharpen, 0.05f);
+				// Never hollow: the gas less its blur alone kept only a blob's rim (a dark glass dome), so the inside keeps
+				// at least 0.45 of its density, broken up by the cell hash into holes and strands.
+				const uint32 Hash = (uint32(I) * 2654435761u) ^ NoiseSeed;
+				const float Keep = 0.25f + 0.35f * float((Hash >> 9) & 0xFF) / 255.0f;
+				const float Drawn = FMath::Max(FMath::Max(0.0f, Rho[I] - Sharpen * T2[I]) / FMath::Max(1.0f - Sharpen, 0.05f), Rho[I] * Keep);
 				Out[(OY + Y) * Size.X + OX + X] = FColor(Byte(Drawn), Byte(Heat[I]), Byte(Key), Byte(Ambient));
 			}
 		}

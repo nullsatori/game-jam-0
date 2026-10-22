@@ -38,7 +38,7 @@ struct FOSSmokeParams
 
 	/** Hot gas churns: a smooth random push, cm/s^2 per unit of heat (the pressure solve keeps only its swirl in air). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.0"))
-	float Turbulence = 600.0f;
+	float Turbulence = 1400.0f;
 
 	/** Density lost per second (the rest of the dying is the material's erosion). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.0"))
