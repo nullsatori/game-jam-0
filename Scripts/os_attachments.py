@@ -29,6 +29,9 @@ They replace the engine cube and cylinder the catalog used (OSMakeAttachments: S
 Lvl_OS_TestRoom: four AOSAttachmentPickup by the gun pickups (Pickup_ATT_<Id>), each showing its
 module four times its size on a pedestal.
 
+DA_Test_Attachments (/Game/OS/Debug/Presets): a debug menu preset whose gear opens the pistol and the
+shotgun, puts the laser on the pistol and the torch, suppressor and 20-round magazine in the pouch.
+
 No texture: shapes are maths, nothing third-party.
 """
 import math
@@ -477,9 +480,25 @@ def place_pickups():
     log("placed 4 attachment pickups in Lvl_OS_TestRoom")
 
 
+def build_preset():
+    """A built-in debug preset for a playtest: the pistol and the shotgun open, the laser on the pistol, the rest in the pouch."""
+    name, folder = "DA_Test_Attachments", "/Game/OS/Debug/Presets"
+    path = folder + "/" + name
+    preset = unreal.load_asset(path) if eal.does_asset_exist(path) else         unreal.AssetToolsHelpers.get_asset_tools().create_asset(name, folder, unreal.OSTestPreset, unreal.DataAssetFactory())
+    preset.set_editor_property("json", """{
+  "format": 1,
+  "name": "attachments",
+  "note": "обвесы: ЛЦУ на пистолете, фонарь, глушитель, магазин 20 в сумке",
+  "map": "Lvl_OS_TestRoom",
+  "gear": { "guns": ["Pistol", "Shotgun"], "attachments": ["Laser@Pistol", "Torch", "Suppressor", "BigMag"] }
+}""")
+    os_build.save(path)
+    log("built " + path)
+
+
 def main():
     os.makedirs(WORK, exist_ok=True)
-    steps = sys.argv[1:] or ["materials", "sound", "meshes", "pickups"]
+    steps = sys.argv[1:] or ["materials", "sound", "meshes", "pickups", "preset"]
     if "materials" in steps:
         build_projection()
         build_clear_mag()
@@ -491,6 +510,8 @@ def main():
         build_long_mag()
     if "pickups" in steps:
         place_pickups()
+    if "preset" in steps:
+        build_preset()
     log("done")
 
 

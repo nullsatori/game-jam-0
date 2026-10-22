@@ -263,6 +263,9 @@ light function (`Origin`, `AxisX/Y/Z`) пишется каждый кадр, п�
   были. Blender не нужен: геометрия пишется в OBJ, оси и обход импортёра
   меряются на пробной коробке.
 - Четыре пикапа в `Lvl_OS_TestRoom`.
+- Пресет отладочного меню `DA_Test_Attachments` (`/Game/OS/Debug/Presets`):
+  пистолет и дробовик, ЛЦУ на пистолете, фонарь, глушитель и магазин 20 в
+  сумке (`os.Debug.Preset DA_Test_Attachments`).
 
 ## Заглушки
 
