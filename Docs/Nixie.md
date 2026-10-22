@@ -57,18 +57,27 @@
 
 | Событие | Вид | Параметр |
 |---|---|---|
-| Смена цифры (выстрел, вставка) | Разряд бежит по новому катоду от вывода с ярким фронтом; удар зажигания перегревает цвет и гаснет за ~80 мс | `SP_IgniteSeconds`, `SP_StrikeOvershoot` |
-| Там же | Старая цифра остывает красным послесвечением на своей глубине | `SP_AfterglowSeconds` |
-| Включение (оружие достали) | Удар → провал → повторный поджиг → короткий провал → устоялся с небольшим перебросом. Окна ≥ 30 мс при умолчаниях: на 30 FPS каждое попадает хотя бы в один кадр | `SP_WarmupSeconds` |
+| Смена цифры (ход помпы, вставка) | Газ вокруг нового катода вспыхивает сразу; разряд бежит по катоду от вывода с ярким фронтом; удар зажигания перегревает цвет большую часть разжига | `SP_IgniteSeconds`, `SP_StrikeOvershoot` |
+| Там же | Старая цифра остывает на своей глубине: быстро из оранжевого в красный, потом долго тлеет | `SP_AfterglowSeconds` |
+| Включение (ствол вошёл в кадр) | Удар → провал → повторный поджиг → короткий провал → устоялся с небольшим перебросом. Окна ≥ 30 мс при умолчаниях: на 30 FPS каждое попадает хотя бы в один кадр | `SP_WarmupSeconds` |
 | Выключение | Затухание | `SP_AfterglowSeconds` |
 
 Смена цифры при выключенном табло послесвечения не оставляет.
+
+**v6 (22.10), «переход невыразительный».** В v5 разжиг 90 мс, остывание 45 мс, удар 80 мс: на 60 к/с это 5, 3 и 5 кадров, и всё под вспышку выстрела, когда табло дёргается отдачей; прогрев при смене оружия играл за плечом. Теперь:
+
+- Разжиг `SP_IgniteSeconds` 0.28, остывание `SP_AfterglowSeconds` 0.35 (квадрат остатка, цвет (1, .30, .05) → (1, .06, .004)), удар `SP_StrikeOvershoot` 1.2 и держится 0.6 разжига, прогрев `SP_WarmupSeconds` 0.6. Фронт ионизации ярче (2.2), и в момент смены газ вокруг нового катода вспыхивает (`volumeFull × blink`), чтобы смена читалась и на 75 px табло в HIP.
+- Ярче для bloom: `SP_CoreIntensity` 4.5, `SP_DischargeIntensity` 2.4, `SP_HaloIntensity` 1.0, `SP_InternalRadiance` 4.0; мерцание по проводу `SP_SegmentFlickerStrength` 0.14 при `Rate` 2.5.
+- У оружия цифра меняется не при выстреле, а с ходом помпы домой (`FJamWeapon::CounterSeconds`, у Рыси 0.40 с, двойной стук): патрон тогда и уходит из трубки в патронник, вспышка уже погасла, взгляд на оружии. 0 — при выстреле, как у пистолета.
+- Табло включается, когда ствол прошёл половину пути в кадр (`UJamWeaponsComponent::PowerCounter`, `DrawPath ≤ 0.5`), а не в момент смены меша за плечом; при мгновенном показе (`FinishSwitch`) — сразу.
+
+Лист кадров в игровом масштабе до/после (numpy-зеркало с грубым bloom): `renders/nixie_v6_scale_sheet.png` в `ArtSource/Instruments/Nixie` (на ПК владельца). Пересборка: `build_ue_nixie.py` `build()` в редакторе; он же ставит Has Pixel Animation.
 
 У `M_Jam_Nixie` включён **Has Pixel Animation**: свечение меняется на месте, а катоды нарисованы за гранью параллаксом, и ни то ни другое не попадает в буфер скоростей. Без флага TSR тянет старое свечение из истории, и цифра гостит при смене оружия и повороте (владелец 22.10). Флаг ставит `build_ue_nixie.py`; на уже собранном материале — `Scripts/jam_nixie_pixel_animation.py`. Материал без меток (v4) работает как раньше, без переходов.
 
 ## Параметры v5
 
-Новые: `SP_StackSpacingCm` 0.032, `SP_CathodeShadow` 0.85, `SP_CathodeBounce` 1.4, `SP_MeshCellCm` 0.085, `SP_MeshWireCm` 0.0055, `SP_MeshOpacity` 1, `SP_MeshGlow` 0.5, `SP_DustScatter` 1.2, `SP_IgniteSeconds` 0.09, `SP_AfterglowSeconds` 0.045, `SP_StrikeOvershoot` 0.6, `SP_WarmupSeconds` 0.30; метки `SP_PrevDigit`, `SP_ChangeTime`, `SP_PowerTime` пишет компонент. `SP_GhostStrength` теперь альбедо металла катодов и сетки (0.06). Остальные значения и их смысл — в `ArtSource/Instruments/Nixie/build_ue_nixie.py` (`DEFAULTS`).
+Новые: `SP_StackSpacingCm` 0.032, `SP_CathodeShadow` 0.85, `SP_CathodeBounce` 1.4, `SP_MeshCellCm` 0.085, `SP_MeshWireCm` 0.0055, `SP_MeshOpacity` 1, `SP_MeshGlow` 0.5, `SP_DustScatter` 1.2, `SP_IgniteSeconds` 0.09, `SP_AfterglowSeconds` 0.045, `SP_StrikeOvershoot` 0.6, `SP_WarmupSeconds` 0.30 (v6: 0.28 / 0.35 / 1.2 / 0.6, см. выше); метки `SP_PrevDigit`, `SP_ChangeTime`, `SP_PowerTime` пишет компонент. `SP_GhostStrength` теперь альбедо металла катодов и сетки (0.06). Остальные значения и их смысл — в `ArtSource/Instruments/Nixie/build_ue_nixie.py` (`DEFAULTS`).
 
 `SP_FaceWidthCm`/`SP_FaceHeightCm`/`SP_DepthCm` задают физический размер и глубину; при другом размере прибора их надо обновить, иначе параллакс неправдоподобен. Цветовой фон — sRGB; normal, маски и distance field — Linear; у атласа нет сжатия, mip и стриминга.
 

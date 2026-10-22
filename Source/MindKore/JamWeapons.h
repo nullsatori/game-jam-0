@@ -736,6 +736,14 @@ struct FJamWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound", meta = (ClampMin = "0.0"))
 	float CycleDelaySeconds = 0.0f;
 
+	/**
+	 * The ammo display (NixieMaterialSlot) counts the round off CounterSeconds after the shot, on the cycle's
+	 * clock: a pump's home, the next round chambered (the tube's count drops then, and the eye is back on the gun
+	 * after the flash - owner 22.10: a change under the flash was never seen); 0: at the shot, as the pistol.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon", meta = (ClampMin = "0.0"))
+	float CounterSeconds = 0.0f;
+
 	/** The dry click when it fires on an empty magazine, 2D; none with the slide locked open (the trigger is dead there). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Jam|Weapon|Sound")
 	TObjectPtr<USoundBase> EmptySound = nullptr;
@@ -1051,6 +1059,9 @@ private:
 	void UpdateViewModel(float DeltaTime);
 	void SetViewMeshes(const FJamWeapon* Weapon);
 	void UpdateCounterAmmo();
+	/** The display powers once the gun is half-way into frame (the draw), not when its mesh is set behind the shoulder: its warm-up is seen. */
+	void PowerCounter();
+	bool bCounterPowerPending = false;
 	/** Turn the owner's view by degrees in the view's own frame. */
 	void TurnView(float PitchDeg, float YawDeg) const;
 	/** The owner's hands hold the gun (AJamZeroGPawn::GetHands); an owner without hands always. */

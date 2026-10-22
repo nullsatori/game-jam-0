@@ -94,7 +94,7 @@ namespace
 		FVector Recoil;
 		// Shoot above the test room so this logic probe does not damage its targets.
 		const bool Fired = Guns->Fire(Pawn->GetActorLocation() + FVector(0, 0, 10000), FVector::UpVector, Recoil);
-		State->Check(Fired && Guns->Weapons[1].Ammo == 5 && State->Shows(5), TEXT("real Fire updates actual ammo and MID immediately"));
+		State->Check(Fired && Guns->Weapons[1].Ammo == 5 && State->Shows(6), TEXT("real Fire updates actual ammo; the MID waits for the pump (CounterSeconds)"));
 		FTimerHandle CycleTimer;
 		World->GetTimerManager().SetTimer(CycleTimer, FTimerDelegate::CreateLambda([State, World, Pickup, Definition, DefaultShotgun]()
 		{
@@ -105,6 +105,7 @@ namespace
 				NixieProbeDone();
 				return;
 			}
+			State->Check(State->Shows(5), TEXT("the pump's home counts the round off the MID"));
 			G->Reload();
 			State->Check(G->GetReloadRemaining() > 0 && G->Weapons[1].Ammo == 5 && State->Shows(5), TEXT("reload does not count a round before its seat event"));
 			FTimerHandle ReloadTimer;

@@ -798,6 +798,7 @@ void UJamWeaponsComponent::FinishSwitch()
 	{
 		const FJamWeapon* Gun = GetWeapon();
 		SetViewMeshes(Gun);
+		PowerCounter(); // drawn at once: lit at once
 	}
 	Pose = FPoseState();
 	PoseWeapon = ShownWeapon;
@@ -887,12 +888,15 @@ const FJamWeapon* UJamWeaponsComponent::UpdateSwitch(float DeltaTime, bool bHand
 			const FJamWeapon& Gun = Weapons[ShownWeapon];
 			if (Crossed(Before, SwitchTime, Gun.DrawSoundSeconds)) { Play(Gun.DrawSound); }
 			if (Crossed(Before, SwitchTime, Gun.DrawViewNudgeSeconds)) { Nudge(Gun.DrawViewNudge); }
+			// Half-way in along its path, the gun is in frame: its ammo display powers up where it is seen.
+			if (JamEvalCycle(Gun.DrawPath, SwitchTime) <= 0.5f) { PowerCounter(); }
 			// Drawn: far enough along its path and settled close to rest (latched - the float past rest
 			// does not take it back), or at the path's end.
 			if (SwitchTime >= LastKeyTime(Gun.DrawPath) || (SwitchTime >= Gun.DrawReadySeconds
 				&& Pose.Place.Size() <= DrawReadyPlaceCm && Pose.Turn.GetAbsMax() <= DrawReadyTurnDeg))
 			{
 				SwitchStage = ESwitch::Drawn;
+				PowerCounter();
 			}
 		}
 		break;
@@ -1056,6 +1060,11 @@ void UJamWeaponsComponent::UpdateCycleEvents()
 		{
 			PlayMechanismSound(Shot, Shot.CycleSound, 0.0f);
 			++CycleSoundsPlayed;
+		}
+		// The ammo display counts the round off with the cycle (CounterSeconds: the pump's home), on the same clock.
+		if (Shot.CounterSeconds > 0.0f && CycleWeapon == ShownWeapon && Crossed(Prev, Since, Shot.CounterSeconds))
+		{
+			UpdateCounterAmmo();
 		}
 		Shot.PrevSinceShot = Since;
 	}
