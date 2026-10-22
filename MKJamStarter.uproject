@@ -76,6 +76,11 @@
 		{
 			"Name": "USDImporter",
 			"Enabled": true
+		},
+		{
+			"Name": "DLSS",
+			"Enabled": true,
+			"Optional": true
 		}
 	],
 	"TargetPlatforms": [
