@@ -14,6 +14,12 @@
 
 namespace
 {
+	/** Last line of every run, so Scripts/jam_fps_sweep.ps1 stops the engine instead of waiting for its deadline. */
+	void NixieProbeDone()
+	{
+		UE_LOG(LogMindKore, Log, TEXT("Nixie weapon probe: done"));
+	}
+
 	struct FNixieWeaponProbe
 	{
 		TWeakObjectPtr<UJamWeaponsComponent> Guns;
@@ -47,6 +53,7 @@ namespace
 		if (!World || !World->IsGameWorld() || !Guns || !Guns->ViewModel || !Guns->Scope || !Guns->Weapons.IsValidIndex(1) || !Body || !Action)
 		{
 			UE_LOG(LogMindKore, Error, TEXT("Nixie weapon probe: FAIL - needs game/PIE pawn with guns and production RMB93 ViewBody/Action assets."));
+			NixieProbeDone();
 			return;
 		}
 		const auto State = MakeShared<FNixieWeaponProbe>();
@@ -92,14 +99,24 @@ namespace
 		World->GetTimerManager().SetTimer(CycleTimer, FTimerDelegate::CreateLambda([State, World, Pickup, Definition, DefaultShotgun]()
 		{
 			UJamWeaponsComponent* G = State->Guns.Get();
-			if (!G) return;
+			if (!G)
+			{
+				UE_LOG(LogMindKore, Error, TEXT("Nixie weapon probe: FAIL - the weapons component is gone before reload."));
+				NixieProbeDone();
+				return;
+			}
 			G->Reload();
 			State->Check(G->GetReloadRemaining() > 0 && G->Weapons[1].Ammo == 5 && State->Shows(5), TEXT("reload does not count a round before its seat event"));
 			FTimerHandle ReloadTimer;
 			World->GetTimerManager().SetTimer(ReloadTimer, FTimerDelegate::CreateLambda([State, Pickup, Definition, DefaultShotgun]()
 			{
 				UJamWeaponsComponent* Current = State->Guns.Get();
-				if (!Current) return;
+				if (!Current)
+				{
+					UE_LOG(LogMindKore, Error, TEXT("Nixie weapon probe: FAIL - the weapons component is gone after reload."));
+					NixieProbeDone();
+					return;
+				}
 				State->Check(Current->Weapons[1].Ammo == 6 && State->Shows(6), TEXT("real shell-seat event restores ammo and MID to6"));
 				Current->SelectWeapon(0);
 				Current->FinishSwitch();
@@ -140,6 +157,7 @@ namespace
 				Current->FinishSwitch();
 				UE_LOG(LogMindKore, Log, TEXT("Nixie weapon probe: %s (%d passed, %d failed). Original inventory restored; no assets saved."),
 					State->Failed == 0 ? TEXT("PASS") : TEXT("FAIL"), State->Passed, State->Failed);
+				NixieProbeDone();
 			}), FMath::Max(G->GetReloadRemaining() + 0.15f, 0.2f), false);
 		}), FMath::Max(Guns->Weapons[1].GetActionCycleSeconds(), Guns->Weapons[1].FireInterval) + 0.15f, false);
 	}
