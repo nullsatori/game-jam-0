@@ -259,6 +259,39 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	Sniper.ActionBodyTurn = FRotator(3.0f, -8.0f, -14.0f);
 	Sniper.ActionBody = MakeCycleCurve({ { 0.2f, 0.0f, 0.0f, 0.0f }, { 0.215f, 1.0f, 0.0f, 0.0f }, { 1.05f, 1.0f, 0.0f, 0.0f },
 		{ 1.065f, 0.0f, 0.0f, 0.0f }, { 1.25f, 0.0f, 0.0f, 0.0f } });
+	// The gas (FOSGasVent, Docs/RecoilWeapons-Fx.md «Газовые отверстия»): a jet into the smoke grid and a thin stream
+	// of wisps out of each muzzle (the stream is the first thing seen, the jet takes over); the SV-98's brake throws
+	// most of it out of two side ports.
+	const auto Vent = [](const FVector& Direction, bool bJet, float Seconds, float Decay, float Speed, float Cone, float Rate, float Width)
+	{
+		FOSGasVent V;
+		V.Direction = Direction;
+		V.bJet = bJet;
+		V.Seconds = Seconds;
+		V.DecaySeconds = Decay;
+		V.SpeedCm = Speed;
+		V.ConeDeg = Cone;
+		V.Rate = Rate;
+		V.WidthCm = Width;
+		return V;
+	};
+	// The jets run out further than a real one (owner: the art first): the front of the shotgun's at ~1.1 m.
+	Pistol.GasVents = { Vent(FVector::ForwardVector, true, 0.3f, 0.15f, 320.0f, 8.0f, 0.5f, 2.5f),
+		Vent(FVector::ForwardVector, false, 0.2f, 0.1f, 150.0f, 10.0f, 40.0f, 1.0f) };
+	Shotgun.GasVents = { Vent(FVector::ForwardVector, true, 0.45f, 0.3f, 500.0f, 6.0f, 0.7f, 6.0f),
+		Vent(FVector::ForwardVector, false, 0.2f, 0.12f, 220.0f, 8.0f, 60.0f, 1.5f) };
+	Sniper.GasVents = { Vent(FVector::ForwardVector, true, 0.3f, 0.15f, 400.0f, 4.0f, 0.4f, 3.0f),
+		Vent(FVector(-0.35f, 1.0f, 0.0f), true, 0.3f, 0.15f, 350.0f, 10.0f, 0.6f, 4.0f),
+		Vent(FVector(-0.35f, -1.0f, 0.0f), true, 0.3f, 0.15f, 350.0f, 10.0f, 0.6f, 4.0f),
+		Vent(FVector::ForwardVector, false, 0.15f, 0.08f, 220.0f, 6.0f, 40.0f, 1.0f) };
+	// The muzzle streams' wisps: thin, short-lived.
+	for (FOSWeapon* Gun : { &Pistol, &Shotgun, &Sniper })
+	{
+		Gun->PortSmoke.StartCm = 1.5f;
+		Gun->PortSmoke.EndCm = 7.0f;
+		Gun->PortSmoke.Seconds = 1.0f;
+		Gun->PortSmoke.Opacity = 0.3f;
+	}
 	Weapons = { Pistol, Shotgun, Sniper };
 	SetupWeaponParts();
 
@@ -502,7 +535,7 @@ void UOSWeaponsComponent::UpdateViewModel(float DeltaTime)
 	UpdateCycleEvents();
 	// The RMB-93's lid and shroud (OSWeaponLid.cpp); nothing for a gun without them.
 	FOSWeapon& Shown = Weapons[ShownWeapon];
-	if (Shown.Lid.Mesh || Shown.PortSmoke.Ports.Num() > 0)
+	if (Shown.Lid.Mesh || Shown.HasSeep())
 	{
 		UpdateLid(Shown, Steady * ViewModel->GetAttachParent()->GetComponentTransform(), DeltaTime);
 		UpdatePortSmoke(Shown, DeltaTime);
@@ -772,6 +805,8 @@ bool UOSWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, F
 	{
 		// Before the kick (the caller adds OutRecoil): the smoke takes the gun's velocity at the shot.
 		Fx->Shot(CurrentWeapon, MuzzleTransform, ViewModel);
+		// The gas out of every vent of the gun (the muzzle's jet, a brake's ports, a shroud's holes).
+		Fx->Vents(*Weapon, MuzzleTransform, ActionInView);
 	}
 	// The RMB-93: its open lid jerked by the kick, its shroud's holes puffing (OSWeaponLid.cpp).
 	bLidShot = Weapon->Lid.Mesh != nullptr;

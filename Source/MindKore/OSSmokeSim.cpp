@@ -144,7 +144,7 @@ void FOSSmokeSim::Inject(const FVector3f& Centre, const FVector3f& Axis, float L
 	});
 }
 
-bool FOSSmokeSim::Impulse(const FVector3f& Origin, const FVector3f& Dir, float RadiusCm, float Along, float Push, float Clear)
+bool FOSSmokeSim::Impulse(const FVector3f& Origin, const FVector3f& Dir, float RadiusCm, float Along, float Push, float Clear, float LengthCm)
 {
 	const float InvR2 = 1.0f / FMath::Max(RadiusCm * RadiusCm, 1.0f);
 	std::atomic<int32> Touched(0);
@@ -162,7 +162,7 @@ bool FOSSmokeSim::Impulse(const FVector3f& Origin, const FVector3f& Dir, float R
 				}
 				const FVector3f Rel = CellCentre(X, Y, Z) - Origin;
 				const float T = Rel | Dir;
-				if (T < 0.0f)
+				if (T < 0.0f || T > LengthCm)
 				{
 					continue;
 				}

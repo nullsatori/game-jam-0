@@ -89,10 +89,10 @@ struct FOSSmokeSim
 	void Inject(const FVector3f& Centre, const FVector3f& Axis, float LengthCm, float RadiusCm, float InRho, float InHeat, const FVector3f& Velocity, float Radial,
 		const FVector3f& RadialPlane = FVector3f::ZeroVector);
 	/**
-	 * A push along the line Origin + t Dir (t > 0, cm): Along cm/s down it, Push cm/s out of it, within RadiusCm
+	 * A push along the line Origin + t Dir (0 < t < LengthCm, cm): Along cm/s down it, Push cm/s out of it, within RadiusCm
 	 * (gaussian); Clear (0..1) of the density on the line is thrown aside at once (a round's tunnel). True if it touched gas.
 	 */
-	bool Impulse(const FVector3f& Origin, const FVector3f& Dir, float RadiusCm, float Along, float Push, float Clear);
+	bool Impulse(const FVector3f& Origin, const FVector3f& Dir, float RadiusCm, float Along, float Push, float Clear, float LengthCm = 1e6f);
 	/** One step; Age (s since the shot) times the blast's swell. */
 	void Step(float Dt, float Age, const FOSSmokeParams& K);
 	/** Move the grid by whole cells (the box follows the gas): the fields shift, what leaves is lost, the planes stay put in the world. */

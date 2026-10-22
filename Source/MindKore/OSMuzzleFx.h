@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "OSSmokeSim.h"
+#include "OSWeapons.h"
 #include "Tasks/Task.h"
 #include "OSMuzzleFx.generated.h"
 
@@ -121,26 +122,6 @@ struct FOSMuzzleFx
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "1.0"))
 	float CellCm = 3.0f;
 
-	/**
-	 * The slug of gas at the shot: its length along the bore and radius across, cm, its speed out of the bore (a brake
-	 * keeps 1 - SmokeBrake of it forward, the rest goes out of the side ports) and out of its own centre, cm/s; the
-	 * muzzle keeps puffing it for EmitSeconds.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.5"))
-	float SlugLengthCm = 10.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.5"))
-	float SlugRadiusCm = 4.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
-	float SlugSpeedCm = 350.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
-	float SlugRadialCm = 60.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
-	float EmitSeconds = 0.05f;
-
 	/** Extinction of the dense band, 1/cm (the material's bands are 1/3, 2/3 and all of it). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float DenseExtinction = 0.1f;
@@ -247,16 +228,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float WakeSeconds = 1.0f;
 
-	/**
-	 * In a vacuum the gas expands freely: the slug keeps this share of its speed out of the bore and swells out of
-	 * its own centre this many times faster (a shell flying apart, not a jet), and the muzzle puffs no stem.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float VacuumThrowShare = 0.3f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
-	float VacuumRadialScale = 2.5f;
-
 	/** How much the gas around a voxel shadows the material's ambient, and the gas toward the key light its key light (FOSSmokeSim::Pack). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
 	float AmbientOcclusion = 0.15f;
@@ -319,14 +290,23 @@ public:
 	void Shot(int32 Weapon, const FTransform& Muzzle, const USceneComponent* GunMesh);
 
 	/**
-	 * Count card puffs out of a perforated shroud's holes (FOSPortSmoke, the RMB-93's), each out of a hole picked at
-	 * random on Action (the part the shroud rides) as it is now, thrown ThrowCm out across the bore, born up to AgeSpread s
-	 * ago (a seep spread over the frame). In the world from then on, as the muzzle's cards; in air, hot smoke rises.
+	 * The gas of a shot out of Def's vents (FOSGasVent, Docs/RecoilWeapons-Fx.md «Газовые отверстия»): jets into the
+	 * shot's grid, streams of wisps over their Seconds. Muzzle is the muzzle's world frame at the shot, Action the part
+	 * the Action-space vents ride. UOSWeaponsComponent::Fire calls this right after Shot.
 	 */
-	void PortPuffs(const FOSPortSmoke& Vent, const USceneComponent& Action, int32 Count, float ThrowCm, float AgeSpread);
+	void Vents(const FOSWeapon& Def, const FTransform& Muzzle, const USceneComponent* Action);
+
+	/**
+	 * Count seeping wisps out of Def's bSeep vents (picked at random), born up to AgeSpread s ago (a seep spread over
+	 * the frame); FOSPortSmoke's heat drives the count (UOSWeaponsComponent::UpdatePortSmoke).
+	 */
+	void Seep(const FOSWeapon& Def, const FTransform& Muzzle, const USceneComponent* Action, int32 Count, float AgeSpread);
 
 	/** A spent case just thrown out: it drags a wisp and cuts the clouds it flies through, and smokes on the floor while hot. */
 	void HotCase(AActor* Case);
+
+	/** Vents still flowing as wisp streams (probes). */
+	int32 GetFlowCount() const { return Flows.Num(); }
 
 	/** Card puffs alive now (probes). */
 	int32 GetPuffCount() const { return Puffs.Num(); }
@@ -388,7 +368,23 @@ private:
 		FVector WorldPos = FVector::ZeroVector;
 		FVector PrevAttached = FVector::ZeroVector;
 		FVector AlongWorld = FVector::ForwardVector;
+		/** Its own velocity once the gun lets go (a vacuum: on outward, straight), world cm/s. */
+		FVector Velocity = FVector::ZeroVector;
 	};
+
+	/** A vent still flowing as wisps after a shot. */
+	struct FFlow
+	{
+		FOSGasVent Vent;
+		FOSPortSmoke Look;
+		FTransform Muzzle;
+		TWeakObjectPtr<const USceneComponent> Action;
+		float Age = 0.0f;
+		float Carry = 0.0f;
+	};
+	/** One wisp out of Vent (Speed: its flow's speed share now), born AgeOffset s ago. */
+	void EmitWisp(const FOSGasVent& Vent, const FOSPortSmoke& Look, const FTransform& Muzzle, const USceneComponent* Action, float Speed, float AgeOffset);
+	TArray<FFlow> Flows;
 	/** A clinging wisp's point on its path in the gun's space at Age. */
 	static FVector ClingPath(const FPuff& Puff, float Age);
 
@@ -462,8 +458,16 @@ private:
 		FVector3f KeyDir = FVector3f::UpVector;
 		FLinearColor KeyColour = FLinearColor::White;
 		FString KeyName;
-		/** The gas was born at the bore's hit (or ahead of the muzzle) after a card jet: it fades in from nothing. */
-		bool bJet = false;
+		/** The jets feeding this cloud: world origin and direction at the shot, the vent's flow. */
+		struct FJet
+		{
+			FVector Origin = FVector::ZeroVector;
+			FVector Direction = FVector::ForwardVector;
+			FOSGasVent Vent;
+			/** How far its front has got, cm (the grid's task moves it). */
+			float FrontCm = 0.0f;
+		};
+		TArray<FJet> Jets;
 		mutable UE::Tasks::FTask Pending;
 		FIntVector PendingShift = FIntVector::ZeroValue;
 		bool bPendingAtlas = false;
@@ -484,7 +488,9 @@ private:
 	void TickClouds(float DeltaTime);
 	void TickHotCases(float DeltaTime);
 	/** A push along Origin + t Direction (world) through every living cloud it crosses but Except (FOSSmokeSim::Impulse); wakes them. */
-	void Blast(const FVector& Origin, const FVector& Direction, float RadiusCm, float Along, float Push, float Clear, const FCloud* Except);
+	void Blast(const FVector& Origin, const FVector& Direction, float RadiusCm, float Along, float Push, float Clear, const FCloud* Except, float LengthCm = 1e6f);
+	/** The cloud the last shot spawned (Vents gives it its jets). */
+	FCloud* LastSpawned = nullptr;
 	/** A card puff at Where, world, thrown along Direction (cm over its life's first moments), in air rising. */
 	FPuff& AddCardPuff(const FVector& Where, const FVector& Direction, float StartCm, float EndCm, float Opacity, float Seconds);
 
