@@ -10,6 +10,8 @@
 #include "OSCollisionImpact.h"
 #include "OSDockZone.h"
 #include "OSOxygen.h"
+#include "OSAttachMenu.h"
+#include "OSSuitProjector.h"
 #include "OSWeapons.h"
 #include "OSZeroGPawn.h"
 #include "OSShip.h"
@@ -180,6 +182,23 @@ void AOSZeroGHUD::DrawHUD()
 		float Height = 0.0f;
 		GetTextSize(Line, Width, Height, Font);
 		DrawText(Line, FLinearColor(0.85f, 0.85f, 0.8f, 0.6f), CenterX - Width * 0.5f, CenterY + 44.0f, Font);
+	}
+
+	// The attachment menu with no wall in the projector's reach, or a refusal's word: one line in the device's own font
+	// (MK Pribor N, 3 px a cell), the projector's pale core colour, under the centre (Docs/Attachments.md, «Без стены»).
+	if (const UOSAttachMenu* Menu = Pawn->Guns ? Pawn->Guns->AttachMenu.Get() : nullptr)
+	{
+		if (const FString Line = Menu->GetHudLine(); !Line.IsEmpty())
+		{
+			constexpr float Cell = 3.0f;
+			const float Left = CenterX - OSProjectorTextCells(Line) * Cell * 0.5f;
+			const float Top = CenterY + 80.0f;
+			const FLinearColor Light(0.62f, 0.74f, 1.0f, 0.9f);
+			OSProjectorTextRuns(Line, [&](int32 X, int32 Y, int32 Length)
+			{
+				DrawRect(Light, Left + X * Cell, Top + Y * Cell, Length * Cell, Cell);
+			});
+		}
 	}
 
 	// O2 bar, bottom left: red under a fifth.
