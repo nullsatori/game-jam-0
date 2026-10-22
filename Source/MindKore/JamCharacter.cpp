@@ -150,7 +150,7 @@ void AJamCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	Input->BindActionValueLambda(CrouchAction, ETriggerEvent::Completed, [this](const FInputActionValue&) { UnCrouch(); });
 	Input->BindAction(UseAction, ETriggerEvent::Started, this, &AJamCharacter::Use);
 	Input->BindAction(PrimaryAction, ETriggerEvent::Started, this, &AJamCharacter::PrimaryPressed);
-	// An automatic gun keeps firing while LMB is held; Fire's interval gate makes the press frame one shot.
+	// A bAutomatic gun (none by default) keeps firing while LMB is held; Fire's interval gate makes the press frame one shot.
 	Input->BindActionValueLambda(PrimaryAction, ETriggerEvent::Triggered, [this](const FInputActionValue&)
 	{
 		const FJamWeapon* Weapon = Guns->GetWeapon();

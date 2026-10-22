@@ -2015,8 +2015,8 @@ namespace
 
 	/**
 	 * jam.Weapons.SlideProbe: the USP's slide stop live (runs headless). The last round locks the slide open
-	 * (logged every frame), a trigger pull does nothing (no shot, no hammer, no case; the reload starts as on
-	 * empty), a switch away and back, a hull tool and back, unarmed and back - still locked; the empty reload
+	 * (logged every frame), a trigger pull does nothing (no shot, no hammer, no case, and no reload: only R
+	 * starts one), a switch away and back, a hull tool and back, unarmed and back - still locked; the empty reload
 	 * releases the slide (every frame logged; refused before its end, fires after); a tactical reload never moves
 	 * the slide; an empty reload cut between the seat and the release leaves it locked with the magazine in, and
 	 * R then releases it only. Each check a PASS / FAIL line; the last "Slide probe: all done".
@@ -2124,7 +2124,7 @@ namespace
 				Part.X, LockedSlide, Part.Y, *Guns->Describe(), Guns->GetCasesThrown() - Probe->Cases),
 				Locked(LockedSlide) && Guns->Describe().Contains(TEXT(" 0/")) && Guns->GetCasesThrown() - Probe->Cases == 2);
 		});
-		// The trigger with the slide locked: nothing - no shot, no hammer, no case (the reload starts, as on empty).
+		// The trigger with the slide locked: nothing - no shot, no hammer, no case, no reload (only R reloads).
 		After(1.0f, [Pawn, Guns, Probe, Check, Shoot, Locked, Shown, LockedSlide]()
 		{
 			Probe->Cases = Guns->GetCasesThrown();
@@ -2132,9 +2132,9 @@ namespace
 			Probe->SinceShot = Guns->Weapons[0].SinceShot;
 			Probe->Debris = Guns->GetDebrisCount();
 			const bool bFired = Shoot(TEXT("trigger pulled with the slide locked"));
-			Check(FString::Printf(TEXT("trigger with the slide locked refused - rounds in flight %d, auto reload %s"), Guns->GetRoundsInFlight(),
+			Check(FString::Printf(TEXT("trigger with the slide locked refused, no auto reload - rounds in flight %d, reload %s"), Guns->GetRoundsInFlight(),
 				Guns->GetReloadRemaining() > 0.0f ? TEXT("started") : TEXT("not started")),
-				!bFired && Guns->GetRoundsInFlight() == 0 && Guns->Weapons[0].SinceShot >= Probe->SinceShot);
+				!bFired && Guns->GetRoundsInFlight() == 0 && Guns->Weapons[0].SinceShot >= Probe->SinceShot && Guns->GetReloadRemaining() <= 0.0f);
 		});
 		After(1.05f, [Guns, Probe, Check, Shown, Locked, LockedSlide]()
 		{
@@ -2142,7 +2142,7 @@ namespace
 			Check(FString::Printf(TEXT("no hammer fall, no case - hammer %.3f -> %.3f, %d case(s)"), Probe->Part.Y, Part.Y, Guns->GetCasesThrown() - Probe->Cases),
 				Locked(LockedSlide) && FMath::Abs(Part.Y - Probe->Part.Y) < 0.001f && Guns->GetCasesThrown() == Probe->Cases);
 		});
-		// Away and back (the auto reload abandoned before the magazine drops), a hull tool and back, unarmed and back.
+		// Away and back, a hull tool and back, unarmed and back.
 		After(1.1f, [Guns]() { Guns->SelectWeapon(1); });
 		After(2.6f, [Guns]() { Guns->SelectWeapon(0); });
 		After(3.6f, [Guns, Probe, Check, Shown, Locked, LockedSlide]()
@@ -2213,11 +2213,12 @@ namespace
 		});
 		// An empty reload cut between the seat and the release: locked with the magazine in; R releases it only.
 		After(11.0f, [Guns, Shoot]() { Guns->Weapons[0].Ammo = 1; Shoot(TEXT("last round again")); });
-		After(11.4f, [Pawn, Guns, Probe, Shoot]()
+		After(11.4f, [Pawn, Guns, Probe]()
 		{
 			Probe->Reserve = Guns->Weapons[0].Reserve;
 			Probe->ReloadAt = Pawn->GetWorld()->GetTimeSeconds();
-			Shoot(TEXT("trigger with the slide locked (the auto reload)"));
+			Guns->Reload();
+			UE_LOG(LogMindKore, Log, TEXT("Slide probe: R with the slide locked again - %.3f s to go"), Guns->GetReloadRemaining());
 		});
 		After(11.4f + 0.92f, [Guns, Probe]()
 		{

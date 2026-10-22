@@ -98,7 +98,7 @@ JAM_FBX_DIR=<dir> UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePythonScrip
 | `MagazineSize` / `Reserve` | 12 / 60 | 6 / 24 | 4 / 16 | патроны |
 | `ReloadSeconds` | 0.97 | 0.42 на патрон (6 патронов — 3.02) | 1.7 | вся перезарядка; у дробовика — на один патрон |
 | `Pellets` / `SpreadDeg` | 1 / 0.5 | 8 / 6 | 1 / 0 | дробины и полуугол конуса |
-| `bAutomatic` | да | нет | нет | огонь, пока ЛКМ зажата |
+| `bAutomatic` | нет (с 22.10) | нет | нет | огонь, пока ЛКМ зажата |
 | `ProjectileSpeed` | 35000 | 40000 | 80000 | см/с, близко к настоящим (9 мм, картечь 12 калибра, 7.62×54R); до 19.10 было 9000 / 6000 / 40000 — дробь летела до стены в 10 м 0.17 с, владелец: «проджектайлы слишком медленно летят» |
 | `RecoilImpulse` | 4000 | 25000 | 70000 | себе по −взгляду: /100 кг = 40 / 250 / 700 см/с |
 | `KickPitchDeg` / `KickYawDeg` | 1.2 / 0.3 | 5 / 1.2 | 8 / 1 | пинок взгляда, ° |
@@ -381,7 +381,7 @@ all` — три выстрела пистолета попали (здоровь
 
 ```
 the last round locks the slide open - slide 0.880 (expected 0.880), hammer -0.500 (cocked back), [1] Пистолет 0/60, 2 case(s) (expected 2): PASS
-trigger with the slide locked refused - rounds in flight 0, auto reload started: PASS
+trigger with the slide locked refused, no auto reload - rounds in flight 0, reload not started: PASS
 no hammer fall, no case - hammer -0.500 -> -0.500, 0 case(s): PASS
 switched to the shotgun and back - slide 0.880, [1] Пистолет 0/60, no magazine dropped (0): PASS
 put away for a hull tool and drawn - slide 0.880 hammer -0.500: PASS
