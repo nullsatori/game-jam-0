@@ -142,7 +142,7 @@ Editor-плагина. В git их нет (обе папки в `.gitignore`; д
    (от него DLSS зависит). Остальные плагины архива (Streamline, NIS,
    генерация кадров) проекту не нужны. Файлы `.pdb` можно не копировать.
 3. Собрать проект и открыть редактор. Проверка: в консоли
-   `r.NGX.DLSS.Enable` отвечает `1`, в `Saved/Logs` есть строки `LogDLSS` о поддержке DLSS.
+   `r.NGX.DLSS.Enable` отвечает `1`, в `Saved/Logs/MKJamStarter.log` есть `LogDLSS: NVIDIA NGX DLSS supported DLSS-SR=1` и `NGXPerfQuality=DLAA(5)`.
 
 Вернуть TSR: удалить блок DLSS в `Config/DefaultEngine.ini`. В упаковку
 DLSS попадает, только если плагин стоит на машине, которая собирает сдачу.
