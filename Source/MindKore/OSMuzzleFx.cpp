@@ -31,6 +31,10 @@
 
 namespace
 {
+	TAutoConsoleVariable<int32> CVarSmokeStamp(
+		TEXT("os.Fx.SmokeStamp"), 1,
+		TEXT("1: a shot's first frame of gas is laid into its grid on the game thread (seen on the shot's frame); 0: only the grid's step lays it (a frame later)."));
+
 	TAutoConsoleVariable<int32> CVarVolumetricSmoke(
 		TEXT("os.Fx.VolumetricSmoke"), 1,
 		TEXT("1: muzzle smoke as volumetric voxel clouds (heterogeneous volumes); 0: card puffs. Both live in the world."));
@@ -155,9 +159,10 @@ UOSMuzzleFxComponent::UOSMuzzleFxComponent()
 		Gun.RoundAlongCm = RoundAlong;
 		Gun.CloudSeconds = Seconds;
 	};
-	Cloud(Pistol, 20, 3.0f, 0.03f, 220.0f, 0.6f, 0.3f, 0.35f, 0.05f, 4, 2.0f, 0.35f, 6.0f, 100.0f, 160.0f, 4.0f);
-	Cloud(Shotgun, 32, 5.0f, 0.03f, 160.0f, 0.8f, 0.8f, 0.5f, 0.03f, 4, 3.0f, 0.35f, 10.0f, 140.0f, 220.0f, 6.0f);
-	Cloud(Sniper, 22, 98.0f / 22.0f, 0.03f, 240.0f, 0.6f, 0.35f, 0.4f, 0.04f, 4, 2.5f, 0.35f, 8.0f, 120.0f, 260.0f, 5.0f);
+	// In air the grid steps the cloud's whole life (v6: it froze at 2-3 s and the clouds stood like stills).
+	Cloud(Pistol, 20, 3.0f, 0.03f, 220.0f, 0.6f, 0.3f, 0.35f, 0.05f, 4, 4.0f, 0.35f, 6.0f, 100.0f, 160.0f, 4.0f);
+	Cloud(Shotgun, 32, 5.0f, 0.03f, 160.0f, 0.8f, 0.8f, 0.5f, 0.03f, 4, 6.0f, 0.35f, 10.0f, 140.0f, 220.0f, 6.0f);
+	Cloud(Sniper, 22, 98.0f / 22.0f, 0.03f, 240.0f, 0.6f, 0.35f, 0.4f, 0.04f, 4, 5.0f, 0.35f, 8.0f, 120.0f, 260.0f, 5.0f);
 	Shotgun.ShoveCm = 90.0f;
 	Guns = { Pistol, Shotgun, Sniper };
 }
@@ -348,6 +353,7 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 			Cloud = &Each;
 		}
 	}
+	bool bStamped = false;
 	for (const FOSGasVent& Vent : Def.GasVents)
 	{
 		if (Vent.bJet)
@@ -361,6 +367,13 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 				Jet.Direction = Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal());
 				Jet.GunVelocity = GetOwner()->GetVelocity();
 				Jet.Vent = Vent;
+				if (CVarSmokeStamp.GetValueOnGameThread() != 0)
+				{
+					// The first frame's gas laid on the game thread (a few splats): the shot is seen on its own frame,
+					// not a grid step later; the grid's steps carry on from this front (v6, owner: «задержка»).
+					LayJet(*Cloud->Sim, Jet, Cloud->Basis, Cloud->Centre, 1.0f / 60.0f);
+					bStamped = true;
+				}
 			}
 			continue;
 		}
@@ -372,6 +385,45 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 			Flow.Muzzle = Muzzle;
 			Flow.Action = Action;
 		}
+	}
+	if (bStamped)
+	{
+		Cloud->Sim->Pack(Cloud->Atlas, Cloud->KeyDir, KeyShadow, AmbientOcclusion, Sharpen);
+		Cloud->bPendingAtlas = true;
+		Cloud->bHasGas = true;
+	}
+}
+
+void UOSMuzzleFxComponent::LayJet(FOSSmokeSim& Sim, FCloud::FJet& Jet, const FQuat& Basis, const FVector& Centre, float At)
+{
+	// The gas the vent let out since the last front, laid along the jet from its old front to the new (the front runs
+	// out at the vent's speed dying with DecaySeconds), widening with the distance and moving on at the jet's speed
+	// there - a long thin jet that frays, never a ball (v4). Laid, not left to the advection alone: a jet a cell or two
+	// wide was smeared to nothing on the 5 cm grid. The flow dies to a thin dribble (v6: «слишком долго льется»).
+	const FOSGasVent& V = Jet.Vent;
+	if (At >= V.Seconds)
+	{
+		return;
+	}
+	const float Flow = FMath::Exp(-At / V.DecaySeconds);
+	const float Speed = V.SpeedCm * Flow;
+	const float From = Jet.FrontCm;
+	Jet.FrontCm = FMath::Max(Jet.FrontCm, V.SpeedCm * V.DecaySeconds * (1.0f - Flow));
+	const FVector3f Mouth(Basis.UnrotateVector(Jet.Origin + Jet.GunVelocity * At - Centre));
+	const FVector3f Dir(Basis.UnrotateVector(FMath::VRandCone(Jet.Direction, FMath::DegreesToRadians(FMath::Max(V.ConeDeg, 0.5f)))));
+	// The burst: the gas that came out since the last step lies between the old front and the new - as much gas as
+	// length, so as dense all along (it was thinned with the flow and the far end came out empty).
+	const float Grow = Jet.FrontCm - From;
+	if (Grow > Sim.CellCm * 0.3f)
+	{
+		const float Mid = 0.5f * (From + Jet.FrontCm);
+		const float Radius = FMath::Max(V.WidthCm * 0.5f + 0.22f * Mid, Sim.CellCm * 0.8f);
+		Sim.Inject(Mouth + Dir * Mid, Dir, FMath::Max(0.5f * Grow, Sim.CellCm * 0.7f), Radius, V.Rate, 1.0f, Dir * Speed, 0.0f);
+	}
+	// The dribble after it, at the mouth and dying with the flow.
+	if (Flow > 0.05f)
+	{
+		Sim.Inject(Mouth + Dir * Sim.CellCm, Dir, Sim.CellCm * 0.7f, FMath::Max(V.WidthCm * 0.5f, Sim.CellCm * 0.8f), V.Rate * Flow, 1.0f, Dir * Speed, 0.0f);
 	}
 }
 
@@ -388,11 +440,11 @@ void UOSMuzzleFxComponent::Seep(const FOSWeapon& Def, const FTransform& Muzzle, 
 	for (int32 Index = 0; Smoke && !Seeping.IsEmpty() && Index < Count; ++Index)
 	{
 		// A seep barely leaves the hole: a tenth of the vent's speed.
-		EmitWisp(*Seeping[FMath::RandHelper(Seeping.Num())], Def.PortSmoke, Muzzle, Action, 0.1f, FMath::FRand() * AgeSpread);
+		EmitWisp(*Seeping[FMath::RandHelper(Seeping.Num())], Def.PortSmoke, Muzzle, Action, 0.1f, FMath::FRand() * AgeSpread, 0.5f);
 	}
 }
 
-void UOSMuzzleFxComponent::EmitWisp(const FOSGasVent& Vent, const FOSPortSmoke& Look, const FTransform& Muzzle, const USceneComponent* Action, float Speed, float AgeOffset)
+void UOSMuzzleFxComponent::EmitWisp(const FOSGasVent& Vent, const FOSPortSmoke& Look, const FTransform& Muzzle, const USceneComponent* Action, float Speed, float AgeOffset, float OpacityScale)
 {
 	UWorld* World = GetWorld();
 	const bool bOnAction = Vent.Space == EOSVentSpace::Action && Action;
@@ -409,7 +461,7 @@ void UOSMuzzleFxComponent::EmitWisp(const FOSGasVent& Vent, const FOSPortSmoke& 
 	Puff.AirDragSeconds = bAir ? AirDragSeconds : 0.0f;
 	Puff.StartCm = Look.StartCm;
 	Puff.EndCm = Look.EndCm * FMath::FRandRange(0.7f, 1.0f);
-	Puff.Opacity = Look.Opacity;
+	Puff.Opacity = Look.Opacity * OpacityScale;
 	Puff.Life = Look.Seconds * FMath::FRandRange(0.75f, 1.25f);
 	Puff.Age = AgeOffset;
 	Puff.Seed = FMath::FRand();
@@ -448,6 +500,8 @@ void UOSMuzzleFxComponent::EmitWisp(const FOSGasVent& Vent, const FOSPortSmoke& 
 		// Straight out of the vent, in the world (the muzzle's thin stream ahead of the jet).
 		Puff.Direction = Out;
 		Puff.Along = Out;
+		// The muzzle's stream is the first thing seen: no fade-in delay.
+		Puff.FadeInSeconds = 0.02f;
 		Puff.SpreadCm = SpeedCm * 0.12f;
 		Puff.DriftCm = SpeedCm * 0.08f;
 	}
@@ -570,6 +624,9 @@ namespace
 	constexpr float SimStep = 1.0f / 60.0f;
 	constexpr float SlowStep = 1.0f / 30.0f;
 	constexpr float FastSeconds = 0.5f;
+	/** Late in life (from LateSeconds) the slow drift steps at 15 Hz: it moves under a pixel a step. */
+	constexpr float LateStep = 1.0f / 15.0f;
+	constexpr float LateSeconds = 2.0f;
 
 #if !UE_BUILD_SHIPPING
 	/** os.Fx.SmokeCost: what the grids cost on the game thread since the last call. */
@@ -634,6 +691,23 @@ void UOSMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, co
 	{
 		Cloud = Algo::MaxElementBy(Clouds, [](const FCloud& Each) { return Each.Age; });
 	}
+	// That was the last free slot: the oldest starts fading out (EvictSeconds), so the next shot finds one.
+	if (!Clouds.ContainsByPredicate([Cloud](const FCloud& Each) { return Each.Age < 0.0f && &Each != Cloud; })
+		&& Clouds.Num() >= MaxClouds)
+	{
+		FCloud* Oldest = nullptr;
+		for (FCloud& Each : Clouds)
+		{
+			if (&Each != Cloud && Each.Age >= 0.0f && Each.Evict <= 0.0f && (!Oldest || Each.Age > Oldest->Age))
+			{
+				Oldest = &Each;
+			}
+		}
+		if (Oldest)
+		{
+			Oldest->Evict = EvictSeconds;
+		}
+	}
 	// The slot's last step may still run (the game thread does not wait for steps otherwise).
 	if (Cloud->Pending.IsValid())
 	{
@@ -641,6 +715,11 @@ void UOSMuzzleFxComponent::SpawnCloud(int32 Weapon, const FTransform& Muzzle, co
 		Cloud->Pending = UE::Tasks::FTask();
 	}
 	Cloud->PlaneMove = FVector3f::ZeroVector;
+	Cloud->Evict = 0.0f;
+	Cloud->Spin = FVector3f::ZeroVector;
+	Cloud->bHasGas = false;
+	Cloud->bShown = false;
+	Cloud->ShotFrame = GFrameCounter;
 	const FQuat BoreQuat = Muzzle.GetRotation();
 	const FVector Bore = BoreQuat.GetAxisX();
 	const float BoxCm = Gun.Cells * Gun.CellCm;
@@ -866,6 +945,13 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 			continue;
 		}
 		Cloud.bPendingAtlas = false;
+#if !UE_BUILD_SHIPPING
+		if (Cloud.bHasGas && !Cloud.bShown)
+		{
+			Cloud.bShown = true;
+			UE_LOG(LogMindKore, Log, TEXT("Smoke latency: gas drawn %d frame(s) after the shot (stamp %d)"), int32(GFrameCounter - Cloud.ShotFrame), CVarSmokeStamp.GetValueOnGameThread());
+		}
+#endif
 		// The box follows the gas by whole cells: the voxels stay where they are in the world.
 		Cloud.Centre += Cloud.Basis.RotateVector(FVector(Cloud.PendingShift) * Cloud.Sim->CellCm);
 		const FIntPoint Size = FOSSmokeSim::AtlasSize(Cloud.Sim->N);
@@ -907,7 +993,8 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		FOSSmokeSim& Sim = *Cloud.Sim;
 		const bool bBusy = Cloud.IsBusy();
 		Cloud.Age += DeltaTime;
-		if (Cloud.Age >= G.CloudSeconds)
+		const bool bEvicted = Cloud.Evict > 0.0f && (Cloud.Evict -= DeltaTime) <= 0.0f;
+		if (Cloud.Age >= G.CloudSeconds || bEvicted)
 		{
 			Cloud.Age = -1.0f;
 			Cloud.Volume->SetVisibility(false);
@@ -955,13 +1042,14 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 			Cloud.Rise = FVector::ZeroVector;
 			Cloud.StepCarry += DeltaTime;
 			// Whole fixed steps; a long frame does not pile them up (at most 4: a hitch slows the gas instead).
-			const float Dt = Cloud.Age - Cloud.StepCarry < FastSeconds ? SimStep : SlowStep;
-			const int32 Steps = FMath::Min(FMath::FloorToInt(Cloud.StepCarry / Dt), 4);
+			const float Since = Cloud.Age - Cloud.StepCarry;
+			const float Dt = Since < FastSeconds ? SimStep : Since < LateSeconds ? SlowStep : LateStep;
+			const int32 Steps = FMath::Min(FMath::FloorToInt(Cloud.StepCarry / Dt + 1e-3f), 4);
 			if (Steps > 0)
 			{
 				Launches.Add({ &Cloud, Steps, Cloud.Age - Cloud.StepCarry + Dt, Dt });
 			}
-			Cloud.StepCarry = Steps == 4 ? 0.0f : Cloud.StepCarry - Steps * Dt;
+			Cloud.StepCarry = Steps == 4 ? 0.0f : FMath::Max(0.0f, Cloud.StepCarry - Steps * Dt);
 			Cloud.Awake = FMath::Max(0.0f, Cloud.Awake - DeltaTime);
 		}
 		else if (!Cloud.bFrozen)
@@ -980,6 +1068,35 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 			Cloud.Rise = Sim.bAir ? Cloud.Basis.RotateVector(FVector(Mean)) : FVector::ZeroVector;
 			// The grid's own radial speed is smeared within a few steps (semi-Lagrangian self-advection), so the slug's
 			// expansion speed sets the rate when it is the larger.
+			// Its spin: angular momentum over the moment of inertia about the gas's centre - kept in a vacuum, the
+			// frozen cloud keeps turning (v6: a vacuum cloud must still look alive, eerily).
+			if (!Sim.bAir)
+			{
+				float SpinMass;
+				const FVector3f C = Sim.Centroid(SpinMass) * Sim.CellCm;
+				FVector3f L = FVector3f::ZeroVector;
+				float Inertia = 0.0f;
+				for (int32 Z = 0; Z < Sim.N; ++Z)
+				{
+					for (int32 Y = 0; Y < Sim.N; ++Y)
+					{
+						for (int32 X = 0; X < Sim.N; ++X)
+						{
+							const int32 I = Sim.Index(X, Y, Z);
+							if (Sim.Rho[I] > 0.004f)
+							{
+								const FVector3f P = Sim.CellCentre(X, Y, Z) - C;
+								L += (P ^ FVector3f(Sim.Ux[I], Sim.Uy[I], Sim.Uz[I])) * Sim.Rho[I];
+								Inertia += P.SizeSquared() * Sim.Rho[I];
+							}
+						}
+					}
+				}
+				Cloud.Spin = L / FMath::Max(Inertia, 1.0f);
+				// At least a slow turn, at most a visible one (rad/s).
+				const float W = FMath::Clamp(Cloud.Spin.Size(), 0.06f, 0.35f);
+				Cloud.Spin = Cloud.Spin.GetSafeNormal(UE_SMALL_NUMBER, FVector3f(FMath::VRand())) * W;
+			}
 			const float Radial = FMath::Max(Sim.MeanRadialSpeed(), 30.0f);
 			Cloud.ExpandRate = Sim.bAir ? 0.0f : FMath::Clamp(Radial / (0.5f * Sim.N * G.CellCm), 0.05f, 0.35f);
 		}
@@ -987,6 +1104,10 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		{
 			Cloud.Rise *= FMath::Exp(-DeltaTime / 2.0f);
 			Cloud.Scale += Cloud.ExpandRate * DeltaTime;
+			if (!Cloud.Spin.IsNearlyZero())
+			{
+				Cloud.Basis = Cloud.Basis * FQuat(FVector(Cloud.Spin.GetSafeNormal()), Cloud.Spin.Size() * DeltaTime);
+			}
 		}
 		const float Half = 0.5f * Sim.N * G.CellCm * Cloud.Scale;
 		// The body passing through parts the gas where its capsule overlaps the box, as fast as it moves, along its own
@@ -1009,7 +1130,12 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		Material->SetScalarParameterValue(TEXT("Thin"), 1.0f / FMath::Cube(Cloud.Scale));
 		// In a vacuum the thinning by the growth does the dying; erosion on top of it left nothing by 2 s.
 		Material->SetScalarParameterValue(TEXT("Erode"), Sim.bAir ? G.Erode : G.Erode * 0.35f);
-		Material->SetScalarParameterValue(TEXT("Gain"), 1.0f);
+		// The end is a process, not an event (v6, owner: «дым резко пропадает»): over the last 40% of its life the
+		// density sinks to nothing - thin parts fall below the lowest band first, holes grow, strands thin - and an
+		// evicted cloud does the same over EvictSeconds.
+		const float LifeFade = 1.0f - FMath::SmoothStep(0.6f * G.CloudSeconds, G.CloudSeconds, Cloud.Age);
+		const float EvictFade = Cloud.Evict > 0.0f ? Cloud.Evict / EvictSeconds : 1.0f;
+		Material->SetScalarParameterValue(TEXT("Gain"), LifeFade * EvictFade);
 		// The key light: the brightest at the cloud now (the flash while it burns); the grid's shadow is packed toward it.
 		// Eased (tau 0.25 s, the same at any frame rate): a change of key light never pops.
 		{
@@ -1031,6 +1157,7 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		Material->SetScalarParameterValue(TEXT("Extinction"), G.DenseExtinction);
 		Material->SetScalarParameterValue(TEXT("UnitCm"), G.CellCm * Cloud.Scale);
 		Material->SetVectorParameterValue(TEXT("Eye"), FLinearColor(EyeLocal.X, EyeLocal.Y, EyeLocal.Z, EyeClearCm));
+		Material->SetVectorParameterValue(TEXT("Body"), FLinearColor(BodyLocal.X, BodyLocal.Y, BodyLocal.Z, BodyRadius));
 #if !UE_BUILD_SHIPPING
 		for (const TPair<FName, FString>& Each : MaterialTune)
 		{
@@ -1079,21 +1206,7 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 				// not left to the advection alone: a jet a cell or two wide was smeared to nothing on the 5 cm grid.
 				for (FCloud::FJet& Jet : Cloud->Jets)
 				{
-					const FOSGasVent& V = Jet.Vent;
-					if (At >= V.Seconds)
-					{
-						continue;
-					}
-					const float Flow = FMath::Exp(-At / V.DecaySeconds);
-					const float Speed = V.SpeedCm * Flow;
-					const float From = Jet.FrontCm;
-					Jet.FrontCm = V.SpeedCm * V.DecaySeconds * (1.0f - Flow);
-					const FVector3f Mouth(Basis.UnrotateVector(Jet.Origin + Jet.GunVelocity * At - Centre));
-					const FVector3f Dir(Basis.UnrotateVector(FMath::VRandCone(Jet.Direction, FMath::DegreesToRadians(FMath::Max(V.ConeDeg, 0.5f)))));
-					const float Mid = 0.5f * (From + Jet.FrontCm);
-					const float Half = FMath::Max(0.5f * (Jet.FrontCm - From), Sim.CellCm * 0.7f);
-					const float Radius = FMath::Max(V.WidthCm * 0.5f + 0.22f * Mid, Sim.CellCm * 0.8f);
-					Sim.Inject(Mouth + Dir * Mid, Dir, Half, Radius, V.Rate * (0.4f + 0.6f * Flow), 1.0f, Dir * Speed, 0.0f);
+					LayJet(Sim, Jet, Basis, Centre, At);
 				}
 #if !UE_BUILD_SHIPPING
 				const double T0 = FPlatformTime::Seconds();
@@ -1117,6 +1230,7 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 				Sim.Shift(Cloud->PendingShift);
 			}
 			Sim.Pack(Cloud->Atlas, KeyDir, Shadow, Occlusion, Sharp);
+			Cloud->bHasGas = Mass > 0.01f;
 			Cloud->bPendingAtlas = true;
 		});
 	}

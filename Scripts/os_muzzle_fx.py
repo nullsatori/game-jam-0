@@ -221,7 +221,7 @@ def _smoke(m, node, custom, data, scalar, colour, mul):
 # volume marches this Volume-domain material and lights it with real self-shadowing and scattering. The gas is
 # simulated on the CPU (FOSSmokeSim) and arrives as an atlas (slice z at tile (z % 8, z / 8), 8 tiles across):
 # r the drawn density (the gas less its blur: rags, not a cushion), g heat, b the key light's shadow, a the ambient's.
-# The low-res identity: the material's pixel is a fixed cube in the box, PixelCm (C++ VoxelPixelCm, 2.5 cm; v5 - a
+# The low-res identity: the material's pixel is a fixed cube in the box, PixelCm (C++ VoxelPixelCm, 3 cm; v5 - a
 # pixel picked from the distance to the eye jumped 2x at thresholds and the cloud re-pixelated as you walked), the
 # grid sampled trilinearly at the pixel's centre and cut into 4 bands - a very thin lowest one (a veil, not a step
 # into grey) - with a hashed threshold per pixel (v5: a 4x4 Bayer summed along a ray drew view-dependent patterns).
@@ -236,6 +236,9 @@ if (any(abs(l) >= H)) return 0;
 float eye = length(l - E.xyz);
 // The eye clears: nothing this close (flying through a cloud never fills the lens).
 if (eye < E.w) return 0;
+// The body carves a soft hole around itself this very frame (v6: the grid's push lagged a few frames).
+float bd = length(l - Bod.xyz);
+float carve = saturate((bd - 0.5 * Bod.w) / max(0.5 * Bod.w, 1.0));
 float cell = Px;
 float3 q = floor(l / cell);
 float3 u = ((q + 0.5) * cell) / (2 * H) + 0.5;
@@ -255,7 +258,7 @@ int3 qi = int3(q);
 float th = frac(sin(dot(q + S * 17, float3(269.5, 183.3, 246.1))) * 43758.5453);
 float hv = frac(sin(dot(q + S * 31, float3(127.1, 311.7, 74.7))) * 43758.5453);
 float erode = Er * saturate((T - 0.25) / max(L - 0.25, 0.1)) * (0.35 + 0.65 * hv);
-float dens = g.r * Th * Gn - erode;
+float dens = (g.r * Th * Gn - erode) * carve;
 int band = (int)min(floor(saturate(dens) * 4 + th), 4);
 if (band < 1) return 0;
 float flick = frac(sin(dot(q, float3(12.9898, 78.233, 37.719)) + floor(Tm * 24) * 0.618) * 43758.5453);
@@ -270,14 +273,14 @@ def _volume(m, node, custom, data, scalar, colour, mul):
     m.set_editor_property("used_with_heterogeneous_volumes", True)
     world = node(unreal.MaterialExpressionWorldPosition)
     vec = {}
-    for name in ["CloudCentre", "CloudX", "CloudY", "CloudZ", "Eye"]:
+    for name in ["CloudCentre", "CloudX", "CloudY", "CloudZ", "Eye", "Body"]:
         vec[name] = colour(name, unreal.LinearColor(0, 0, 0, 0))
     grid = node(unreal.MaterialExpressionTextureObjectParameter, parameter_name="Grid",
                 texture=unreal.load_asset("/Engine/EngineResources/DefaultTexture"))
     inputs = {"W": world, "H": scalar("HalfCm", 80.0), "N": scalar("Cells", 32.0), "S": scalar("Seed", 0.0),
               "T": scalar("Age", 0.0), "L": scalar("Life", 6.0), "Th": scalar("Thin", 1.0), "Er": scalar("Erode", 0.9),
-              "Gn": scalar("Gain", 1.0), "Px": scalar("PixelCm", 2.5), "Tm": node(unreal.MaterialExpressionTime), "Grid": grid}
-    rgba = {"C": "CloudCentre", "BX": "CloudX", "BY": "CloudY", "BZ": "CloudZ", "E": "Eye"}
+              "Gn": scalar("Gain", 1.0), "Px": scalar("PixelCm", 3.0), "Tm": node(unreal.MaterialExpressionTime), "Grid": grid}
+    rgba = {"C": "CloudCentre", "BX": "CloudX", "BY": "CloudY", "BZ": "CloudZ", "E": "Eye", "Bod": "Body"}
     n = node(unreal.MaterialExpressionCustom, code=VOLUME_HLSL, description="Cloud",
              output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT4,
              inputs=[_input(k) for k in list(inputs) + list(rgba)])

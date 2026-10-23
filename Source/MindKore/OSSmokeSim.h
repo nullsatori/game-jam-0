@@ -40,6 +40,17 @@ struct FOSSmokeParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.0"))
 	float Turbulence = 1400.0f;
 
+	/**
+	 * Air: the gas stays a little warmer than the room its whole life (v6, owner: «облака дыма слишком статичные»): a
+	 * lift of ResidualLift x Buoyancy per unit of density on top of the heat's, and a slow ambient churn, cm/s^2 - a
+	 * coarse noise drifting with time - that keeps folding it after the heat is gone.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.0"))
+	float ResidualLift = 0.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.0"))
+	float AmbientChurn = 40.0f;
+
 	/** Density lost per second (the rest of the dying is the material's erosion). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Smoke", meta = (ClampMin = "0.0"))
 	float DecayPerSecond = 0.06f;
@@ -137,7 +148,7 @@ private:
 	}
 	bool IsSolid(int32 X, int32 Y, int32 Z) const { return Solid[Index(X, Y, Z)] != 0; }
 	void Advect(float Dt);
-	void Churn(float Dt, float Amount);
+	void Churn(float Dt, float Amount, float Ambient);
 	/** Seconds stepped (the churn's noise drifts with it). */
 	float Time = 0.0f;
 	void Confine(float Dt, float Epsilon);

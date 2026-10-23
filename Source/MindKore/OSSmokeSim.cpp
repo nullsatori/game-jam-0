@@ -376,25 +376,34 @@ namespace
 	}
 }
 
-void FOSSmokeSim::Churn(float Dt, float Amount)
+void FOSSmokeSim::Churn(float Dt, float Amount, float Ambient)
 {
-	if (Amount <= 0.0f)
-	{
-		return;
-	}
-	// Only where there is heat (the fresh gas; nothing once it has cooled), a lattice of ~3 cells drifting with time.
+	// Where there is heat, a lattice of ~3 cells drifting with time (the fresh gas); and wherever there is gas, a slow
+	// coarse one of ~8 cells (the room's air never still: the cloud keeps folding after it has cooled).
 	const FVector3f Drift(Time * 0.9f, Time * -0.7f, Time * 0.5f);
+	const FVector3f Slow(Time * 0.15f, Time * 0.11f, Time * -0.13f);
 	ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 	{
-		if (Heat[I] < 0.02f || Solid[I])
+		if (Solid[I])
 		{
 			return;
 		}
-		const FVector3f Pos = FVector3f(X, Y, Z) / 2.5f + Drift;
-		const float S = Amount * Heat[I] * Dt;
-		Ux[I] += S * SmokeNoise(Pos, NoiseSeed);
-		Uy[I] += S * SmokeNoise(Pos, NoiseSeed ^ 0x9E3779B9u);
-		Uz[I] += S * SmokeNoise(Pos, NoiseSeed ^ 0x85EBCA6Bu);
+		if (Heat[I] >= 0.02f && Amount > 0.0f)
+		{
+			const FVector3f Pos = FVector3f(X, Y, Z) / 2.5f + Drift;
+			const float S = Amount * Heat[I] * Dt;
+			Ux[I] += S * SmokeNoise(Pos, NoiseSeed);
+			Uy[I] += S * SmokeNoise(Pos, NoiseSeed ^ 0x9E3779B9u);
+			Uz[I] += S * SmokeNoise(Pos, NoiseSeed ^ 0x85EBCA6Bu);
+		}
+		if (Rho[I] > 0.004f && Ambient > 0.0f)
+		{
+			const FVector3f Pos = FVector3f(X, Y, Z) / 8.0f + Slow;
+			const float S = Ambient * Dt;
+			Ux[I] += S * SmokeNoise(Pos, NoiseSeed ^ 0x27D4EB2Fu);
+			Uy[I] += S * SmokeNoise(Pos, NoiseSeed ^ 0x165667B1u);
+			Uz[I] += S * SmokeNoise(Pos, NoiseSeed ^ 0xD3A2646Cu);
+		}
 	});
 }
 
@@ -415,13 +424,14 @@ void FOSSmokeSim::Step(float Dt, float Age, const FOSSmokeParams& K)
 		const FVector3f Lift = -Down * (K.Buoyancy * Dt);
 		ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 		{
-			Ux[I] = (Ux[I] + Lift.X * Heat[I]) * Drag;
-			Uy[I] = (Uy[I] + Lift.Y * Heat[I]) * Drag;
-			Uz[I] = (Uz[I] + Lift.Z * Heat[I]) * Drag;
+			const float Warm = Heat[I] + K.ResidualLift * FMath::Min(Rho[I], 1.0f);
+			Ux[I] = (Ux[I] + Lift.X * Warm) * Drag;
+			Uy[I] = (Uy[I] + Lift.Y * Warm) * Drag;
+			Uz[I] = (Uz[I] + Lift.Z * Warm) * Drag;
 		});
 		// The fresh gas churns (air only: without the pressure solve the push is divergent, and the advected
 		// density would swell with it).
-		Churn(Dt, K.Turbulence);
+		Churn(Dt, K.Turbulence, K.AmbientChurn);
 	}
 	// 2. The curls the coarse grid would smear (no pressure feeds them in a vacuum: half).
 	Confine(Dt, bAir ? K.Vorticity : K.Vorticity * 0.5f);

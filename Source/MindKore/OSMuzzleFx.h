@@ -213,16 +213,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx")
 	TSoftObjectPtr<UMaterialInterface> SmokeMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/FX/M_OS_MuzzleSmoke.M_OS_MuzzleSmoke")));
 
-	/** Clouds alive at once (volumetric smoke); the oldest is reused. */
+	/**
+	 * Clouds alive at once (volumetric smoke). When a shot takes the last free one the oldest starts fading out over
+	 * EvictSeconds (v6: it was cut off at once); only with none free at all is the oldest reused on the spot.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "1"))
-	int32 MaxClouds = 4;
+	int32 MaxClouds = 6;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.05"))
+	float EvictSeconds = 0.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume")
 	TSoftObjectPtr<UMaterialInterface> CloudMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/FX/M_OS_MuzzleSmokeVolume.M_OS_MuzzleSmokeVolume")));
 
 	/** Clouds whose grids step in one frame (the youngest); the rest hold still until they are among them again. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "1"))
-	int32 MaxActiveSims = 2;
+	int32 MaxActiveSims = 6;
 
 	/** A push (a round, the pawn, a flyer, a hot case) wakes a frozen cloud's grid for this long, s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
@@ -268,7 +274,7 @@ public:
 	 * (r.HeterogeneousVolumes.StepSize, in cells) must stay at most half of it, or the pixels alias as the view turns.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.5"))
-	float VoxelPixelCm = 2.5f;
+	float VoxelPixelCm = 3.0f;
 
 	/** Voxels this close to the eye fade out (cm): flying through a cloud never fills the lens. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
@@ -393,7 +399,7 @@ private:
 		float Carry = 0.0f;
 	};
 	/** One wisp out of Vent (Speed: its flow's speed share now), born AgeOffset s ago. */
-	void EmitWisp(const FOSGasVent& Vent, const FOSPortSmoke& Look, const FTransform& Muzzle, const USceneComponent* Action, float Speed, float AgeOffset);
+	void EmitWisp(const FOSGasVent& Vent, const FOSPortSmoke& Look, const FTransform& Muzzle, const USceneComponent* Action, float Speed, float AgeOffset, float OpacityScale = 1.0f);
 	TArray<FFlow> Flows;
 	/** A clinging wisp's point on its path in the gun's space at Age. */
 	static FVector ClingPath(const FPuff& Puff, float Age);
@@ -468,6 +474,14 @@ private:
 		FVector3f KeyDir = FVector3f::UpVector;
 		FLinearColor KeyColour = FLinearColor::White;
 		FString KeyName;
+		/** Fading out early (another shot needed its slot): seconds left, 0 when not. */
+		float Evict = 0.0f;
+		/** A vacuum cloud frozen keeps turning at its gas's angular velocity at the freeze (box frame axis x rad/s). */
+		FVector3f Spin = FVector3f::ZeroVector;
+		/** Gas in the last packed atlas; the frame of the shot (os.Fx.SmokeCost: shot-to-visible latency). */
+		bool bHasGas = false;
+		bool bShown = false;
+		uint64 ShotFrame = 0;
 		/** The jets feeding this cloud: world origin and direction at the shot, the vent's flow. */
 		struct FJet
 		{
@@ -488,6 +502,9 @@ private:
 		/** A step still in flight: the game thread never waits for it (v5) - the grid, the atlas and the planes wait. */
 		bool IsBusy() const { return Pending.IsValid() && !Pending.IsCompleted(); }
 	};
+
+	/** A jet's gas let out by At (s after the shot) since its last front, laid into the grid (box at Centre, Basis). */
+	static void LayJet(FOSSmokeSim& Sim, FCloud::FJet& Jet, const FQuat& Basis, const FVector& Centre, float At);
 
 	/** A case still hot. */
 	struct FHotCase
