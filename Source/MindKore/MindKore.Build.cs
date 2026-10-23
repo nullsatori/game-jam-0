@@ -20,6 +20,10 @@ public class MindKore : ModuleRules
 		{
 			"Core",
 			"CoreUObject",
+			// The gas's screen-block pass (v11 stage 5): its shaders' module, and the renderer for the view extension.
+			"MindKoreShaders",
+			"RenderCore",
+			"Renderer",
 			"Engine",
 			"InputCore",
 			"EnhancedInput",

@@ -376,6 +376,8 @@ private:
 	UPROPERTY()
 	TObjectPtr<UTexture2D> TunnelTexture = nullptr;
 	TArray<TObjectPtr<UTexture2D>> BoundGrids;
+	/** The screen-block pass (v11 stage 5, os.Gas.LowRes 1): fed each frame with what M_OS_GasPost would get. */
+	TSharedPtr<class FOSGasViewExtension, ESPMode::ThreadSafe> GasView;
 	/** The drawn set (slots) last frame and how often it changed (the log, os.Gas.WalkProbe). */
 	TArray<int32> LastDrawnSet;
 public:

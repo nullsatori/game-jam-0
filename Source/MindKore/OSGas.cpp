@@ -12,6 +12,11 @@
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
 #include "Misc/ScopeExit.h"
+#include "OSGasRender.h"
+#include "RenderingThread.h"
+#include "PostProcess/PostProcessMaterialInputs.h"
+#include "SceneViewExtension.h"
+#include "ScreenPass.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -77,6 +82,10 @@ namespace
 		TEXT("os.Gas.Cards"), 0,
 		TEXT("1: the old card wisps (shroud, muzzle stream) are drawn too; 0 (v11): the gas is parcels only."));
 
+	TAutoConsoleVariable<int32> CVarGasLowRes(
+		TEXT("os.Gas.LowRes"), 1,
+		TEXT("1: the gas drawn once per screen block by its own pass after the tonemapper (v11 stage 5); 0: by M_OS_GasPost in every pixel (the old way, kept until the merge)."));
+
 	TAutoConsoleVariable<int32> CVarGasDebugAlpha(
 		TEXT("os.Gas.DebugAlpha"), 0,
 		TEXT("1: the gas post-process draws only its opacity, grey (os.Gas.WalkProbe measures its jumps a frame)."));
@@ -131,6 +140,41 @@ namespace
 	}
 }
 
+/** The gas's screen-block pass hooked after the tonemapper (where M_OS_GasPost draws): the subsystem hands it a frame. */
+class FOSGasViewExtension : public FWorldSceneViewExtension
+{
+public:
+	FOSGasViewExtension(const FAutoRegister& AutoRegister, UWorld* InWorld) : FWorldSceneViewExtension(AutoRegister, InWorld) {}
+
+	void SetData(const FOSGasRenderData& InData)
+	{
+		FScopeLock Lock(&DataLock);
+		Data = InData;
+	}
+
+	virtual void SubscribeToPostProcessingPass(EPostProcessingPass Pass, const FSceneView& InView, FPostProcessingPassDelegateArray& InOutPassCallbacks, bool bIsPassEnabled) override
+	{
+		if (Pass == EPostProcessingPass::Tonemap && CVarGasLowRes.GetValueOnAnyThread() > 0)
+		{
+			InOutPassCallbacks.Add(FAfterPassCallbackDelegate::CreateRaw(this, &FOSGasViewExtension::Draw));
+		}
+	}
+
+private:
+	FScreenPassTexture Draw(FRDGBuilder& GraphBuilder, const FSceneView& View, const FPostProcessMaterialInputs& Inputs)
+	{
+		FOSGasRenderData Now;
+		{
+			FScopeLock Lock(&DataLock);
+			Now = Data;
+		}
+		return OSAddGasPasses(GraphBuilder, View, Inputs, Now);
+	}
+
+	FCriticalSection DataLock;
+	FOSGasRenderData Data;
+};
+
 UOSGasSubsystem* UOSGasSubsystem::Get(const UObject* WorldContext)
 {
 	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
@@ -150,6 +194,13 @@ TStatId UOSGasSubsystem::GetStatId() const
 void UOSGasSubsystem::Deinitialize()
 {
 	WaitAll();
+	// The pass lets go of the textures before they go (an empty frame: it draws nothing).
+	if (GasView.IsValid())
+	{
+		GasView->SetData(FOSGasRenderData());
+		FlushRenderingCommands();
+		GasView.Reset();
+	}
 	Super::Deinitialize();
 }
 
@@ -179,6 +230,7 @@ void UOSGasSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		Volume->Priority = 1000.0f;
 		Volume->Settings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0f, Post));
 		PostVolume = Volume;
+		GasView = FSceneViewExtensions::NewExtension<FOSGasViewExtension>(&InWorld);
 	}
 	// The pool: every cloud's volume, material, textures and grid made now, not on the first shot (a 30 ms frame).
 	Clouds.SetNum(MaxClouds);
@@ -1208,6 +1260,36 @@ void UOSGasSubsystem::UpdatePost()
 	}
 	Post->SetScalarParameterValue(TEXT("BlockPx"), FMath::Max(1.0f, FMath::RoundToFloat(float(View.Y) / 270.0f)));
 	Post->SetScalarParameterValue(TEXT("EyeClear"), EyeClearCm);
+	// The screen-block pass (os.Gas.LowRes 1) gets the same; the material then draws nothing (no clouds, no tunnels).
+	if (GasView.IsValid())
+	{
+		FOSGasRenderData Frame;
+		const bool bLowRes = CVarGasLowRes.GetValueOnGameThread() > 0;
+		for (int32 Index = 0; Index < FMath::Min(Drawn.Num(), FOSGasRenderData::MaxGrids); ++Index)
+		{
+			Frame.Grids[Index] = BoundGrids[Index] ? BoundGrids[Index]->GetResource() : nullptr;
+		}
+		Frame.Data = DataTexture->GetResource();
+		Frame.Tunnels = TunnelTexture->GetResource();
+		Frame.CloudCount = bLowRes ? Drawn.Num() : 0;
+		Frame.TunnelCount = Count;
+		Frame.BlockPx = FMath::Max(1.0f, FMath::RoundToFloat(float(View.Y) / 270.0f));
+		Frame.EyeClear = EyeClearCm;
+#if !UE_BUILD_SHIPPING
+		Frame.DebugMode = float(CVarGasDebugAlpha.GetValueOnGameThread());
+#endif
+		GasView->SetData(Frame);
+		if (bLowRes)
+		{
+			Post->SetScalarParameterValue(TEXT("CloudCount"), 0.0f);
+			Post->SetScalarParameterValue(TEXT("TunnelCount"), 0.0f);
+		}
+		// The material out of the frame altogether while the pass draws (it cost 0.1 ms even with nothing to march).
+		if (APostProcessVolume* Volume = Cast<APostProcessVolume>(PostVolume); Volume && Volume->Settings.WeightedBlendables.Array.Num() > 0)
+		{
+			Volume->Settings.WeightedBlendables.Array[0].Weight = bLowRes ? 0.0f : 1.0f;
+		}
+	}
 #if !UE_BUILD_SHIPPING
 	Post->SetScalarParameterValue(TEXT("DebugAlpha"), CVarGasDebugAlpha.GetValueOnGameThread() > 0 ? 1.0f : 0.0f);
 #endif

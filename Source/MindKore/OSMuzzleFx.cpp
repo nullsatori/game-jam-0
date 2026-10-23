@@ -2774,7 +2774,8 @@ namespace
 			// The probe's clock and its last shot, for the jumps' log (a jump within 2 frames of a shot is the shot's).
 			TSharedRef<FVector2D> Clock = MakeShared<FVector2D>(0.0, -1.0);
 			TSharedRef<int32> JumpLines = MakeShared<int32>(0);
-			if (GEngine->GameViewport && IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.DebugAlpha"))->GetInt() > 0)
+			// Only at 1: the delegate takes every screenshot (os.Gas.Capture's too) instead of saving it.
+			if (GEngine->GameViewport && IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.DebugAlpha"))->GetInt() == 1)
 			{
 				GEngine->GameViewport->OnScreenshotCaptured().AddLambda([LastBlocks, Alpha, Clock, JumpLines](int32 Width, int32 Height, const TArray<FColor>& Pixels)
 				{

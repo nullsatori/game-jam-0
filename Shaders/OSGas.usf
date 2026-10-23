@@ -1,0 +1,329 @@
+// v11 stage 5 (Docs/RecoilWeapons-SmokeV11.md): the gas drawn once per screen block, not once per pixel.
+// MainBlockCS marches the block centre's ray (the same ray M_OS_GasPost gave every pixel of the block) through every
+// cloud, to the block's farthest scene depth, and flags a block whose depths differ (a gun's edge, a wall's rim);
+// MainCompositePS takes the block's result, or marches its own pixel's depth in a flagged block (crisp edges).
+// The march is M_OS_GasPost's (Scripts/os_muzzle_fx.py, GAS_POST_HLSL), kept the same: two atlases per cloud blended
+// by the step's phase, soft tunnels, the eye's and the box faces' fades, the light and colour, the 4 bands.
+
+#include "/Engine/Private/Common.ush"
+
+Texture2D SceneDepth;
+Texture2D<float4> GasData;
+Texture2D<float4> GasTunnels;
+Texture2D GasGrid0;
+Texture2D GasGrid1;
+Texture2D GasGrid2;
+Texture2D GasGrid3;
+Texture2D GasGrid4;
+Texture2D GasGrid5;
+Texture2D GasGrid6;
+Texture2D GasGrid7;
+Texture2D GasGrid8;
+Texture2D GasGrid9;
+SamplerState GasSampler;
+float GasCloudCount;
+float GasTunnelCount;
+float GasBlockPx;
+float GasEyeClear;
+float GasDebugAlpha;
+float3 GasCamera;
+// The output's rect (post-upscale pixels) and the depth's (render pixels): a pixel's depth texel is
+// DepthMin + (Px - OutMin) * DepthScale.
+int2 OutMin;
+int2 OutSize;
+int2 DepthMin;
+float2 DepthScale;
+
+// Where an output pixel's ray meets the scene (distance from the eye, cm) and its direction, from the render view.
+float3 PixelRay(float2 OutPx, out float SceneDist)
+{
+	float2 DepthPx = DepthMin + (OutPx - OutMin) * DepthScale;
+	float DeviceZ = SceneDepth.Load(int3(DepthPx, 0)).r;
+	float4 Far = mul(float4(DepthPx, 0.5, 1), View.SVPositionToTranslatedWorld);
+	float3 Dir = normalize(Far.xyz / Far.w - View.TranslatedWorldCameraOrigin);
+	if (DeviceZ <= 0.0)
+	{
+		SceneDist = 1e7;
+	}
+	else
+	{
+		float4 Hit = mul(float4(DepthPx, DeviceZ, 1), View.SVPositionToTranslatedWorld);
+		SceneDist = length(Hit.xyz / Hit.w - View.TranslatedWorldCameraOrigin);
+	}
+	return Dir;
+}
+
+float3 RayDir(float2 OutPx)
+{
+	float Unused;
+	return PixelRay(OutPx, Unused);
+}
+
+void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, out float3 acc, out float T, out float firstT)
+{
+	firstT = 1e9;
+	// The tunnels this ray crosses: (t of the closest approach, its distance, sin of the angle, radius), the stretch
+	// inside the caps, the birth.
+	float4 hq[16];
+	float2 hc[16];
+	float hb[16];
+	int nh = 0;
+	int nt = (int)(GasTunnelCount + 0.5);
+	[loop] for (int k = 0; k < nt && nh < 16; k++)
+	{
+	    float4 ta = GasTunnels.Load(int3(k, 0, 0));
+	    float4 tb = GasTunnels.Load(int3(k, 1, 0));
+	    float birth = GasTunnels.Load(int3(k, 2, 0)).x;
+	    float r = ta.w * (1.0 - 0.5 * tb.w);
+	    if (r < 0.3) continue;
+	    float3 u = tb.xyz - ta.xyz;
+	    float L = length(u);
+	    if (L < 1e-3) continue;
+	    float3 ax = u / L;
+	    float3 m = Cam - ta.xyz;
+	    float da = dot(dir, ax), ma = dot(m, ax);
+	    float3 dp = dir - ax * da, mp = m - ax * ma;
+	    float A = dot(dp, dp);
+	    float tc = A > 1e-6 ? -dot(dp, mp) / A : 0.0;
+	    float dmin = length(mp + dp * tc);
+	    if (dmin >= r) continue;
+	    float2 caps = float2(-1e9, 1e9);
+	    if (abs(da) > 1e-6)
+	    {
+	        float c0 = (0.0 - ma) / da, c1 = (L - ma) / da;
+	        caps = float2(min(c0, c1), max(c0, c1));
+	    }
+	    else if (ma < 0 || ma > L) continue;
+	    // Only the stretch of the ray inside the cylinder is checked per sample (it was the caps' whole span).
+	    float hw = sqrt(r * r - dmin * dmin) / max(sqrt(A), 0.05);
+	    hq[nh] = float4(tc, dmin, sqrt(A), r);
+	    hc[nh] = float2(max(caps.x, tc - hw), min(caps.y, tc + hw));
+	    hb[nh] = birth;
+	    nh++;
+	}
+	T = 1.0;
+	acc = 0;
+	int nc = (int)(GasCloudCount + 0.5);
+	float3 inv = 1.0 / dir;
+	[loop] for (int c = 0; c < nc; c++)
+	{
+	    float4 d0 = GasData.Load(int3(c, 0, 0));
+	    float4 d1 = GasData.Load(int3(c, 1, 0));
+	    float4 d2 = GasData.Load(int3(c, 2, 0));
+	    float4 d3 = GasData.Load(int3(c, 3, 0));
+	    float4 d4 = GasData.Load(int3(c, 4, 0));
+	    float4 d7 = GasData.Load(int3(c, 7, 0));
+	    float cellP = GasData.Load(int3(c, 8, 0)).x;
+	    float3 C = d0.xyz;
+	    float H = d0.w;
+	    float n = d1.x, cell = d1.y, gain = d1.z, ext = d1.w;
+	    float phase = d2.w;
+	    float cloudBirth = d3.w;
+	    float curHalf = d4.w;
+	    float3 CP = d7.xyz;
+	    float HP = d7.w;
+	    if (gain <= 0.0 || H <= 0.0) continue;
+	    float3 key = d2.rgb;
+	    float3 base = d3.rgb;
+	    float3 warm = d4.rgb;
+	    float3 top = GasData.Load(int3(c, 5, 0)).rgb;
+	    float3 bot = GasData.Load(int3(c, 6, 0)).rgb;
+	    // Where both atlases hold gas (rows 9-12, the cells they wrote): the march over their union, not the boxes.
+	    float3 qa0 = GasData.Load(int3(c, 9, 0)).xyz, qa1 = GasData.Load(int3(c, 10, 0)).xyz;
+	    float3 qb0 = GasData.Load(int3(c, 11, 0)).xyz, qb1 = GasData.Load(int3(c, 12, 0)).xyz;
+	    float3 t0 = (qa0 - Cam) * inv, t1 = (qa1 - Cam) * inv;
+	    float3 tn = min(t0, t1), tf = max(t0, t1);
+	    float aC = max(max(tn.x, tn.y), tn.z), bC = min(min(tf.x, tf.y), tf.z);
+	    float3 p0 = (qb0 - Cam) * inv, p1 = (qb1 - Cam) * inv;
+	    float3 pn = min(p0, p1), pf = max(p0, p1);
+	    float aP = max(max(pn.x, pn.y), pn.z), bP = min(min(pf.x, pf.y), pf.z);
+	    float a = max(min(bC > aC ? aC : 1e9, bP > aP ? aP : 1e9), GasEyeClear * 0.5);
+	    float b = min(max(bC > aC ? bC : -1e9, bP > aP ? bP : -1e9), sceneDist);
+	    if (b <= a) continue;
+	    // Coarse cells (a vacuum cone metres long) at 1.5 cells a step: the jitter hides it, a third fewer samples.
+	    float stepCm = max(min(cell, cellP), 1.5) * (min(cell, cellP) >= 4.0 ? 1.5 : 1.0);
+	    // 96 samples a cloud at most (a doubled step through thin gas lost half the thin smoke: not taken).
+	    int ns = min((int)((b - a) / stepCm) + 1, 96);
+	    float t = a + jit * stepCm;
+	    float adv = 0.0;
+	    float rows = ceil(n / 8.0) * n;
+	    float2 atlas = float2(8.0 * n, 2.0 * rows);
+	    float vC0 = curHalf * rows, vP0 = (1.0 - curHalf) * rows;
+	    [loop] for (int s = 0; s < ns; s++)
+	    {
+	        t += adv;
+	        if (t > b) break;
+	        adv = stepCm;
+	        // Soft tunnels: the density scaled down within 0.6 r of a tunnel's axis, 0 on it.
+	        float keep = 1.0;
+	        for (int q = 0; q < nh; q++)
+	        {
+	            if (cloudBirth < hb[q] && t > hc[q].x && t < hc[q].y)
+	            {
+	                float dd = sqrt(hq[q].y * hq[q].y + (t - hq[q].x) * (t - hq[q].x) * hq[q].z * hq[q].z);
+	                keep *= smoothstep(0.6 * hq[q].w, hq[q].w, dd);
+	            }
+	        }
+	        if (keep < 0.01) continue;
+	        float3 pw = Cam + dir * t;
+	        float4 vC = 0, vP = 0;
+	        float3 p = pw - C;
+	        bool inC = phase > 0.001 && all(abs(p) < H);
+	        float3 pp = pw - CP;
+	        bool inP = phase < 0.999 && all(abs(pp) < HP);
+	        float2 uA0 = 0, uA1 = 0, uB0 = 0, uB1 = 0;
+	        float fA = 0, fB = 0;
+	        if (inC)
+	        {
+	            float3 g = clamp((p + H) / cell - 0.5, 0.0, n - 1.001);
+	            float z0 = floor(g.z);
+	            float z1 = min(z0 + 1.0, n - 1.0);
+	            float2 xy = clamp(g.xy + 0.5, 0.5, n - 0.5);
+	            uA0 = (float2(fmod(z0, 8.0) * n, floor(z0 / 8.0) * n + vC0) + xy) / atlas;
+	            uA1 = (float2(fmod(z1, 8.0) * n, floor(z1 / 8.0) * n + vC0) + xy) / atlas;
+	            fA = g.z - z0;
+	        }
+	        if (inP)
+	        {
+	            float3 g = clamp((pp + HP) / cellP - 0.5, 0.0, n - 1.001);
+	            float z0 = floor(g.z);
+	            float z1 = min(z0 + 1.0, n - 1.0);
+	            float2 xy = clamp(g.xy + 0.5, 0.5, n - 0.5);
+	            uB0 = (float2(fmod(z0, 8.0) * n, floor(z0 / 8.0) * n + vP0) + xy) / atlas;
+	            uB1 = (float2(fmod(z1, 8.0) * n, floor(z1 / 8.0) * n + vP0) + xy) / atlas;
+	            fB = g.z - z0;
+	        }
+	        float4 sA0 = 0, sA1 = 0, sB0 = 0, sB1 = 0;
+	        if (c == 0) { if (inC) { sA0 = GasGrid0.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid0.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid0.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid0.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 1) { if (inC) { sA0 = GasGrid1.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid1.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid1.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid1.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 2) { if (inC) { sA0 = GasGrid2.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid2.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid2.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid2.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 3) { if (inC) { sA0 = GasGrid3.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid3.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid3.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid3.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 4) { if (inC) { sA0 = GasGrid4.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid4.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid4.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid4.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 5) { if (inC) { sA0 = GasGrid5.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid5.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid5.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid5.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 6) { if (inC) { sA0 = GasGrid6.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid6.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid6.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid6.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 7) { if (inC) { sA0 = GasGrid7.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid7.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid7.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid7.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 8) { if (inC) { sA0 = GasGrid8.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid8.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid8.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid8.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 9) { if (inC) { sA0 = GasGrid9.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid9.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid9.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid9.SampleLevel(GasSampler, uB1, 0); } }
+	        // Gas reaching a box's face fades over its last 1.5 cells (a cut face read as a flat soft square).
+	        if (inC) vC = lerp(sA0, sA1, fA) * saturate(min(min(H - abs(p.x), H - abs(p.y)), H - abs(p.z)) / (1.5 * cell));
+	        if (inP) vP = lerp(sB0, sB1, fB) * saturate(min(min(HP - abs(pp.x), HP - abs(pp.y)), HP - abs(pp.z)) / (1.5 * cellP));
+	        float4 v = lerp(vP, vC, phase);
+	        float near = smoothstep(GasEyeClear * 0.5, GasEyeClear * 1.5, t);
+	        float dens = v.r * gain * keep * near;
+	        if (dens < 0.01) continue;
+	        float aStep = 1.0 - exp(-ext * dens * stepCm);
+	        float3 amb = lerp(bot, top, saturate(0.5 + 0.5 * (pw.z - C.z) / H));
+	        float3 col = base * 1.5 * (amb * (0.35 + 0.65 * v.a) + key * v.b) + warm * v.g * v.g;
+	        firstT = min(firstT, t - stepCm);
+	        acc += T * aStep * col;
+	        T *= 1.0 - aStep;
+	        if (T < 0.05) break;
+	    }
+	}
+}
+
+RWTexture2D<float4> OutBlock;
+// An edge block's first gas along its ray (cm, a step early), -1 a block taken whole.
+RWTexture2D<float> OutEdge;
+
+[numthreads(8, 8, 1)]
+void MainBlockCS(uint3 Id : SV_DispatchThreadID)
+{
+	float B = max(GasBlockPx, 1.0);
+	int2 Blocks = int2(ceil(OutSize / B));
+	if (any(int2(Id.xy) >= Blocks))
+	{
+		return;
+	}
+	// The block in absolute output pixels (as the material's SvPosition: the same blocks, the same hashes).
+	float2 Corner = floor(OutMin / B) * B + Id.xy * B;
+	float2 Centre = Corner + 0.5 * B;
+	float3 dir = RayDir(Centre);
+	float Near = 1e9, Far = 0.0;
+	for (int y = 0; y < (int)B; y++)
+	{
+		for (int x = 0; x < (int)B; x++)
+		{
+			float2 P = clamp(Corner + float2(x, y) + 0.5, OutMin + 0.5, OutMin + OutSize - 0.5);
+			float D;
+			PixelRay(P, D);
+			Near = min(Near, D);
+			Far = max(Far, D);
+		}
+	}
+	float jit = frac(sin(dot(floor(Centre / B), float2(12.9898, 78.233))) * 43758.5453);
+	float3 acc;
+	float T;
+	float firstT;
+	GasMarch(GasCamera, dir, Far, jit, acc, T, firstT);
+	OutBlock[Id.xy] = float4(acc, T);
+	// An edge: the block's depths differ by more than 3% of the far one or 10 cm, gas in it reached in front of the far
+	// depth; its first gas kept (a pixel nearer than that has no gas in front of it).
+	bool Edge = Far - Near > max(0.03 * min(Far, 1e5), 10.0) && T < 0.999 && firstT < Far;
+	OutEdge[Id.xy] = Edge ? firstT : -1.0;
+}
+
+Texture2D SceneColor;
+SamplerState SceneColorSampler;
+Texture2D<float4> BlockResult;
+Texture2D<float> BlockEdge;
+
+// The inputs as FScreenPassVS writes them (TEXCOORD0 then SV_POSITION: a pixel shader reading SV_POSITION alone did not
+// link with it on D3D12).
+void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	float B = max(GasBlockPx, 1.0);
+	float2 px = SvPosition.xy;
+	int2 Block = int2(floor(px / B) - floor(OutMin / B));
+	float4 Col = SceneColor.Load(int3(px, 0));
+	float3 acc;
+	float T;
+	float4 R = BlockResult.Load(int3(Block, 0));
+	acc = R.rgb;
+	T = R.a;
+	float FirstGas = BlockEdge.Load(int3(Block, 0));
+	if (FirstGas >= 0.0)
+	{
+		// An edge block: a pixel nearer than the block's first gas has none in front of it; the others march their own
+		// depth (as M_OS_GasPost did in every pixel).
+		float D;
+		PixelRay(px, D);
+		if (D <= FirstGas)
+		{
+			acc = 0;
+			T = 1.0;
+		}
+		else
+		{
+			float2 Centre = floor(px / B) * B + 0.5 * B;
+			float jit = frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453);
+			float Unused;
+			GasMarch(GasCamera, RayDir(Centre), D, jit, acc, T, Unused);
+		}
+	}
+	float alpha = 1.0 - T;
+	// os.Gas.DebugAlpha 3: how far the block's opacity is from the pixel's own march (x4, grey; 0 in a flagged block).
+	if (GasDebugAlpha > 2.5)
+	{
+		float2 Centre = floor(px / B) * B + 0.5 * B;
+		float D;
+		PixelRay(px, D);
+		float3 acc2;
+		float T2;
+		float Unused2;
+		GasMarch(GasCamera, RayDir(Centre), D, frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453), acc2, T2, Unused2);
+		float Diff = saturate(abs(T2 - T) * 4.0);
+		OutColor = float4(Diff, Diff, Diff, 1);
+		return;
+	}
+	float hn = frac(sin(dot(floor(px / B), float2(41.3, 289.1))) * 43758.5453);
+	// The faint tail off (no snow of lone blocks), the threshold's spread halved: stable bands, few stray blocks.
+	float aq = alpha < 0.12 ? 0.0 : floor(alpha * 4.0 + 0.25 + 0.5 * hn) / 4.0;
+	if (GasDebugAlpha > 0.5)
+	{
+		OutColor = float4(alpha, alpha, alpha, 1);
+		return;
+	}
+	float3 smoke = alpha > 1e-3 ? acc / alpha : float3(0, 0, 0);
+	OutColor = float4(lerp(Col.rgb, smoke, aq), Col.a);
+}
