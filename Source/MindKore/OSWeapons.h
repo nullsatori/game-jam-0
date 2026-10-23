@@ -948,6 +948,16 @@ public:
 	 */
 	void GetShotLine(const FVector& Eye, const FVector& ViewDirection, FVector& OutStart, FVector& OutDirection) const;
 
+	/**
+	 * The gun as drawn against the gun as placed: it is drawn with its own field of view in the aim and the menu
+	 * (FirstPersonFieldOfView), which on screen is the world's picture of it stretched across the view by DrawnAcross
+	 * (1 at the hip). GunToDrawn takes a point on the gun to the world point that sits where the gun is drawn;
+	 * DrawnToGun takes a world point back into the gun's own space (the laser's beam: its far end on the dot).
+	 */
+	double DrawnAcross() const;
+	FVector GunToDrawn(const FVector& OnGun) const;
+	FVector DrawnToGun(const FVector& InWorld) const;
+
 	/** Rounds in flight now. */
 	int32 GetRoundsInFlight() const { return Rounds.Num(); }
 

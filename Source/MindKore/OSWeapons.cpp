@@ -564,6 +564,42 @@ FTransform UOSWeaponsComponent::GetMuzzleTransform() const
 	return FTransform(Bore, Location + Bore.GetAxisX() * (Device ? Device->MuzzleOffsetCm : 0.0f));
 }
 
+double UOSWeaponsComponent::DrawnAcross() const
+{
+	// The gun is drawn with its own field of view (the scope blends FirstPersonFieldOfView in for the aim and the
+	// menu): on screen that is the world's picture of the gun stretched across the view by tan(world / 2) / tan(gun / 2)
+	// (playtest 23.10: «луч не туда, особенно в табе»). At the hip the fields are one and the stretch 1.
+	const UCameraComponent* Eye = ViewModel ? Cast<UCameraComponent>(ViewModel->GetAttachParent()) : nullptr;
+	if (!Eye || !Eye->bEnableFirstPersonFieldOfView)
+	{
+		return 1.0;
+	}
+	return FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(Eye->FieldOfView, 5.0f, 170.0f) * 0.5))
+		/ FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(Eye->FirstPersonFieldOfView, 5.0f, 170.0f) * 0.5));
+}
+
+FVector UOSWeaponsComponent::GunToDrawn(const FVector& OnGun) const
+{
+	const double Across = DrawnAcross();
+	if (Across == 1.0 || !ViewModel)
+	{
+		return OnGun;
+	}
+	const FTransform& View = ViewModel->GetAttachParent()->GetComponentTransform();
+	return View.TransformPositionNoScale(View.InverseTransformPositionNoScale(OnGun) * FVector(1.0, Across, Across));
+}
+
+FVector UOSWeaponsComponent::DrawnToGun(const FVector& InWorld) const
+{
+	const double Across = DrawnAcross();
+	if (Across == 1.0 || !ViewModel)
+	{
+		return InWorld;
+	}
+	const FTransform& View = ViewModel->GetAttachParent()->GetComponentTransform();
+	return View.TransformPositionNoScale(View.InverseTransformPositionNoScale(InWorld) / FVector(1.0, Across, Across));
+}
+
 void UOSWeaponsComponent::GetShotLine(const FVector& Eye, const FVector& ViewDirection, FVector& OutStart, FVector& OutDirection) const
 {
 	OutStart = Eye;
@@ -573,20 +609,9 @@ void UOSWeaponsComponent::GetShotLine(const FVector& Eye, const FVector& ViewDir
 		return;
 	}
 	const FTransform Muzzle = GetMuzzleTransform();
-	FVector MuzzleAt = Muzzle.GetLocation();
-	OutDirection = Muzzle.GetRotation().GetAxisX();
-	// The gun is drawn with its own field of view (the scope blends FirstPersonFieldOfView in for the aim and the menu):
-	// the line that looks like the bore on screen is the drawn one's, its across-the-view parts scaled by
-	// tan(world / 2) / tan(gun / 2) in the camera's frame (playtest 23.10: «луч не туда, особенно в табе»).
-	if (const UCameraComponent* Eye3 = Cast<UCameraComponent>(ViewModel->GetAttachParent()); Eye3 && Eye3->bEnableFirstPersonFieldOfView)
-	{
-		const double Ratio = FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(Eye3->FieldOfView, 5.0f, 170.0f) * 0.5))
-			/ FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(Eye3->FirstPersonFieldOfView, 5.0f, 170.0f) * 0.5));
-		const FTransform View = Eye3->GetComponentTransform();
-		const FVector Across(1.0, Ratio, Ratio);
-		MuzzleAt = View.TransformPositionNoScale(View.InverseTransformPositionNoScale(MuzzleAt) * Across);
-		OutDirection = View.TransformVectorNoScale(View.InverseTransformVectorNoScale(OutDirection) * Across).GetSafeNormal();
-	}
+	// The line that looks like the bore on screen is the drawn gun's (GunToDrawn).
+	const FVector MuzzleAt = GunToDrawn(Muzzle.GetLocation());
+	OutDirection = (GunToDrawn(Muzzle.GetLocation() + Muzzle.GetRotation().GetAxisX() * 100.0) - MuzzleAt).GetSafeNormal();
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(OSShotLine), /*bTraceComplex=*/false, GetOwner());
 	FHitResult Blocked;
 	if (!GetWorld()->LineTraceSingleByChannel(Blocked, Eye, MuzzleAt, ECC_GameTraceChannel2, Params))
@@ -884,7 +909,7 @@ bool UOSWeaponsComponent::Fire(const FVector& Eye, const FVector& Direction, FVe
 		Round.Weapon = CurrentWeapon;
 		Round.Position = Start;
 		Round.Direction = PelletDirection;
-		Round.MuzzleOffset = Muzzle - Start;
+		Round.MuzzleOffset = GunToDrawn(Muzzle) - Start; // the tracer starts where the muzzle is drawn
 		if (TracerMesh)
 		{
 			// Hidden until its first step: a zero-length streak at the eye would fill the view.
