@@ -55,7 +55,7 @@ namespace
 	constexpr float DensityGain = 2.5f;
 	/** A parcel kernel's share of its cell (1: opaque at its core), air and vacuum: tuned to T 0.5 / 0.75 / 0.95 at 0.2 / 1 / 4 s. */
 	constexpr float AirMassScale = 1.2f;
-	constexpr float VacuumMassScale = 0.3f;
+	constexpr float VacuumMassScale = 0.6f;
 	constexpr float KeyShadow = 0.1f;
 	/** The key light's shadow through the render grid (relief), per unit of drawn density along the way. */
 	constexpr float GridKeyShadow = 0.6f;
@@ -624,6 +624,9 @@ int32 UOSGasSubsystem::AddSource(const FOSGasRecipe& Recipe, const FOSGasLook& L
 		// vacuum), a cone of 7 degrees at most; the speeds' spread lays the fast ahead and the slow by the muzzle.
 		Source.Recipe.RingCm = 0.0f;
 		Source.Recipe.ConeDeg = FMath::Min(Recipe.ConeDeg, 7.0f);
+		// Half the speed: a plume of ~1.5 m that stays in view (at full speed the fast gas was 3-4 m off and thinned to
+		// nothing against the dark in a second).
+		Source.Recipe.SpeedCm *= 0.5f;
 	}
 	const FOSGasRecipe& Used = Source.Recipe;
 	Source.Look = Look;
@@ -1605,8 +1608,8 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					}
 				}
 			}
-			// 0.7 of the way to the second nearest, 15 cm at most: the cone stays one body without swelling into a ball
-			// (1.2 and 30 cm made a round cloud in a second).
+			// 0.7 of the way to the second nearest, 15 cm at most (1.2 and 30 cm made a round cloud in a second; 0.9 and
+			// 20 cm a row of round balls).
 			Need[I] = FMath::Min(0.7f * FMath::Sqrt(Second), 15.0f);
 		});
 		for (int32 I = 0; I < Parcels.Num(); ++I)

@@ -2661,10 +2661,12 @@ namespace
 			// side: as space, and 0.05 s after the first shot the view turns 55 degrees in 0.2 s (the cone seen from the side, still in view).
 			const bool bSide = Args.Num() > 1 && Args[1] == TEXT("side");
 			const bool bSpace = Args.Num() > 1 && (Args[1] == TEXT("space") || bSide);
-			const bool bNear = Args.Num() > 1 && (Args[1] == TEXT("near") || bSpace);
+			// living: as near, facing the nearest living wall.
+			const bool bLiving = Args.Num() > 1 && Args[1] == TEXT("living");
+			const bool bNear = Args.Num() > 1 && (Args[1] == TEXT("near") || bSpace || bLiving);
 			const int32 BackCount = Args.Num() > 2 ? FCString::Atoi(*Args[2]) : 5;
 			const float BackEvery = Args.Num() > 3 ? FMath::Max(FCString::Atof(*Args[3]), 0.05f) : 0.3f;
-			World->GetTimerManager().SetTimer(Later, FTimerDelegate::CreateLambda([World, bBack, bNear, bSpace, bSide, BackCount, BackEvery]()
+			World->GetTimerManager().SetTimer(Later, FTimerDelegate::CreateLambda([World, bBack, bNear, bSpace, bSide, bLiving, BackCount, BackEvery]()
 			{
 			APlayerController* Controller = World->GetFirstPlayerController();
 			AOSZeroGPawn* Pawn = Controller ? Cast<AOSZeroGPawn>(Controller->GetPawn()) : nullptr;
@@ -2694,6 +2696,23 @@ namespace
 				if (World->LineTraceSingleByChannel(Hit, Home, Behind, ECC_Visibility, FCollisionQueryParams(SCENE_QUERY_STAT(OSWalkProbe), false, Pawn)))
 				{
 					Look.Yaw += 180.0f;
+				}
+			}
+			if (bLiving)
+			{
+				const AOSLivingWall* Nearest = nullptr;
+				for (TActorIterator<AOSLivingWall> It(World); It; ++It)
+				{
+					if (!Nearest || FVector::Dist(It->GetActorLocation(), Home) < FVector::Dist(Nearest->GetActorLocation(), Home))
+					{
+						Nearest = *It;
+					}
+				}
+				if (Nearest)
+				{
+					Look = (Nearest->GetActorLocation() - Home).Rotation();
+					Look.Pitch += 10.0f;
+					UE_LOG(LogMindKore, Log, TEXT("Walk probe: facing the living wall %s at %.0f cm"), *Nearest->GetName(), FVector::Dist(Nearest->GetActorLocation(), Home));
 				}
 			}
 			if (bSpace)
