@@ -185,6 +185,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope", meta = (ClampMin = "0.0"))
 	float ShadowPerCm = 0.7f;
 
+	/** How much of the eye-relief shadow is left at the eye (aim alpha 1): 0 - none, the glass stays bright
+	 * through sway and turns (owner 23.10: «убрать затемнение при прицеле»); 1 - the old full shadow. At the hip it is always full. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float AimedShadow = 0.0f;
+
 	/** Square render target side, px (the eyepiece is about 450 px across in a 1080p frame; 768 leaves room for 4K). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope", meta = (ClampMin = "64", ClampMax = "2048"))
 	int32 RenderTargetSize = 768;

@@ -413,11 +413,14 @@ void UOSScopeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 		// The eye (the camera's origin) in the gun's frame, from the eyepiece: the
 		// lens's x is the gun's right, its y the gun's down; z how far the eye is
 		// off its relief, cm. At the hip the shadow covers the glass.
+		// Aimed, the shadow fades out (AimedShadow): sway and turns no longer darken the glass.
 		const FVector Eye = Gun->GetRelativeTransform().InverseTransformPosition(FVector::ZeroVector) - EyepieceCm;
-		LensMID->SetVectorParameterValue(TEXT("Eye"), FLinearColor(Eye.Y * ShadowPerCm, -Eye.Z * ShadowPerCm, -Eye.X - Aims[ScopedWeapon].EyeCm, 0.0f));
+		const float Shadow = FMath::Lerp(1.0f, AimedShadow, FMath::Clamp(Alpha, 0.0f, 1.0f));
+		const FLinearColor EyeParam(Eye.Y * ShadowPerCm * Shadow, -Eye.Z * ShadowPerCm * Shadow, (-Eye.X - Aims[ScopedWeapon].EyeCm) * Shadow, 0.0f);
+		LensMID->SetVectorParameterValue(TEXT("Eye"), EyeParam);
 		if (ReticleMID)
 		{
-			ReticleMID->SetVectorParameterValue(TEXT("Eye"), FLinearColor(Eye.Y * ShadowPerCm, -Eye.Z * ShadowPerCm, -Eye.X - Aims[ScopedWeapon].EyeCm, 0.0f));
+			ReticleMID->SetVectorParameterValue(TEXT("Eye"), EyeParam);
 		}
 	}
 }
