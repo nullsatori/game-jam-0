@@ -9,6 +9,7 @@
 #include "Components/PointLightComponent.h"
 #include "Components/LocalLightComponent.h"
 #include "Engine/OverlapResult.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -61,10 +62,18 @@ namespace
 	constexpr float KeyMax = 3.0f;
 	constexpr float EyeClearCm = 30.0f;
 	constexpr float EvictSeconds = 0.5f;
+	/** In air: the gun's inherited velocity's time constant; old gas's relaxing to the still room; a body's push share. */
+	constexpr float CarrierSeconds = 0.2f;
+	constexpr float AirRestSeconds = 0.7f;
+	constexpr float BodyShare = 0.5f;
 
 	TAutoConsoleVariable<int32> CVarGasCards(
 		TEXT("os.Gas.Cards"), 0,
 		TEXT("1: the old card wisps (shroud, muzzle stream) are drawn too; 0 (v11): the gas is parcels only."));
+
+	TAutoConsoleVariable<int32> CVarGasDebug(
+		TEXT("os.Gas.Debug"), 0,
+		TEXT("1: draw every cloud's box (white), parcels (points, red heavy to blue light), bodies (yellow, velocity arrow), tunnels (cyan), wall/floor planes (green) and sources (magenta)."));
 
 	uint32 Hash3(int32 X, int32 Y, int32 Z, uint32 Seed)
 	{
@@ -256,6 +265,101 @@ FString UOSGasSubsystem::DescribeClouds() const
 	return Line;
 }
 
+bool UOSGasSubsystem::ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int32& OutBehind, FVector& OutBox) const
+{
+	WaitAll();
+	const FCloud* Best = nullptr;
+	for (const FCloud& Cloud : Clouds)
+	{
+		if (Cloud.IsAlive() && (!Best || Cloud.Parcels.Num() > Best->Parcels.Num()))
+		{
+			Best = &Cloud;
+		}
+	}
+	if (!Best)
+	{
+		return false;
+	}
+	FVector Sum = FVector::ZeroVector;
+	double Mass = 0.0;
+	OutBehind = 0;
+	for (const FOSGasParcel& P : Best->Parcels)
+	{
+		const FVector At = Best->Origin + FVector(P.P);
+		Sum += At * P.Mass;
+		Mass += P.Mass;
+		for (int32 I = 0; I < Best->Planes.Num(); ++I)
+		{
+			if (Best->PlaneBoxes[I].IsInside(At) && Best->Planes[I].PlaneDot(At) < -1.0)
+			{
+				++OutBehind;
+				break;
+			}
+		}
+	}
+	OutCentroid = Mass > 0.0 ? Sum / Mass : Best->Origin;
+	OutParcels = Best->Parcels.Num();
+	OutBox = Best->Origin + FVector(Best->DrawnCentre);
+	return true;
+}
+
+void UOSGasSubsystem::DrawDebug() const
+{
+	const UWorld* World = GetWorld();
+	for (const FCloud& Cloud : Clouds)
+	{
+		if (!Cloud.IsAlive())
+		{
+			continue;
+		}
+		const FVector Centre = Cloud.Origin + FVector(Cloud.DrawnCentre);
+		DrawDebugBox(World, Centre, FVector(0.5f * RenderCells * Cloud.RenderCellCm), FColor::White, false, -1.0f, 0, 0.5f);
+		DrawDebugPoint(World, Cloud.Origin, 10.0f, FColor::Orange, false, -1.0f);
+		for (const FPlane& Plane : Cloud.Planes)
+		{
+			const FVector N(Plane);
+			const FVector OnIt = FVector::PointPlaneProject(Centre, Plane);
+			DrawDebugSolidPlane(World, Plane, OnIt, FVector2D(60.0f), FColor(0, 200, 0, 60), false, -1.0f);
+			DrawDebugDirectionalArrow(World, OnIt, OnIt + N * 30.0f, 8.0f, FColor::Green, false, -1.0f, 0, 1.0f);
+		}
+		// The parcels only while no step runs (they are the step's then).
+		if (!Cloud.IsBusy())
+		{
+			for (const FOSGasParcel& P : Cloud.Parcels)
+			{
+				const float M = FMath::Clamp(P.Mass, 0.0f, 1.0f);
+				DrawDebugPoint(World, Cloud.Origin + FVector(P.P), 4.0f, FColor(uint8(255 * M), 40, uint8(255 * (1.0f - M))), false, -1.0f);
+			}
+		}
+		for (const FOSSmokeSim::FMover& M : Cloud.NextMovers)
+		{
+			const FVector C = Cloud.Origin + FVector(M.Centre);
+			if (M.Extent.IsZero())
+			{
+				DrawDebugSphere(World, C, M.RadiusCm, 12, FColor::Yellow, false, -1.0f);
+			}
+			else
+			{
+				DrawDebugBox(World, C, FVector(M.Extent), FQuat(M.Rotation), FColor::Yellow, false, -1.0f);
+			}
+			DrawDebugDirectionalArrow(World, C, C + FVector(M.Velocity) * 0.2f, 10.0f, FColor::Yellow, false, -1.0f, 0, 1.5f);
+		}
+	}
+	for (const FTunnel& T : Tunnels)
+	{
+		DrawDebugLine(World, T.Start, T.End, FColor::Cyan, false, -1.0f, 0, 1.0f);
+	}
+	for (const FSource& S : Sources)
+	{
+		FVector Where = S.Where;
+		if (const USceneComponent* Attach = S.bAttached ? S.Attach.Get() : nullptr)
+		{
+			Where = Attach->GetComponentTransform().TransformPosition(S.Where);
+		}
+		DrawDebugPoint(World, Where, 12.0f, FColor::Magenta, false, -1.0f);
+	}
+}
+
 FString UOSGasSubsystem::TakeCostLine()
 {
 	FScopeLock Lock(&CostLock);
@@ -329,6 +433,8 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	Cloud.Incoming.Reset();
 	Cloud.Commands.Reset();
 	Cloud.Movers.Reset();
+	Cloud.NextCommands.Reset();
+	Cloud.NextMovers.Reset();
 	Cloud.Age = 0.0f;
 	Cloud.Evict = 0.0f;
 	Cloud.StepCarry = 0.0f;
@@ -345,14 +451,36 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	Cloud.Grid->Reset(VelocityCells, VelocityCellCm, Cloud.bAir, FVector3f(Cloud.Gravity.GetSafeNormal()));
 	// The floor and the walls round the birth: planes the gas slides on (Visibility; a few traces, once).
 	Cloud.Planes.Reset();
+	Cloud.PlaneBoxes.Reset();
+	// 16 ways round, up and down, 4 m; static and dynamic geometry (a window's glass does not block Visibility), no
+	// pawns or loose props (they are bodies). Was 6 axis traces of 1.5 m: the gas left a round room through its glass.
 	FCollisionQueryParams Query(SCENE_QUERY_STAT(OSGasPlanes), false);
-	for (const FVector& Direction : { Cloud.Gravity.GetSafeNormal(), FVector::ForwardVector, -FVector::ForwardVector, FVector::RightVector, -FVector::RightVector, FVector::UpVector })
+	if (const APlayerController* Controller = World->GetFirstPlayerController(); Controller && Controller->GetPawn())
+	{
+		Query.AddIgnoredActor(Controller->GetPawn());
+		TArray<AActor*> Held;
+		Controller->GetPawn()->GetAttachedActors(Held, true, true);
+		Query.AddIgnoredActors(Held);
+	}
+	FCollisionObjectQueryParams Statics;
+	Statics.AddObjectTypesToQuery(ECC_WorldStatic);
+	Statics.AddObjectTypesToQuery(ECC_WorldDynamic);
+	TArray<FVector, TInlineAllocator<18>> Ways = { FVector::UpVector, -FVector::UpVector };
+	for (int32 Index = 0; Index < 16; ++Index)
+	{
+		const float A = Index * UE_TWO_PI / 16.0f;
+		Ways.Add(FVector(FMath::Cos(A), FMath::Sin(A), 0.0f));
+	}
+	for (const FVector& Direction : Ways)
 	{
 		FHitResult Hit;
-		if (!Direction.IsNearlyZero() && World->LineTraceSingleByChannel(Hit, Where, Where + Direction * 150.0f, ECC_Visibility, Query)
-			&& !Cloud.Planes.ContainsByPredicate([&Hit](const FPlane& Each) { return (FVector(Each) | Hit.ImpactNormal) > 0.95f; }))
+		if (World->LineTraceSingleByObjectType(Hit, Where, Where + Direction * 400.0f, Statics, Query)
+			&& !Hit.bStartPenetrating && (Hit.ImpactNormal | Direction) < -0.2f
+			&& Hit.Component.IsValid() && !Hit.Component->IsSimulatingPhysics()
+			&& !Cloud.Planes.ContainsByPredicate([&Hit](const FPlane& Each) { return (FVector(Each) | Hit.ImpactNormal) > 0.99f && FMath::Abs(Each.PlaneDot(Hit.ImpactPoint)) < 5.0f; }))
 		{
 			Cloud.Planes.Emplace(Hit.ImpactPoint, Hit.ImpactNormal);
+			Cloud.PlaneBoxes.Add(Hit.Component->Bounds.GetBox().ExpandBy(10.0f));
 		}
 	}
 	EnsureRender(Cloud);
@@ -459,9 +587,24 @@ void UOSGasSubsystem::Stop(int32 Id)
 
 void UOSGasSubsystem::EmitNow(const FOSGasRecipe& Recipe, const FOSGasLook& Look, const FVector& Where, const FVector& Direction, const FVector& CarrierVelocity, int32 Count)
 {
-	if (Count > 0)
+	if (Count <= 0)
 	{
-		Emit(Clouds[CloudFor(Look, Where)], Recipe, Where, Direction, CarrierVelocity, Count);
+		return;
+	}
+	// A seep or a hot case's puff joins a cloud it is well inside of (0.8 of its drawn box), else it is not let out: as
+	// a cloud of its own it took a slot and evicted a shot's cloud (owner 23.10: «телепортируется», «резко пропадает»),
+	// and joining by distance stretched a cloud after the walking gun.
+	for (FCloud& Cloud : Clouds)
+	{
+		if (Cloud.IsAlive() && Cloud.Evict <= 0.0f && Cloud.bDrawable && Cloud.Look == Look)
+		{
+			const FVector Off = (Where - (Cloud.Origin + FVector(Cloud.DrawnCentre))).GetAbs();
+			if (Off.GetMax() < 0.4f * RenderCells * Cloud.RenderCellCm)
+			{
+				Emit(Cloud, Recipe, Where, Direction, CarrierVelocity, Count);
+				return;
+			}
+		}
 	}
 }
 
@@ -535,7 +678,7 @@ void UOSGasSubsystem::CarveRay(const FVector& Start, const FVector& End, float R
 		{
 			bThrough = true;
 			Where = Closest;
-			Cloud.Commands.Add({ FCommand::EKind::Carve, Start, End, RadiusCm, 0.0f });
+			Cloud.NextCommands.Add({ FCommand::EKind::Carve, Start, End, RadiusCm, 0.0f });
 		}
 	}
 	if (!bThrough)
@@ -569,7 +712,7 @@ void UOSGasSubsystem::Burst(const FVector& Location, const FVector& Normal, floa
 	{
 		if (Cloud.IsAlive() && FVector::Dist(Cloud.Origin + FVector(Cloud.DrawnCentre), Location) < RadiusCm + 0.5f * RenderCells * Cloud.PackedCellCm * 1.74f)
 		{
-			Cloud.Commands.Add({ FCommand::EKind::Burst, Location, Normal, RadiusCm, Speed });
+			Cloud.NextCommands.Add({ FCommand::EKind::Burst, Location, Normal, RadiusCm, Speed });
 		}
 	}
 }
@@ -609,7 +752,7 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 		{
 			if (Cloud.IsAlive() && FVector::Dist(Cloud.Origin + FVector(Cloud.DrawnCentre), Flow.Location) < Flow.ReachCm)
 			{
-				Cloud.Commands.Add({ FCommand::EKind::Burst, Flow.Location, -Flow.Direction, Flow.ReachCm, -Flow.SpeedCm * DeltaTime * 4.0f });
+				Cloud.NextCommands.Add({ FCommand::EKind::Burst, Flow.Location, -Flow.Direction, Flow.ReachCm, -Flow.SpeedCm * DeltaTime * 4.0f });
 			}
 		}
 	}
@@ -630,6 +773,12 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 		}
 	}
 	UpdatePost();
+#if !UE_BUILD_SHIPPING
+	if (CVarGasDebug.GetValueOnGameThread() > 0)
+	{
+		DrawDebug();
+	}
+#endif
 	if (bAny)
 	{
 		const double Us = (FPlatformTime::Seconds() - FrameStart) * 1e6;
@@ -839,7 +988,7 @@ void UOSGasSubsystem::UpdatePost()
 	}
 	for (const FCloud* Cloud : Drawn)
 	{
-		for (const FOSSmokeSim::FMover& M : Cloud->Movers)
+		for (const FOSSmokeSim::FMover& M : Cloud->NextMovers)
 		{
 			if (Count < MaxTunnels && M.Extent.IsZero())
 			{
@@ -875,9 +1024,13 @@ void UOSGasSubsystem::UpdatePost()
 
 void UOSGasSubsystem::LaunchStep(FCloud& Cloud, int32 Steps, float Dt)
 {
-	// What came while the last step ran joins now (the game thread holds the cloud: no step in flight).
+	// What came while the last step ran joins now (the game thread holds the cloud: no step in flight), and so do the
+	// bodies and the commands (written to while the step ran they were a data race: pushes from half-written bodies).
 	Cloud.Parcels.Append(MoveTemp(Cloud.Incoming));
 	Cloud.Incoming.Reset();
+	Cloud.Movers = Cloud.NextMovers;
+	Cloud.Commands.Append(MoveTemp(Cloud.NextCommands));
+	Cloud.NextCommands.Reset();
 	if (Cloud.Parcels.IsEmpty())
 	{
 		return;
@@ -978,8 +1131,14 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			GridCentre = SnapTo(GridCentre / FMath::Max(Mass, 1e-3f), GridCell);
 			const FVector3f GridWorld = Origin + GridCentre;
 			G.Planes.Reset();
-			for (const FPlane& Plane : Cloud.Planes)
+			const FBox GridBox = FBox::BuildAABB(FVector(GridWorld), FVector(0.5f * N * GridCell));
+			for (int32 I = 0; I < Cloud.Planes.Num(); ++I)
 			{
+				const FPlane& Plane = Cloud.Planes[I];
+				if (!Cloud.PlaneBoxes[I].Intersect(GridBox))
+				{
+					continue;
+				}
 				const FVector Normal(Plane);
 				G.Planes.Emplace(FVector3f(Normal * Plane.W - FVector(GridWorld)), FVector3f(Normal));
 			}
@@ -1063,6 +1222,24 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				P.Cling -= Dt;
 				P.V = P.Carrier + P.Throw;
 			}
+			const FVector3f Before = P.P;
+			if (Cloud.bAir)
+			{
+				// The gun's velocity it inherited goes into the air in ~0.2 s (a shot on the walk stops with the walker);
+				// in a vacuum it keeps it.
+				if (P.Cling <= 0.0f)
+				{
+					const FVector3f Lost = P.Carrier * (1.0f - FMath::Exp(-Dt / CarrierSeconds));
+					P.Carrier -= Lost;
+					P.V -= Lost;
+				}
+				// Old gas relaxes to the still room's air (it moved forever: «уезжает хрен пойми куда»); the young
+				// keep their ring.
+				if (P.Age > 0.3f)
+				{
+					P.V *= FMath::Exp(-Dt / AirRestSeconds);
+				}
+			}
 			const float Speed = P.V.Size();
 			P.P += P.V * Dt;
 			P.RadiusCm = Cloud.bAir ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, 14.0f) : P.RadiusCm + VacuumGrowPerCm * Speed * Dt;
@@ -1079,7 +1256,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					{
 						const FVector3f Out = Off.GetSafeNormal(UE_SMALL_NUMBER, FVector3f::UpVector);
 						P.P += Out * (Reach - D) * 0.6f;
-						const float Push = (M.Velocity | Out) - (P.V | Out);
+						const float Push = BodyShare * (M.Velocity | Out) - (P.V | Out);
 						if (Push > 0.0f)
 						{
 							P.V += Out * Push;
@@ -1097,7 +1274,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 						const float Depth = FMath::Min3(Pen.X, Pen.Y, Pen.Z);
 						Out = M.Rotation.RotateVector(Out);
 						P.P += Out * Depth * 0.6f;
-						const float Push = (M.Velocity | Out) - (P.V | Out);
+						const float Push = BodyShare * (M.Velocity | Out) - (P.V | Out);
 						if (Push > 0.0f)
 						{
 							P.V += Out * Push;
@@ -1105,13 +1282,16 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					}
 				}
 			}
-			// The floor and the walls last: whatever pushed it, it slides on them (no speed into them, never through).
-			for (const FPlane& Plane : Cloud.Planes)
+			// The floor and the walls last: whatever pushed it, it slides on them (no speed into them, never through) -
+			// inside each surface's bounds, and only coming from its front (one already behind is let be).
+			for (int32 I = 0; I < Cloud.Planes.Num(); ++I)
 			{
+				const FPlane& Plane = Cloud.Planes[I];
 				const FVector3f Normal = FVector3f(FVector(Plane));
 				const float Dist = (FVector3f(Origin + P.P) | Normal) - float(Plane.W);
+				const float Was = (FVector3f(Origin + Before) | Normal) - float(Plane.W);
 				const float Keep = P.RadiusCm * 0.5f;
-				if (Dist < Keep)
+				if (Dist < Keep && Was > -1.0f && Cloud.PlaneBoxes[I].IsInside(Cloud.Origin + FVector(P.P)))
 				{
 					P.P += Normal * (Keep - Dist);
 					const float In = P.V | Normal;
@@ -1474,7 +1654,7 @@ void UOSGasSubsystem::EnsureRender(FCloud& Cloud)
 
 void UOSGasSubsystem::FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey<UPrimitiveComponent>>& Seen)
 {
-	Cloud.Movers.Reset();
+	Cloud.NextMovers.Reset();
 	const float Half = 0.5f * RenderCells * Cloud.RenderCellCm;
 	const FVector Centre = Cloud.Origin + FVector(Cloud.DrawnCentre);
 	FCollisionObjectQueryParams Types;
@@ -1489,7 +1669,7 @@ void UOSGasSubsystem::FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey
 	{
 		UPrimitiveComponent* Body = Hit.GetComponent();
 		const float Radius = Body ? Body->Bounds.SphereRadius : 0.0f;
-		if (!Body || Radius < 1.0f || Radius > 400.0f || Cloud.Movers.Num() >= 8)
+		if (!Body || Radius < 1.0f || Radius > 400.0f || Cloud.NextMovers.Num() >= 8)
 		{
 			continue;
 		}
@@ -1510,7 +1690,7 @@ void UOSGasSubsystem::FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey
 		{
 			float CapsuleRadius = 0.0f, CapsuleHalf = 0.0f;
 			PawnOwner->GetSimpleCollisionCylinder(CapsuleRadius, CapsuleHalf);
-			FOSSmokeSim::FMover& M = Cloud.Movers.AddDefaulted_GetRef();
+			FOSSmokeSim::FMover& M = Cloud.NextMovers.AddDefaulted_GetRef();
 			M.Centre = FVector3f(At - Cloud.Origin);
 			M.RadiusCm = FMath::Clamp(CapsuleRadius, 15.0f, 45.0f);
 			M.Velocity = FVector3f(Velocity.GetClampedToMaxSize(1500.0f));
@@ -1521,7 +1701,7 @@ void UOSGasSubsystem::FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey
 		{
 			continue;
 		}
-		FOSSmokeSim::FMover& M = Cloud.Movers.AddDefaulted_GetRef();
+		FOSSmokeSim::FMover& M = Cloud.NextMovers.AddDefaulted_GetRef();
 		M.Velocity = FVector3f(Velocity.GetClampedToMaxSize(1500.0f));
 		if (bBig)
 		{

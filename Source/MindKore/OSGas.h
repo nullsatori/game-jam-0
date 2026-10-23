@@ -189,6 +189,13 @@ public:
 	bool GetYoungestCloud(float MinAge, FVector& OutCentre, float& OutHalf) const;
 	/** The cost since the last call (os.Fx.SmokeCost). */
 	FString TakeCostLine();
+	/**
+	 * The cloud with most parcels (os.Gas.WalkProbe): its parcels' mass centroid (world), their count, how many are behind one of
+	 * its wall/floor planes, its drawn box's centre (world). Waits for the steps in flight.
+	 */
+	bool ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int32& OutBehind, FVector& OutBox) const;
+	/** os.Gas.Debug 1: the clouds' boxes, parcels, bodies, tunnels, planes and sources drawn in the world. */
+	void DrawDebug() const;
 
 	/** The post-process that draws every cloud after the upscaler (v11 stage 3, Scripts/os_muzzle_fx.py). */
 	UPROPERTY()
@@ -226,10 +233,15 @@ private:
 		TArray<FOSGasParcel> Parcels;
 		/** Parcels let out while a step was in flight: joined at the next launch. */
 		TArray<FOSGasParcel> Incoming;
+		/** The step's commands and bodies: the game thread fills Next*, they move in at a launch (never while a step runs). */
 		TArray<FCommand> Commands;
 		TArray<FOSSmokeSim::FMover> Movers;
-		/** World planes (floor, wall) the gas slides on: traced at birth. */
+		TArray<FCommand> NextCommands;
+		TArray<FOSSmokeSim::FMover> NextMovers;
+		/** World planes (floor, walls, ceiling, glass) the gas slides on: traced round the birth point, 18 ways, 4 m. */
 		TArray<FPlane> Planes;
+		/** Each plane's surface's bounds (+10 cm): the plane holds only inside them. */
+		TArray<FBox> PlaneBoxes;
 		TUniquePtr<FOSSmokeSim> Grid;
 		bool bAir = true;
 		FVector Gravity = FVector::ZeroVector;

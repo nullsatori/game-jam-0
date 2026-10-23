@@ -2500,6 +2500,95 @@ namespace
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunSmokeMoments));
 
 #if !UE_BUILD_SHIPPING
+	/**
+	 * os.Gas.WalkProbe: a shot while walking ahead at 3 m/s, a stop, 1.2 s still, 1 m back, turns 90 degrees, walks 3 m on
+	 * an arc round the cloud and 2 m back (the body's velocity set every frame). Logs the youngest cloud's parcel centroid,
+	 * box centre and pawn distance every 0.25 s; HighResShot OSWalk_* at the shot, 1 s, the step back and the turn
+	 * (os.Gas.Debug 1 draws the gas's insides).
+	 */
+	FAutoConsoleCommandWithWorldAndArgs GGasWalkProbe(
+		TEXT("os.Gas.WalkProbe"),
+		TEXT("[after s] Shoot while walking, stop, step back, turn, walk round the cloud; log the cloud's centroid every 0.25 s (and HighResShot OSWalk_*)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			// [after s]: starts that many seconds later (the pawn spawned, the shaders warm).
+			const float Delay = Args.Num() > 0 ? FMath::Max(FCString::Atof(*Args[0]), 0.01f) : 0.01f;
+			FTimerHandle Later;
+			World->GetTimerManager().SetTimer(Later, FTimerDelegate::CreateLambda([World]()
+			{
+			APlayerController* Controller = World->GetFirstPlayerController();
+			AOSZeroGPawn* Pawn = Controller ? Cast<AOSZeroGPawn>(Controller->GetPawn()) : nullptr;
+			UOSGasSubsystem* Gas = UOSGasSubsystem::Get(World);
+			if (!Pawn || !Gas || !Pawn->Body)
+			{
+				UE_LOG(LogMindKore, Warning, TEXT("Walk probe: no zero-G pawn or no gas"));
+				return;
+			}
+			Gas->ClearClouds();
+			const double Start = World->GetTimeSeconds();
+			const FVector Home = Pawn->Body->GetComponentLocation();
+			const FRotator Look = Controller->GetControlRotation();
+			TSharedRef<FVector> First = MakeShared<FVector>(FVector::ZeroVector);
+			TSharedRef<int32> Logged = MakeShared<int32>(-1);
+			TSharedRef<int32> Shots = MakeShared<int32>(0);
+			TSharedRef<bool> Fired = MakeShared<bool>(false);
+			TSharedRef<FTimerHandle> Handle = MakeShared<FTimerHandle>();
+			World->GetTimerManager().SetTimer(*Handle, FTimerDelegate::CreateLambda([World, Handle, Controller, Pawn, Gas, Start, Home, Look, First, Logged, Shots, Fired]()
+			{
+				const float T = float(World->GetTimeSeconds() - Start);
+				const FVector Ahead = FRotator(0.0f, Look.Yaw, 0.0f).Vector();
+				const FVector Side = FVector::CrossProduct(FVector::UpVector, Ahead);
+				// The walk: 0-0.6 s ahead at 3 m/s with a shot at 0.3 s, then still to 1.8 s, 1.8-2.3 s 1 m back, 2.3-2.8 s turn
+				// 90 degrees, 2.8-4.0 s an arc of 3 m, 4.0-4.8 s 2 m back.
+				FVector Velocity = FVector::ZeroVector;
+				FRotator View = Look;
+				if (T <= 0.6f) { Velocity = Ahead * 300.0f; }
+				if (T >= 0.3f && !*Fired) { *Fired = true; Pawn->Fire(); }
+				if (T > 1.8f && T <= 2.3f) { Velocity = -Ahead * 200.0f; }
+				if (T > 2.3f) { View.Yaw += 90.0f * FMath::Clamp((T - 2.3f) / 0.5f, 0.0f, 1.0f); }
+				if (T > 2.8f && T <= 4.0f) { const float A = (T - 2.8f) / 1.2f * UE_HALF_PI; Velocity = (Ahead * FMath::Cos(A) + Side * FMath::Sin(A)) * 250.0f; }
+				if (T > 4.0f && T <= 4.8f) { Velocity = -Side * 250.0f; }
+				const FVector Now = Pawn->Body->GetPhysicsLinearVelocity();
+				Pawn->Body->SetPhysicsLinearVelocity(FVector(Velocity.X, Velocity.Y, Now.Z));
+				Controller->SetControlRotation(View);
+				const int32 Tick = FMath::FloorToInt(T / 0.25f);
+				if (Tick != *Logged)
+				{
+					*Logged = Tick;
+					FVector Centroid, Box;
+					int32 Parcels = 0, Behind = 0;
+					if (Gas->ProbeYoungest(Centroid, Parcels, Behind, Box))
+					{
+						if (First->IsZero())
+						{
+							*First = Centroid;
+						}
+						const FVector P = Pawn->Body->GetComponentLocation();
+						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s, centroid %s (%.0f cm from the first), box %s, %d parcels, %d behind a plane, pawn %s at %.0f cm, |v| %.0f"),
+							T, *Centroid.ToCompactString(), FVector::Dist(Centroid, *First), *Box.ToCompactString(), Parcels, Behind, *P.ToCompactString(),
+							FVector::Dist(P, Centroid), Pawn->Body->GetPhysicsLinearVelocity().Size());
+					}
+					else
+					{
+						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s, no cloud"), T);
+					}
+				}
+				static const float ShotAt[] = { 0.4f, 1.6f, 2.35f, 2.85f };
+				static const TCHAR* ShotName[] = { TEXT("0_shot"), TEXT("1_stopped_1s"), TEXT("2_stepped_back"), TEXT("3_turned") };
+				if (*Shots < 4 && T >= ShotAt[*Shots])
+				{
+					Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=OSWalk_%s"), ShotName[*Shots]));
+					++*Shots;
+				}
+				if (T > 5.0f)
+				{
+					World->GetTimerManager().ClearTimer(*Handle);
+					UE_LOG(LogMindKore, Log, TEXT("Walk probe: done"));
+				}
+			}), 0.001f, true);
+			}), Delay, false);
+		}));
+
 	/** os.Fx.TunnelStill: waits for a cloud 0.6 s old, carves a 3 x 3 grid of tunnels along the view through it, shoots it carved, at +1 s and +2 s (healing). */
 	FAutoConsoleCommandWithWorldAndArgs GTunnelStill(
 		TEXT("os.Fx.TunnelStill"),
