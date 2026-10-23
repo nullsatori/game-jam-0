@@ -471,7 +471,7 @@ FString UOSGasSubsystem::TakeCostLine()
 
 // --- sources --------------------------------------------------------------------------
 
-int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, float JoinAge)
+int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, float JoinAge, bool bFreeSlotOnly)
 {
 	UWorld* World = GetWorld();
 	// The youngest of this look with room, its gas close, young enough (a new shot never joins: JoinAge < 0). The
@@ -499,6 +499,10 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	{
 		Slot = Clouds.AddDefaulted();
 	}
+	if (Slot == INDEX_NONE && bFreeSlotOnly)
+	{
+		return INDEX_NONE;
+	}
 	if (Slot == INDEX_NONE)
 	{
 		int32 Youngest = INDEX_NONE;
@@ -520,12 +524,15 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	{
 		Free += !Each.IsAlive() && &Each != &Cloud ? 1 : 0;
 	}
-	if (Free < 3 && Clouds.Num() >= MaxClouds)
+	// A level source never starts an eviction (it would take a shot's cloud); a shot does - the oldest unfed first.
+	if (Free < 3 && Clouds.Num() >= MaxClouds && !bFreeSlotOnly)
 	{
 		FCloud* Oldest = nullptr;
 		for (FCloud& Each : Clouds)
 		{
-			if (&Each != &Cloud && Each.IsAlive() && Each.Evict <= 0.0f && (!Oldest || Each.Age > Oldest->Age))
+			const double WorldNow = World->GetTimeSeconds();
+			if (&Each != &Cloud && Each.IsAlive() && Each.Evict <= 0.0f
+				&& (!Oldest || (Oldest->IsFed(WorldNow) && !Each.IsFed(WorldNow)) || (Oldest->IsFed(WorldNow) == Each.IsFed(WorldNow) && Each.Age > Oldest->Age)))
 			{
 				Oldest = &Each;
 			}
@@ -545,6 +552,8 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	Cloud.NextCommands.Reset();
 	Cloud.NextMovers.Reset();
 	Cloud.Age = 0.0f;
+	Cloud.FadeAge = 0.0f;
+	Cloud.LastFed = World->GetTimeSeconds();
 	Cloud.Evict = 0.0f;
 	Cloud.StepCarry = 0.0f;
 	Cloud.Seed = FMath::Rand();
@@ -612,6 +621,7 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 
 void UOSGasSubsystem::Emit(FCloud& Cloud, const FOSGasRecipe& R, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count)
 {
+	Cloud.LastFed = GetWorld()->GetTimeSeconds();
 	const FVector3f At(Where - Cloud.Origin);
 	const FVector3f Axis = FVector3f(Direction.GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector));
 	FVector3f U, W;
@@ -770,7 +780,7 @@ void UOSGasSubsystem::EmitNow(const FOSGasRecipe& Recipe, const FOSGasLook& Look
 		{
 			return;
 		}
-		SmallCloud = CloudFor(Look, Where, -1.0f);
+		SmallCloud = CloudFor(Look, Where, -1.0f, true);
 		if (SmallCloud == INDEX_NONE)
 		{
 			return;
@@ -936,9 +946,11 @@ int32 UOSGasSubsystem::EmitForSource(const FOSGasRecipe& Recipe, const FOSGasLoo
 	if (!Clouds.IsValidIndex(InOutCloud) || !Clouds[InOutCloud].IsAlive() || Clouds[InOutCloud].Serial != InOutSerial || Clouds[InOutCloud].Evict > 0.0f
 		|| Clouds[InOutCloud].Parcels.Num() + Clouds[InOutCloud].Incoming.Num() + Count > MaxParcels)
 	{
-		InOutCloud = CloudFor(Look, Where, -1.0f);
+		// A free slot only: no eviction, no stranger's cloud (a shot's) - none free, refused.
+		InOutCloud = CloudFor(Look, Where, -1.0f, true);
 		if (InOutCloud == INDEX_NONE)
 		{
+			UE_LOG(LogMindKore, Log, TEXT("Gas: a source refused - no free cloud slot (%d alive)"), GetCloudCount());
 			return 0;
 		}
 		InOutSerial = Clouds[InOutCloud].Serial;
@@ -1021,9 +1033,11 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		Cloud.Pending = UE::Tasks::FTask();
 	}
 	Cloud.Age += DeltaTime;
+	const bool bFed = Cloud.IsFed(World->GetTimeSeconds());
+	Cloud.FadeAge = bFed ? FMath::Min(Cloud.FadeAge + DeltaTime, 0.3f * Cloud.Look.LifeSeconds) : Cloud.FadeAge + DeltaTime;
 	const bool bEvicted = Cloud.Evict > 0.0f && (Cloud.Evict -= DeltaTime) <= 0.0f;
 	const bool bEmpty = !bBusy && Cloud.Parcels.IsEmpty() && Cloud.Incoming.IsEmpty() && Cloud.Age > 0.3f;
-	if ((Cloud.Age >= Cloud.Look.LifeSeconds || bEvicted) && bBusy)
+	if ((Cloud.FadeAge >= Cloud.Look.LifeSeconds || bEvicted) && bBusy)
 	{
 		// Faded out already; tried again next frame (an eviction kept pending).
 		if (bEvicted)
@@ -1032,7 +1046,7 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		}
 		return;
 	}
-	if (Cloud.Age >= Cloud.Look.LifeSeconds || bEvicted || bEmpty)
+	if (Cloud.FadeAge >= Cloud.Look.LifeSeconds || bEvicted || bEmpty)
 	{
 		UE_LOG(LogMindKore, Log, TEXT("Gas: a cloud ends at %.2f s (%s), %d parcels; %d re-box(es), the largest %.1f cm, cells %.1f-%.1f cm; %d carve(s), %d blow(s)"), Cloud.Age,
 			bEvicted ? TEXT("evicted") : bEmpty ? TEXT("empty") : TEXT("its life"), Cloud.Parcels.Num(), Cloud.Reboxes, Cloud.MaxReboxCm,
@@ -1116,7 +1130,8 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 	Cloud.StepCarry = FMath::Min(Cloud.StepCarry + DeltaTime, 0.25f);
 	if (!bBusy)
 	{
-		const float Since = Cloud.SimTime;
+		// A fed cloud keeps stepping at 30 Hz at least (fresh gas in it).
+		const float Since = bFed ? FMath::Min(Cloud.SimTime, 1.0f) : Cloud.SimTime;
 		const float Dt = Since < FastSeconds ? FastStep : Since < 1.5f ? SlowStep : Since < 3.0f ? 1.0f / 15.0f : 0.1f;
 		const int32 Steps = FMath::Min(FMath::FloorToInt(Cloud.StepCarry / Dt + 1e-3f), 4);
 		if (Steps > 0)
@@ -1225,7 +1240,7 @@ void UOSGasSubsystem::UpdatePost()
 		// The cloud melts from 0.3 of its life: the density's gain as the cube of the fade, so a thick cloud's opacity
 		// (1 - exp(-density)) falls about evenly instead of holding to the last half second and going at once (owner
 		// 23.10: the veil went in 0.2 s).
-		const float LifeFade = FMath::Cube(1.0f - FMath::SmoothStep(0.3f * Cloud.Look.LifeSeconds, Cloud.Look.LifeSeconds, Cloud.Age));
+		const float LifeFade = FMath::Cube(1.0f - FMath::SmoothStep(0.3f * Cloud.Look.LifeSeconds, Cloud.Look.LifeSeconds, Cloud.FadeAge));
 		const float EvictFade = Cloud.Evict > 0.0f ? FMath::Cube(Cloud.Evict / EvictSeconds) : 1.0f;
 		// The key light in display terms (the post-process is after the tonemapper): a soft knee, never blown white.
 		const FLinearColor K = Cloud.KeyColour;
@@ -1626,11 +1641,12 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				{
 					P.V *= FMath::Exp(-Dt / AirRestSeconds);
 				}
-				// Heavy matter settles (dust): its fall against the drag above.
-				if (P.Fall > 0.0f)
-				{
-					P.V += Down * (P.Fall * GScale * Dt);
-				}
+
+			}
+			// Heavy matter settles (dust): in air against the drag above, in a vacuum freely; in zero-G |g| = 0 holds it.
+			if (P.Fall > 0.0f)
+			{
+				P.V += Down * (P.Fall * GScale * Dt);
 			}
 			// Its own drag, in a vacuum too (a hole's pop: 450 cm/s stopped within ~12 cm - without it a vacuum threw the
 			// 16 holes' puffs across the view as blobs).

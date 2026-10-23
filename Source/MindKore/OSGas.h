@@ -309,6 +309,14 @@ private:
 		bool bAir = true;
 		FVector Gravity = FVector::ZeroVector;
 		float Age = -1.0f;
+		/**
+		 * The age its fade and end go by: held at 0.3 of its life while it is fed (a level source's steady flow, a
+		 * weld - it pulsed: faded and ended by its own age while fed), then aging on from there.
+		 */
+		float FadeAge = 0.0f;
+		/** When gas was last let into it (world s). */
+		double LastFed = -1e9;
+		bool IsFed(double Now) const { return Now - LastFed < 0.5; }
 		float Evict = 0.0f;
 		float StepCarry = 0.0f;
 		uint32 Seed = 0;
@@ -410,7 +418,7 @@ private:
 	 * A cloud of Look near Where no older than JoinAge (negative: always a new one), or a new one in a free slot; with
 	 * none free, the youngest of the look within 1.5 m, else INDEX_NONE (a slot is never taken from a living cloud).
 	 */
-	int32 CloudFor(const FOSGasLook& Look, const FVector& Where, float JoinAge = 1e9f);
+	int32 CloudFor(const FOSGasLook& Look, const FVector& Where, float JoinAge = 1e9f, bool bFreeSlotOnly = false);
 	void Emit(FCloud& Cloud, const FOSGasRecipe& Recipe, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count);
 	void TickSources(float DeltaTime);
 	void TickCloud(FCloud& Cloud, float DeltaTime);

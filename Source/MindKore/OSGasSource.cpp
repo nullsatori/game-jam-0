@@ -153,13 +153,24 @@ void UOSGasSourceComponent::ApplyPreset(EOSGasPreset NewPreset)
 void UOSGasSourceComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	ApplyPreset(Preset);
 	LastLocation = GetComponentLocation();
 	if (bAutoStart)
 	{
 		Mode == EOSGasMode::Burst ? Burst() : SetRate(Rate);
 	}
 }
+
+#if WITH_EDITOR
+void UOSGasSourceComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	// The preset fills the fields once, when picked; a designer's later tweaks stand.
+	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UOSGasSourceComponent, Preset))
+	{
+		ApplyPreset(Preset);
+	}
+}
+#endif
 
 void UOSGasSourceComponent::Burst()
 {
@@ -260,7 +271,9 @@ void UOSGasSourceComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 #if !UE_BUILD_SHIPPING
 namespace
 {
-	/** os.Gas.Spawn <preset> [x y z]: a source of a preset at a point (1.5 m along the view by default), 4 s. */
+	TAutoConsoleVariable<float> CVarGasSpawnSeconds(TEXT("os.Gas.SpawnSeconds"), 4.0f, TEXT("How long an os.Gas.Spawn source lives, s (4)."));
+
+	/** os.Gas.Spawn <preset> [x y z]: a source of a preset at a point (1.5 m along the view by default), os.Gas.SpawnSeconds. */
 	FAutoConsoleCommandWithWorldAndArgs GGasSpawn(
 		TEXT("os.Gas.Spawn"),
 		TEXT("<muzzle|port|weld|breach|rcs|dust|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for 4 s, along the view."),
@@ -296,11 +309,12 @@ namespace
 				return;
 			}
 			UOSGasSourceComponent* Source = NewObject<UOSGasSourceComponent>(Holder);
-			Source->Preset = Preset;
+			Source->ApplyPreset(Preset);
 			Holder->SetRootComponent(Source);
 			Source->SetWorldTransform(FTransform(View, Where));
 			Source->RegisterComponent();
-			Holder->SetLifeSpan(4.0f);
+			// os.Gas.SpawnSeconds: how long (a flow's whole run; a burst is let out at once anyway).
+			Holder->SetLifeSpan(FMath::Max(IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.SpawnSeconds"))->GetFloat(), 0.1f));
 			UE_LOG(LogMindKore, Log, TEXT("os.Gas.Spawn: %s at %s"), *Args[0], *Where.ToCompactString());
 		}));
 }

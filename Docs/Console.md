@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 108 команд, 18 переменных.
+Всего: 108 команд, 19 переменных.
 
 ## `os.Attach`
 
@@ -103,6 +103,7 @@
 | `os.Gas.ProbeSpawn` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSuppressor` (переменная) | значение (умолч. `0`) | 1: os.Gas.WalkProbe mounts the suppressor first. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.Spawn` | `<muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]` | <muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for 4 s, along the view. *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
+| `os.Gas.SpawnSeconds` (переменная) | значение (умолч. `4.0f`) | How long an os.Gas.Spawn source lives, s (4). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.WalkProbe` | `[after s]` | [after s] Shoot while walking, stop, step back, turn, walk round the cloud; log the cloud's centroid every 0.25 s (and HighResShot OSWalk_*). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 
 ## `os.Gravity`

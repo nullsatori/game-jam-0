@@ -73,7 +73,10 @@ class MINDKORE_API UOSGasSourceComponent : public USceneComponent
 public:
 	UOSGasSourceComponent();
 
-	/** A preset fills the recipe, the look, the mode and the amount below at BeginPlay (Custom keeps them). */
+	/**
+	 * Picking a preset in the editor fills the recipe, the look, the mode and the amount below (they can be tuned after);
+	 * BeginPlay leaves them as they are. Custom changes nothing.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
 	EOSGasPreset Preset = EOSGasPreset::Custom;
 
@@ -125,6 +128,9 @@ public:
 	void ApplyPreset(EOSGasPreset NewPreset);
 
 	virtual void BeginPlay() override;
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:

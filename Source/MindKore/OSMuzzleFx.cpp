@@ -2675,7 +2675,9 @@ namespace
 	 * box centre and pawn distance every 0.25 s; HighResShot OSWalk_* at the shot, 1 s, the step back and the turn
 	 * (os.Gas.Debug 1 draws the gas's insides).
 	 */
-	TAutoConsoleVariable<FString> CVarGasProbeSpawn(TEXT("os.Gas.ProbeSpawn"), TEXT(""), TEXT("A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot."));
+	TAutoConsoleVariable<FString> CVarGasProbeSpawn(TEXT("os.Gas.ProbeSpawn"), TEXT(""), TEXT("A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot, and runs 24 s."));
+
+	TAutoConsoleVariable<FString> CVarGasProbeSpawnLate(TEXT("os.Gas.ProbeSpawnLate"), TEXT(""), TEXT("A preset: os.Gas.WalkProbe spawns it once at 5 s (after its shots)."));
 
 	TAutoConsoleVariable<int32> CVarGasProbeSuppressor(TEXT("os.Gas.ProbeSuppressor"), 0, TEXT("1: os.Gas.WalkProbe mounts the suppressor first."));
 
@@ -3013,7 +3015,20 @@ namespace
 					Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=OSWalk_%s"), ShotName[*Shots]));
 					++*Shots;
 				}
-				if (T > 8.0f)
+				// A late source (os.Gas.ProbeSpawnLate) once at 5 s.
+				static bool bLate = false;
+				if (T < 0.1f) { bLate = false; }
+				if (!bLate && T >= 5.0f)
+				{
+					bLate = true;
+					const FString Late = IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSpawnLate"))->GetString();
+					if (!Late.IsEmpty())
+					{
+						GEngine->Exec(World, *(TEXT("os.Gas.Spawn ") + Late));
+					}
+				}
+				const bool bLongRun = !IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSpawn"))->GetString().IsEmpty();
+				if (T > (bLongRun ? 24.0f : 8.0f))
 				{
 					UE_LOG(LogMindKore, Log, TEXT("Walk probe: the drawn set changed %d time(s)"), Gas->DrawnSetChanges);
 					UE_LOG(LogMindKore, Log, TEXT("Walk probe: the gas's opacity - the largest jump a frame in a block %.3f, %d of %d frame(s) over 0.25 (the gun's corner left out; the muzzle's jet in its first 0.25 s apart: up to %.2f); %s"),
