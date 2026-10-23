@@ -5,7 +5,7 @@ opens the maps (OS_FLYERS_MAPS=ship, zerog or both - the default), replaces only
 the actors it owns (tag OS.Flyers, or a label of its lists below) and saves them;
 the rest of each map is untouched - the way to put the flyers back after a map was
 taken from elsewhere, and to place the roosts:
-  UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  UnrealEditor-Cmd.exe <path>/OuterSpace.uproject
       -ExecutePythonScript="<path>/Scripts/os_flyers.py" -unattended -nop4 -nosplash -nullrhi
 (wrap it so the editor quits, as the other scripts). Lvl_OS_Ship is edited by hand
 (Nick): `git lfs lock` it first, dump its actors before and after.

@@ -4,6 +4,7 @@
 // OSWeapons.cpp so the parts and the shooting change in separate files.
 
 #include "OSWeapons.h"
+#include "OSMuzzleFx.h"
 
 #include "OSAttachMenu.h"
 
@@ -1064,8 +1065,15 @@ void UOSWeaponsComponent::UpdateCycleEvents()
 			const FRotator Facing = (Shot.bEjectAlongBore ? Gun.Rotator()
 				: FRotationMatrix::MakeFromXZ(View.GetUnitAxis(EAxis::Y), View.GetUnitAxis(EAxis::Z)).Rotator())
 				+ FRotator(FMath::FRandRange(-15.0f, 15.0f), FMath::FRandRange(-20.0f, 20.0f), 0.0f);
+			const int32 Before = Debris.Num();
 			SpawnDebris(Shot.CaseMesh, FTransform(Facing, Gun.TransformPosition(Shot.EjectPort)), Velocity, Spin, 0.012f);
 			++CasesThrown;
+			// Hot: it drags a wisp through the smoke and smokes on the floor (OSMuzzleFx).
+			UOSMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UOSMuzzleFxComponent>();
+			if (Fx && Debris.Num() > Before)
+			{
+				Fx->HotCase(Debris.Last().Get());
+			}
 		}
 		if (Shot.HammerSound && Crossed(Prev, Since, Shot.HammerSoundSeconds))
 		{

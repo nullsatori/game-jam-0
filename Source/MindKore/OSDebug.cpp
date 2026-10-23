@@ -19,6 +19,7 @@
 #include "OSFlyer.h"
 #include "OSGravity.h"
 #include "OSShip.h"
+#include "OSScope.h"
 #include "OSWeapons.h"
 #include "OSZeroGPawn.h"
 #include "Kismet/GameplayStatics.h"
@@ -201,6 +202,71 @@ namespace
 }
 
 // --- lifetime ---------------------------------------------------------------------------
+
+bool UOSDebugSubsystem::GiveGun(const FString& Which)
+{
+	const UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
+	const APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
+	APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+	UOSWeaponsComponent* Guns = Pawn ? Pawn->FindComponentByClass<UOSWeaponsComponent>() : nullptr;
+	if (!Guns)
+	{
+		UE_LOG(LogMindKore, Warning, TEXT("Debug: no player with guns to give a gun to"));
+		return false;
+	}
+	// The slots as in code (UOSWeaponsComponent's defaults): 0 pistol, 1 pump gun or the Рысь, 2 SV-98.
+	const UOSWeaponsComponent* Defaults = GetDefault<UOSWeaponsComponent>();
+	const UOSScopeComponent* Sights = GetDefault<UOSScopeComponent>();
+	const auto Slot2 = [Guns, Defaults, Sights](bool bRmb93)
+	{
+		if (!Defaults->Weapons.IsValidIndex(1))
+		{
+			return;
+		}
+		// The Рысь is built on the pump gun, as its pickup does (AOSWeaponPickup); the pump gun is the slot's own.
+		const FOSWeapon Gun = bRmb93 ? OSMakeRmb93(Defaults->Weapons[1]) : Defaults->Weapons[1];
+		if (Guns->ApplyPickupWeapon(1, Gun) && Guns->Scope && Guns->Scope->Aims.IsValidIndex(1) && Sights->Aims.IsValidIndex(1))
+		{
+			Guns->Scope->Aims[1] = bRmb93 ? OSMakeRmb93Aim(Sights->Aims[1]) : Sights->Aims[1];
+		}
+	};
+	const FString Name = Which.ToLower();
+	TArray<int32, TInlineAllocator<3>> Unlock;
+	if (Name == TEXT("pistol"))
+	{
+		Unlock = { 0 };
+	}
+	else if (Name == TEXT("shotgun") || Name == TEXT("rmb93"))
+	{
+		Slot2(Name == TEXT("rmb93"));
+		Unlock = { 1 };
+	}
+	else if (Name == TEXT("sv98"))
+	{
+		Unlock = { 2 };
+	}
+	else if (Name == TEXT("all"))
+	{
+		Unlock = { 0, 1, 2 };
+	}
+	else
+	{
+		UE_LOG(LogMindKore, Warning, TEXT("Debug: no gun called %s (pistol, shotgun, sv98, rmb93, all)"), *Which);
+		return false;
+	}
+	for (const int32 Index : Unlock)
+	{
+		Guns->UnlockWeapon(Index);
+	}
+	// Holding a body: let it go and draw the gun (as a pickup does).
+	if (AOSZeroGPawn* ZeroG = Cast<AOSZeroGPawn>(Pawn); ZeroG && ZeroG->GetHands() == EOSHands::Held)
+	{
+		ZeroG->SetHands(EOSHands::Gun);
+	}
+	UE_LOG(LogMindKore, Log, TEXT("Debug: gave %s - guns [%s]"), *Name, *FString::JoinBy(Guns->Weapons, TEXT(", "),
+		[](const FOSWeapon& Each) { return FString::Printf(TEXT("%s%s"), *Each.Name.ToString(), Each.bUnlocked ? TEXT("") : TEXT(" (locked)")); }));
+	return true;
+}
 
 UOSDebugSubsystem* UOSDebugSubsystem::Get(const UObject* WorldContext)
 {
@@ -1700,6 +1766,17 @@ namespace
 			if (Debug && Debug->GetMenu().IsValid() && !Args.IsEmpty())
 			{
 				Debug->GetMenu()->SetGroups(FString::Join(Args, TEXT(" ")));
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GOSDebugGiveGun(TEXT("os.Debug.GiveGun"),
+		TEXT("os.Debug.GiveGun <pistol|shotgun|sv98|rmb93|all>: the player gets that gun on any map (the menu's «Оружие» buttons)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			UOSDebugSubsystem* Debug = OSDebugFor(World);
+			if (Debug && Args.Num() == 1)
+			{
+				Debug->GiveGun(Args[0]);
 			}
 		}));
 

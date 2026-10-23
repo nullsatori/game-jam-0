@@ -9,7 +9,7 @@
 Без окна (только логика, NullRHI):
 
 ```powershell
-$a = '"<путь>/MKJamStarter.uproject" /Game/OS/Maps/Lvl_OS_ZeroG -game -nullrhi -nosound -unattended -nop4 -nosplash -log=Probe.log -ExecCmds="os.ZeroG.Probe"'
+$a = '"<путь>/OuterSpace.uproject" /Game/OS/Maps/Lvl_OS_ZeroG -game -nullrhi -nosound -unattended -nop4 -nosplash -log=Probe.log -ExecCmds="os.ZeroG.Probe"'
 Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" -ArgumentList $a
 ```
 
@@ -96,7 +96,11 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `os.Weapons.SlideTake` | звук затворной задержки USP (рендер не нужен, `-nullrhi` без `-nosound`): последний выстрел, пустая перезарядка со сбросом, снова последний выстрел, только сброс — запись мастера 9 с, `Saved/Clips/SlideTake.wav`, покадровая таблица `SlideTake.csv`, время действий в лог ([RecoilWeapons-Sound](RecoilWeapons-Sound.md#затворная-задержка-usp-2010-ветка-jam-slide-sound)) |
 | `os.Wall.BlastFrames [См]` | выстрел дробовика в стену с 10 м, кадр каждый кадр 0.5 с (`OSBlast_<кадр>_<мс>.png`; с `-UseFixedTimeStep -FPS=60`) |
 | `os.Weapons.Fx [space]` | вспышка покадрово и дым за 3 с |
+| `os.Weapons.Smoke room` / `roomspace` | живой дым ([RecoilWeapons-Fx](RecoilWeapons-Fx.md#живой-дым-2210)): `room` — `Lvl_OS_TestRoom`, Рысь, выстрел в пол 2.5 м впереди, кадры 0.05–4 с, свидетель сбоку, второй выстрел сквозь облако, гильза от первого лица; `roomspace` — тот же выстрел на `Lvl_OS_ZeroG` в чёрное (вакуум). В лог — газ, масса, скорость, жар каждые 0.25 с и `os.Fx.SmokeCost`. Первый прогон после пересборки материала — без облака (шейдеры) |
 | `os.Weapons.Smoke [budget \| foot cling burst sv98]` | дым в мире на `Lvl_OS_Range` (с `-UseFixedTimeStep -FPS=60`): пешком в зале — дробовик и второй выстрел сквозь облако; вис на якоре — СВ-98 и второй; очередь пистолета в невесомости; СВ-98 — лента «облако на месте, тело уплывает» и возврат сквозь облако (или только названные моменты); кадры от глаза и со стороны, в лог — облака против дула каждые 0.25 с. `budget` — три облака дробовика на стенде `os.Weapons.Fx` и `ProfileGPU` ([RecoilWeapons-Fx](RecoilWeapons-Fx.md#честная-физика-ветка-jam-smoke-world-1910)) |
+| `os.Fx.TunnelStill [после, с]` | ждёт облако игрока возрастом 0.6 с, прорезает сквозь него сетку 3×3 туннелей вдоль взгляда (`CarveRay`, 7 см), кадры `OSTunnels_0050/1000/2000ms` ([RecoilWeapons-Fx](RecoilWeapons-Fx.md#дым-в-мире-жизнь-пули-тела-v5v10-222310)); запускать вместе с `os.Weapons.Smoke room` и `8`, чтобы не попасть на прогревочное облако |
+| `os.Fx.MoverStill [после, с]` | ждёт облако, бросает сквозь него ближайший физический проп поперёк взгляда со скоростью 3.5 м/с, кадры `OSMover_0100/0250/0500ms` |
+| `os.Fx.SmokeStamp 0/1` | 1 (по умолчанию) — газ первого кадра выстрела кладётся в сетку на игровом потоке; 0 — только шагом сетки. Задержка в лог: `Smoke latency: gas drawn N frame(s) after the shot` |
 | `os.Scope.Shots`, `os.Scope.AimFrames`, `os.Scope.AimStills` | оптика СВ-98, подъём к глазу всех стволов, подбор глаза и поля зрения |
 | `os.Scope.SwitchStills [ствол] [на какой]` | смена ствола у глаза: кадры прицела и 0 / 0.05 / 0.15 / 0.3 с после смены, в лог каждый тик — доля прицела и поле зрения ствола |
 | `os.Wall.Shots [Name]` | живая стена до и после дробовика |

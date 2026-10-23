@@ -25,6 +25,8 @@ struct FOSDebugRow
 		Section,
 		/** A row of action buttons after a label (Docs/DebugMenu.md, «Ряд действий»): «Снаряжение»'s guns and attachments. */
 		Actions,
+		/** «Оружие»: the give-a-gun buttons (UOSDebugSubsystem::GiveGun), on any map. */
+		Give,
 	};
 	/** One button of an Actions row: its label and state read on paint (cheap: the menu is open), a click runs it. */
 	struct FAction

@@ -1,6 +1,6 @@
 """The guns' air assets (editor Python, headless). Docs/RecoilWeapons-Sound.md, «В воздухе».
 
-  OS_WAV_DIR=<out dir of Scripts/os_air_sounds.py> UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  OS_WAV_DIR=<out dir of Scripts/os_air_sounds.py> UnrealEditor-Cmd.exe <path>/OuterSpace.uproject
       -ExecutePythonScript="<path>/Scripts/os_air_audio.py" -unattended -nop4 -nosplash -nullrhi
 
 The cracks (SW_OS_ShotAir_*.wav, same dir) are imported by Scripts/os_import_audio.py. Here, in

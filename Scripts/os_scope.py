@@ -1,6 +1,6 @@
 """The SV-98 scope's eyepiece and the pistol's sight dots for UOSScopeComponent (editor Python).
 
-  UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/os_scope.py" -unattended -nop4 -nosplash -nullrhi
+  UnrealEditor-Cmd.exe <path>/OuterSpace.uproject -ExecutePythonScript="<path>/Scripts/os_scope.py" -unattended -nop4 -nosplash -nullrhi
 
 Rebuilt in place on every run. Three materials:
 

@@ -85,7 +85,7 @@
 ```
 blender.exe -b --factory-startup --python Scripts/blender/os_guns.py -- <dir>
 blender.exe -b <MindKore>/Models/USP_Soviet_20260924/source/USP_Soviet_Game.blend --python Scripts/blender/os_usp_split.py -- <MindKore>/Models/low-poly-usp/UPS-S.blend <dir>
-OS_FBX_DIR=<dir> UnrealEditor-Cmd.exe MKJamStarter.uproject -ExecutePythonScript="<repo>/Scripts/os_weapons.py" -unattended -nop4 -nosplash -nullrhi
+OS_FBX_DIR=<dir> UnrealEditor-Cmd.exe OuterSpace.uproject -ExecutePythonScript="<repo>/Scripts/os_weapons.py" -unattended -nop4 -nosplash -nullrhi
 ```
 
 `os_weapons.py` импортирует только те FBX, что лежат в `OS_FBX_DIR`

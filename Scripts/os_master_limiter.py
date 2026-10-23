@@ -1,6 +1,6 @@
 """The master limiter (editor Python, headless).
 
-  UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject -ExecutePythonScript="<path>/Scripts/os_master_limiter.py"
+  UnrealEditor-Cmd.exe <path>/OuterSpace.uproject -ExecutePythonScript="<path>/Scripts/os_master_limiter.py"
       -unattended -nop4 -nosplash -nullrhi
 
 Makes (or updates) /Game/OSArt/Audio/Mix/SMX_OS_MasterBrickwall, the lookahead brickwall

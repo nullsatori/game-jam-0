@@ -1,6 +1,6 @@
 """Builds /Game/OS/Maps/Lvl_OS_Range: a test range for the guns and the living walls (editor Python, headless).
 
-  UnrealEditor-Cmd.exe <path>/MKJamStarter.uproject
+  UnrealEditor-Cmd.exe <path>/OuterSpace.uproject
       -ExecutePythonScript="<path>/Scripts/build_range.py" -unattended -nop4 -nosplash -nullrhi
 (wrap it in a script that calls unreal.SystemLibrary.quit_editor(), see README)
 

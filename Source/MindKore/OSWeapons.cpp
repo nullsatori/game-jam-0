@@ -152,6 +152,7 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	Pistol.bAutomatic = false;
 	// Near real muzzle velocities (owner 19.10: slow rounds made the flesh walls answer late): 9 mm 350 m/s.
 	Pistol.ProjectileSpeed = 35000.0f;
+	Pistol.SmokeHoleCm = 6.0f;
 	Pistol.KickPitchDeg = 1.2f;
 	Pistol.KickYawDeg = 0.3f;
 	Pistol.ViewKickBackCm = 3.0f;
@@ -186,6 +187,7 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	Shotgun.EmptySound = ShotgunEmpty.Object;
 	Shotgun.ShellInsertSound = ShotgunShell.Object;
 	Shotgun.ProjectileSpeed = 40000.0f; // buckshot ~400 m/s
+	Shotgun.SmokeHoleCm = 7.0f; // each pellet its own
 	Shotgun.KickPitchDeg = 5.0f;
 	Shotgun.KickYawDeg = 1.2f;
 	Shotgun.ViewKickBackCm = 7.0f;
@@ -229,6 +231,7 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	Sniper.MagOutSound = SniperMagOut.Object;
 	Sniper.MagInSound = SniperMagIn.Object;
 	Sniper.ProjectileSpeed = 80000.0f; // 7.62x54R ~800 m/s
+	Sniper.SmokeHoleCm = 12.0f;
 	Sniper.KickPitchDeg = 8.0f;
 	Sniper.KickYawDeg = 1.0f;
 	Sniper.ViewKickBackCm = 9.0f;
@@ -261,6 +264,41 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	Sniper.ActionBodyTurn = FRotator(3.0f, -8.0f, -14.0f);
 	Sniper.ActionBody = MakeCycleCurve({ { 0.2f, 0.0f, 0.0f, 0.0f }, { 0.215f, 1.0f, 0.0f, 0.0f }, { 1.05f, 1.0f, 0.0f, 0.0f },
 		{ 1.065f, 0.0f, 0.0f, 0.0f }, { 1.25f, 0.0f, 0.0f, 0.0f } });
+	// The gas (FOSGasVent, Docs/RecoilWeapons-Fx.md «Газовые отверстия»): a jet into the smoke grid and a thin stream
+	// of wisps out of each muzzle (the stream is the first thing seen, the jet takes over); the SV-98's brake throws
+	// most of it out of two side ports.
+	const auto Vent = [](const FVector& Direction, bool bJet, float Seconds, float Decay, float Speed, float Cone, float Rate, float Width)
+	{
+		FOSGasVent V;
+		V.Direction = Direction;
+		V.bJet = bJet;
+		V.Seconds = Seconds;
+		V.DecaySeconds = Decay;
+		V.SpeedCm = Speed;
+		V.ConeDeg = Cone;
+		V.Rate = Rate;
+		V.WidthCm = Width;
+		return V;
+	};
+	// A short sharp blast - the burst dies with DecaySeconds (0.05-0.07 s), a thin dribble to Seconds (0.2 s at most;
+	// v6, owner: «слишком долго льется из ствола») - fast enough that the front still runs out about as far
+	// (SpeedCm x DecaySeconds: the shotgun's ~1.05 m; further than a real one, the art first).
+	Pistol.GasVents = { Vent(FVector::ForwardVector, true, 0.15f, 0.05f, 900.0f, 8.0f, 0.5f, 2.5f),
+		Vent(FVector::ForwardVector, false, 0.1f, 0.04f, 150.0f, 10.0f, 40.0f, 1.0f) };
+	Shotgun.GasVents = { Vent(FVector::ForwardVector, true, 0.2f, 0.07f, 1500.0f, 6.0f, 0.7f, 6.0f),
+		Vent(FVector::ForwardVector, false, 0.12f, 0.05f, 220.0f, 8.0f, 60.0f, 1.5f) };
+	Sniper.GasVents = { Vent(FVector::ForwardVector, true, 0.15f, 0.05f, 1200.0f, 4.0f, 0.4f, 3.0f),
+		Vent(FVector(-0.35f, 1.0f, 0.0f), true, 0.15f, 0.05f, 1000.0f, 10.0f, 0.6f, 4.0f),
+		Vent(FVector(-0.35f, -1.0f, 0.0f), true, 0.15f, 0.05f, 1000.0f, 10.0f, 0.6f, 4.0f),
+		Vent(FVector::ForwardVector, false, 0.1f, 0.04f, 220.0f, 6.0f, 40.0f, 1.0f) };
+	// The muzzle streams' wisps: thin, short-lived.
+	for (FOSWeapon* Gun : { &Pistol, &Shotgun, &Sniper })
+	{
+		Gun->PortSmoke.StartCm = 1.5f;
+		Gun->PortSmoke.EndCm = 7.0f;
+		Gun->PortSmoke.Seconds = 1.0f;
+		Gun->PortSmoke.Opacity = 0.3f;
+	}
 	Weapons = { Pistol, Shotgun, Sniper };
 	SetupWeaponParts();
 	SetupAttachments();
@@ -386,6 +424,16 @@ void UOSWeaponsComponent::UpdateRounds(float DeltaTime)
 		Round.TravelledCm += float(FVector::Dist(Round.Position, Impact));
 		Round.Position = Impact;
 		Round.bLanded = bLands;
+		// Its flight this frame punches a tunnel through any smoke on the way (along the streak: the round's path).
+		if (UOSMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UOSMuzzleFxComponent>())
+		{
+			Fx->CarveRay(Tail, TracerHead(Round), Weapon.SmokeHoleCm);
+			// Where it hits, the smoke round the impact is blown back out of the surface.
+			if (bLands)
+			{
+				Fx->Burst(Impact, -Round.Direction, Weapon.SmokeHoleCm * 4.0f, 350.0f);
+			}
+		}
 		if (UStaticMeshComponent* Tracer = Round.Tracer.Get())
 		{
 			// The streak covers this frame's flight (a fast round is a long streak, as on film; at
@@ -537,7 +585,7 @@ void UOSWeaponsComponent::UpdateViewModel(float DeltaTime)
 	UpdateCycleEvents();
 	// The RMB-93's lid and shroud (OSWeaponLid.cpp); nothing for a gun without them.
 	FOSWeapon& Shown = Weapons[ShownWeapon];
-	if (Shown.Lid.Mesh || Shown.PortSmoke.Ports.Num() > 0)
+	if (Shown.Lid.Mesh || Shown.HasSeep())
 	{
 		UpdateLid(Shown, Steady * ViewModel->GetAttachParent()->GetComponentTransform(), DeltaTime);
 		UpdatePortSmoke(Shown, DeltaTime);
@@ -908,6 +956,8 @@ bool UOSWeaponsComponent::Fire(const FVector& Eye, const FVector& Direction, FVe
 		// Before the kick (the caller adds OutRecoil): the smoke takes the gun's velocity at the shot.
 		const FOSAttachment* Device = GetActiveOn(CurrentWeapon, EOSMountType::Muzzle);
 		Fx->Shot(CurrentWeapon, MuzzleTransform, ViewModel, Device ? Device->MuzzleFlashScale : 1.0f, Device ? Device->MuzzleSmokeScale : 1.0f);
+		// The gas out of every vent of the gun (the muzzle's jet, a brake's ports, a shroud's holes).
+		Fx->Vents(*Weapon, MuzzleTransform, ActionInView);
 	}
 	// The RMB-93: its open lid jerked by the kick, its shroud's holes puffing (OSWeaponLid.cpp).
 	bLidShot = Weapon->Lid.Mesh != nullptr;
@@ -923,7 +973,13 @@ bool UOSWeaponsComponent::Fire(const FVector& Eye, const FVector& Direction, FVe
 			: Bore;
 		if (Weapon->ProjectileSpeed <= 0.0f)
 		{
-			TraceShot(*Weapon, Start, Start + PelletDirection * Weapon->RangeCm, PelletDirection);
+			FVector Impact = Start + PelletDirection * Weapon->RangeCm;
+			TraceShot(*Weapon, Start, Impact, PelletDirection, &Impact);
+			if (UOSMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UOSMuzzleFxComponent>())
+			{
+				Fx->CarveRay(Start, Impact, Weapon->SmokeHoleCm);
+				Fx->Burst(Impact, -PelletDirection, Weapon->SmokeHoleCm * 4.0f, 350.0f);
+			}
 			continue;
 		}
 		FRound& Round = Rounds.AddDefaulted_GetRef();

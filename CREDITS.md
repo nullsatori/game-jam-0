@@ -44,8 +44,8 @@ descriptions of its proportions only); no third-party model.
 
 The tracer material `/Game/MindKore/Weapons/M_MK_Tracer` is MindKore's own.
 
-The muzzle flash and powder smoke (`/Game/JamArt/FX/M_Jam_MuzzleFlash`,
-`M_Jam_MuzzleSmoke`) are the game's own: procedural materials built by
+The muzzle flash and powder smoke (`/Game/OSArt/FX/M_OS_MuzzleFlash`,
+`M_OS_MuzzleSmoke`) are the game's own: procedural materials built by
 `Scripts/os_muzzle_fx.py`, no texture, on the engine plane. MindKore's
 `NS_MK_MuzzleFlash` was not taken: it uses the Vefects Free_Fire pack (Fab)
 and a FootageCrate frame.

@@ -146,16 +146,43 @@ FOSWeapon OSMakeRmb93(const FOSWeapon& PumpShotgun)
 	Lid.LatchSound = GunSound(TEXT("SW_OS_MagIn_Pistol"));
 	Lid.LatchSoundPitch = 0.9f;
 
-	// The shroud's 16 holes (ActionMesh space, the shroud rides the barrel): four rings along it, two holes a side each, above and below the bore.
+	// The gas (FOSGasVent): the pump gun's muzzle jet and stream, plus the shroud's 16 holes (ActionMesh space, the
+	// shroud rides the barrel: four rings along it, two holes a side each, above and below the bore). Each hole streams
+	// thin wisps for 0.3 s after a shot - out of the hole, then back along the barrel and round it, clinging to the gun
+	// for ~1.5 s in air (owner 22.10: «струйки дыма должны идти из дула и дырок в стволе», «плавно обволакивать
+	// оружие») - and seeps while the barrel is hot.
 	FOSPortSmoke& Smoke = Gun.PortSmoke;
 	Smoke.BoreZCm = 0.75f;
+	// Seeps thin and not for long (v6, owner: «слишком долго льется из ствола»): 8 a second per unit of heat, cooling
+	// with 2 s (after three shots ~5 s of a thinning seep, not ~12 s of a stream).
+	Smoke.SeepPerSecond = 8.0f;
+	Smoke.HeatSeconds = 2.0f;
+	Smoke.StartCm = 1.7f;
+	Smoke.EndCm = 10.0f;
+	Smoke.Seconds = 2.2f;
+	Smoke.Opacity = 0.46f;
+	Smoke.SwirlCmPerSecond = 20.0f;
+	Smoke.RiseShare = 0.08f;
+	Smoke.AirDragSeconds = 0.7f;
+	Smoke.ClingSeconds = 0.45f;
 	for (const float X : { 38.15f, 41.05f, 43.95f, 46.85f })
 	{
 		for (const float Y : { 1.21f, -1.21f })
 		{
 			for (const float Z : { 1.25f, 0.25f })
 			{
-				Smoke.Ports.Add(FVector(X, Y, Z));
+				FOSGasVent& Hole = Gun.GasVents.AddDefaulted_GetRef();
+				Hole.Space = EOSVentSpace::Action;
+				Hole.Location = FVector(X, Y, Z);
+				Hole.Direction = FVector(0.0f, Y, Z - Smoke.BoreZCm).GetSafeNormal();
+				Hole.bCling = true;
+				Hole.bSeep = true;
+				Hole.Seconds = 0.3f;
+				Hole.DecaySeconds = 0.15f;
+				Hole.SpeedCm = 25.0f;
+				Hole.ConeDeg = 20.0f;
+				Hole.Rate = 20.0f;
+				Hole.WidthCm = 1.0f;
 			}
 		}
 	}
@@ -284,10 +311,10 @@ namespace
 				if (Since() >= 0.2f)
 				{
 					CasesBefore = G->GetCasesThrown();
-					const int32 Puffs = Fx.IsValid() ? Fx->GetPuffCount() : 0;
 					Check(Shoot() && Gun.Ammo == 5, TEXT("a shot fires, 5 left"));
-					Check(Fx.IsValid() && Fx->GetPuffCount() >= Puffs + Gun.PortSmoke.ShotPuffs,
-						FString::Printf(TEXT("the shroud's holes puff at the shot (%d puffs)"), Fx.IsValid() ? Fx->GetPuffCount() - Puffs : -1));
+					// Every hole (and the muzzle's stream) flows after the shot.
+					Check(Fx.IsValid() && Fx->GetFlowCount() >= 17,
+						FString::Printf(TEXT("the shroud's holes and the muzzle stream after the shot (%d flowing)"), Fx.IsValid() ? Fx->GetFlowCount() : -1));
 					Next();
 				}
 				break;
@@ -528,7 +555,8 @@ namespace
 		const FOSWeapon Rmb = OSMakeRmb93(GetDefault<UOSWeaponsComponent>()->Weapons[1]);
 		Probe->Check(Rmb.ViewMesh && Rmb.ActionMesh && Rmb.Lid.Mesh,
 			TEXT("the RMB-93's meshes load - the lid's too (SM_OS_RMB93_Lid, Scripts/os_rmb93_assets.py)"));
-		Probe->Check(Rmb.PortSmoke.Ports.Num() == 16 && Rmb.ShellMesh && Rmb.bEjectAlongBore, TEXT("16 shroud holes, round-by-round, bottom ejection"));
+		Probe->Check(Rmb.GasVents.FilterByPredicate([](const FOSGasVent& V) { return V.Space == EOSVentSpace::Action; }).Num() == 16 && Rmb.ShellMesh && Rmb.bEjectAlongBore,
+			TEXT("16 shroud holes, round-by-round, bottom ejection"));
 		if (!Rmb.Lid.Mesh)
 		{
 			Probe->Finish();

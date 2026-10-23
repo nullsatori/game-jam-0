@@ -17,7 +17,7 @@ $Runs = foreach ($Fps in $Rates) {
 	$Name = "Sweep_${Tag}_$Fps"
 	$Log = "$Root/Saved/Logs/$Name.log"
 	Remove-Item $Log -ErrorAction SilentlyContinue
-	$CmdLine = "`"$Root/MKJamStarter.uproject`" $Map -game -nullrhi -nosound -unattended -nop4 -nosplash -UseFixedTimeStep -FPS=$Fps -log=$Name.log -ExecCmds=`"$Command`""
+	$CmdLine = "`"$Root/OuterSpace.uproject`" $Map -game -nullrhi -nosound -unattended -nop4 -nosplash -UseFixedTimeStep -FPS=$Fps -log=$Name.log -ExecCmds=`"$Command`""
 	[pscustomobject]@{ Fps = $Fps; Log = $Log; Proc = (Start-Process -PassThru -WindowStyle Hidden $Engine -ArgumentList $CmdLine); End = $null }
 }
 $Deadline = (Get-Date).AddSeconds($Seconds)

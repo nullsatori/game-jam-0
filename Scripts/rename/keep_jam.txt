@@ -1,5 +1,0 @@
-# Keep Jam names for now: the smoke thread (PR #21) regenerates these with Scripts/os_muzzle_fx.py after the rename.
-/Game/JamArt/FX
-/Game/JamArt/FX/M_Jam_MuzzleFlash
-/Game/JamArt/FX/M_Jam_MuzzleSmoke
-/Game/JamArt/FX/M_Jam_MuzzleSmokeVolume

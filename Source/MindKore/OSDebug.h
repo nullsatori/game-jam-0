@@ -192,6 +192,13 @@ public:
 	/** Paused: run one frame, then pause again. */
 	void StepFrame();
 
+	/**
+	 * Gives the player a gun on any map (owner 23.10: «на этой карте в дебаг меню нет выдачи пушек»): "pistol",
+	 * "shotgun" (the pump gun back in slot 2), "sv98", "rmb93" (the Рысь in slot 2, as its pickup does), "all"
+	 * (pistol, slot 2 as it is, SV-98). Unlocked and drawn. False: no player with guns, or an unknown name.
+	 */
+	bool GiveGun(const FString& Which);
+
 	/** A frame as measured at its end: real seconds since the last, and the game's dt. */
 	struct FFrameSample
 	{
