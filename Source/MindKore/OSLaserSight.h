@@ -72,9 +72,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "1.0"))
 	float DotStretchMax = 6.0f;
 
-	/** The grid of the light, lines of the screen (5 px a texel at 1080, the smoke's texel). */
+	/** The grid of the light, lines of the screen (4 px a texel at 1080, 5 at 1440; owner 23.10: a touch less low-res than the smoke's 216). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "90.0"))
-	float GridLines = 216.0f;
+	float GridLines = 288.0f;
 
 	/** On screen the dot's core is never under this many texels across; its glow's width (sigma, texels) and share. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.3"))
@@ -86,7 +86,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.0"))
 	float DotGlowShare = 0.18f;
 
-	/** The speckle in the dot: grains this bright against the core; they boil as the dot moves (a new set every this many cm) and rest when it rests (every this many seconds). */
+	/** The speckle in the dot: grains this bright against the core; they boil as the dot moves (a new set every this many cm) and rest when it rests (every this many seconds) - a hard switch, no fade (owner 23.10: «резко моргать, этож лазеры»). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float Speckle = 0.2f;
 
@@ -96,14 +96,28 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.1"))
 	float SpeckleRestSeconds = 2.0f;
 
-	/** The dot's light on the surface, candelas (none at 0) and its reach, cm: a faint red spill on the wall, no specular (owner 23.10: its highlight read as a second dot). */
+	/**
+	 * The dot's light on the surface, candelas (none at 0) and its reach, cm. Off: the camera's motion blur smeared its spill
+	 * into a long red streak on every turn (owner 23.10); the streak is the HUD's own now (Trail*), short and a hair thin.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.0"))
-	float DotLightCandela = 0.012f;
+	float DotLightCandela = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "1.0"))
 	float DotLightRadiusCm = 8.0f;
 
-	/** Glass: the beam goes through; the ghost of the dot left on the pane, share of the dot. */
+	/** The dot's streak as it sweeps the screen: back toward where it was last frame, at most this many texels, this bright at the dot (share), fading out. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.0"))
+	float TrailTexels = 2.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float TrailShare = 0.35f;
+
+	/** The hot of the light (the dot's core, the speckle, the glints): a hotter red, never white (owner 23.10: no flashing in another colour). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot")
+	FLinearColor HotColour = FLinearColor(1.0f, 0.3f, 0.18f);
+
+	/** Glass: the beam goes through; the ghost of the dot left on the pane where the beam from the lens crosses it, share of the dot. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Surface", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float GlassGhost = 0.3f;
 
@@ -151,12 +165,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0", ClampMax = "0.9"))
 	float HazeFloor = 0.3f;
 
-	/** Glints: where the haze is densest (above this of its noise) a texel of the beam flashes hot, this bright. */
+	/** Glints: where the haze is densest (above this of its noise) a texel of the beam grows brighter by up to this share - in its own red. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.5", ClampMax = "1.0"))
 	float GlintAbove = 0.86f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0"))
-	float Glint = 0.5f;
+	float Glint = 0.3f;
 
 	/** The haze the beam shows in: its cell, cm, and its drift, cm/s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "1.0"))
@@ -175,15 +189,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Diode", meta = (ClampMin = "0.0"))
 	float DriveRippleHz = 50.0f;
 
-	/** Dropouts: how often (a second), how deep (share of the light) and how long the recovery takes. */
+	/** Dropouts: how often (a second), how deep (share of the light) and how long - a hard blink, off and back at once. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Diode", meta = (ClampMin = "0.0"))
 	float DropsPerSecond = 0.3f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Diode", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float DropDepth = 0.35f;
+	float DropDepth = 0.85f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Diode", meta = (ClampMin = "0.01"))
-	float DropSeconds = 0.08f;
+	float DropSeconds = 0.05f;
 
 	/** Switching on: the light comes up on a spring (rise, overshoot share); off: it dies over this. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Diode", meta = (ClampMin = "0.01"))
@@ -244,8 +258,10 @@ private:
 	void Hide();
 	/** The diode's light this frame, 0..~1.1: the spring, the drift, the ripple, a dropout, the shot's rattle. */
 	float StepDrive(float DeltaTime, bool bWant, bool bShot);
-	/** The spans of the beam (0..1 of LensAt -> BeamEnd) that no part of the gun stands in front of, from the eye. */
+	/** The spans of the beam (0..1 of LensAt -> BeamEnd) that no part of the gun stands in front of, from the eye (by the parts' boxes: the fallback where the meshes' triangles are not on the CPU). */
 	void FindBeamSpans(const FVector& EyeAt);
+	/** The gun's parts drawn into a depth mask on the light's texel grid over Region (texels): the beam hides exactly behind the gun's silhouette. False where no part's triangles are on the CPU. */
+	bool DrawGunMask(const UCanvas& Canvas, float Texel, const FIntRect& Region);
 	/** The geometry from the camera as it stands: the round's line, the dot, its disc, the beam's spans, the light. */
 	void Refresh();
 
@@ -288,6 +304,12 @@ private:
 	FVector LastDotAt = FVector::ZeroVector;
 	float Boil = 0.0f;
 	float DeltaSecondsNow = 0.0f;
+	/** The dot on screen last frame (texels), for its streak. */
+	FVector2D LastDotTexel = FVector2D::ZeroVector;
+	bool bLastDotTexel = false;
+	/** The gun's depth mask (DrawGunMask): the nearest 1/depth of the gun per texel over MaskRegion, 0 where none. */
+	FIntRect MaskRegion;
+	TArray<float> MaskNearInv;
 	// The diode's drive.
 	float OnLevel = 0.0f;
 	float OnVelocity = 0.0f;
