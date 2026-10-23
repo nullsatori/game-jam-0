@@ -6,6 +6,7 @@
 // magazine dropped, no rounds counted), and with a tool in hand there is no gun (GetWeapon,
 // the HUD's RMB line). Each line ends in PASS or FAIL; the last is "Hands probe: done".
 
+#include "OSAttachMenu.h"
 #include "OSLadder.h"
 #include "OSScope.h"
 #include "OSShip.h"
@@ -98,12 +99,15 @@ namespace OSHandsProbe
 		bool bHeld = false;
 		bool bCling = false;
 		float Aim = 0.0f;
+		/** The attachment menu up (Tab held, Docs/Attachments.md): a key must not open or leave it by itself. */
+		bool bMenu = false;
 
 		FString ToString() const
 		{
-			return FString::Printf(TEXT("%s%s gun %d ammo %d%s lines %d (%.0f cm)%s%s aim %.2f"), *UEnum::GetDisplayValueAsText(Hands).ToString(),
+			return FString::Printf(TEXT("%s%s gun %d ammo %d%s lines %d (%.0f cm)%s%s aim %.2f%s"), *UEnum::GetDisplayValueAsText(Hands).ToString(),
 				Tool == EOSHullTool::Strap ? TEXT("(strap)") : Tool == EOSHullTool::Welder ? TEXT("(welder)") : TEXT(""), Current, Ammo,
-				bReload ? TEXT(" reloading") : TEXT(""), Lines, LastLength, bHeld ? TEXT(" holding") : TEXT(""), bCling ? TEXT(" clinging") : TEXT(""), Aim);
+				bReload ? TEXT(" reloading") : TEXT(""), Lines, LastLength, bHeld ? TEXT(" holding") : TEXT(""), bCling ? TEXT(" clinging") : TEXT(""), Aim,
+				bMenu ? TEXT(" menu") : TEXT(""));
 		}
 	};
 
@@ -121,6 +125,7 @@ namespace OSHandsProbe
 		S.bHeld = Pawn->GetGrabbed() != nullptr;
 		S.bCling = Pawn->IsClinging();
 		S.Aim = Guns->Scope ? Guns->Scope->GetAimAlpha() : 0.0f;
+		S.bMenu = Guns->AttachMenu && Guns->AttachMenu->IsActive();
 		return S;
 	}
 
@@ -141,7 +146,7 @@ namespace OSHandsProbe
 		{
 		case EOutcome::Nothing:
 			return A.Hands == B.Hands && A.Tool == B.Tool && A.Current == B.Current && A.Ammo == B.Ammo && A.bReload == B.bReload && A.Lines == B.Lines
-				&& FMath::Abs(A.LastLength - B.LastLength) < 0.5f && A.bHeld == B.bHeld && A.bCling == B.bCling && A.Aim - B.Aim < 0.05f;
+				&& FMath::Abs(A.LastLength - B.LastLength) < 0.5f && A.bHeld == B.bHeld && A.bCling == B.bCling && A.Aim - B.Aim < 0.05f && A.bMenu == B.bMenu;
 		case EOutcome::Shot: return A.Ammo == B.Ammo - 1;
 		case EOutcome::Hooked: return A.Lines == B.Lines + 1;
 		case EOutcome::Thrown: return B.bHeld && !A.bHeld;

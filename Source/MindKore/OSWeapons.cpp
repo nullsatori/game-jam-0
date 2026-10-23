@@ -9,6 +9,8 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "OSLivingWall.h"
+#include "OSAttachMenu.h"
+#include "OSLaserSight.h"
 #include "OSMuzzleFx.h"
 #include "OSNixieCounter.h"
 #include "OSScope.h"
@@ -303,6 +305,7 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	}
 	Weapons = { Pistol, Shotgun, Sniper };
 	SetupWeaponParts();
+	SetupAttachments();
 
 	// MindKore's own content.
 	static ConstructorHelpers::FObjectFinder<UMKImpactDataAsset> DefaultImpactData(
@@ -324,6 +327,10 @@ void UOSWeaponsComponent::BeginPlay()
 	{
 		Weapon.Ammo = Weapon.MagazineSize;
 		Weapon.bUnlocked = bStartWithAllWeapons;
+		// The stock magazine, for a magazine attachment to stand in for and give back (OSWeaponAttach.cpp).
+		Weapon.StockMagMesh = Weapon.MagMesh;
+		Weapon.StockMagazineSize = Weapon.MagazineSize;
+		Weapon.StockMagTravelCm = Weapon.MagTravelCm;
 	}
 	// The gun in view hangs off the owner's camera (the zero-G pawn's and the test room's).
 	if (UCameraComponent* Camera = GetOwner()->FindComponentByClass<UCameraComponent>())
@@ -341,6 +348,7 @@ void UOSWeaponsComponent::BeginPlay()
 		ActionInView->SetupAttachment(ViewModel);
 		ActionInView->RegisterComponent();
 		MakePartComponents(*ViewModel);
+		MakeAttachmentComponents();
 		// Muzzle flash (on the gun in view) and powder smoke (in the world): OSMuzzleFx.h.
 		UOSMuzzleFxComponent* Fx = NewObject<UOSMuzzleFxComponent>(GetOwner(), TEXT("MuzzleFx"));
 		Fx->RegisterComponent();
@@ -349,6 +357,12 @@ void UOSWeaponsComponent::BeginPlay()
 	// Every gun's aim and the SV-98's scope; it builds itself once the gun in view exists (UOSScopeComponent::Build).
 	Scope = NewObject<UOSScopeComponent>(GetOwner(), TEXT("Scope"));
 	Scope->RegisterComponent();
+	// The attachment menu on the suit's projector and the laser's dot (Docs/Attachments.md); both idle until wanted.
+	AttachMenu = NewObject<UOSAttachMenu>(GetOwner(), TEXT("AttachMenu"));
+	AttachMenu->RegisterComponent();
+	LaserSight = NewObject<UOSLaserSightComponent>(GetOwner(), TEXT("LaserSight"));
+	LaserSight->RegisterComponent();
+	LaserSight->AddTickPrerequisiteComponent(this);
 }
 
 bool UOSWeaponsComponent::IsInHand() const
@@ -378,6 +392,12 @@ void UOSWeaponsComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 		const FOSWeapon& Weapon = Weapons[CurrentWeapon];
 		ReloadEndSeconds = 0.0;
 		UE_LOG(LogMindKore, Log, TEXT("Weapon %s: %s reloaded, %d/%d"), *GetNameSafe(GetOwner()), *Weapon.Name.ToString(), Weapon.Ammo, Weapon.Reserve);
+		if (bMagSwap)
+		{
+			// A magazine swap's reload through: the gun goes back to the hand now (owner 22.10 14:16: after the seat).
+			bMagSwap = false;
+			SeatWeapon = INDEX_NONE;
+		}
 	}
 	UpdateRounds(DeltaTime);
 	UpdateRecoil(DeltaTime);
@@ -519,6 +539,7 @@ void UOSWeaponsComponent::UpdateViewModel(float DeltaTime)
 	if (!Weapon)
 	{
 		UpdateParts(nullptr, 0.0f);
+		UpdateModules(nullptr);
 		LidTrackFrames = 0; // the lid's motion is tracked afresh when a gun is back in view
 		return;
 	}
@@ -534,7 +555,11 @@ void UOSWeaponsComponent::UpdateViewModel(float DeltaTime)
 	if (Scope)
 	{
 		Scope->AimPose(ShownWeapon, Offset, KickScale);
+		// The attachment menu's pose (Tab held, a module rolling on): over the aim, which it excludes (OSScope.h).
+		Scope->MenuPose(ShownWeapon, Offset, KickScale);
 	}
+	// The module's knocks reach the pose springs before they step.
+	UpdateSeatEvents();
 	const float Kick = KickScale * FMath::Exp(-ViewKickReturnRate * (PoseAt >= 0.0f ? PoseAt : SinceKickSeconds));
 	const FQuat Rise = FRotator(Weapon->ViewKickRiseDeg * Kick, 0.0f, -0.3f * Weapon->ViewKickRiseDeg * Kick).Quaternion();
 	// The whole gun's pose in the cycle and the reload: a mass on springs (OSWeaponParts.cpp).
@@ -543,6 +568,15 @@ void UOSWeaponsComponent::UpdateViewModel(float DeltaTime)
 	FTransform Steady = Offset;
 	Steady.SetRotation(FRotator(Pose.Turn.X, Pose.Turn.Y, Pose.Turn.Z).Quaternion() * Offset.GetRotation());
 	Steady.AddToTranslation(Pose.Place);
+	// The gun gives under the hand rolling a module on: a pure function of the seat's time (OSSeatPoseAt).
+	FVector YieldPlace;
+	FRotator YieldTurn;
+	GetSeatYield(YieldPlace, YieldTurn);
+	if (!YieldPlace.IsZero() || !YieldTurn.IsZero())
+	{
+		Steady.SetRotation(YieldTurn.Quaternion() * Steady.GetRotation());
+		Steady.AddToTranslation(YieldPlace);
+	}
 	Offset.SetRotation(Rise * Steady.GetRotation());
 	Offset.SetTranslation(Steady.GetTranslation() + FVector(-Weapon->ViewKickBackCm * Kick, 0.0f, 0.0f));
 	ViewModel->SetRelativeTransform(Offset);
@@ -551,6 +585,7 @@ void UOSWeaponsComponent::UpdateViewModel(float DeltaTime)
 		Weapon->ActionPivot + FVector(Weapon->ActionTravelCm * GetSlideAndHammer(*Weapon, Since).X, 0.0f, 0.0f),
 		FQuat(FVector::ForwardVector, FMath::DegreesToRadians(Weapon->ActionTurnDeg * EvalCycle(Weapon->ActionTurn, Since))));
 	UpdateParts(Weapon, Since);
+	UpdateModules(Weapon);
 	UpdateCycleEvents();
 	// The RMB-93's lid and shroud (OSWeaponLid.cpp); nothing for a gun without them.
 	FOSWeapon& Shown = Weapons[ShownWeapon];
@@ -571,12 +606,91 @@ FTransform UOSWeaponsComponent::GetMuzzleTransform() const
 	}
 	// The bore's line is the view's forward carried through the kick: the gun's
 	// world rotation without its rest turn in ViewOffset (the USP sits turned 180).
-	const FQuat Bore = ViewModel->GetComponentQuat() * Weapon->ViewOffset.GetRotation().Inverse();
+	FQuat Bore = ViewModel->GetComponentQuat() * Weapon->ViewOffset.GetRotation().Inverse();
 	const FVector Location = ViewModel->DoesSocketExist(TEXT("Muzzle"))
 		? ViewModel->GetSocketLocation(TEXT("Muzzle"))
 		// No socket (a mesh not from Scripts/os_weapons.py): its front, on its origin's line.
 		: ViewModel->GetComponentTransform().TransformPosition(FVector(ViewModel->GetStaticMesh()->GetBoundingBox().Max.X, 0.0f, 0.0f));
-	return FTransform(Bore, Location);
+	// The bore regulated to the sights, as a gun's are: from the muzzle to the point on the aimed eye's line of sight
+	// (the eye EyeCm behind the rear sight, through the front) ZeroCm out. Aimed, the round and the laser's dot land on
+	// the front sight there (owner 23.10: the dot sat on the slide's back - the USP's bore ran a degree under its sights).
+	if (Scope && Scope->Aims.IsValidIndex(CurrentWeapon))
+	{
+		const FOSGunAim& Aim = Scope->Aims[CurrentWeapon];
+		const FVector Sight = (Aim.SightFrontCm - Aim.SightRearCm).GetSafeNormal();
+		if (Aim.ZeroCm > 0.0f && !Sight.IsNearlyZero())
+		{
+			// The aimed eye, and its ray over the front sight (ZeroOverFrontCm above it) out to the zero.
+			const FVector EyeAt = Aim.SightRearCm - Sight * Aim.EyeCm;
+			const FVector OverFront = (Aim.SightFrontCm + FVector::UpVector * Aim.ZeroOverFrontCm - EyeAt).GetSafeNormal();
+			const FVector ZeroAt = ViewModel->GetComponentTransform().TransformPosition(EyeAt + OverFront * Aim.ZeroCm);
+			const FVector Toward = (ZeroAt - Location).GetSafeNormal();
+			// Only a small regulation (a few degrees): sight data far off the bore is left alone.
+			if ((Toward | Bore.GetAxisX()) > 0.995)
+			{
+				Bore = FQuat::FindBetweenNormals(Bore.GetAxisX(), Toward) * Bore;
+			}
+		}
+	}
+	// A muzzle device carries the muzzle out to its own end (the suppressor), once it is on.
+	const FOSAttachment* Device = GetActiveOn(CurrentWeapon, EOSMountType::Muzzle);
+	return FTransform(Bore, Location + Bore.GetAxisX() * (Device ? Device->MuzzleOffsetCm : 0.0f));
+}
+
+double UOSWeaponsComponent::DrawnAcross() const
+{
+	// The gun is drawn with its own field of view (the scope blends FirstPersonFieldOfView in for the aim and the
+	// menu): on screen that is the world's picture of the gun stretched across the view by tan(world / 2) / tan(gun / 2)
+	// (playtest 23.10: «луч не туда, особенно в табе»). At the hip the fields are one and the stretch 1.
+	const UCameraComponent* Eye = ViewModel ? Cast<UCameraComponent>(ViewModel->GetAttachParent()) : nullptr;
+	if (!Eye || !Eye->bEnableFirstPersonFieldOfView)
+	{
+		return 1.0;
+	}
+	return FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(Eye->FieldOfView, 5.0f, 170.0f) * 0.5))
+		/ FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(Eye->FirstPersonFieldOfView, 5.0f, 170.0f) * 0.5));
+}
+
+FVector UOSWeaponsComponent::GunToDrawn(const FVector& OnGun) const
+{
+	const double Across = DrawnAcross();
+	if (Across == 1.0 || !ViewModel)
+	{
+		return OnGun;
+	}
+	const FTransform& View = ViewModel->GetAttachParent()->GetComponentTransform();
+	return View.TransformPositionNoScale(View.InverseTransformPositionNoScale(OnGun) * FVector(1.0, Across, Across));
+}
+
+FVector UOSWeaponsComponent::DrawnToGun(const FVector& InWorld) const
+{
+	const double Across = DrawnAcross();
+	if (Across == 1.0 || !ViewModel)
+	{
+		return InWorld;
+	}
+	const FTransform& View = ViewModel->GetAttachParent()->GetComponentTransform();
+	return View.TransformPositionNoScale(View.InverseTransformPositionNoScale(InWorld) / FVector(1.0, Across, Across));
+}
+
+void UOSWeaponsComponent::GetShotLine(const FVector& Eye, const FVector& ViewDirection, FVector& OutStart, FVector& OutDirection) const
+{
+	OutStart = Eye;
+	OutDirection = ViewDirection;
+	if (!ViewModel || !ViewModel->GetStaticMesh() || !GetWeapon())
+	{
+		return;
+	}
+	const FTransform Muzzle = GetMuzzleTransform();
+	// The line that looks like the bore on screen is the drawn gun's (GunToDrawn).
+	const FVector MuzzleAt = GunToDrawn(Muzzle.GetLocation());
+	OutDirection = (GunToDrawn(Muzzle.GetLocation() + Muzzle.GetRotation().GetAxisX() * 100.0) - MuzzleAt).GetSafeNormal();
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(OSShotLine), /*bTraceComplex=*/false, GetOwner());
+	FHitResult Blocked;
+	if (!GetWorld()->LineTraceSingleByChannel(Blocked, Eye, MuzzleAt, ECC_GameTraceChannel2, Params))
+	{
+		OutStart = MuzzleAt;
+	}
 }
 
 void UOSWeaponsComponent::SelectStep(int32 Step)
@@ -622,8 +736,18 @@ bool UOSWeaponsComponent::ApplyPickupWeapon(int32 Index, const FOSWeapon& Defini
 	Fresh.Lid.bHeldClear = false;
 	Fresh.Lid.bCatchPending = false;
 	Fresh.PortSmoke.Heat = Fresh.PortSmoke.SeepCarry = 0.0f;
+	Fresh.StockMagMesh = Fresh.MagMesh;
+	Fresh.StockMagazineSize = Fresh.MagazineSize;
+	Fresh.StockMagTravelCm = Fresh.MagTravelCm;
+	Fresh.MagStretch = 1.0f;
+	for (FOSWeaponMount& Place : Fresh.Mounts)
+	{
+		Place.Mounted = NAME_None;
+	}
 	if (UAudioComponent* Sound = Weapons[Index].MechanismSound.Get()) Sound->Stop();
 	if (CurrentWeapon == Index || ShownWeapon == Index) Holster(true);
+	if (SeatWeapon == Index) FinishSeat();
+	TransferAttachments(Weapons[Index], Fresh);
 	if (CycleWeapon == Index) CycleWeapon = INDEX_NONE;
 	Weapons[Index] = MoveTemp(Fresh);
 	return true;
@@ -669,6 +793,12 @@ void UOSWeaponsComponent::UpdateCounterAmmo()
 
 void UOSWeaponsComponent::Holster(bool bAtOnce)
 {
+	// The hands leave the gun: the menu goes dark without applying, a module on its way is put where it was going.
+	if (AttachMenu)
+	{
+		AttachMenu->Kill();
+	}
+	FinishSeat();
 	bReloadQueued = false;
 	ReloadEndSeconds = 0.0; // as a switch: the reload is abandoned, the gun's cycle freezes (UpdateViewModel)
 	if (bAtOnce)
@@ -709,6 +839,11 @@ void UOSWeaponsComponent::SelectWeapon(int32 Index)
 	{
 		return;
 	}
+	if (AttachMenu)
+	{
+		AttachMenu->Kill();
+	}
+	FinishSeat();
 	CurrentWeapon = Index;
 	bReloadQueued = false;
 	ReloadEndSeconds = 0.0; // A switch abandons a reload; the last gun's cycle freezes until it is back (UpdateViewModel).
@@ -762,7 +897,7 @@ void UOSWeaponsComponent::Reload()
 		!bEmptyReload ? TEXT("") : ReloadFromSeconds > 0.0f ? TEXT(" (the slide release only)") : TEXT(" (empty: the slide released at the end)"));
 }
 
-bool UOSWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, FVector& OutRecoil)
+bool UOSWeaponsComponent::Fire(const FVector& Eye, const FVector& Direction, FVector& OutRecoil)
 {
 	OutRecoil = FVector::ZeroVector;
 	FOSWeapon* Weapon = GetWeapon() ? &Weapons[CurrentWeapon] : nullptr;
@@ -823,18 +958,23 @@ bool UOSWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, F
 	if (UOSMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UOSMuzzleFxComponent>())
 	{
 		// Before the kick (the caller adds OutRecoil): the smoke takes the gun's velocity at the shot.
-		Fx->Shot(CurrentWeapon, MuzzleTransform, ViewModel);
+		const FOSAttachment* Device = GetActiveOn(CurrentWeapon, EOSMountType::Muzzle);
+		Fx->Shot(CurrentWeapon, MuzzleTransform, ViewModel, Device ? Device->MuzzleFlashScale : 1.0f, Device ? Device->MuzzleSmokeScale : 1.0f);
 		// The gas out of every vent of the gun (the muzzle's jet, a brake's ports, a shroud's holes).
-		Fx->Vents(*Weapon, MuzzleTransform, ActionInView);
+		Fx->Vents(*Weapon, MuzzleTransform, ActionInView, Device ? Device->MuzzleJetScale : 1.0f);
 	}
 	// The RMB-93: its open lid jerked by the kick, its shroud's holes puffing (OSWeaponLid.cpp).
 	bLidShot = Weapon->Lid.Mesh != nullptr;
 	PortSmokeShot(*Weapon);
+	// Out of the muzzle along the bore (the laser's dot is where this goes); the kick above stays along the view.
+	FVector Start;
+	FVector Bore;
+	GetShotLine(Eye, Direction, Start, Bore);
 	for (int32 Pellet = 0; Pellet < Weapon->Pellets; ++Pellet)
 	{
 		const FVector PelletDirection = Weapon->SpreadDeg > 0.0f
-			? FMath::VRandCone(Direction, FMath::DegreesToRadians(Weapon->SpreadDeg))
-			: Direction;
+			? FMath::VRandCone(Bore, FMath::DegreesToRadians(Weapon->SpreadDeg))
+			: Bore;
 		if (Weapon->ProjectileSpeed <= 0.0f)
 		{
 			FVector Impact = Start + PelletDirection * Weapon->RangeCm;
@@ -850,7 +990,7 @@ bool UOSWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, F
 		Round.Weapon = CurrentWeapon;
 		Round.Position = Start;
 		Round.Direction = PelletDirection;
-		Round.MuzzleOffset = Muzzle - Start;
+		Round.MuzzleOffset = GunToDrawn(Muzzle) - Start; // the tracer starts where the muzzle is drawn
 		if (TracerMesh)
 		{
 			// Hidden until its first step: a zero-length streak at the eye would fill the view.

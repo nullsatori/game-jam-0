@@ -220,7 +220,7 @@ void UOSMuzzleFxComponent::BeginPlay()
 	Light->RegisterComponent();
 }
 
-void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const USceneComponent* GunMesh)
+void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const USceneComponent* GunMesh, float FlashScale, float SmokeScale)
 {
 	if (!Smoke || !Guns.IsValidIndex(Weapon))
 	{
@@ -237,14 +237,14 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 	// the muzzle; the rest are yellow-orange gas from the first frame, dimmer, so
 	// the burst reads as hot gas and not a white disc.
 	FlashBits.Reset();
-	const auto Lobe = [this](const FVector& Direction, float ReachCm, float SizeCm, float Stretch, float Brightness, float Heat)
+	const auto Lobe = [this, FlashScale](const FVector& Direction, float ReachCm, float SizeCm, float Stretch, float Brightness, float Heat)
 	{
 		FFlashBit& Bit = FlashBits.AddDefaulted_GetRef();
 		Bit.Direction = Direction;
-		Bit.ReachCm = ReachCm;
-		Bit.SizeCm = SizeCm;
+		Bit.ReachCm = ReachCm * FlashScale;
+		Bit.SizeCm = SizeCm * FMath::Sqrt(FlashScale);
 		Bit.Stretch = Stretch;
-		Bit.Brightness = Brightness;
+		Bit.Brightness = Brightness * FlashScale;
 		Bit.Heat = Heat;
 		Bit.Seed = FMath::FRand();
 		Bit.Angle = FMath::FRand() * UE_TWO_PI;
@@ -270,7 +270,7 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 			}
 		}
 	}
-	for (int32 Index = 0; Index < Gun.Sparks; ++Index)
+	for (int32 Index = 0; Index < FMath::RoundToInt32(Gun.Sparks * FlashScale); ++Index)
 	{
 		FFlashBit& Spark = FlashBits.AddDefaulted_GetRef();
 		Spark.Direction = (FMath::VRand() + FVector(Gun.FlashForward + 0.5f, 0.0f, 0.0f)).GetSafeNormal();
@@ -307,8 +307,9 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 		SpawnCloud(Weapon, Muzzle, GunVelocity);
 		return;
 	}
-	const int32 Ports = FMath::RoundToInt(Gun.SmokePuffs * Gun.SmokeBrake);
-	for (int32 Index = 0; Index < Gun.SmokePuffs; ++Index)
+	const int32 PuffCount = FMath::RoundToInt32(Gun.SmokePuffs * SmokeScale);
+	const int32 Ports = FMath::RoundToInt(PuffCount * Gun.SmokeBrake);
+	for (int32 Index = 0; Index < PuffCount; ++Index)
 	{
 		FPuff& Puff = Puffs.AddDefaulted_GetRef();
 		Puff.Origin = Muzzle.GetLocation();
@@ -334,7 +335,7 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 		Puff.BackCm = Gun.SmokeBackCm * FMath::FRandRange(0.5f, 1.0f);
 		Puff.StartCm = Gun.SmokeStartCm;
 		Puff.EndCm = Gun.SmokeEndCm * FMath::FRandRange(0.7f, 1.0f);
-		Puff.Opacity = Gun.SmokeOpacity;
+		Puff.Opacity = Gun.SmokeOpacity * FMath::Min(SmokeScale, 1.0f);
 		Puff.Life = Gun.SmokeSeconds * FMath::FRandRange(0.75f, 1.25f);
 		Puff.Seed = FMath::FRand();
 		Puff.Spin = FMath::FRandRange(-0.4f, 0.4f);
@@ -461,7 +462,7 @@ namespace
 
 bool OSGasCardsEnabled();
 
-void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle, const USceneComponent* Action)
+void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle, const USceneComponent* Action, float JetScale)
 {
 	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
 	{
@@ -477,8 +478,17 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 			}
 			const bool bOnAction = Vent.Space == EOSVentSpace::Action && Action;
 			const FTransform Frame = bOnAction ? Action->GetComponentTransform() : Muzzle;
+			// A muzzle device (a suppressor, FOSAttachment::MuzzleJetScale) throttles what leaves the muzzle: fewer
+			// parcels (6 at least) and slower; the gun's own ports and shroud holes blow as ever.
+			FOSGasRecipe Recipe = VentRecipe(Vent);
+			if (Vent.Space == EOSVentSpace::Muzzle && JetScale < 1.0f)
+			{
+				Recipe.BurstCount = FMath::Max(6, FMath::RoundToInt(Recipe.BurstCount * JetScale));
+				Recipe.VacuumBurstCount = Recipe.VacuumBurstCount > 0 ? FMath::Max(6, FMath::RoundToInt(Recipe.VacuumBurstCount * JetScale)) : 0;
+				Recipe.SpeedCm *= JetScale;
+			}
 			// A clinging hole's wisps ride with the gun whole (a hold, not an inherited velocity); a jet takes Carrier.
-			Gas->AddSource(VentRecipe(Vent), GunSmoke(), Frame.TransformPosition(Vent.Location), Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()),
+			Gas->AddSource(Recipe, GunSmoke(), Frame.TransformPosition(Vent.Location), Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()),
 				Vent.bCling && !Vent.bJet ? GetOwner()->GetVelocity() : Carrier);
 			// A narrow muzzle's lingering wisp: up out of the muzzle for a second, following the gun.
 			if (Vent.bJet && Vent.WidthCm < 3.0f)
@@ -535,8 +545,14 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 		}
 	}
 	bool bStamped = false;
-	for (const FOSGasVent& Vent : Def.GasVents)
+	for (FOSGasVent Vent : Def.GasVents)
 	{
+		// A muzzle device (a suppressor) throttles what leaves the muzzle; the gun's own ports blow as ever.
+		if (Vent.Space == EOSVentSpace::Muzzle)
+		{
+			Vent.Rate *= JetScale;
+			Vent.SpeedCm *= JetScale;
+		}
 		if (Vent.bJet)
 		{
 			if (Cloud)
@@ -2625,6 +2641,8 @@ namespace
 	 * box centre and pawn distance every 0.25 s; HighResShot OSWalk_* at the shot, 1 s, the step back and the turn
 	 * (os.Gas.Debug 1 draws the gas's insides).
 	 */
+	TAutoConsoleVariable<int32> CVarGasProbeSuppressor(TEXT("os.Gas.ProbeSuppressor"), 0, TEXT("1: os.Gas.WalkProbe mounts the suppressor first."));
+
 	TAutoConsoleVariable<int32> CVarGasCapture(TEXT("os.Gas.Capture"), 0, TEXT("1: os.Gas.WalkProbe saves every frame from 0.2 to 3.2 s (a self-check)."));
 
 	FAutoConsoleCommandWithWorldAndArgs GGasWalkProbe(
@@ -2653,6 +2671,12 @@ namespace
 			{
 				UE_LOG(LogMindKore, Warning, TEXT("Walk probe: no zero-G pawn or no gas"));
 				return;
+			}
+			// os.Gas.ProbeSuppressor 1: the suppressor on the gun first (its MuzzleJetScale throttles the muzzle's gas).
+			if (IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSuppressor"))->GetInt() > 0 && Pawn->Guns)
+			{
+				Pawn->Guns->GiveAttachment(TEXT("Suppressor"), true);
+				Pawn->Guns->MountAttachment(TEXT("Suppressor"), 0);
 			}
 			Gas->ClearClouds();
 			Gas->DrawnSetChanges = 0;

@@ -94,6 +94,26 @@ private:
 	bool bHasReplacement = false;
 };
 
+/**
+ * An attachment (FOSAttachment::Id: Laser, Torch, Suppressor, BigMag) into the pouch of whoever takes it, and onto
+ * the gun in hand when it has a free place that fits (UOSWeaponsComponent::GiveAttachment, Docs/Attachments.md).
+ */
+UCLASS()
+class MINDKORE_API AOSAttachmentPickup : public AOSPickupBase
+{
+	GENERATED_BODY()
+
+public:
+	AOSAttachmentPickup();
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Pickup")
+	FName AttachmentId = TEXT("Laser");
+
+protected:
+	virtual FText RefusalFor(const AActor* Hand) const override;
+	virtual bool Give(AActor* Hand) override;
+};
+
 /** Unlocks a tool by name (a flag in AOSShipGameMode::Tools): OSGrappleTool lets Left Alt hook (AOSZeroGPawn). */
 UCLASS()
 class MINDKORE_API AOSToolPickup : public AOSPickupBase

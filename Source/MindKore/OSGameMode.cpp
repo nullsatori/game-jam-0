@@ -10,6 +10,9 @@
 #include "OSCollisionImpact.h"
 #include "OSDockZone.h"
 #include "OSOxygen.h"
+#include "OSAttachMenu.h"
+#include "OSLaserSight.h"
+#include "OSSuitProjector.h"
 #include "OSWeapons.h"
 #include "OSZeroGPawn.h"
 #include "OSShip.h"
@@ -180,6 +183,32 @@ void AOSZeroGHUD::DrawHUD()
 		float Height = 0.0f;
 		GetTextSize(Line, Width, Height, Font);
 		DrawText(Line, FLinearColor(0.85f, 0.85f, 0.8f, 0.6f), CenterX - Width * 0.5f, CenterY + 44.0f, Font);
+	}
+
+	// The laser's dot and thread (UOSLaserSightComponent::DrawHud: on the HUD, not smeared by the upscaler).
+	if (UOSLaserSightComponent* Laser = Pawn->Guns ? Pawn->Guns->LaserSight.Get() : nullptr)
+	{
+		Laser->DrawHud(*this, *Canvas);
+	}
+	// The attachment menu: nodes on the gun's places, leaders and boxes (Docs/Attachments.md, «Меню»); a refusal's word:
+	// one line in the device's own font (MK Pribor N, 3 px a cell), the projector's pale core colour, under the centre.
+	if (UOSAttachMenu* Menu = Pawn->Guns ? Pawn->Guns->AttachMenu.Get() : nullptr)
+	{
+		Menu->DrawHud(*this, *Canvas);
+	}
+	if (const UOSAttachMenu* Menu = Pawn->Guns ? Pawn->Guns->AttachMenu.Get() : nullptr)
+	{
+		if (const FString Line = Menu->GetHudLine(); !Line.IsEmpty())
+		{
+			constexpr float Cell = 3.0f;
+			const float Left = CenterX - OSProjectorTextCells(Line) * Cell * 0.5f;
+			const float Top = CenterY + 80.0f;
+			const FLinearColor Light(0.62f, 0.74f, 1.0f, 0.9f);
+			OSProjectorTextRuns(Line, [&](int32 X, int32 Y, int32 Length)
+			{
+				DrawRect(Light, Left + X * Cell, Top + Y * Cell, Length * Cell, Cell);
+			});
+		}
 	}
 
 	// O2 bar, bottom left: red under a fifth.

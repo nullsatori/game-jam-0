@@ -5,13 +5,16 @@
 #include "Brushes/SlateColorBrush.h"
 #include "Brushes/SlateNoResource.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "EngineUtils.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/WorldSettings.h"
 #include "HAL/IConsoleManager.h"
 #include "OSGravity.h"
 #include "OSShip.h"
+#include "OSWeapons.h"
 #include "OSZeroGPawn.h"
 #include "Misc/App.h"
 #include "Misc/FileHelper.h"
@@ -1055,6 +1058,159 @@ namespace
 			[
 				SNew(STextBlock).Font(MenuFont()).ColorAndOpacity(FSlateColor::UseForeground()).Text(MenuText_(Label))
 			];
+	}
+
+	/** An Actions row's button: its label and lit state read on paint. */
+	TSharedRef<SWidget> MenuActionButton(const FOSDebugRow::FAction& Action)
+	{
+		const TFunction<FString()> Label = Action.Label;
+		const TFunction<bool()> IsOn = Action.IsOn;
+		const TFunction<void()> Run = Action.Run;
+		return SNew(SButton)
+			.ButtonStyle(&FOSMenuLook::Get().Button)
+			.ToolTipText(MenuText_(Action.Tip))
+			.OnClicked_Lambda([Run]() { if (Run) { Run(); } return FReply::Handled(); })
+			[
+				SNew(STextBlock).Font(MenuFont())
+				.ColorAndOpacity_Lambda([IsOn]() { return FSlateColor(IsOn && IsOn() ? MenuCore : MenuDim); })
+				.Text_Lambda([Label]() { return MenuText_(Label ? Label() : FString()); })
+			];
+	}
+
+	/** The player's guns now (the zero-G pawn's or a walker's), or null. */
+	UOSWeaponsComponent* MenuPlayerGuns(const TWeakObjectPtr<UOSDebugSubsystem>& Debug)
+	{
+		UWorld* World = Debug.IsValid() ? Debug->GetGameWorld() : nullptr;
+		APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
+		APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+		return Pawn ? Pawn->FindComponentByClass<UOSWeaponsComponent>() : nullptr;
+	}
+
+	void MenuExec(const TWeakObjectPtr<UOSDebugSubsystem>& Debug, const FString& Command)
+	{
+		UWorld* World = Debug.IsValid() ? Debug->GetGameWorld() : nullptr;
+		if (GEngine && World)
+		{
+			GEngine->Exec(World, *Command);
+		}
+	}
+
+	/**
+	 * «Снаряжение» at the head of «Игрок» (Docs/DebugMenu.md): the guns open or closed (the pump and the RMB-93 swapped in
+	 * slot 2), each attachment none -> in the pouch -> on a gun -> none, all or nothing. Every button runs an os.Guns /
+	 * os.Attach command (Docs/Console.md), so what it does is logged and can be typed.
+	 */
+	void MenuGearRows(const TWeakObjectPtr<UOSDebugSubsystem>& Debug, TArray<TSharedPtr<FOSDebugRow>>& Rows)
+	{
+		const UOSWeaponsComponent* Guns = MenuPlayerGuns(Debug);
+		if (!Guns)
+		{
+			return;
+		}
+		const TSharedPtr<FOSDebugRow> Header = MakeShared<FOSDebugRow>();
+		Header->Kind = FOSDebugRow::EKind::Section;
+		Header->Header = TEXT("Снаряжение");
+		Rows.Add(Header);
+
+		const TSharedPtr<FOSDebugRow> GunsRow = MakeShared<FOSDebugRow>();
+		GunsRow->Kind = FOSDebugRow::EKind::Actions;
+		GunsRow->Label = TEXT("Стволы");
+		for (int32 Gun = 0; Gun < Guns->Weapons.Num(); ++Gun)
+		{
+			FOSDebugRow::FAction& Action = GunsRow->Actions.AddDefaulted_GetRef();
+			Action.Label = [Debug, Gun]()
+			{
+				const UOSWeaponsComponent* G = MenuPlayerGuns(Debug);
+				return G && G->Weapons.IsValidIndex(Gun) ? G->Weapons[Gun].Name.ToString() : FString(TEXT("—"));
+			};
+			Action.IsOn = [Debug, Gun]() { const UOSWeaponsComponent* G = MenuPlayerGuns(Debug); return G && G->IsWeaponUnlocked(Gun); };
+			Action.Run = [Debug, Gun]()
+			{
+				const UOSWeaponsComponent* G = MenuPlayerGuns(Debug);
+				MenuExec(Debug, FString::Printf(TEXT("%s %d"), G && G->IsWeaponUnlocked(Gun) ? TEXT("os.Guns.Take") : TEXT("os.Guns.Give"), Gun + 1));
+			};
+			Action.Tip = FString::Printf(TEXT("os.Guns.Give / os.Guns.Take %d: открыть или закрыть"), Gun + 1);
+		}
+		if (Guns->Weapons.Num() > 1)
+		{
+			FOSDebugRow::FAction& Swap = GunsRow->Actions.AddDefaulted_GetRef();
+			Swap.Label = [Debug]()
+			{
+				const UOSWeaponsComponent* G = MenuPlayerGuns(Debug);
+				return G && G->Weapons.IsValidIndex(1) && G->Weapons[1].Id == FName(TEXT("Rmb93")) ? FString(TEXT("→ дробовик")) : FString(TEXT("→ Рысь"));
+			};
+			Swap.Run = [Debug]()
+			{
+				const UOSWeaponsComponent* G = MenuPlayerGuns(Debug);
+				const bool bRmb = G && G->Weapons.IsValidIndex(1) && G->Weapons[1].Id == FName(TEXT("Rmb93"));
+				MenuExec(Debug, bRmb ? TEXT("os.Guns.Swap 2 Slot") : TEXT("os.Guns.Swap 2 Rmb93"));
+			};
+			Swap.Tip = TEXT("os.Guns.Swap 2 Rmb93 / Slot: в слот 2 Рысь или дробовик");
+		}
+		Rows.Add(GunsRow);
+
+		for (const FOSAttachment& Each : Guns->Attachments)
+		{
+			const FName Id = Each.Id;
+			const TSharedPtr<FOSDebugRow> Row = MakeShared<FOSDebugRow>();
+			Row->Kind = FOSDebugRow::EKind::Actions;
+			Row->Label = Each.Name.ToString();
+			FOSDebugRow::FAction& Action = Row->Actions.AddDefaulted_GetRef();
+			Action.Label = [Debug, Id]()
+			{
+				const UOSWeaponsComponent* G = MenuPlayerGuns(Debug);
+				int32 Gun = INDEX_NONE, Mount = INDEX_NONE;
+				if (G && G->FindMounted(Id, Gun, Mount))
+				{
+					return FString::Printf(TEXT("на стволе: %s"), *G->Weapons[Gun].Name.ToString());
+				}
+				return FString(G && G->HasAttachment(Id) ? TEXT("в сумке") : TEXT("нет"));
+			};
+			Action.IsOn = [Debug, Id]() { const UOSWeaponsComponent* G = MenuPlayerGuns(Debug); return G && G->HasAttachment(Id); };
+			Action.Run = [Debug, Id]()
+			{
+				// none -> the pouch -> on the gun in hand (or the first that takes it) -> none.
+				const UOSWeaponsComponent* G = MenuPlayerGuns(Debug);
+				if (!G)
+				{
+					return;
+				}
+				int32 Gun = INDEX_NONE, Mount = INDEX_NONE;
+				if (G->FindMounted(Id, Gun, Mount))
+				{
+					MenuExec(Debug, TEXT("os.Attach.Take ") + Id.ToString());
+					return;
+				}
+				if (!G->HasAttachment(Id))
+				{
+					MenuExec(Debug, TEXT("os.Attach.Give ") + Id.ToString() + TEXT(" bag"));
+					return;
+				}
+				const FOSAttachment* Attachment = G->FindAttachment(Id);
+				int32 Target = Attachment && G->FindMountFor(G->CurrentWeapon, *Attachment) != INDEX_NONE ? G->CurrentWeapon : INDEX_NONE;
+				for (int32 Other = 0; Target == INDEX_NONE && Attachment && Other < G->Weapons.Num(); ++Other)
+				{
+					Target = G->FindMountFor(Other, *Attachment) != INDEX_NONE ? Other : INDEX_NONE;
+				}
+				MenuExec(Debug, Target == INDEX_NONE ? TEXT("os.Attach.Take ") + Id.ToString()
+					: FString::Printf(TEXT("os.Attach.Mount %s %d"), *Id.ToString(), Target + 1));
+			};
+			Action.Tip = FString::Printf(TEXT("%s: нет → в сумке → на стволе → нет (os.Attach.Give %s bag / Mount / Take)"), *Id.ToString(), *Id.ToString());
+			Rows.Add(Row);
+		}
+
+		const TSharedPtr<FOSDebugRow> AllRow = MakeShared<FOSDebugRow>();
+		AllRow->Kind = FOSDebugRow::EKind::Actions;
+		AllRow->Label = TEXT("Разом");
+		FOSDebugRow::FAction& All = AllRow->Actions.AddDefaulted_GetRef();
+		All.Label = []() { return FString(TEXT("Всё")); };
+		All.Run = [Debug]() { MenuExec(Debug, TEXT("os.Guns.Give all")); MenuExec(Debug, TEXT("os.Attach.Give all bag")); };
+		All.Tip = TEXT("os.Guns.Give all, os.Attach.Give all bag");
+		FOSDebugRow::FAction& Nothing = AllRow->Actions.AddDefaulted_GetRef();
+		Nothing.Label = []() { return FString(TEXT("Ничего")); };
+		Nothing.Run = [Debug]() { MenuExec(Debug, TEXT("os.Attach.Take all")); MenuExec(Debug, TEXT("os.Guns.Take all")); };
+		Nothing.Tip = TEXT("os.Attach.Take all, os.Guns.Take all");
+		Rows.Add(AllRow);
 	}
 
 	/** The game's dt over the last 5 s: one column per pixel (its longest frame), lines at 30 and 60 FPS. */
@@ -2113,6 +2269,31 @@ TSharedRef<ITableRow> SOSDebugMenu::MakeRow(TSharedPtr<FOSDebugRow> Row, const T
 				MenuSection(Row->Header)
 			];
 	}
+	if (Row->Kind == FOSDebugRow::EKind::Actions)
+	{
+		TSharedRef<SWrapBox> Buttons = SNew(SWrapBox).UseAllottedSize(true).InnerSlotPadding(FVector2D(4.0f, 2.0f));
+		for (const FOSDebugRow::FAction& Action : Row->Actions)
+		{
+			Buttons->AddSlot()[MenuActionButton(Action)];
+		}
+		return SNew(STableRow<TSharedPtr<FOSDebugRow>>, Table)
+			.Style(&Look.Row)
+			.Padding(FMargin(0.0f, 1.0f, 6.0f, 1.0f))
+			[
+				SNew(SBox).MinDesiredHeight(GridRow)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(0.3f).VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
+					[
+						SNew(STextBlock).Font(MenuFont()).ColorAndOpacity(MenuText).Text(MenuText_(Row->Label))
+					]
+					+ SHorizontalBox::Slot().FillWidth(0.7f).VAlign(VAlign_Center)
+					[
+						Buttons
+					]
+				]
+			];
+	}
 	// Rows of an open group sit in from its header.
 	const bool bInGroup = Search.IsEmpty() ? Tab != TEXT("Главное") : true;
 	return SNew(STableRow<TSharedPtr<FOSDebugRow>>, Table)
@@ -2202,6 +2383,11 @@ void SOSDebugMenu::Rebuild()
 		}
 		else
 		{
+			// «Игрок» opens with the gear (guns, attachments): buttons, not parameters, so a search skips it.
+			if (Search.IsEmpty() && Tab == TEXT("Игрок") && !bChangedOnly)
+			{
+				MenuGearRows(Debug, Rows);
+			}
 			// Groups in the curated order: by owner as listed (the pawn, its parts, each gun, the flyers, the map's
 			// actors), inside an owner the most tuned first; a gun's recoil leads its rows.
 			struct FGroup

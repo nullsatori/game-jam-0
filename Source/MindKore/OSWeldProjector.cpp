@@ -1,6 +1,5 @@
 #include "OSWeldProjector.h"
 
-#include "Algo/BinarySearch.h"
 #include "Camera/PlayerCameraManager.h"
 #include "CanvasItem.h"
 #include "Components/LightComponent.h"
@@ -24,76 +23,23 @@
 
 namespace
 {
-	// MindKore's character generator, MK Pribor N (its MKDeviceFrame.h/.cpp; the table is its
-	// generated MKDeviceFontData.inl, copied with the MIT licence in DeviceFont/). Ten rows from the
-	// top, bit 0 leftmost; Advance in cells.
-	struct FOSGlyph
-	{
-		uint16 Code;
-		uint8 Advance;
-		uint16 Rows[10];
-	};
-
-	const FOSGlyph OSWeldGlyphs[] = {
-#include "DeviceFont/MKDeviceFontData.inl"
-	};
+	// MK Pribor N, the hash and the clock are the suit projector's (OSSuitProjector.h); the weld frame's names stay.
+	using FOSGlyph = FOSProjectorGlyph;
 
 	const FOSGlyph* OSWeldGlyph(TCHAR Code)
 	{
-		const int32 Index = Algo::BinarySearchBy(OSWeldGlyphs, uint16(Code), &FOSGlyph::Code);
-		return Index == INDEX_NONE ? (Code == TEXT(' ') ? nullptr : OSWeldGlyph(TEXT(' '))) : &OSWeldGlyphs[Index];
+		return OSProjectorGlyph(Code);
 	}
 
-	/** Width of a line in cells, without the gap after its last glyph (MKDeviceTextCells). */
-	int32 OSWeldTextCells(FStringView Text)
-	{
-		int32 Cells = 0;
-		for (const TCHAR Char : Text)
-		{
-			const FOSGlyph* Glyph = OSWeldGlyph(Char);
-			Cells += Glyph ? Glyph->Advance : 0;
-		}
-		return FMath::Max(Cells - 1, 0);
-	}
-
-	/** The lit cells of a line as horizontal runs: Emit(X, Y, Length) in cells, Y from the top row (MKDeviceTextRuns). */
 	template <typename EmitType>
 	void OSWeldTextRuns(FStringView Text, EmitType&& Emit)
 	{
-		int32 PenX = 0;
-		for (const TCHAR Char : Text)
-		{
-			const FOSGlyph* Glyph = OSWeldGlyph(Char);
-			for (int32 Row = 0; Glyph && Row < 10; ++Row)
-			{
-				for (int32 Bit = 0; Bit < 16;)
-				{
-					if (!(Glyph->Rows[Row] >> Bit & 1))
-					{
-						++Bit;
-						continue;
-					}
-					int32 End = Bit;
-					while (End < 16 && (Glyph->Rows[Row] >> End & 1))
-					{
-						++End;
-					}
-					Emit(PenX + Bit, Row, End - Bit);
-					Bit = End;
-				}
-			}
-			PenX += Glyph ? Glyph->Advance : 0;
-		}
+		OSProjectorTextRuns(Text, Forward<EmitType>(Emit));
 	}
 
-	// A number in 0..1 that is the same for the same pair and unrelated for neighbours (MindKore's Hash01).
 	float OSWeldHash(int64 A, int64 B)
 	{
-		uint32 H = uint32(A) * 0x9E3779B1u ^ uint32(B) * 0x85EBCA6Bu;
-		H ^= H >> 15;
-		H *= 0x2C1B3C6Du;
-		H ^= H >> 12;
-		return float(H & 0xFFFF) / 65535.0f;
+		return OSProjectorHash(A, B);
 	}
 
 	// MindKore's heartbeat for a stable reading (MKProjectorPulse): about 65 a minute on the 12 Hz clock.
@@ -103,7 +49,7 @@ namespace
 		return Beat[int32(((Tick % 11) + 11) % 11)];
 	}
 
-	constexpr double OSDeviceClockHz = 12.0;
+	constexpr double OSDeviceClockHz = OSProjectorClockHz;
 
 	/** Boxes in the breach frame (cm) onto the raster (pixels). */
 	struct FOSWeldPaint
@@ -243,6 +189,7 @@ void UOSWeldProjectorComponent::BeginPlay()
 	}
 	HaloLaser->SetLightColor(HaloColour);
 	CoreLaser->SetLightColor(CoreColour);
+	Suit = GetOwner() ? GetOwner()->FindComponentByClass<UOSSuitProjectorComponent>() : nullptr;
 	if (UMaterialInterface* Picture = PictureFunction.LoadSynchronous())
 	{
 		auto MakeFunction = [this, Picture](USpotLightComponent* Laser, const FLinearColor& Channel)
@@ -1138,6 +1085,24 @@ void UOSWeldProjectorComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	const bool bDeviceTick = Tick != LastTick;
 	LastTick = Tick;
 	double Now = Clock();
+
+	// The attachment menu holds the suit's device: the frame is dark and keeps nothing; back, it converges again.
+	if (Suit.IsValid() && Suit->IsHeldBy(EOSProjectorClient::Menu))
+	{
+		bYielded = true;
+		GoDark();
+		return;
+	}
+	if (bYielded)
+	{
+		bYielded = false;
+		if (Phase == EPhase::Open || Phase == EPhase::Appearing)
+		{
+			Phase = EPhase::Appearing;
+			AppearScale = FMath::Clamp(ReconvergeSeconds / AppearSeconds, 0.1f, 1.0f);
+			PhaseStart = AppearOrigin = Now;
+		}
+	}
 
 	if (bDeviceTick)
 	{

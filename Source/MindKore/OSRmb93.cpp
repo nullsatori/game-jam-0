@@ -44,6 +44,17 @@ FOSWeapon OSMakeRmb93(const FOSWeapon& PumpShotgun)
 	// counter in material slot 1 (the lid cut off it), the barrel and fore-end as the moving part, the lid on its hinge.
 	FOSWeapon Gun = PumpShotgun;
 	Gun.Name = LOCTEXT("Name", "Рысь");
+	// Its places (Docs/Attachments.md): the rail under the barrel and the top rail over the receiver - first numbers off
+	// the mesh's proportions (the bore at z 0.75, the barrel to x 47); the PC's stills fix them.
+	Gun.Id = TEXT("Rmb93");
+	FOSWeaponMount Rail;
+	Rail.Type = EOSMountType::Rail;
+	Rail.Transform = FTransform(FRotator::ZeroRotator, FVector(30.0f, 0.0f, -1.5f));
+	FOSWeaponMount Top;
+	Top.Type = EOSMountType::Top;
+	Top.bUnder = false;
+	Top.Transform = FTransform(FRotator::ZeroRotator, FVector(14.0f, 0.0f, 8.5f));
+	Gun.Mounts = { Rail, Top };
 	Gun.ViewMesh = Rmb93Mesh(TEXT("ViewBody"));
 	Gun.ActionMesh = Rmb93Mesh(TEXT("Action"));
 	Gun.ActionPivot = FVector::ZeroVector;

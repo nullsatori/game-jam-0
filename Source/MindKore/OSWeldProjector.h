@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
+#include "OSSuitProjector.h"
 #include "OSWeldProjector.generated.h"
 
 class AOSPlateSocket;
@@ -13,15 +14,7 @@ class UMaterialInterface;
 class UPrimitiveComponent;
 class USpotLightComponent;
 
-/** One stroke of the raster: a box in raster pixels and the drive of each laser, 0..1 (MindKore's FMKProjectorBox). */
-struct FOSWeldBox
-{
-	int16 X = 0, Y = 0, W = 0, H = 0;
-	float Halo = 0.0f;
-	float Core = 0.0f;
-	/** Turned about its centre, degrees (a plate's frame at a slant); 0 for the breach's own strokes. */
-	float Angle = 0.0f;
-};
+// FOSWeldBox, the projector's font and its strokes are shared with the suit's device (OSSuitProjector.h).
 
 /** A plate's outline where it would lie on the hull now, in the breach frame (cm), and how it fits. */
 struct FOSWeldFootprint
@@ -325,6 +318,9 @@ private:
 	float Jolt = 0.0f;
 	TArray<FOSWeldBox> Boxes;
 	TArray<FString> Lines;
+	// The suit's device: while the attachment menu holds it the weld frame is dark, and converges again after.
+	TWeakObjectPtr<UOSSuitProjectorComponent> Suit;
+	bool bYielded = false;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UCanvasRenderTarget2D> Raster = nullptr;
