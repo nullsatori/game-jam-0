@@ -104,6 +104,18 @@ struct FOSSmokeSim
 	 * (gaussian); Clear (0..1) of the density on the line is thrown aside at once (a round's tunnel). True if it touched gas.
 	 */
 	bool Impulse(const FVector3f& Origin, const FVector3f& Dir, float RadiusCm, float Along, float Push, float Clear, float LengthCm = 1e6f);
+	/**
+	 * A body moving through the gas (v9, owner: «дым не раскрывается вокруг бочки»): a sphere in the box frame (cm) with
+	 * its velocity (cm/s). Each step the gas inside it is pushed out and the flow there takes its velocity - a moving
+	 * boundary: the pressure solve parts the gas round it and leaves a wake behind. Set by the caller before Step.
+	 */
+	struct FMover
+	{
+		FVector3f Centre;
+		float RadiusCm;
+		FVector3f Velocity;
+	};
+	TArray<FMover> Movers;
 	/** One step; Age (s since the shot) times the blast's swell. */
 	void Step(float Dt, float Age, const FOSSmokeParams& K);
 	/** Move the grid by whole cells (the box follows the gas): the fields shift, what leaves is lost, the planes stay put in the world. */

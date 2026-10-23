@@ -11,6 +11,7 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
+#include "Engine/OverlapResult.h"
 #include "EngineUtils.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
@@ -941,6 +942,16 @@ void UOSMuzzleFxComponent::UpdateTunnels(FCloud& Cloud, float Half)
 		Rows[MaxTunnels + Count] = FLinearColor(B.X, B.Y, B.Z, Ragged);
 		++Count;
 	}
+	for (const FOSSmokeSim::FMover& M : Cloud.Movers)
+	{
+		if (Count >= MaxTunnels)
+		{
+			break;
+		}
+		Rows[Count] = FLinearColor(M.Centre.X, M.Centre.Y, M.Centre.Z, -M.RadiusCm);
+		Rows[MaxTunnels + Count] = FLinearColor(M.Centre.X, M.Centre.Y, M.Centre.Z, 0.0f);
+		++Count;
+	}
 	if (Count == 0 && Cloud.TunnelCount == 0)
 	{
 		return;
@@ -965,6 +976,51 @@ void UOSMuzzleFxComponent::UpdateTunnels(FCloud& Cloud, float Half)
 		FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, MaxTunnels, 2);
 		Cloud.TunnelTexture->UpdateTextureRegions(0, 1, Region, MaxTunnels * sizeof(FLinearColor), sizeof(FLinearColor), Data,
 			[](uint8* Src, const FUpdateTextureRegion2D* Regions) { FMemory::Free(Src); delete Regions; });
+	}
+}
+
+void UOSMuzzleFxComponent::FindMovers(FCloud& Cloud, float Half, float DeltaTime, TSet<TObjectKey<UPrimitiveComponent>>& Seen)
+{
+	Cloud.Movers.Reset();
+	FCollisionObjectQueryParams Types;
+	Types.AddObjectTypesToQuery(ECC_PhysicsBody);
+	Types.AddObjectTypesToQuery(ECC_WorldDynamic);
+	Types.AddObjectTypesToQuery(ECC_Pawn);
+	TArray<FOverlapResult> Hits;
+	GetWorld()->OverlapMultiByObjectType(Hits, Cloud.Centre, Cloud.Basis, Types, FCollisionShape::MakeBox(FVector(Half)),
+		FCollisionQueryParams(SCENE_QUERY_STAT(OSSmokeMovers), false));
+	for (const FOverlapResult& Hit : Hits)
+	{
+		UPrimitiveComponent* Body = Hit.GetComponent();
+		// The bounds' sphere (not the mesh): a barrel, a crate, a capsule. Big things (walls, doors' frames) stay out:
+		// the world's solids are the planes traced at the shot.
+		const float Radius = Body ? Body->Bounds.SphereRadius : 0.0f;
+		if (!Body || Radius > 90.0f || Radius < 1.0f || Cloud.Movers.Num() >= 8)
+		{
+			continue;
+		}
+		// Of the shooter only its body: the gun in his hands would carve its own muzzle's gas.
+		if (Body->GetOwner() == GetOwner() && Body != GetOwner()->GetRootComponent())
+		{
+			continue;
+		}
+		const TObjectKey<UPrimitiveComponent> Key(Body);
+		const FVector At = Body->Bounds.Origin;
+		const FVector* Last = LastMoverAt.Find(Key);
+		const FVector Velocity = Body->IsSimulatingPhysics() ? Body->GetPhysicsLinearVelocity()
+			: Last && DeltaTime > 0.0f ? (At - *Last) / DeltaTime : FVector::ZeroVector;
+		LastMoverAt.Add(Key, At);
+		Seen.Add(Key);
+		// A sphere round a long body is too fat; the box's middle extent is closer to its girth.
+		const FVector E = Body->Bounds.BoxExtent;
+		const float Girth = FMath::Min(Radius, FMath::Max3(FMath::Min(E.X, E.Y), FMath::Min(E.Y, E.Z), FMath::Min(E.X, E.Z)));
+		Cloud.Movers.Add({ FVector3f(Cloud.Basis.UnrotateVector(At - Cloud.Centre)), Girth,
+			FVector3f(Cloud.Basis.UnrotateVector(Velocity.GetClampedToMaxSize(1500.0f))) });
+		// A moving body wakes a resting grid.
+		if (Velocity.SizeSquared() > 400.0f)
+		{
+			Cloud.Awake = WakeSeconds;
+		}
 	}
 }
 
@@ -1027,13 +1083,12 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 {
 	UWorld* World = GetWorld();
 	const FVector Eye = View->GetComponentLocation();
-	// The body, not the eye, parts the gas: its capsule where it overlaps the box, along its own step.
+	// The pawn's body for the material's soft hole (its push is the movers' path, FindMovers).
 	const FVector Body = GetOwner()->GetActorLocation();
-	const FVector BodyStep = Body - LastBody;
-	LastBody = Body;
 	float BodyRadius = 0.0f, BodyHalfHeight = 0.0f;
 	GetOwner()->GetSimpleCollisionCylinder(BodyRadius, BodyHalfHeight);
 	BodyRadius = FMath::Clamp(BodyRadius, 15.0f, 45.0f);
+	TSet<TObjectKey<UPrimitiveComponent>> SeenMovers;
 	// The tunnels heal; a healed one goes.
 	for (int32 Index = Tunnels.Num() - 1; Index >= 0; --Index)
 	{
@@ -1275,14 +1330,12 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 			}
 		}
 		const float Half = 0.5f * Sim.N * G.CellCm * Cloud.Scale;
-		// The body passing through parts the gas where its capsule overlaps the box, as fast as it moves, along its own
-		// step only (v4 pushed from the eye; the voxels by the eye still fade in the material).
+		// Everything in the box - props, the pawn, flyers, cases, anything moved by physics, a hand or a door - is a
+		// moving body in the grid (its next steps) and carved in the material now (v9; the pawn's push and the flyers'
+		// wakes were special cases of it). The voxels by the eye still fade in the material.
 		const FVector EyeLocal = Cloud.Basis.UnrotateVector(Eye - Cloud.Centre);
 		const FVector BodyLocal = Cloud.Basis.UnrotateVector(Body - Cloud.Centre);
-		if (!bBusy && BodyLocal.GetAbsMax() < Half + BodyRadius && BodyStep.Size() > 0.5f && BodyStep.Size() < 200.0f && DeltaTime > 0.0f)
-		{
-			Blast(Body - BodyStep, BodyStep.GetSafeNormal(), BodyRadius, BodyStep.Size() / DeltaTime * 0.5f, 40.0f, 0.0f, nullptr, BodyStep.Size() + BodyRadius);
-		}
+		FindMovers(Cloud, Half, DeltaTime, SeenMovers);
 		UMaterialInstanceDynamic* Material = Cloud.Material;
 		Material->SetVectorParameterValue(TEXT("CloudCentre"), FLinearColor(FVector3f(Cloud.Centre)));
 		Material->SetVectorParameterValue(TEXT("CloudX"), FLinearColor(FVector3f(Cloud.Basis.GetAxisX())));
@@ -1337,16 +1390,12 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		// The volume box: Cells units a side, each a cell (grown with a frozen vacuum cloud).
 		Cloud.Volume->SetWorldTransform(FTransform(Cloud.Basis, Cloud.Centre, FVector(G.CellCm * Cloud.Scale)));
 	}
-	// A flyer diving through stirs the gas after it: the swirl of its wings.
-	if (GetCloudCount() > 0)
+	// Bodies not seen in any cloud this frame start afresh next time (no stale velocity).
+	for (auto It = LastMoverAt.CreateIterator(); It; ++It)
 	{
-		for (TActorIterator<AOSFlyer> Flyer(World); Flyer; ++Flyer)
+		if (!SeenMovers.Contains(It.Key()))
 		{
-			const FVector Velocity = Flyer->GetVelocity();
-			if (Velocity.SizeSquared() > 100.0f)
-			{
-				Blast(Flyer->GetActorLocation() - Velocity * DeltaTime, Velocity.GetSafeNormal(), 25.0f, Velocity.Size() * 0.4f, 40.0f, 0.0f, nullptr);
-			}
+			It.RemoveCurrent();
 		}
 	}
 	// The steps, off the game thread while the rest of the frame runs (each grid its own task; ParallelFor inside):
@@ -1360,7 +1409,8 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		// The box as of the launch: the game thread moves it on while the step runs.
 		const FVector Centre = Cloud->Centre;
 		const FQuat Basis = Cloud->Basis;
-		Cloud->Pending = UE::Tasks::Launch(UE_SOURCE_LOCATION, [Cloud, G, L, KeyDir, Occlusion, Shadow, Sharp, Centre, Basis]()
+		const TArray<FOSSmokeSim::FMover> Movers = Cloud->Movers;
+		Cloud->Pending = UE::Tasks::Launch(UE_SOURCE_LOCATION, [Cloud, G, L, KeyDir, Occlusion, Shadow, Sharp, Centre, Basis, Movers]()
 		{
 			FOSSmokeSim& Sim = *Cloud->Sim;
 			for (int32 Step = 0; Step < L.Steps; ++Step)
@@ -1377,6 +1427,11 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 #if !UE_BUILD_SHIPPING
 				const double T0 = FPlatformTime::Seconds();
 #endif
+				Sim.Movers = Movers;
+				for (FOSSmokeSim::FMover& M : Sim.Movers)
+				{
+					M.Centre += M.Velocity * (Step * L.Dt);
+				}
 				Sim.Step(L.Dt, At, G.Sim);
 #if !UE_BUILD_SHIPPING
 				const double Us = (FPlatformTime::Seconds() - T0) * 1e6;
@@ -2282,6 +2337,60 @@ namespace
 			}), 0.05f, true);
 		}));
 #endif
+
+	/** os.Fx.MoverStill [after s]: the nearest loose physics prop thrown through the player's next cloud (0.6 s old), stills at +0.1/0.25/0.5 s. */
+	FAutoConsoleCommandWithWorldAndArgs GMoverStill(
+		TEXT("os.Fx.MoverStill"),
+		TEXT("[after s] Wait for the player's next smoke cloud (0.6 s old), throw the nearest simulating prop through it across the view at 3.5 m/s, HighResShot OSMover_0100/0250/0500ms."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			const float After = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 0.0f;
+			TSharedRef<FTimerHandle> Handle = MakeShared<FTimerHandle>();
+			World->GetTimerManager().SetTimer(*Handle, FTimerDelegate::CreateLambda([World, Handle, After]()
+			{
+				APlayerController* Controller = World->GetFirstPlayerController();
+				APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+				UOSMuzzleFxComponent* Fx = Pawn ? Pawn->FindComponentByClass<UOSMuzzleFxComponent>() : nullptr;
+				FVector Centre;
+				float Half;
+				if (World->GetTimeSeconds() < After || !Fx || !Fx->GetYoungestCloud(0.6f, Centre, Half))
+				{
+					return;
+				}
+				World->GetTimerManager().ClearTimer(*Handle);
+				UPrimitiveComponent* Prop = nullptr;
+				for (TObjectIterator<UPrimitiveComponent> It; It; ++It)
+				{
+					if (It->GetWorld() == World && It->IsSimulatingPhysics() && It->GetOwner() != Pawn && It->Bounds.SphereRadius > 10.0f && It->Bounds.SphereRadius < 90.0f
+						&& (!Prop || FVector::DistSquared(It->Bounds.Origin, Centre) < FVector::DistSquared(Prop->Bounds.Origin, Centre)))
+					{
+						Prop = *It;
+					}
+				}
+				if (!Prop)
+				{
+					UE_LOG(LogMindKore, Warning, TEXT("Mover still: no loose prop on the map"));
+					return;
+				}
+				FVector Eye;
+				FRotator View;
+				Controller->GetPlayerViewPoint(Eye, View);
+				const FVector Right = FRotationMatrix(View).GetUnitAxis(EAxis::Y);
+				const FVector Gravity = OSGravityAt(World, Centre).Acceleration;
+				Prop->SetWorldLocation(Centre - Right * 70.0f - Gravity * 0.02f, false, nullptr, ETeleportType::TeleportPhysics);
+				// Across the view through the cloud, a little up against gravity so it crosses it level-ish.
+				Prop->SetPhysicsLinearVelocity(Right * 350.0f - Gravity * 0.15f);
+				UE_LOG(LogMindKore, Log, TEXT("Mover still: %s (r %.0f cm) thrown through the cloud at %s"), *GetNameSafe(Prop->GetOwner()), Prop->Bounds.SphereRadius, *Centre.ToCompactString());
+				for (const float At : { 0.1f, 0.25f, 0.5f })
+				{
+					FTimerHandle Shot;
+					World->GetTimerManager().SetTimer(Shot, FTimerDelegate::CreateLambda([Controller, At]()
+					{
+						Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=OSMover_%04dms"), FMath::RoundToInt(At * 1000.0f)));
+					}), At, false);
+				}
+			}), 0.05f, true);
+		}));
 
 	FAutoConsoleCommandWithWorld GClearSmoke(
 		TEXT("os.Fx.ClearSmoke"),

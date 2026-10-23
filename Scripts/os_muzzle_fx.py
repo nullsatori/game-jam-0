@@ -276,8 +276,10 @@ float hr = frac(sin(dot(q + S * 7, float3(41.3, 289.1, 117.7))) * 43758.5453);
     float3 ab = tb.xyz - ta.xyz;
     float t = saturate(dot(pc - ta.xyz, ab) / max(dot(ab, ab), 1e-3));
     float td = length(pc - (ta.xyz + ab * t));
-    float tr = ta.w * (1 - tb.w * hr);
+    // A negative radius: a body in the smoke (a prop, a pawn, a flyer) - carved, no rim (v9).
+    float tr = abs(ta.w) * (1 - tb.w * hr);
     if (td < tr) return 0;
+    if (ta.w < 0) continue;
     // The wall: a lit band a pixel and a half thick, then a thin dark one - the outline pops (v8, owner: «четче»).
     else if (td < tr + 1.5 * cell) rim = max(rim, 1 - tb.w);
     else if (td < tr + 2.5 * cell) edge = max(edge, 1 - tb.w);

@@ -496,6 +496,8 @@ private:
 		FVector3f KeyDir = FVector3f::UpVector;
 		FLinearColor KeyColour = FLinearColor::White;
 		FString KeyName;
+		/** Bodies in its box this frame (box frame): the grid's moving boundaries and the material's carve. */
+		TArray<FOSSmokeSim::FMover> Movers;
 		/** The tunnels through it this frame (box frame), for the material: 32 x 2 floats. */
 		TObjectPtr<UTexture2D> TunnelTexture = nullptr;
 		int32 TunnelCount = 0;
@@ -563,7 +565,6 @@ private:
 	/** Keeps the clouds' components and materials alive (FCloud is not reflected). */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UObject>> CloudObjects;
-	FVector LastBody = FVector::ZeroVector;
 
 	struct FTunnel
 	{
@@ -574,6 +575,10 @@ private:
 		bool bVacuum = false;
 	};
 	TArray<FTunnel> Tunnels;
+	/** Where each body seen in a cloud was last frame: its velocity, whatever moves it (physics, a hand, a door). */
+	TMap<TObjectKey<UPrimitiveComponent>, FVector> LastMoverAt;
+	/** The bodies in a cloud's box now (one overlap query): its Movers. */
+	void FindMovers(FCloud& Cloud, float Half, float DeltaTime, TSet<TObjectKey<UPrimitiveComponent>>& Seen);
 	/** One cloud's share of a push (Blast): true if it touched gas. */
 	bool BlastCloud(FCloud& Cloud, const FVector& Origin, const FVector& Direction, float RadiusCm, float Along, float Push, float Clear, float LengthCm);
 	/** The tunnels through this cloud into its material (box frame, healed as of now). */

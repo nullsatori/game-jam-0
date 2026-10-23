@@ -435,6 +435,31 @@ void FOSSmokeSim::Step(float Dt, float Age, const FOSSmokeParams& K)
 	}
 	// 2. The curls the coarse grid would smear (no pressure feeds them in a vacuum: half).
 	Confine(Dt, bAir ? K.Vorticity : K.Vorticity * 0.5f);
+	// 2b. Bodies moving through: inside each the flow is the body's and the gas goes (out within ~20 ms); a cell's
+	// width round it is dragged along at half its speed. The pressure solve then turns the rest round it.
+	for (const FMover& M : Movers)
+	{
+		const float Out = FMath::Exp(-Dt / 0.02f);
+		const float Reach = M.RadiusCm + CellCm;
+		ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
+		{
+			const float D = FVector3f::Dist(CellCentre(X, Y, Z), M.Centre);
+			if (D < M.RadiusCm)
+			{
+				Ux[I] = M.Velocity.X;
+				Uy[I] = M.Velocity.Y;
+				Uz[I] = M.Velocity.Z;
+				Rho[I] *= Out;
+				Heat[I] *= Out;
+			}
+			else if (D < Reach)
+			{
+				Ux[I] += (M.Velocity.X - Ux[I]) * 0.5f;
+				Uy[I] += (M.Velocity.Y - Uy[I]) * 0.5f;
+				Uz[I] += (M.Velocity.Z - Uz[I]) * 0.5f;
+			}
+		});
+	}
 	// 3. Everything rides the velocity (the velocity itself too: free-streaming in a vacuum).
 	Advect(Dt);
 	// 4. Incompressible in air, the floor and walls turning the flow.
