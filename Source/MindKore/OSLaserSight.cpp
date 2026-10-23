@@ -661,6 +661,26 @@ bool UOSLaserSightComponent::DrawGunMask(const UCanvas& Canvas, float Texel, con
 		}
 		bAny = true;
 	}
+	// The silhouette eroded by MaskErodeTexels: the beam runs that far over the gun's edge, so its texel's soft tent
+	// meets the edge instead of stopping a step short of it (owner 23.10: «небольшой зазор остался»).
+	for (int32 Pass = 0; bAny && Pass < MaskErodeTexels; ++Pass)
+	{
+		const TArray<float> Before = MaskNearInv;
+		const auto Covered = [&Before, Width, Height](int32 X, int32 Y)
+		{
+			return X < 0 || Y < 0 || X >= Width || Y >= Height || Before[Y * Width + X] > 0.0f;
+		};
+		for (int32 Y = 0; Y < Height; ++Y)
+		{
+			for (int32 X = 0; X < Width; ++X)
+			{
+				if (Before[Y * Width + X] > 0.0f && !(Covered(X - 1, Y) && Covered(X + 1, Y) && Covered(X, Y - 1) && Covered(X, Y + 1)))
+				{
+					MaskNearInv[Y * Width + X] = 0.0f;
+				}
+			}
+		}
+	}
 	return bAny;
 #endif
 }
