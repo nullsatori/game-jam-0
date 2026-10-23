@@ -16,6 +16,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
 #include "OSFlyer.h"
+#include "OSGas.h"
 #include "OSGravity.h"
 #include "OSLivingWall.h"
 #include "OSWeapons.h"
@@ -281,6 +282,11 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 	// before the kick (UOSWeaponsComponent::Fire calls this before the recoil).
 	const FVector GunVelocity = GetOwner()->GetVelocity();
 	const FVector Bore = Muzzle.GetRotation().GetAxisX();
+	// v11: the gas is the vents' parcels (Vents, UOSGasSubsystem); no grid cloud of the shot's own.
+	if (UOSGasSubsystem::Get(this))
+	{
+		return;
+	}
 	if (CVarVolumetricSmoke.GetValueOnGameThread() != 0 && CloudMaterial.LoadSynchronous())
 	{
 		// Every round punches its own tunnel as it flies (CarveRay from UOSWeaponsComponent); a shotgun blast out of
@@ -337,8 +343,71 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 	}
 }
 
+namespace
+{
+	/** The gun's smoke look and the vents' parcel recipes (v11, contract 2.2). */
+	FOSGasLook GunSmoke()
+	{
+		return FOSGasLook();
+	}
+
+	FOSGasRecipe VentRecipe(const FOSGasVent& Vent)
+	{
+		FOSGasRecipe R;
+		R.SpeedCm = Vent.SpeedCm;
+		R.ConeDeg = Vent.ConeDeg;
+		if (Vent.bJet)
+		{
+			// The muzzle: 60-90 parcels over 0.1 s (by the vent's Rate), a vortex ring round a forward jet.
+			R.BurstCount = FMath::Clamp(FMath::RoundToInt(Vent.Rate * 110.0f), 20, 90);
+			R.BurstSeconds = 0.1f;
+			R.RingCm = Vent.Direction.X > 0.9f ? 10.0f : 0.0f;
+			R.RingTurnsPerSecond = 2.0f;
+			R.RadiusMinCm = 4.0f;
+			R.RadiusMaxCm = 7.0f;
+			R.Mass = 1.0f;
+			R.Heat = 1.0f;
+			R.LifeSeconds = 6.0f;
+		}
+		else
+		{
+			// A shroud hole: 2-4 small parcels over the vent's time, clinging to the gun for 0.4 s.
+			R.BurstCount = 3;
+			R.BurstSeconds = FMath::Max(Vent.Seconds, 0.05f);
+			R.RadiusMinCm = 1.5f;
+			R.RadiusMaxCm = 2.5f;
+			R.Mass = 0.3f;
+			R.Heat = 0.6f;
+			R.ClingSeconds = 0.4f;
+			R.LifeSeconds = 3.0f;
+		}
+		return R;
+	}
+}
+
+bool OSGasCardsEnabled();
+
 void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle, const USceneComponent* Action)
 {
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		// v11: every vent is a gas source; the muzzle's card stream only with os.Gas.Cards 1.
+		const FVector Carrier = GetOwner()->GetVelocity();
+		for (const FOSGasVent& Vent : Def.GasVents)
+		{
+			if (!Vent.bJet && !Vent.bCling)
+			{
+				continue;
+			}
+			const bool bOnAction = Vent.Space == EOSVentSpace::Action && Action;
+			const FTransform Frame = bOnAction ? Action->GetComponentTransform() : Muzzle;
+			Gas->AddSource(VentRecipe(Vent), GunSmoke(), Frame.TransformPosition(Vent.Location), Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()), Carrier);
+		}
+		if (!OSGasCardsEnabled())
+		{
+			return;
+		}
+	}
 	if (!Smoke)
 	{
 		return;
@@ -434,6 +503,24 @@ void UOSMuzzleFxComponent::Seep(const FOSWeapon& Def, const FTransform& Muzzle, 
 		if (Vent.bSeep)
 		{
 			Seeping.Add(&Vent);
+		}
+	}
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this); Gas && !Seeping.IsEmpty())
+	{
+		// v11: the seep is small parcels out of a random seeping hole, a tenth of its speed.
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			const FOSGasVent& Vent = *Seeping[FMath::RandHelper(Seeping.Num())];
+			const bool bOnAction = Vent.Space == EOSVentSpace::Action && Action;
+			const FTransform Frame = bOnAction ? Action->GetComponentTransform() : Muzzle;
+			FOSGasRecipe R = VentRecipe(Vent);
+			R.SpeedCm *= 0.1f;
+			R.Mass = 0.15f;
+			Gas->EmitNow(R, GunSmoke(), Frame.TransformPosition(Vent.Location), Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()), GetOwner()->GetVelocity(), 1);
+		}
+		if (!OSGasCardsEnabled())
+		{
+			return;
 		}
 	}
 	for (int32 Index = 0; Smoke && !Seeping.IsEmpty() && Index < Count; ++Index)
@@ -540,6 +627,10 @@ void UOSMuzzleFxComponent::WaitSims() const
 
 void UOSMuzzleFxComponent::ClearClouds()
 {
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		Gas->ClearClouds();
+	}
 	WaitSims();
 	for (FCloud& Cloud : Clouds)
 	{
@@ -551,7 +642,8 @@ void UOSMuzzleFxComponent::ClearClouds()
 FString UOSMuzzleFxComponent::DescribeClouds() const
 {
 	WaitSims();
-	FString Line;
+	const UOSGasSubsystem* GasSystem = UOSGasSubsystem::Get(this);
+	FString Line = GasSystem ? GasSystem->DescribeClouds() : FString();
 	const FVector Eye = View->GetComponentLocation();
 	for (const FCloud& Cloud : Clouds)
 	{
@@ -606,7 +698,8 @@ void UOSMuzzleFxComponent::DumpClouds(const FString& Name) const
 
 int32 UOSMuzzleFxComponent::GetCloudCount() const
 {
-	int32 Count = 0;
+	const UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this);
+	int32 Count = Gas ? Gas->GetCloudCount() : 0;
 	for (const FCloud& Cloud : Clouds)
 	{
 		Count += Cloud.Age >= 0.0f ? 1 : 0;
@@ -647,6 +740,14 @@ namespace
 			UE_LOG(LogMindKore, Log, TEXT("Smoke cost: %d step(s) off the game thread, %.0f us mean, %.0f us max; game thread in %d frame(s) with grids, %.0f us mean, %.0f us max"),
 				C.Steps, C.Steps ? C.StepUs / C.Steps : 0.0, C.MaxStepUs, C.Frames, C.Frames ? C.FrameUs / C.Frames : 0.0, C.MaxFrameUs);
 			C = FSmokeCost();
+			// v11: the gas subsystem's own (every world with one).
+			for (TObjectIterator<UOSGasSubsystem> It; It; ++It)
+			{
+				if (It->GetWorld())
+				{
+					UE_LOG(LogMindKore, Log, TEXT("%s"), *It->TakeCostLine());
+				}
+			}
 		}));
 
 	/**
@@ -892,6 +993,10 @@ bool UOSMuzzleFxComponent::BlastCloud(FCloud& Cloud, const FVector& Origin, cons
 
 bool UOSMuzzleFxComponent::GetYoungestCloud(float MinAge, FVector& OutCentre, float& OutHalf) const
 {
+	if (const UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this); Gas && Gas->GetYoungestCloud(MinAge, OutCentre, OutHalf))
+	{
+		return true;
+	}
 	const FCloud* Best = nullptr;
 	for (const FCloud& Cloud : Clouds)
 	{
@@ -1049,6 +1154,10 @@ void UOSMuzzleFxComponent::FindMovers(FCloud& Cloud, float Half, float DeltaTime
 
 void UOSMuzzleFxComponent::Burst(const FVector& Location, const FVector& Normal, float RadiusCm, float SpeedCm)
 {
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		Gas->Burst(Location, Normal, RadiusCm, SpeedCm);
+	}
 	if (GetCloudCount() == 0 || RadiusCm <= 0.0f)
 	{
 		return;
@@ -1063,11 +1172,19 @@ void UOSMuzzleFxComponent::Burst(const FVector& Location, const FVector& Normal,
 
 void UOSMuzzleFxComponent::AddAirFlow(const FVector& Location, const FVector& Direction, float SpeedCm, float ReachCm, float Seconds)
 {
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		Gas->AddAirFlow(Location, Direction, SpeedCm, ReachCm, Seconds);
+	}
 	AirFlows.Add({ Location, Direction.GetSafeNormal(), SpeedCm, ReachCm, Seconds });
 }
 
 void UOSMuzzleFxComponent::CarveRay(const FVector& Start, const FVector& End, float RadiusCm)
 {
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		Gas->CarveRay(Start, End, RadiusCm);
+	}
 	const FVector Along = End - Start;
 	const float Length = Along.Size();
 	if (Length < 1.0f || RadiusCm <= 0.0f)
@@ -1578,6 +1695,24 @@ void UOSMuzzleFxComponent::TickHotCases(float DeltaTime)
 		const FVector Where = Case->GetActorLocation();
 		const UPrimitiveComponent* Body = Cast<UPrimitiveComponent>(Case->GetRootComponent());
 		const FVector Velocity = Body ? Body->GetPhysicsLinearVelocity() : FVector::ZeroVector;
+		if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this); Gas && !OSGasCardsEnabled())
+		{
+			// v11: a hot case lets out one small parcel a second (contract 2.2), no cards.
+			Hot.Carry += DeltaTime;
+			if (Hot.Carry >= 1.0f)
+			{
+				Hot.Carry -= 1.0f;
+				FOSGasRecipe R;
+				R.SpeedCm = 10.0f;
+				R.ConeDeg = 30.0f;
+				R.RadiusMinCm = R.RadiusMaxCm = 1.5f;
+				R.Mass = 0.2f;
+				R.Heat = 0.5f;
+				R.LifeSeconds = 2.5f;
+				Gas->EmitNow(R, GunSmoke(), Where, -OSGravityAt(GetWorld(), Where).Acceleration.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector), Velocity * 0.3f, 1);
+			}
+			continue;
+		}
 		bool bInCloud = false;
 		for (FCloud& Cloud : Clouds)
 		{

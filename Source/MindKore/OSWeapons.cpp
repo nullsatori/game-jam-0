@@ -281,13 +281,15 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	// A short sharp blast - the burst dies with DecaySeconds (0.05-0.07 s), a thin dribble to Seconds (0.2 s at most;
 	// v6, owner: «слишком долго льется из ствола») - fast enough that the front still runs out about as far
 	// (SpeedCm x DecaySeconds: the shotgun's ~1.05 m; further than a real one, the art first).
-	Pistol.GasVents = { Vent(FVector::ForwardVector, true, 0.15f, 0.05f, 900.0f, 8.0f, 0.5f, 2.5f),
+	// v11 (Docs/RecoilWeapons-SmokeV11.md): the jets are parcel bursts - SpeedCm the fastest parcel (U(0.3, 1) of it),
+	// Rate x 110 the parcels; Seconds and DecaySeconds no longer shape them.
+	Pistol.GasVents = { Vent(FVector::ForwardVector, true, 0.15f, 0.05f, 320.0f, 8.0f, 0.5f, 2.5f),
 		Vent(FVector::ForwardVector, false, 0.1f, 0.04f, 150.0f, 10.0f, 40.0f, 1.0f) };
-	Shotgun.GasVents = { Vent(FVector::ForwardVector, true, 0.2f, 0.07f, 1500.0f, 6.0f, 0.7f, 6.0f),
+	Shotgun.GasVents = { Vent(FVector::ForwardVector, true, 0.2f, 0.07f, 450.0f, 6.0f, 0.7f, 6.0f),
 		Vent(FVector::ForwardVector, false, 0.12f, 0.05f, 220.0f, 8.0f, 60.0f, 1.5f) };
-	Sniper.GasVents = { Vent(FVector::ForwardVector, true, 0.15f, 0.05f, 1200.0f, 4.0f, 0.4f, 3.0f),
-		Vent(FVector(-0.35f, 1.0f, 0.0f), true, 0.15f, 0.05f, 1000.0f, 10.0f, 0.6f, 4.0f),
-		Vent(FVector(-0.35f, -1.0f, 0.0f), true, 0.15f, 0.05f, 1000.0f, 10.0f, 0.6f, 4.0f),
+	Sniper.GasVents = { Vent(FVector::ForwardVector, true, 0.15f, 0.05f, 400.0f, 4.0f, 0.4f, 3.0f),
+		Vent(FVector(-0.35f, 1.0f, 0.0f), true, 0.15f, 0.05f, 350.0f, 10.0f, 0.35f, 4.0f),
+		Vent(FVector(-0.35f, -1.0f, 0.0f), true, 0.15f, 0.05f, 350.0f, 10.0f, 0.35f, 4.0f),
 		Vent(FVector::ForwardVector, false, 0.1f, 0.04f, 220.0f, 6.0f, 40.0f, 1.0f) };
 	// The muzzle streams' wisps: thin, short-lived.
 	for (FOSWeapon* Gun : { &Pistol, &Shotgun, &Sniper })

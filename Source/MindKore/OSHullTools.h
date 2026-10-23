@@ -140,6 +140,8 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 private:
+	/** Weld fumes owed (UOSGasSubsystem, parcels per second while the bead lays). */
+	float GasCarry = 0.0f;
 	/** The last tool taken; whether it is in hand is the owner's (GetTool). */
 	EOSHullTool Tool = EOSHullTool::None;
 	TArray<FOSStrapLine> Lines;
