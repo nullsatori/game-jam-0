@@ -518,6 +518,12 @@ FBox2D UOSAttachMenu::GunOnScreen(const UCanvas& Canvas) const
 void UOSAttachMenu::LayOut(const UCanvas& Canvas, float Cell)
 {
 	const FOSWeapon* Weapon = Guns ? Guns->GetWeapon() : nullptr;
+	TMap<int32, FVector2D> PreviousAt;
+	for (const FPlaceBox& Each : Boxes)
+	{
+		PreviousAt.Add(Each.Mount, Each.At);
+	}
+	const bool bAgain = bLaidOut;
 	Boxes.Reset();
 	if (!Weapon || Rows.IsEmpty())
 	{
@@ -615,8 +621,20 @@ void UOSAttachMenu::LayOut(const UCanvas& Canvas, float Cell)
 		}
 		Box.At = FVector2D(Snap(Box.At.X), Snap(Box.At.Y));
 	}
+	for (FPlaceBox& Box : Boxes)
+	{
+		const FVector2D* Was = PreviousAt.Find(Box.Mount);
+		Box.From = bAgain && Was ? *Was : Box.At;
+	}
 	bLaidOut = true;
-	LaidOutAt = GetWorld()->GetTimeSeconds();
+	if (bAgain)
+	{
+		MovedAt = GetWorld()->GetTimeSeconds();
+	}
+	else
+	{
+		LaidOutAt = GetWorld()->GetTimeSeconds();
+	}
 }
 
 void UOSAttachMenu::DrawHud(AHUD& Hud, UCanvas& Canvas)
@@ -712,6 +730,27 @@ void UOSAttachMenu::DrawHud(AHUD& Hud, UCanvas& Canvas)
 			LayOut(Canvas, Cell);
 		}
 	}
+	// Laid out, the boxes stay put; but if the gun comes to sit under one for a moment (the pose settled late, a
+	// suppressor went on), lay out again and slide them over.
+	if (bLaidOut)
+	{
+		const FBox2D Gun = GunOnScreen(Canvas);
+		const FBox2D Core = Gun.bIsValid ? FBox2D(Gun.Min + FVector2D(2.0f * Cell), Gun.Max - FVector2D(2.0f * Cell)) : Gun;
+		const bool bUnder = Core.bIsValid && Boxes.ContainsByPredicate([&Core](const FPlaceBox& Each) { return Core.Intersect(FBox2D(Each.At, Each.At + Each.Size)); });
+		if (!bUnder)
+		{
+			OverlapSince = -1.0;
+		}
+		else if (OverlapSince < 0.0)
+		{
+			OverlapSince = Now;
+		}
+		else if (Now - OverlapSince > 0.15)
+		{
+			LayOut(Canvas, Cell);
+			OverlapSince = -1.0;
+		}
+	}
 	const float Laid = bLaidOut ? float(Now - LaidOutAt) : -1.0f;
 	const int32 SelectedMount = Rows.IsValidIndex(Selected) ? Rows[Selected].Mount : INDEX_NONE;
 	const float Slide = FMath::SmoothStep(0.0f, 1.0f, float(Now - SelectedAt) / 0.09f);
@@ -759,8 +798,9 @@ void UOSAttachMenu::DrawHud(AHUD& Hud, UCanvas& Canvas)
 		const FPlaceBox& Box = Boxes[Index];
 		const FVector2D* NodeAt = Nodes.Find(Box.Mount);
 		const bool bHere = Box.Mount == SelectedMount;
-		const float X = float(Box.At.X);
-		const float Y = float(Box.At.Y);
+		const FVector2D Shown = FMath::Lerp(Box.From, Box.At, double(FMath::SmoothStep(0.0f, 1.0f, float(Now - MovedAt) / 0.2f)));
+		const float X = Snap(Shown.X);
+		const float Y = Snap(Shown.Y);
 		const float W = float(Box.Size.X);
 		if (NodeAt)
 		{

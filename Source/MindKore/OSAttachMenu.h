@@ -160,6 +160,8 @@ private:
 		int32 Mount = INDEX_NONE;
 		TArray<int32> Lines;
 		FVector2D At = FVector2D::ZeroVector;
+		/** Where it slides from after a re-layout (MovedAt). */
+		FVector2D From = FVector2D::ZeroVector;
 		FVector2D Size = FVector2D::ZeroVector;
 		/** 0 right of the gun, 1 left, 2 above, 3 below. */
 		int32 Side = 0;
@@ -192,6 +194,9 @@ private:
 	TArray<FPlaceBox> Boxes;
 	bool bLaidOut = false;
 	double LaidOutAt = -100.0;
+	/** A re-layout (the gun came to sit under a box: the pose settled, a suppressor went on): the boxes slide over. */
+	double MovedAt = -100.0;
+	double OverlapSince = -1.0;
 	/** The cursor, HUD pixels; moved this frame (hover selects only after a move); the wheel's selection stands until the mouse moves. */
 	FVector2D Cursor = FVector2D::ZeroVector;
 	bool bCursorPlaced = false;

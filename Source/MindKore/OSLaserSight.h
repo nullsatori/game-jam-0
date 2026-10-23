@@ -11,7 +11,7 @@ class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UOSWeaponsComponent;
 class UStaticMeshComponent;
-struct FCanvasTileItem;
+class FCanvasTileItem;
 
 /**
  * The laser's light in the world (Docs/Attachments.md, «ЛЦУ»): while a laser sits on the gun in view, switched on

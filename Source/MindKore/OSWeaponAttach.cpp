@@ -343,7 +343,7 @@ void UOSWeaponsComponent::SetupAttachments()
 	Weapons[0].Id = TEXT("Pistol");
 	FOSWeaponMount UspRail;
 	UspRail.Type = EOSMountType::Rail;
-	UspRail.Transform = FTransform(FRotator(0.0f, 180.0f, 0.0f), FVector(-7.0f, -1.43f, 1.6f));
+	UspRail.Transform = FTransform(FRotator(0.0f, 180.0f, 0.0f), FVector(-13.7f, -1.43f, 1.6f));
 	FOSWeaponMount UspMuzzle;
 	UspMuzzle.Type = EOSMountType::Muzzle;
 	UspMuzzle.Socket = TEXT("Muzzle");
