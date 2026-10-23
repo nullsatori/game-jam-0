@@ -482,7 +482,7 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	{
 		const FCloud& Cloud = Clouds[Index];
 		if (Cloud.IsAlive() && Cloud.Age <= JoinAge && Cloud.Evict <= 0.0f && Cloud.Look == Look && Cloud.Parcels.Num() + Cloud.Incoming.Num() < MaxParcels
-			&& FVector::Dist(Cloud.Origin + FVector(Cloud.DrawnCentre), Where) < JoinCm && (Join == INDEX_NONE || Cloud.Age < Clouds[Join].Age))
+			&& FVector::Dist(Cloud.Origin + FVector(Cloud.DrawnCentre), Where) < JoinCm && Cloud.TakesGas() && (Join == INDEX_NONE || Cloud.Age < Clouds[Join].Age))
 		{
 			Join = Index;
 		}
@@ -553,6 +553,7 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	Cloud.NextMovers.Reset();
 	Cloud.Age = 0.0f;
 	Cloud.FadeAge = 0.0f;
+	Cloud.FedWindow = 0.5f;
 	Cloud.LastFed = World->GetTimeSeconds();
 	Cloud.Evict = 0.0f;
 	Cloud.StepCarry = 0.0f;
@@ -762,7 +763,7 @@ void UOSGasSubsystem::EmitNow(const FOSGasRecipe& Recipe, const FOSGasLook& Look
 			return false;
 		}
 		const FCloud& Cloud = Clouds[Slot];
-		return Cloud.IsAlive() && Cloud.Serial == Serial && Cloud.Evict <= 0.0f && Cloud.Look == Look && Cloud.Parcels.Num() + Cloud.Incoming.Num() < MaxParcels
+		return Cloud.IsAlive() && Cloud.Serial == Serial && Cloud.Evict <= 0.0f && Cloud.Look == Look && Cloud.TakesGas() && Cloud.Parcels.Num() + Cloud.Incoming.Num() < MaxParcels
 			&& (Where - (Cloud.Origin + FVector(Cloud.DrawnCentre))).GetAbs().GetMax() < Share * RenderCells * Cloud.RenderCellCm;
 	};
 	if (Takes(ShotCloud, ShotSerial, 0.45f))
@@ -908,7 +909,7 @@ void UOSGasSubsystem::Burst(const FVector& Location, const FVector& Normal, floa
 }
 
 int32 UOSGasSubsystem::EmitForSource(const FOSGasRecipe& Recipe, const FOSGasLook& Look, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count,
-	bool bContinuous, int32& InOutCloud, uint32& InOutSerial)
+	bool bContinuous, int32& InOutCloud, uint32& InOutSerial, float FeedWindow)
 {
 	if (Count <= 0)
 	{
@@ -944,7 +945,7 @@ int32 UOSGasSubsystem::EmitForSource(const FOSGasRecipe& Recipe, const FOSGasLoo
 		return 0;
 	}
 	if (!Clouds.IsValidIndex(InOutCloud) || !Clouds[InOutCloud].IsAlive() || Clouds[InOutCloud].Serial != InOutSerial || Clouds[InOutCloud].Evict > 0.0f
-		|| Clouds[InOutCloud].Parcels.Num() + Clouds[InOutCloud].Incoming.Num() + Count > MaxParcels)
+		|| !Clouds[InOutCloud].TakesGas() || Clouds[InOutCloud].Parcels.Num() + Clouds[InOutCloud].Incoming.Num() + Count > MaxParcels)
 	{
 		// A free slot only: no eviction, no stranger's cloud (a shot's) - none free, refused.
 		InOutCloud = CloudFor(Look, Where, -1.0f, true);
@@ -956,6 +957,7 @@ int32 UOSGasSubsystem::EmitForSource(const FOSGasRecipe& Recipe, const FOSGasLoo
 		InOutSerial = Clouds[InOutCloud].Serial;
 	}
 	Emit(Clouds[InOutCloud], Recipe, Where, Direction, Carrier, Count);
+	Clouds[InOutCloud].FedWindow = FMath::Max(0.5f, FeedWindow);
 	return Count;
 }
 
@@ -1034,7 +1036,10 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 	}
 	Cloud.Age += DeltaTime;
 	const bool bFed = Cloud.IsFed(World->GetTimeSeconds());
-	Cloud.FadeAge = bFed ? FMath::Min(Cloud.FadeAge + DeltaTime, 0.3f * Cloud.Look.LifeSeconds) : Cloud.FadeAge + DeltaTime;
+	// Fed: up to 0.3 of its life; one that had faded past it comes back no faster than a second a second (a jump
+	// brought its old gas back up in a frame).
+	const float Hold = 0.3f * Cloud.Look.LifeSeconds;
+	Cloud.FadeAge = !bFed ? Cloud.FadeAge + DeltaTime : Cloud.FadeAge > Hold ? FMath::Max(Hold, Cloud.FadeAge - DeltaTime) : FMath::Min(Cloud.FadeAge + DeltaTime, Hold);
 	const bool bEvicted = Cloud.Evict > 0.0f && (Cloud.Evict -= DeltaTime) <= 0.0f;
 	const bool bEmpty = !bBusy && Cloud.Parcels.IsEmpty() && Cloud.Incoming.IsEmpty() && Cloud.Age > 0.3f;
 	if ((Cloud.FadeAge >= Cloud.Look.LifeSeconds || bEvicted) && bBusy)

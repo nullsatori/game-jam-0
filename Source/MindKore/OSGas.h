@@ -213,7 +213,7 @@ public:
 	 * a second in all, a burst 90 - the rest is refused with a log line. Returns how many went out.
 	 */
 	int32 EmitForSource(const FOSGasRecipe& Recipe, const FOSGasLook& Look, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count,
-		bool bContinuous, int32& InOutCloud, uint32& InOutSerial);
+		bool bContinuous, int32& InOutCloud, uint32& InOutSerial, float FeedWindow = 0.5f);
 	static constexpr int32 SourceRatePerSecond = 120;
 	static constexpr int32 SourceBurstMax = 90;
 
@@ -316,7 +316,14 @@ private:
 		float FadeAge = 0.0f;
 		/** When gas was last let into it (world s). */
 		double LastFed = -1e9;
-		bool IsFed(double Now) const { return Now - LastFed < 0.5; }
+		/** How long after its last gas it counts as fed: 0.5 s, or 1.5 periods of a steady source's rate. */
+		float FedWindow = 0.5f;
+		bool IsFed(double Now) const { return Now - LastFed < FedWindow; }
+		/**
+		 * Takes new gas only while it has not faded far: a fade age past 0.3 of its life + 1 s and fresh gas would
+		 * bring the whole old cloud back up (a weld let go and pressed again, a thruster's bursts) - a new cloud then.
+		 */
+		bool TakesGas() const { return FadeAge <= 0.3f * Look.LifeSeconds + 1.0f; }
 		float Evict = 0.0f;
 		float StepCarry = 0.0f;
 		uint32 Seed = 0;

@@ -2906,7 +2906,10 @@ namespace
 					{
 						++NearShots;
 						const FString Spawn = IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSpawn"))->GetString();
-						Spawn.IsEmpty() ? (void)Pawn->Fire() : (void)GEngine->Exec(World, *(TEXT("os.Gas.Spawn ") + Spawn));
+						// A preset each shot, or a whole command once (os.Gas.SourceTest weld pulse).
+						if (Spawn.IsEmpty()) { Pawn->Fire(); }
+						else if (!Spawn.StartsWith(TEXT("os."))) { GEngine->Exec(World, *(TEXT("os.Gas.Spawn ") + Spawn)); }
+						else if (NearShots == 1) { GEngine->Exec(World, *Spawn); }
 						Clock->Y = T;
 					}
 				}

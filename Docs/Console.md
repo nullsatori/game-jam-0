@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 108 команд, 19 переменных.
+Всего: 109 команд, 20 переменных.
 
 ## `os.Attach`
 
@@ -100,8 +100,10 @@
 | `os.Gas.Debug` (переменная) | значение (умолч. `0`) | 1: draw every cloud's box (white), parcels (points, red heavy to blue light), bodies (yellow, velocity arrow), tunnels (cyan), wall/floor planes (green) and sources (magenta). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DebugAlpha` (переменная) | значение (умолч. `0`) | 1: the gas post-process draws only its opacity, grey (os.Gas.WalkProbe measures its jumps a frame). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.LowRes` (переменная) | значение (умолч. `1`) | 1: the gas drawn once per screen block by its own pass after the tonemapper (v11 stage 5); 0: by M_OS_GasPost in every pixel (the old way, kept until the merge). | `Source/MindKore/OSGas.cpp` |
-| `os.Gas.ProbeSpawn` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Gas.ProbeSpawn` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot, and runs 24 s. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Gas.ProbeSpawnLate` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe spawns it once at 5 s (after its shots). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSuppressor` (переменная) | значение (умолч. `0`) | 1: os.Gas.WalkProbe mounts the suppressor first. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Gas.SourceTest` | `<preset> <pulse\|burst\|rate1>` | <preset> <pulse\|burst\|rate1>: a gas source 1.5 m along the view run by a pattern (on/off, bursts every 2.5 s, 1 a second). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.Spawn` | `<muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]` | <muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for 4 s, along the view. *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.SpawnSeconds` (переменная) | значение (умолч. `4.0f`) | How long an os.Gas.Spawn source lives, s (4). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.WalkProbe` | `[after s]` | [after s] Shoot while walking, stop, step back, turn, walk round the cloud; log the cloud's centroid every 0.25 s (and HighResShot OSWalk_*). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |

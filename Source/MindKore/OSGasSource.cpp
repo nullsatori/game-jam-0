@@ -6,6 +6,7 @@
 #include "HAL/IConsoleManager.h"
 #include "MindKore.h"
 #include "OSGravity.h"
+#include "TimerManager.h"
 
 FOSGasPresetDef OSGasPreset(EOSGasPreset Preset)
 {
@@ -227,16 +228,18 @@ void UOSGasSourceComponent::Let(int32 Number, bool bContinuous)
 	}
 	const FVector Direction = GetForwardVector();
 	const float Dt = GetWorld()->GetDeltaSeconds();
+	// A steady flow keeps its cloud fed for 1.5 of its periods (a rare flow does not blink).
+	const float Window = bContinuous && Rate > 0.0f ? 1.5f / Rate : 0.5f;
 	const FVector Carrier = bCarried && Dt > 0.0f ? (GetComponentLocation() - LastLocation) / Dt : FVector::ZeroVector;
 	// A point lets them out together (one emit); a shape a parcel at a time at its own point.
 	if (Shape == EOSGasShape::Point)
 	{
-		Gas->EmitForSource(Recipe, Look, GetComponentLocation(), Direction, Carrier, Number, bContinuous, Cloud, CloudSerial);
+		Gas->EmitForSource(Recipe, Look, GetComponentLocation(), Direction, Carrier, Number, bContinuous, Cloud, CloudSerial, Window);
 		return;
 	}
 	for (int32 Index = 0; Index < Number; ++Index)
 	{
-		if (Gas->EmitForSource(Recipe, Look, PointOnShape(), Direction, Carrier, 1, bContinuous, Cloud, CloudSerial) == 0)
+		if (Gas->EmitForSource(Recipe, Look, PointOnShape(), Direction, Carrier, 1, bContinuous, Cloud, CloudSerial, Window) == 0)
 		{
 			break;
 		}
@@ -271,6 +274,69 @@ void UOSGasSourceComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 #if !UE_BUILD_SHIPPING
 namespace
 {
+	/**
+	 * os.Gas.SourceTest <preset> <pulse|burst|rate1>: a source 1.5 m along the view run by a pattern (stage 4c's
+	 * checks): pulse - on 2 s, off 0.8 s, on 2 s, off 3 s, on 2 s (a weld let go and pressed again); burst - Burst()
+	 * every 2.5 s for 15 s (a thruster); rate1 - one parcel a second for 15 s.
+	 */
+	FAutoConsoleCommandWithWorldAndArgs GGasSourceTest(
+		TEXT("os.Gas.SourceTest"),
+		TEXT("<preset> <pulse|burst|rate1>: a gas source 1.5 m along the view run by a pattern (on/off, bursts every 2.5 s, 1 a second)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			const EOSGasPreset Preset = Args.Num() > 0 ? OSGasPresetByName(Args[0]) : EOSGasPreset::Custom;
+			const FString Pattern = Args.Num() > 1 ? Args[1] : TEXT("pulse");
+			FVector Eye = FVector::ZeroVector;
+			FRotator View = FRotator::ZeroRotator;
+			if (const APlayerController* Controller = World->GetFirstPlayerController())
+			{
+				Controller->GetPlayerViewPoint(Eye, View);
+			}
+			const FVector Where = Eye + View.Vector() * 150.0f;
+			FActorSpawnParameters Params;
+			Params.ObjectFlags |= RF_Transient;
+			AActor* Holder = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform(View, Where), Params);
+			if (!Holder || Preset == EOSGasPreset::Custom)
+			{
+				return;
+			}
+			UOSGasSourceComponent* Source = NewObject<UOSGasSourceComponent>(Holder);
+			Source->ApplyPreset(Preset);
+			Source->bAutoStart = false;
+			Holder->SetRootComponent(Source);
+			Source->SetWorldTransform(FTransform(View, Where));
+			Source->RegisterComponent();
+			Holder->SetLifeSpan(20.0f);
+			const TWeakObjectPtr<UOSGasSourceComponent> Weak(Source);
+			const auto At = [World, Weak](float Seconds, TFunction<void(UOSGasSourceComponent*)> Do)
+			{
+				FTimerHandle Handle;
+				World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([Weak, Do]() { if (UOSGasSourceComponent* S = Weak.Get()) { Do(S); } }), FMath::Max(Seconds, 0.001f), false);
+			};
+			const float Rate = Source->Rate;
+			if (Pattern == TEXT("burst"))
+			{
+				for (float T = 0.0f; T < 15.0f; T += 2.5f)
+				{
+					At(T, [](UOSGasSourceComponent* S) { S->Burst(); });
+				}
+			}
+			else if (Pattern == TEXT("rate1"))
+			{
+				At(0.0f, [](UOSGasSourceComponent* S) { S->SetRate(1.0f); });
+				At(15.0f, [](UOSGasSourceComponent* S) { S->Stop(); });
+			}
+			else
+			{
+				for (const TPair<float, float>& OnOff : { TPair<float, float>(0.0f, 2.0f), TPair<float, float>(2.8f, 4.8f), TPair<float, float>(7.8f, 9.8f) })
+				{
+					At(OnOff.Key, [Rate](UOSGasSourceComponent* S) { S->SetRate(Rate); });
+					At(OnOff.Value, [](UOSGasSourceComponent* S) { S->Stop(); });
+				}
+			}
+			UE_LOG(LogMindKore, Log, TEXT("os.Gas.SourceTest: %s %s at %s"), *Args[0], *Pattern, *Where.ToCompactString());
+		}));
+
 	TAutoConsoleVariable<float> CVarGasSpawnSeconds(TEXT("os.Gas.SpawnSeconds"), 4.0f, TEXT("How long an os.Gas.Spawn source lives, s (4)."));
 
 	/** os.Gas.Spawn <preset> [x y z]: a source of a preset at a point (1.5 m along the view by default), os.Gas.SpawnSeconds. */
