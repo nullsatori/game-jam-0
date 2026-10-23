@@ -614,7 +614,7 @@ namespace
 	};
 }
 
-bool UOSLaserSightComponent::DrawGunMask(const UCanvas& Canvas, float Texel, const FIntRect& Region)
+bool UOSLaserSightComponent::DrawGunMask(const FOSHudProjector& Projector, float Texel, const FIntRect& Region)
 {
 	// A depth buffer of the gun on the light's grid, over the beam's region only: each part's triangles, as drawn (first
 	// person field of view, the bodycam lens' bend), their nearest 1/depth per texel centre. The parts' boxes stood out
@@ -632,12 +632,6 @@ bool UOSLaserSightComponent::DrawGunMask(const UCanvas& Canvas, float Texel, con
 	}
 	MaskNearInv.Reset();
 	MaskNearInv.SetNumZeroed(Width * Height);
-	const FMatrix ToView = Camera->GetComponentTransform().ToMatrixNoScale().Inverse();
-	const float FieldOfView = Camera->bEnableFirstPersonFieldOfView ? Camera->FirstPersonFieldOfView : Camera->FieldOfView;
-	const double Half = Canvas.ClipX * 0.5;
-	const double Scale = Half / FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(FieldOfView, 5.0f, 170.0f) * 0.5f));
-	const FVector2D Clip(Canvas.ClipX, Canvas.ClipY);
-	const double LensK = OSLensK(*Camera);
 	TArray<const UStaticMeshComponent*, TInlineAllocator<8>> Parts;
 	Parts.Add(Guns->ViewModel);
 	Parts.Add(Guns->ActionInView);
@@ -667,19 +661,19 @@ bool UOSLaserSightComponent::DrawGunMask(const UCanvas& Canvas, float Texel, con
 		{
 			return false;
 		}
-		const FMatrix ToEye = Part->GetComponentTransform().ToMatrixWithScale() * ToView;
+		const FMatrix ToWorld = Part->GetComponentTransform().ToMatrixWithScale();
 		Drawn.SetNumUninitialized(Vertices);
 		for (int32 Vertex = 0; Vertex < Vertices; ++Vertex)
 		{
-			const FVector Local = ToEye.TransformPosition(FVector(Positions.VertexPosition(Vertex)));
-			if (Local.X < 1.0)
+			FVector2D At;
+			double Depth = 1.0;
+			if (!Projector.Project(FVector(ToWorld.TransformPosition(FVector(Positions.VertexPosition(Vertex)))), true, At, &Depth))
 			{
 				Drawn[Vertex] = FVector3f::ZeroVector;
 				continue;
 			}
-			FVector2D At(Half + Local.Y / Local.X * Scale, Clip.Y * 0.5 - Local.Z / Local.X * Scale);
-			At = OSLensScreenUV(At / Clip, LensK) * Clip / Texel;
-			Drawn[Vertex] = FVector3f(float(At.X), float(At.Y), float(1.0 / Local.X));
+			At /= Texel;
+			Drawn[Vertex] = FVector3f(float(At.X), float(At.Y), float(1.0 / FMath::Max(Depth, 1.0)));
 		}
 		for (int32 Index = 0; Index + 2 < Indices.Num(); Index += 3)
 		{
@@ -762,6 +756,8 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 	}
 	// Light adds over the picture (never darkens it) on the game's coarse grid - not pixel art (owner 23.10): the
 	// brightness is continuous and each texel a soft tent, as a low-res frame comes up through a bilinear upscale.
+	// One projection for the frame: the scene view's own (OSAttachMenu.h), the gun's points as it is drawn.
+	const FOSHudProjector Projector(Camera, Canvas);
 	FOSTexelFrame Frame;
 	Frame.Texel = FMath::Max(1.0f, FMath::RoundToFloat(Canvas.ClipY / GridLines));
 	const float Texel = Frame.Texel;
@@ -769,16 +765,16 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 	const FLinearColor Hot = HotColour;
 
 	FVector2D Dot2D;
-	const bool bDot = bDotHit && bDotSeen && OSProjectToHud(Camera, Canvas, DotAt, false, Dot2D);
+	const bool bDot = bDotHit && bDotSeen && Projector.Project(DotAt, false, Dot2D);
 	FVector2D Ghost2D;
-	const bool bGhostShown = bGhost && bDotHit && OSProjectToHud(Camera, Canvas, GhostAt, false, Ghost2D);
+	const bool bGhostShown = bGhost && bDotHit && Projector.Project(GhostAt, false, Ghost2D);
 	// The gun's own depth on the grid over the beam, the ghost and the dot: the beam leaves from behind its silhouette
 	// exactly, and the gun hides the dot and the ghost behind it (owner 23.10: aimed, the dot rode over the rear sight).
 	bool bMask = false;
 	FVector2D Lens2D = FVector2D::ZeroVector;
 	FVector2D End2D;
 	FBox2D Reach(ForceInit);
-	if (bThreadShown && OSProjectToHud(Camera, Canvas, LensAt, true, Lens2D) && OSProjectToHud(Camera, Canvas, BeamEnd, true, End2D))
+	if (bThreadShown && Projector.Project(LensAt, true, Lens2D) && Projector.Project(BeamEnd, true, End2D))
 	{
 		Reach += Lens2D / Texel;
 		Reach += End2D / Texel;
@@ -799,7 +795,7 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 			FMath::Max(0, FMath::FloorToInt32(float(Reach.Min.X)) - 3), FMath::Max(0, FMath::FloorToInt32(float(Reach.Min.Y)) - 3),
 			FMath::Min(FMath::CeilToInt32(Canvas.ClipX / Texel), FMath::CeilToInt32(float(Reach.Max.X)) + 4),
 			FMath::Min(FMath::CeilToInt32(Canvas.ClipY / Texel), FMath::CeilToInt32(float(Reach.Max.Y)) + 4));
-		bMask = DrawGunMask(Canvas, Texel, Region);
+		bMask = DrawGunMask(Projector, Texel, Region);
 	}
 	// Is the gun nearer than Depth (cm from the eye; the world behind it: a huge depth) at this texel?
 	const auto GunBefore = [this, bMask](int32 X, int32 Y, double Depth)
@@ -811,8 +807,13 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 		const float Near = MaskNearInv[(Y - MaskRegion.Min.Y) * MaskRegion.Width() + (X - MaskRegion.Min.X)];
 		return Near > 0.0f && 1.0 / Near < Depth - 0.4;
 	};
-	const FTransform View = Camera->GetComponentTransform();
-	const auto DepthOf = [&View](const FVector& At) { return FMath::Max(1.0, View.InverseTransformPositionNoScale(At).X); };
+	const auto DepthOf = [&Projector](const FVector& At)
+	{
+		FVector2D Unused;
+		double Depth = 1.0;
+		Projector.Project(At, true, Unused, &Depth);
+		return FMath::Max(1.0, Depth);
+	};
 	TArray<FVector2f, TInlineAllocator<1>> WholeBeam;
 	WholeBeam.Emplace(0.0f, 1.0f);
 	const TArray<FVector2f>& Spans = BeamSpans;
@@ -841,7 +842,7 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 			FVector2D B2;
 			const FVector From3 = LensAt + (BeamEnd - LensAt) * Span.X;
 			const FVector To3 = LensAt + (BeamEnd - LensAt) * Span.Y;
-			if (!OSProjectToHud(Camera, Canvas, From3, true, A2) || !OSProjectToHud(Camera, Canvas, To3, true, B2))
+			if (!Projector.Project(From3, true, A2) || !Projector.Project(To3, true, B2))
 			{
 				continue;
 			}
@@ -944,7 +945,7 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 		}
 		FVector2D AxisU;
 		FVector2D AxisV;
-		if (!OSProjectToHud(Camera, Canvas, DotAt + DotAxisU, false, AxisU) || !OSProjectToHud(Camera, Canvas, DotAt + DotAxisV, false, AxisV))
+		if (!Projector.Project(DotAt + DotAxisU, false, AxisU) || !Projector.Project(DotAt + DotAxisV, false, AxisV))
 		{
 			AxisU = Dot2D + FVector2D(1.0, 0.0);
 			AxisV = Dot2D + FVector2D(0.0, 1.0);

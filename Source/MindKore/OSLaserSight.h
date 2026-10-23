@@ -7,6 +7,7 @@
 class AHUD;
 class UCameraComponent;
 class UCanvas;
+struct FOSHudProjector;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UOSWeaponsComponent;
@@ -309,7 +310,7 @@ private:
 	/** The spans of the beam (0..1 of LensAt -> BeamEnd) that no part of the gun stands in front of, from the eye (by the parts' boxes: the fallback where the meshes' triangles are not on the CPU). */
 	void FindBeamSpans(const FVector& EyeAt);
 	/** The gun's parts drawn into a depth mask on the light's texel grid over Region (texels): the beam hides exactly behind the gun's silhouette. False where no part's triangles are on the CPU. */
-	bool DrawGunMask(const UCanvas& Canvas, float Texel, const FIntRect& Region);
+	bool DrawGunMask(const FOSHudProjector& Projector, float Texel, const FIntRect& Region);
 	/** The geometry from the camera as it stands: the round's line, the dot, its disc, the beam's spans, the light. */
 	void Refresh();
 

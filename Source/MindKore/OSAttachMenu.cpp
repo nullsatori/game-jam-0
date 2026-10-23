@@ -1,5 +1,6 @@
 #include "OSAttachMenu.h"
 #include "OSLens.h"
+#include "SceneView.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -455,26 +456,77 @@ FString UOSAttachMenu::GetHudLine() const
 	return FString();
 }
 
-bool OSProjectToHud(const UCameraComponent* Camera, const UCanvas& Canvas, const FVector& World, bool bFirstPerson, FVector2D& Out)
+FOSHudProjector::FOSHudProjector(const UCameraComponent* Camera, const UCanvas& Canvas)
 {
 	if (!Camera)
 	{
-		return false;
+		return;
 	}
+	bValid = true;
+	Clip = FVector2D(Canvas.ClipX, Canvas.ClipY);
+	LensK = OSLensK(*Camera);
+	Eye = Camera->GetComponentTransform();
+	const auto TanHalf = [](float Degrees) { return FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(Degrees, 5.0f, 170.0f) * 0.5)); };
 	// The first-person scale toward the eye does not move a point on screen; only the field of view does.
-	const FVector Local = Camera->GetComponentTransform().InverseTransformPositionNoScale(World);
-	if (Local.X < 1.0f)
+	Drawn = Camera->bEnableFirstPersonFieldOfView ? TanHalf(Camera->FieldOfView) / TanHalf(Camera->FirstPersonFieldOfView) : 1.0;
+	WorldScale = Clip.X * 0.5 / TanHalf(Camera->FieldOfView);
+	if (Canvas.SceneView)
+	{
+		bSceneView = true;
+		ViewMatrix = Canvas.SceneView->ViewMatrices.GetViewMatrix();
+		ProjectionMatrix = Canvas.SceneView->ViewMatrices.GetProjectionMatrix();
+	}
+}
+
+bool FOSHudProjector::Project(const FVector& World, bool bFirstPerson, FVector2D& Out, double* OutDepth) const
+{
+	if (!bValid)
 	{
 		return false;
 	}
-	const float FieldOfView = bFirstPerson && Camera->bEnableFirstPersonFieldOfView ? Camera->FirstPersonFieldOfView : Camera->FieldOfView;
-	const float Half = Canvas.ClipX * 0.5f;
-	const float Scale = Half / FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(FieldOfView, 5.0f, 170.0f) * 0.5f));
-	Out = FVector2D(Half + Local.Y / Local.X * Scale, Canvas.ClipY * 0.5f - Local.Z / Local.X * Scale);
+	const double Stretch = bFirstPerson ? Drawn : 1.0;
+	double Depth = 0.0;
+	if (bSceneView)
+	{
+		// The view's own frame: x right, y up, z ahead.
+		FVector View(ViewMatrix.TransformPosition(World));
+		if (View.Z < 1.0)
+		{
+			return false;
+		}
+		View.X *= Stretch;
+		View.Y *= Stretch;
+		const FVector4 ClipAt = ProjectionMatrix.TransformFVector4(FVector4(View, 1.0));
+		if (ClipAt.W <= 0.0)
+		{
+			return false;
+		}
+		Out = FVector2D(Clip.X * 0.5 * (1.0 + ClipAt.X / ClipAt.W), Clip.Y * 0.5 * (1.0 - ClipAt.Y / ClipAt.W));
+		Depth = View.Z;
+	}
+	else
+	{
+		const FVector Local = Eye.InverseTransformPositionNoScale(World);
+		if (Local.X < 1.0)
+		{
+			return false;
+		}
+		const double Scale = WorldScale * Stretch;
+		Out = FVector2D(Clip.X * 0.5 + Local.Y / Local.X * Scale, Clip.Y * 0.5 - Local.Z / Local.X * Scale);
+		Depth = Local.X;
+	}
 	// The bodycam lens (OSLens.h) bends the picture after it is drawn; the HUD is not bent: bend the point.
-	const FVector2D Clip(Canvas.ClipX, Canvas.ClipY);
-	Out = OSLensScreenUV(Out / Clip, OSLensK(*Camera)) * Clip;
+	Out = OSLensScreenUV(Out / Clip, LensK) * Clip;
+	if (OutDepth)
+	{
+		*OutDepth = Depth;
+	}
 	return true;
+}
+
+bool OSProjectToHud(const UCameraComponent* Camera, const UCanvas& Canvas, const FVector& World, bool bFirstPerson, FVector2D& Out)
+{
+	return FOSHudProjector(Camera, Canvas).Project(World, bFirstPerson, Out);
 }
 
 bool UOSAttachMenu::ProjectGun(const UCanvas& Canvas, const FVector& World, FVector2D& Out) const

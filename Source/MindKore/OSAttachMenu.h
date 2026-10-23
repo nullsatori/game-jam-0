@@ -19,6 +19,28 @@ struct FOSAttachment;
  */
 MINDKORE_API bool OSProjectToHud(const UCameraComponent* Camera, const UCanvas& Canvas, const FVector& World, bool bFirstPerson, FVector2D& Out);
 
+/**
+ * OSProjectToHud made once for many points (the laser's mask of the gun projects its every vertex). The frame's own
+ * view and projection (the canvas' scene view, what the picture is drawn with: owner 23.10, the gun's mask stood ~20 px
+ * off the drawn gun at the hip) when the canvas has one, else the camera's; first-person points stretched across the
+ * view by tan(world / 2) / tan(gun / 2) as the gun is drawn; then the bodycam lens' bend. Depth: cm along the view.
+ */
+struct MINDKORE_API FOSHudProjector
+{
+	FOSHudProjector(const UCameraComponent* Camera, const UCanvas& Canvas);
+	bool Project(const FVector& World, bool bFirstPerson, FVector2D& Out, double* OutDepth = nullptr) const;
+
+	bool bValid = false;
+	bool bSceneView = false;
+	FMatrix ViewMatrix = FMatrix::Identity;
+	FMatrix ProjectionMatrix = FMatrix::Identity;
+	FTransform Eye;
+	double Drawn = 1.0;
+	double WorldScale = 1.0;
+	double LensK = 0.0;
+	FVector2D Clip = FVector2D::ZeroVector;
+};
+
 /** The gun in hand and what hangs on it (modules, the magazine), on the HUD: their meshes' boxes' corners (OSProjectToHud, first person). */
 MINDKORE_API void OSGunScreenPoints(const UOSWeaponsComponent& Guns, const UCameraComponent* Camera, const UCanvas& Canvas, TArray<FVector2D>& Out);
 
