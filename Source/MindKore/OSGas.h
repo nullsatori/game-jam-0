@@ -131,6 +131,10 @@ struct FOSGasRecipe
 	/** Seen at full weight from its first step (the muzzle's blast); otherwise a parcel fades in over 0.12 s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
 	bool bInstant = false;
+
+	/** Joins the cloud a source started this very frame (one shot's several streamers share one cloud). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
+	bool bJoinThisFrame = false;
 };
 
 /** One parcel of gas, box... cloud-origin frame (cm, world axes). */

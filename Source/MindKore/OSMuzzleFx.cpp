@@ -487,9 +487,28 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 				Recipe.VacuumBurstCount = Recipe.VacuumBurstCount > 0 ? FMath::Max(6, FMath::RoundToInt(Recipe.VacuumBurstCount * JetScale)) : 0;
 				Recipe.SpeedCm *= JetScale;
 			}
+			// A jet into a vacuum: a fan of streamers, as the holes' threads (owner 23.10: one jet read as a capsule) -
+			// 7 (a narrow muzzle 4) in a cone of 25 degrees round the bore, each a 3 degree thread with its own share.
+			const FVector Where = Frame.TransformPosition(Vent.Location);
+			const FVector Axis = Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal());
+			if (Vent.bJet && !OSAirZoneAt(GetWorld(), Where) && Recipe.VacuumBurstCount > 0)
+			{
+				const int32 Streamers = Vent.WidthCm < 3.0f ? 4 : 7;
+				for (int32 Index = 0; Index < Streamers; ++Index)
+				{
+					FOSGasRecipe Thread = Recipe;
+					// The first (along the bore) starts the shot's cloud (20 at least: a burst's own cloud), the rest join it.
+					Thread.VacuumBurstCount = FMath::Max(Index == 0 ? 20 : 6, FMath::RoundToInt(Recipe.VacuumBurstCount * FMath::FRandRange(0.6f, 1.4f) / Streamers));
+					Thread.BurstCount = Thread.VacuumBurstCount;
+					Thread.ConeDeg = 3.0f;
+					Thread.bJoinThisFrame = Index > 0;
+					const FVector Dir = Index == 0 ? Axis : FMath::VRandCone(Axis, FMath::DegreesToRadians(12.5f));
+					Gas->AddSource(Thread, GunSmoke(), Where, Dir, Carrier);
+				}
+				continue;
+			}
 			// A clinging hole's wisps ride with the gun whole (a hold, not an inherited velocity); a jet takes Carrier.
-			Gas->AddSource(Recipe, GunSmoke(), Frame.TransformPosition(Vent.Location), Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()),
-				Vent.bCling && !Vent.bJet ? GetOwner()->GetVelocity() : Carrier);
+			Gas->AddSource(Recipe, GunSmoke(), Where, Axis, Vent.bCling && !Vent.bJet ? GetOwner()->GetVelocity() : Carrier);
 			// A narrow muzzle's lingering wisp: up out of the muzzle for a second, following the gun.
 			if (Vent.bJet && Vent.WidthCm < 3.0f)
 			{

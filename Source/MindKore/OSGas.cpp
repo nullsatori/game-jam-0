@@ -55,7 +55,7 @@ namespace
 	constexpr float DensityGain = 2.5f;
 	/** A parcel kernel's share of its cell (1: opaque at its core), air and vacuum: tuned to T 0.5 / 0.75 / 0.95 at 0.2 / 1 / 4 s. */
 	constexpr float AirMassScale = 1.2f;
-	constexpr float VacuumMassScale = 0.6f;
+	constexpr float VacuumMassScale = 0.9f;
 	constexpr float KeyShadow = 0.1f;
 	/** The key light's shadow through the render grid (relief), per unit of drawn density along the way. */
 	constexpr float GridKeyShadow = 0.6f;
@@ -621,9 +621,9 @@ int32 UOSGasSubsystem::AddSource(const FOSGasRecipe& Recipe, const FOSGasLook& L
 		Source.Recipe.RadiusMinCm = Recipe.VacuumRadiusMinCm;
 		Source.Recipe.RadiusMaxCm = Recipe.VacuumRadiusMaxCm;
 		// A cone with a tail, not a cloud (design v11): no vortex ring and its sideways throw (nothing to roll against in a
-		// vacuum), a cone of 7 degrees at most; the speeds' spread lays the fast ahead and the slow by the muzzle.
+		// vacuum); the speeds' spread lays the fast ahead and the slow by the muzzle.
 		Source.Recipe.RingCm = 0.0f;
-		Source.Recipe.ConeDeg = FMath::Min(Recipe.ConeDeg, 7.0f);
+		Source.Recipe.ConeDeg = FMath::Min(Recipe.ConeDeg, 16.0f);
 		// Half the speed: a plume of ~1.5 m that stays in view (at full speed the fast gas was 3-4 m off and thinned to
 		// nothing against the dark in a second).
 		Source.Recipe.SpeedCm *= 0.5f;
@@ -651,7 +651,7 @@ int32 UOSGasSubsystem::AddSource(const FOSGasRecipe& Recipe, const FOSGasLook& L
 		// At most 20 on the game thread (the rest from the next step on: no hitch).
 		const int32 Now = FMath::Clamp(FMath::RoundToInt(Source.BurstOwed * Frame), 1, 20);
 		Source.BurstOwed = FMath::Max(0.0f, Source.BurstOwed - Now);
-		Source.Cloud = CloudFor(Look, WorldWhere, Used.BurstCount >= 20 ? -1.0f : 0.3f);
+		Source.Cloud = CloudFor(Look, WorldWhere, Used.bJoinThisFrame ? 0.0f : Used.BurstCount >= 20 ? -1.0f : 0.3f);
 		if (Source.Cloud != INDEX_NONE)
 		{
 			FCloud& Cloud = Clouds[Source.Cloud];
@@ -762,7 +762,7 @@ void UOSGasSubsystem::TickSources(float DeltaTime)
 			// Its own cloud (the serial: a reused slot is another cloud), else one for it.
 			if (S.Cloud == INDEX_NONE || !Clouds.IsValidIndex(S.Cloud) || !Clouds[S.Cloud].IsAlive() || Clouds[S.Cloud].Serial != S.CloudSerial)
 			{
-				S.Cloud = CloudFor(S.Look, Where, S.Recipe.BurstCount >= 20 ? -1.0f : 0.3f);
+				S.Cloud = CloudFor(S.Look, Where, S.Recipe.bJoinThisFrame ? 0.0f : S.Recipe.BurstCount >= 20 ? -1.0f : 0.3f);
 				S.CloudSerial = S.Cloud != INDEX_NONE ? Clouds[S.Cloud].Serial : 0;
 			}
 			if (S.Cloud != INDEX_NONE)
@@ -1583,7 +1583,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			}
 		}
 	}
-	// Vacuum: a parcel grows to at least 0.7 of the way to its second nearest neighbour (15 cm at most) - the cone stays
+	// Vacuum: a parcel grows to at least 0.6 of the way to its second nearest neighbour (14 cm at most) - the cone stays
 	// one body as the parcels fly apart, its edges not cut away.
 	if (!Cloud.bAir && Parcels.Num() > 2)
 	{
@@ -1608,9 +1608,9 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					}
 				}
 			}
-			// 0.7 of the way to the second nearest, 15 cm at most (1.2 and 30 cm made a round cloud in a second; 0.9 and
-			// 20 cm a row of round balls).
-			Need[I] = FMath::Min(0.7f * FMath::Sqrt(Second), 15.0f);
+			// 0.6 of the way to the second nearest, 14 cm at most: the streamers stay apart (1.2 / 30 cm made a round
+			// cloud, 0.9 / 20 cm a row of balls, 0.7 / 15 cm one capsule).
+			Need[I] = FMath::Min(0.6f * FMath::Sqrt(Second), 14.0f);
 		});
 		for (int32 I = 0; I < Parcels.Num(); ++I)
 		{
@@ -1710,6 +1710,11 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		// 0.12 s, not the contract's 0.05: a thin parcel half a metre from the eye came in by 0.3 of opacity a frame.
 		const float In = P.bInstant ? 1.0f : FMath::SmoothStep(0.0f, 0.12f, P.Age);
 		Weight[I] = In * (1.0f - FMath::SmoothStep(0.6f * P.Life, P.Life, P.Age));
+		// In a vacuum the gas thins with the way it went (~1/d^2 past 90 cm): dense by the muzzle, sparse at the front.
+		if (!Cloud.bAir)
+		{
+			Weight[I] /= 1.0f + FVector3f::DistSquared(P.P, P.Birth) / (90.0f * 90.0f);
+		}
 	}
 	double LapAt = FPlatformTime::Seconds();
 	int32 LapPart = -1;
@@ -1755,7 +1760,8 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		}
 		Light[I] = FMath::Exp(-KeyShadow * Sum);
 	});
-	const float Cut = Cloud.bAir ? NoiseCut + 0.1f : 0.15f;
+	// A vacuum's edges torn a little harder (0.18), as the holes' threads; more tore the thin streamers into dots.
+	const float Cut = Cloud.bAir ? NoiseCut + 0.1f : 0.18f;
 	const float Scale = Cloud.bAir ? NoiseCm : 12.0f;
 	const uint32 CloudSeed = Cloud.Seed;
 	SplatLap(1);
@@ -1844,6 +1850,8 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			// draws a streak of jet, not a ball (owner 23.10: «в невесомости дым вылетает как будто дробинками»).
 			const float Speed = P.V.Size();
 			const FVector3f Along = Speed > 1.0f ? P.V / Speed : FVector3f::ZeroVector;
+			// The streak along the velocity joins a streamer's parcels into a thread (a vacuum's jet is a fan of 3 degree
+			// streamers now, so it no longer merges them across into one cylinder: owner 23.10 «цилиндр или капсула»).
 			const float Long = FMath::Max(P.RadiusCm, Speed * 0.08f);
 			const float InvAcross2 = 1.0f / (P.RadiusCm * P.RadiusCm);
 			const float InvLong2 = 1.0f / (Long * Long);
