@@ -558,6 +558,7 @@ void UOSGasSubsystem::Emit(FCloud& Cloud, const FOSGasRecipe& R, const FVector& 
 		P.Life = R.LifeSeconds * FMath::FRandRange(0.8f, 1.2f);
 		P.Cling = R.ClingSeconds;
 		P.MaxRadiusCm = R.MaxRadiusCm;
+		P.DragSeconds = R.DragSeconds;
 		P.Seed = FMath::Rand();
 	}
 }
@@ -621,7 +622,8 @@ void UOSGasSubsystem::Stop(int32 Id)
 	Sources.RemoveAll([Id](const FSource& Each) { return Each.Id == Id; });
 }
 
-void UOSGasSubsystem::EmitNow(const FOSGasRecipe& Recipe, const FOSGasLook& Look, const FVector& Where, const FVector& Direction, const FVector& CarrierVelocity, int32 Count)
+void UOSGasSubsystem::EmitNow(const FOSGasRecipe& Recipe, const FOSGasLook& Look, const FVector& Where, const FVector& Direction, const FVector& CarrierVelocity, int32 Count,
+	bool bMayStartCloud)
 {
 	if (Count <= 0)
 	{
@@ -641,6 +643,11 @@ void UOSGasSubsystem::EmitNow(const FOSGasRecipe& Recipe, const FOSGasLook& Look
 				return;
 			}
 		}
+	}
+	// A barrel's seep may start a cloud of its own, near it (60 cm), while 4 slots are free (it never evicts a shot's).
+	if (bMayStartCloud && MaxClouds - GetCloudCount() >= 4)
+	{
+		Emit(Clouds[CloudFor(Look, Where)], Recipe, Where, Direction, CarrierVelocity, Count);
 	}
 }
 
@@ -1298,6 +1305,11 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				if (P.Age > 0.3f)
 				{
 					P.V *= FMath::Exp(-Dt / AirRestSeconds);
+				}
+				// Its own drag (a hole's pop: 450 cm/s stopped within ~8 cm).
+				if (P.DragSeconds > 0.0f)
+				{
+					P.V *= FMath::Exp(-Dt / P.DragSeconds);
 				}
 			}
 			const float Speed = P.V.Size();

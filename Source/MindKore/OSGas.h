@@ -123,6 +123,10 @@ struct FOSGasRecipe
 	/** In air a parcel grows to this radius at most, cm (a thin wisp stays thin). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.5"))
 	float MaxRadiusCm = 14.0f;
+
+	/** Its own air drag's time constant in air, s (0: none) - a hole's pop stops within a few cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.0"))
+	float DragSeconds = 0.0f;
 };
 
 /** One parcel of gas, box... cloud-origin frame (cm, world axes). */
@@ -142,6 +146,7 @@ struct FOSGasParcel
 	float Life = 6.0f;
 	float Cling = 0.0f;
 	float MaxRadiusCm = 14.0f;
+	float DragSeconds = 0.0f;
 	uint32 Seed = 0;
 };
 
@@ -175,7 +180,8 @@ public:
 	void SetRate(int32 Source, float PerSecond);
 	void Stop(int32 Source);
 	/** Count parcels at once (a seep, a case's puff). */
-	void EmitNow(const FOSGasRecipe& Recipe, const FOSGasLook& Look, const FVector& Where, const FVector& Direction, const FVector& CarrierVelocity, int32 Count);
+	void EmitNow(const FOSGasRecipe& Recipe, const FOSGasLook& Look, const FVector& Where, const FVector& Direction, const FVector& CarrierVelocity, int32 Count,
+		bool bMayStartCloud = false);
 
 	/** A projectile's tunnel (as UOSMuzzleFxComponent::CarveRay): drawn at once, healing; the parcels in it lose mass and are pushed out. */
 	void CarveRay(const FVector& Start, const FVector& End, float RadiusCm);
@@ -210,7 +216,8 @@ public:
 	static constexpr int32 MaxDrawn = 6;
 
 	static constexpr int32 MaxClouds = 10;
-	static constexpr int32 MaxParcels = 220;
+	/** A cloud's parcels: the Рысь's shot is 160 from the muzzle and 64 from its 16 shroud holes, the seep on top. */
+	static constexpr int32 MaxParcels = 260;
 	/** The velocity grid (air): 20 cells of 6 cm; the render grid: 48 of 2 cm (3 cm in a vacuum), same centre. */
 	static constexpr int32 VelocityCells = 20;
 	static constexpr float VelocityCellCm = 6.0f;

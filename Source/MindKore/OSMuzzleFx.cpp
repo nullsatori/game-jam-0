@@ -412,15 +412,21 @@ namespace
 		}
 		else
 		{
-			// A shroud hole: 2-4 small parcels over the vent's time, clinging to the gun for 0.4 s.
+			// A shroud hole's pop at the shot, as real gas out of a shroud (owner 23.10: «списано с настоящего дыма»):
+			// 3 parcels in 0.03 s at 270-450 cm/s along the hole's normal, stopped by the air within ~8 cm (their
+			// own drag, tau 0.018 s) - a small puff at each hole. The thin rising thread after it is the seep (Seep).
 			R.BurstCount = 3;
-			R.BurstSeconds = FMath::Max(Vent.Seconds, 0.05f);
+			R.BurstSeconds = 0.03f;
+			R.SpeedCm = 450.0f;
+			R.SpeedMin = 0.6f;
+			R.ConeDeg = 15.0f;
+			R.DragSeconds = 0.018f;
 			R.RadiusMinCm = 1.5f;
 			R.RadiusMaxCm = 2.5f;
-			R.Mass = 0.3f;
-			R.Heat = 0.6f;
-			R.ClingSeconds = 0.4f;
-			R.LifeSeconds = 3.0f;
+			R.MaxRadiusCm = 6.0f;
+			R.Mass = 0.8f;
+			R.Heat = 0.8f;
+			R.LifeSeconds = 2.0f;
 		}
 		return R;
 	}
@@ -444,7 +450,9 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 			}
 			const bool bOnAction = Vent.Space == EOSVentSpace::Action && Action;
 			const FTransform Frame = bOnAction ? Action->GetComponentTransform() : Muzzle;
-			Gas->AddSource(VentRecipe(Vent), GunSmoke(), Frame.TransformPosition(Vent.Location), Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()), Carrier);
+			// A clinging hole's wisps ride with the gun whole (a hold, not an inherited velocity); a jet takes Carrier.
+			Gas->AddSource(VentRecipe(Vent), GunSmoke(), Frame.TransformPosition(Vent.Location), Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()),
+				Vent.bCling && !Vent.bJet ? GetOwner()->GetVelocity() : Carrier);
 			// A narrow muzzle's lingering wisp: up out of the muzzle for a second, following the gun.
 			if (Vent.bJet && Vent.WidthCm < 3.0f)
 			{
@@ -570,10 +578,22 @@ void UOSMuzzleFxComponent::Seep(const FOSWeapon& Def, const FTransform& Muzzle, 
 			const FOSGasVent& Vent = *Seeping[FMath::RandHelper(Seeping.Num())];
 			const bool bOnAction = Vent.Space == EOSVentSpace::Action && Action;
 			const FTransform Frame = bOnAction ? Action->GetComponentTransform() : Muzzle;
-			FOSGasRecipe R = VentRecipe(Vent);
-			R.SpeedCm *= 0.1f;
-			R.Mass = 0.15f;
-			Gas->EmitNow(R, GunSmoke(), Frame.TransformPosition(Vent.Location), Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()), GetOwner()->GetVelocity() * (OSAirZoneAt(GetWorld(), Frame.GetLocation()) ? 0.25f : 1.0f), 1);
+			// The hot barrel's thread: a small parcel rising out of the hole (20 cm/s against gravity, a narrow cone: a
+			// straight thread first, the flow curls it after), not carried by the gun - moved, the thread tears off and
+			// hangs. The heat (FOSPortSmoke) sets how many: one shot a faint thread, a burst a thicker, longer one.
+			FOSGasRecipe R;
+			R.SpeedCm = 20.0f;
+			R.SpeedMin = 0.6f;
+			R.ConeDeg = 6.0f;
+			R.RadiusMinCm = 1.0f;
+			R.RadiusMaxCm = 1.5f;
+			R.MaxRadiusCm = 5.0f;
+			R.Mass = 0.45f;
+			R.Heat = 0.5f;
+			R.LifeSeconds = 2.5f;
+			const FVector Where = Frame.TransformPosition(Vent.Location);
+			const FVector Up = -OSGravityAt(GetWorld(), Where).Acceleration.GetSafeNormal(UE_SMALL_NUMBER, Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()));
+			Gas->EmitNow(R, GunSmoke(), Where, Up, FVector::ZeroVector, 1, true);
 		}
 		if (!OSGasCardsEnabled())
 		{
