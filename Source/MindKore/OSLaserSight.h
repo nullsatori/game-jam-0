@@ -161,6 +161,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float BeamSheath = 0.08f;
 
+	/** The beam's root: this many texels past where it comes out from behind the gun it always shows, fading into the haze's gaps (a gap there read as the beam torn off the module). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0"))
+	float BeamRootTexels = 8.0f;
+
 	/** Below this of the haze's noise the beam has nothing to show in (gaps: a sparse beam). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0", ClampMax = "0.9"))
 	float HazeFloor = 0.3f;
@@ -240,7 +244,7 @@ public:
 	bool HasDot() const { return bLit && bDotHit; }
 	bool IsThreadShown() const;
 	FVector GetDotLocation() const { return DotAt; }
-	/** Traces since play began (os.Attach.Cost: two a lit frame - the round's line and the eye's sight of the dot). */
+	/** Traces since play began (os.Attach.Cost: three or more a lit frame - the round's line, the beam's for glass, the eye's sight of the dot; one more for each pane passed). */
 	int32 GetTraceCount() const { return Traces; }
 
 	/** The dot and the thread on the HUD's canvas, every frame while lit (AOSZeroGHUD); the geometry is refreshed from this frame's camera first. */

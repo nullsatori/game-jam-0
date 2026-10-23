@@ -352,45 +352,62 @@ void UOSLaserSightComponent::Refresh()
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(OSLaserSight), /*bTraceComplex=*/false, GetOwner());
 	Params.bReturnPhysicalMaterial = true;
 	FHitResult Hit;
-	bGhost = false;
-	FVector GlassAt = FVector::ZeroVector;
-	FVector GlassNormal = FVector::ZeroVector;
 	Surface = EOSLaserSurface::Plain;
+	// What a hit lies on: the round's physical material (MindKore's surfaces), or the glass pane's class.
+	const auto KindOf = [](const FHitResult& On)
+	{
+		return On.PhysMaterial.IsValid() ? MKSurfaceKindFromPhysical(On.PhysMaterial->SurfaceType) : EMKSurfaceKind::Default;
+	};
+	const auto IsGlass = [&KindOf](const FHitResult& On)
+	{
+		return KindOf(On) == EMKSurfaceKind::Glass || Cast<AMKGlassPane>(On.GetActor()) != nullptr;
+	};
+	// Glass is passed through, every pane and shard of it (a broken pane's pieces are glass too): the dot lies on the
+	// first thing behind that is not glass.
+	const auto PassGlass = [](FCollisionQueryParams& Into, const FHitResult& On)
+	{
+		Into.AddIgnoredComponent(On.GetComponent());
+		if (Cast<AMKGlassPane>(On.GetActor()))
+		{
+			Into.AddIgnoredActor(On.GetActor());
+		}
+	};
 	FVector Start = From;
-	for (int32 Pass = 0; Pass < 3; ++Pass)
+	for (int32 Pass = 0; Pass < 6; ++Pass)
 	{
 		++Traces;
 		bDotHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, From + Along * Weapon->RangeCm, ECC_GameTraceChannel2, Params);
-		if (!bDotHit)
+		if (!bDotHit || !IsGlass(Hit))
 		{
 			break;
 		}
-		// What it lies on: the round's physical material (MindKore's surfaces), or the glass pane's class.
-		const EMKSurfaceKind Kind = Hit.PhysMaterial.IsValid() ? MKSurfaceKindFromPhysical(Hit.PhysMaterial->SurfaceType) : EMKSurfaceKind::Default;
-		const bool bGlass = Kind == EMKSurfaceKind::Glass || Cast<AMKGlassPane>(Hit.GetActor()) != nullptr;
-		if (bGlass && !bGhost)
-		{
-			// Through the glass: a ghost of the dot stays on the pane (placed below, on the beam), the beam and the dot go on behind it.
-			bGhost = true;
-			GlassAt = FVector(Hit.ImpactPoint);
-			GlassNormal = FVector(Hit.ImpactNormal).GetSafeNormal();
-			Params.AddIgnoredActor(Hit.GetActor());
-			Start = FVector(Hit.ImpactPoint) + Along * 1.0;
-			continue;
-		}
+		PassGlass(Params, Hit);
+		Start = FVector(Hit.ImpactPoint) + Along * 0.5;
+		bDotHit = false;
+	}
+	if (bDotHit)
+	{
+		const EMKSurfaceKind Kind = KindOf(Hit);
 		Surface = Kind == EMKSurfaceKind::Metal ? EOSLaserSurface::Metal : Kind == EMKSurfaceKind::Flesh ? EOSLaserSurface::Flesh : EOSLaserSurface::Plain;
-		break;
 	}
 	DotAt = bDotHit ? FVector(Hit.ImpactPoint) + FVector(Hit.ImpactNormal) * DotLiftCm : From + Along * Weapon->RangeCm;
-	if (bGhost)
+	// The ghost: where the beam itself - from the lens as the gun is drawn to the dot, the line the HUD draws - meets
+	// glass first, on its own trace (owner 23.10: it sat on the round's line from the muzzle; then, by the pane's plane,
+	// it hung in the air past the pane's edge). No glass on that line, no ghost.
+	bGhost = false;
+	if (bDotHit && GlassGhost > 0.0f)
 	{
-		// The ghost sits where the beam crosses the pane - from the lens as the gun is drawn to the dot, the line the HUD
-		// draws - not where the round's line from the muzzle does (owner 23.10: «проекция на стекло идет из дула»).
+		FCollisionQueryParams BeamParams(SCENE_QUERY_STAT(OSLaserBeam), /*bTraceComplex=*/false, GetOwner());
+		BeamParams.bReturnPhysicalMaterial = true;
 		const FVector LensDrawn = Guns->GunToDrawn(LensAt);
-		const FVector Way = DotAt - LensDrawn;
-		const double Across = Way | GlassNormal;
-		const double T = FMath::IsNearlyZero(Across) ? -1.0 : ((GlassAt - LensDrawn) | GlassNormal) / Across;
-		GhostAt = (T > 0.0 && T < 1.0 ? LensDrawn + Way * T : GlassAt) + GlassNormal * DotLiftCm;
+		FHitResult OnBeam;
+		++Traces;
+		if (GetWorld()->LineTraceSingleByChannel(OnBeam, LensDrawn, DotAt, ECC_GameTraceChannel2, BeamParams) && IsGlass(OnBeam)
+			&& OnBeam.Distance < FVector::Dist(LensDrawn, DotAt) - 1.0f)
+		{
+			bGhost = true;
+			GhostAt = FVector(OnBeam.ImpactPoint) + FVector(OnBeam.ImpactNormal).GetSafeNormal() * DotLiftCm;
+		}
 	}
 	bDotSeen = false;
 	if (bDotHit)
@@ -407,11 +424,30 @@ void UOSLaserSightComponent::Refresh()
 		}
 		DotAxisU = U * Radius * FMath::Min(1.0f / Cos, DotStretchMax);
 		DotAxisV = FVector::CrossProduct(Normal, U) * Radius;
-		// Seen from the eye? The round's line starts at the muzzle, the eye is elsewhere: an edge can hide the dot.
-		FHitResult Sight;
-		++Traces;
-		bDotSeen = !GetWorld()->LineTraceSingleByChannel(Sight, EyeAt, DotAt - FVector(Hit.ImpactNormal) * (DotLiftCm * 0.5f), ECC_Visibility, Params)
-			|| Sight.Distance > FVector::Dist(EyeAt, DotAt) - 2.0f;
+		// Seen from the eye? The round's line starts at the muzzle, the eye is elsewhere: an edge can hide the dot. Glass
+		// does not (the eye's line crosses other panes and shards than the round's did).
+		const FVector SightEnd = DotAt - FVector(Hit.ImpactNormal) * (DotLiftCm * 0.5f);
+		const double SightLength = FVector::Dist(EyeAt, DotAt);
+		FCollisionQueryParams SightParams = Params;
+		FVector SightFrom = EyeAt;
+		bDotSeen = true;
+		for (int32 Pass = 0; Pass < 6; ++Pass)
+		{
+			FHitResult Sight;
+			++Traces;
+			if (!GetWorld()->LineTraceSingleByChannel(Sight, SightFrom, SightEnd, ECC_Visibility, SightParams)
+				|| FVector::Dist(EyeAt, FVector(Sight.ImpactPoint)) > SightLength - 2.0)
+			{
+				break;
+			}
+			if (!IsGlass(Sight))
+			{
+				bDotSeen = false;
+				break;
+			}
+			PassGlass(SightParams, Sight);
+			SightFrom = FVector(Sight.ImpactPoint) + (SightEnd - EyeAt).GetSafeNormal() * 0.5;
+		}
 		// The speckle boils with the dot's travel over the surface and barely at rest.
 		Boil += float(FVector::Dist(LastDotAt, DotAt)) / SpeckleBoilCm + DeltaSecondsNow / SpeckleRestSeconds;
 		DeltaSecondsNow = 0.0f; // the rest counts once a frame, whichever pass runs first
@@ -700,8 +736,12 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 		};
 		// With the mask the whole beam is drawn and each texel tested; without it, the boxes' spans.
 		const TArrayView<const FVector2f> Drawn = bMask ? TArrayView<const FVector2f>(WholeBeam) : TArrayView<const FVector2f>(Spans);
-		for (const FVector2f& Span : Drawn)
+		for (int32 SpanIndex = 0; SpanIndex < Drawn.Num(); ++SpanIndex)
 		{
+			const FVector2f& Span = Drawn[SpanIndex];
+			// The root: the first BeamRootTexels the beam shows past the gun's silhouette always light, whatever the haze,
+			// fading into it - a gap of thin haze there read as the beam torn off the module (owner 23.10: «обрезается»).
+			int32 FirstShown = SpanIndex == 0 ? -1 : TNumericLimits<int32>::Max();
 			FVector2D A2;
 			FVector2D B2;
 			const FVector From3 = LensAt + (BeamEnd - LensAt) * Span.X;
@@ -723,14 +763,20 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 				const float T = FMath::Lerp(Span.X, Span.Y, S);
 				const FVector2D At = A + Way * S;
 				const float Haze = HazeAt(T);
-				// Nothing to show in below the haze's floor: the beam breaks into a sparse line.
-				const float Shown = FMath::Pow(FMath::Clamp((Haze - HazeFloor) / (1.0f - HazeFloor), 0.0f, 1.0f), 0.8f);
+				// Its depth here (1/depth runs straight on screen).
+				const double Depth = 1.0 / FMath::Lerp(InvFrom, InvTo, double(S));
+				if (FirstShown < 0 && !GunBefore(FMath::FloorToInt32(float(At.X)), FMath::FloorToInt32(float(At.Y)), Depth))
+				{
+					FirstShown = Step;
+				}
+				const float Root = FirstShown >= 0 && FirstShown <= Step && BeamRootTexels > 0.0f
+					? FMath::Clamp(1.0f - float(Step - FirstShown) / BeamRootTexels, 0.0f, 1.0f) : 0.0f;
+				// Nothing to show in below the haze's floor: the beam breaks into a sparse line (not at its root).
+				const float Shown = FMath::Max(Root, FMath::Pow(FMath::Clamp((Haze - HazeFloor) / (1.0f - HazeFloor), 0.0f, 1.0f), 0.8f));
 				const float Light = Base * (0.35f + 0.65f * FMath::Pow(1.0f - T, 1.3f)) * Shown;
 				// The glints brighten the beam's own red, never shift it (owner 23.10: no flashing in another colour).
 				const FLinearColor Colour = BeamColour;
 				const float Flash = Haze > GlintAbove ? 1.0f + Glint * (Haze - GlintAbove) / (1.0f - GlintAbove) : 1.0f;
-				// Its depth here (1/depth runs straight on screen).
-				const double Depth = 1.0 / FMath::Lerp(InvFrom, InvTo, double(S));
 				// The major axis steps a texel; across it the line's width is shared out by coverage over the rows it
 				// touches (a hair under a texel lights its row by its share), the sheath either side of those.
 				const double Major = bFlat ? At.X : At.Y;
