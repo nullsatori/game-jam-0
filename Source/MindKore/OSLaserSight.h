@@ -191,9 +191,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float BeamSheath = 0.08f;
 
-	/** The gun's silhouette in the beam's mask shrunk by this many texels: the beam runs over its edge by that much (no seam between the two). */
+	/** The gun's silhouette in the beam's mask shrunk by this many texels: the beam runs over its edge by that much. 0: once the projection was the frame's own, one texel stood on the gun (owner 23.10). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0", ClampMax = "4"))
-	int32 MaskErodeTexels = 1;
+	int32 MaskErodeTexels = 0;
 
 	/** The beam's root: this many texels past where it comes out from behind the gun it always shows, fading into the haze's gaps (a gap there read as the beam torn off the module). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0"))
