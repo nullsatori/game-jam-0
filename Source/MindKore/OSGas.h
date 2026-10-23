@@ -190,9 +190,12 @@ public:
 	/** The cost since the last call (os.Fx.SmokeCost). */
 	FString TakeCostLine();
 
-	/** The volume material (the HV path until stage 3). */
+	/** The post-process that draws every cloud after the upscaler (v11 stage 3, Scripts/os_muzzle_fx.py). */
 	UPROPERTY()
-	TSoftObjectPtr<UMaterialInterface> CloudMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/FX/M_OS_MuzzleSmokeVolume.M_OS_MuzzleSmokeVolume")));
+	TSoftObjectPtr<UMaterialInterface> PostMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/FX/M_OS_GasPost.M_OS_GasPost")));
+
+	/** Clouds the post-process draws at once (the nearest to the eye). */
+	static constexpr int32 MaxDrawn = 6;
 
 	static constexpr int32 MaxClouds = 8;
 	static constexpr int32 MaxParcels = 220;
@@ -243,10 +246,9 @@ private:
 		float CentreT = 1.0f;
 		FVector3f KeyDir = FVector3f::UpVector;
 		FLinearColor KeyColour = FLinearColor::White;
-		TObjectPtr<UHeterogeneousVolumeComponent> Volume = nullptr;
-		TObjectPtr<UMaterialInstanceDynamic> Material = nullptr;
 		TObjectPtr<UTexture2D> Texture = nullptr;
-		TObjectPtr<UTexture2D> TunnelTexture = nullptr;
+		/** An atlas has been uploaded (the post-process may draw it). */
+		bool bDrawable = false;
 		int32 TunnelCount = 0;
 		mutable UE::Tasks::FTask Pending;
 		bool IsBusy() const { return Pending.IsValid() && !Pending.IsCompleted(); }
@@ -291,9 +293,20 @@ private:
 	TMap<TObjectKey<UPrimitiveComponent>, FVector> LastMoverAt;
 	TArray<TWeakObjectPtr<ULightComponent>> KeyLights;
 	float KeyLightsAge = 1e6f;
-	/** Everything the clouds render with lives on this actor. */
+	/** The unbound post-process volume carrying PostMaterial, its instance, the clouds' data and the tunnels (float textures). */
 	UPROPERTY()
-	TObjectPtr<AActor> Host = nullptr;
+	TObjectPtr<AActor> PostVolume = nullptr;
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> Post = nullptr;
+	UPROPERTY()
+	TObjectPtr<UTexture2D> DataTexture = nullptr;
+	UPROPERTY()
+	TObjectPtr<UTexture2D> TunnelTexture = nullptr;
+	TArray<TObjectPtr<UTexture2D>> BoundGrids;
+	/** The post-process's parameters for this frame: the nearest clouds, the tunnels and bodies, the block size. */
+	void UpdatePost();
+	/** The room's light from above and below for the gas (display colours): by the map, the vacuum's starry dark. */
+	void AmbientFor(bool bAir, FLinearColor& OutTop, FLinearColor& OutBottom) const;
 	UPROPERTY()
 	TArray<TObjectPtr<UObject>> Keep;
 
@@ -305,7 +318,6 @@ private:
 	void TickCloud(FCloud& Cloud, float DeltaTime);
 	void LaunchStep(FCloud& Cloud, int32 Steps, float Dt);
 	void FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey<UPrimitiveComponent>>& Seen);
-	void UpdateTunnels(FCloud& Cloud);
 	void PickKey(const FVector& Where, FVector3f& OutDir, FLinearColor& OutColour);
 	void EnsureRender(FCloud& Cloud);
 	void WaitAll() const;

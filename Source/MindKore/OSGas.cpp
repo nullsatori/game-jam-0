@@ -3,7 +3,9 @@
 #include "Async/ParallelFor.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/DirectionalLightComponent.h"
-#include "Components/HeterogeneousVolumeComponent.h"
+#include "Engine/PostProcessVolume.h"
+#include "Engine/GameViewportClient.h"
+#include "Engine/Engine.h"
 #include "Components/PointLightComponent.h"
 #include "Components/LocalLightComponent.h"
 #include "Engine/OverlapResult.h"
@@ -50,7 +52,7 @@ namespace
 	constexpr float DensityGain = 2.5f;
 	/** A parcel kernel's share of its cell (1: opaque at its core), air and vacuum: tuned to T 0.5 / 0.75 / 0.95 at 0.2 / 1 / 4 s. */
 	constexpr float AirMassScale = 3.0f;
-	constexpr float VacuumMassScale = 0.15f;
+	constexpr float VacuumMassScale = 0.3f;
 	constexpr float KeyShadow = 0.1f;
 	/** The key light's shadow through the render grid (relief), per unit of drawn density along the way. */
 	constexpr float GridKeyShadow = 0.6f;
@@ -130,6 +132,30 @@ void UOSGasSubsystem::Deinitialize()
 void UOSGasSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
+	if (UMaterialInterface* Material = PostMaterial.LoadSynchronous())
+	{
+		const auto FloatTexture = [this](int32 W, int32 H)
+		{
+			UTexture2D* T = UTexture2D::CreateTransient(W, H, PF_A32B32G32R32F);
+			T->SRGB = false;
+			T->Filter = TF_Nearest;
+			T->NeverStream = true;
+			T->UpdateResource();
+			return T;
+		};
+		DataTexture = FloatTexture(MaxDrawn, 7);
+		TunnelTexture = FloatTexture(MaxTunnels, 2);
+		Post = UMaterialInstanceDynamic::Create(Material, this);
+		Post->SetTextureParameterValue(TEXT("GasData"), DataTexture);
+		Post->SetTextureParameterValue(TEXT("Tunnels"), TunnelTexture);
+		FActorSpawnParameters Params;
+		Params.ObjectFlags |= RF_Transient;
+		APostProcessVolume* Volume = InWorld.SpawnActor<APostProcessVolume>(APostProcessVolume::StaticClass(), FTransform::Identity, Params);
+		Volume->bUnbound = true;
+		Volume->Priority = 1000.0f;
+		Volume->Settings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0f, Post));
+		PostVolume = Volume;
+	}
 	// The pool: every cloud's volume, material, textures and grid made now, not on the first shot (a 30 ms frame).
 	Clouds.SetNum(MaxClouds);
 	for (FCloud& Cloud : Clouds)
@@ -183,10 +209,7 @@ void UOSGasSubsystem::ClearClouds()
 		Cloud.Age = -1.0f;
 		Cloud.Parcels.Reset();
 		Cloud.Incoming.Reset();
-		if (Cloud.Volume)
-		{
-			Cloud.Volume->SetVisibility(false);
-		}
+		Cloud.bDrawable = false;
 	}
 	Sources.Reset();
 }
@@ -601,6 +624,7 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 			It.RemoveCurrent();
 		}
 	}
+	UpdatePost();
 	if (bAny)
 	{
 		const double Us = (FPlatformTime::Seconds() - FrameStart) * 1e6;
@@ -632,10 +656,7 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		Cloud.Age = -1.0f;
 		Cloud.Parcels.Reset();
 		Cloud.Incoming.Reset();
-		if (Cloud.Volume)
-		{
-			Cloud.Volume->SetVisibility(false);
-		}
+		Cloud.bDrawable = false;
 		return;
 	}
 	// A burst's first parcels: splatted here, on the game thread, so the shot is seen on its own frame.
@@ -658,10 +679,8 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, Size.X, Size.Y);
 		Cloud.Texture->UpdateTextureRegions(0, 1, Region, Size.X * sizeof(FColor), sizeof(FColor), Data,
 			[](uint8* Src, const FUpdateTextureRegion2D* Regions) { FMemory::Free(Src); delete Regions; });
-		if (Cloud.bHasGas && !Cloud.Volume->IsVisible())
-		{
-			Cloud.Volume->SetVisibility(true);
-		}
+		// Drawn from its first atlas with gas on; off only when the cloud ends (no flicker).
+		Cloud.bDrawable |= Cloud.bHasGas;
 	}
 	// Air or vacuum and gravity where the gas is now.
 	const FVector Centre = Cloud.Origin + FVector(Cloud.DrawnCentre);
@@ -676,7 +695,9 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 	Cloud.StepCarry += DeltaTime;
 	if (!bBusy)
 	{
-		const float Dt = Cloud.Age - Cloud.StepCarry < FastSeconds ? FastStep : SlowStep;
+		// 60 Hz to 0.5 s, 30 Hz to 1 s, 15 Hz to 3 s, 10 Hz after (old gas moves slowly).
+		const float Since = Cloud.Age - Cloud.StepCarry;
+		const float Dt = Since < FastSeconds ? FastStep : Since < 1.0f ? SlowStep : Since < 3.0f ? 1.0f / 15.0f : 0.1f;
 		const int32 Steps = FMath::Min(FMath::FloorToInt(Cloud.StepCarry / Dt + 1e-3f), 4);
 		if (Steps > 0)
 		{
@@ -695,52 +716,157 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		Cloud.KeyDir = (Cloud.KeyDir + (Dir - Cloud.KeyDir) * Ease).GetSafeNormal(UE_SMALL_NUMBER, Dir);
 		Cloud.KeyColour = Cloud.KeyColour + (Colour - Cloud.KeyColour) * Ease;
 	}
-	const float Half = 0.5f * RenderCells * Cloud.RenderCellCm;
-	FVector Eye = Centre, Body = Centre + FVector(1e5f);
-	float BodyRadius = 0.0f;
-	if (const APlayerController* Controller = World->GetFirstPlayerController())
+	// The rest is the post-process's (UpdatePost, once a frame for all clouds).
+}
+
+void UOSGasSubsystem::AmbientFor(bool bAir, FLinearColor& OutTop, FLinearColor& OutBottom) const
+{
+	// ponytail: by the map's name until the zones carry their own (stage 4: a field on the air zone).
+	if (!bAir)
 	{
-		if (Controller->PlayerCameraManager)
+		OutTop = FLinearColor(0.16f, 0.16f, 0.20f);
+		OutBottom = FLinearColor(0.07f, 0.07f, 0.10f);
+		return;
+	}
+	const FString Map = GetWorld()->GetMapName();
+	if (Map.Contains(TEXT("Ship")))
+	{
+		// The ship's room: pink from the ceiling, blue from the snow below the windows.
+		OutTop = FLinearColor(0.92f, 0.62f, 0.72f);
+		OutBottom = FLinearColor(0.42f, 0.62f, 0.78f);
+	}
+	else if (Map.Contains(TEXT("TestRoom")))
+	{
+		OutTop = FLinearColor(0.78f, 0.72f, 0.64f);
+		OutBottom = FLinearColor(0.38f, 0.35f, 0.33f);
+	}
+	else
+	{
+		OutTop = FLinearColor(0.65f, 0.66f, 0.70f);
+		OutBottom = FLinearColor(0.32f, 0.33f, 0.36f);
+	}
+}
+
+void UOSGasSubsystem::UpdatePost()
+{
+	if (!Post)
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	FVector Eye = FVector::ZeroVector;
+	if (const APlayerController* Controller = World->GetFirstPlayerController(); Controller && Controller->PlayerCameraManager)
+	{
+		Eye = Controller->PlayerCameraManager->GetCameraLocation();
+	}
+	// The nearest drawable clouds, MaxDrawn of them.
+	TArray<FCloud*, TInlineAllocator<MaxClouds>> Drawn;
+	for (FCloud& Cloud : Clouds)
+	{
+		if (Cloud.IsAlive() && Cloud.bDrawable)
 		{
-			Eye = Controller->PlayerCameraManager->GetCameraLocation();
-		}
-		if (const APawn* Pawn = Controller->GetPawn())
-		{
-			Body = Pawn->GetActorLocation();
-			float HalfHeight;
-			Pawn->GetSimpleCollisionCylinder(BodyRadius, HalfHeight);
-			BodyRadius = FMath::Clamp(BodyRadius, 15.0f, 45.0f);
+			Drawn.Add(&Cloud);
 		}
 	}
-	const FVector EyeLocal = Eye - Centre, BodyLocal = Body - Centre;
-	const float LifeFade = 1.0f - FMath::SmoothStep(0.6f * Cloud.Look.LifeSeconds, Cloud.Look.LifeSeconds, Cloud.Age);
-	const float EvictFade = Cloud.Evict > 0.0f ? Cloud.Evict / EvictSeconds : 1.0f;
-	UMaterialInstanceDynamic* M = Cloud.Material;
-	M->SetVectorParameterValue(TEXT("CloudCentre"), FLinearColor(FVector3f(Centre)));
-	M->SetVectorParameterValue(TEXT("CloudX"), FLinearColor(1, 0, 0, 0));
-	M->SetVectorParameterValue(TEXT("CloudY"), FLinearColor(0, 1, 0, 0));
-	M->SetVectorParameterValue(TEXT("CloudZ"), FLinearColor(0, 0, 1, 0));
-	M->SetScalarParameterValue(TEXT("HalfCm"), Half);
-	M->SetScalarParameterValue(TEXT("Cells"), float(RenderCells));
-	M->SetScalarParameterValue(TEXT("Age"), Cloud.Age);
-	M->SetScalarParameterValue(TEXT("Life"), Cloud.Look.LifeSeconds);
-	M->SetScalarParameterValue(TEXT("Thin"), 1.0f);
-	// The rags come from the splat's noise now: no erosion in the material.
-	M->SetScalarParameterValue(TEXT("Erode"), 0.0f);
-	M->SetScalarParameterValue(TEXT("Gain"), LifeFade * EvictFade);
-	M->SetScalarParameterValue(TEXT("PixelCm"), 3.0f);
-	M->SetScalarParameterValue(TEXT("AmbientShare"), Cloud.bAir ? 1.0f : 0.0f);
-	M->SetScalarParameterValue(TEXT("Seed"), float(Cloud.Seed % 1000) / 1000.0f);
-	M->SetScalarParameterValue(TEXT("Extinction"), Cloud.Look.Extinction);
-	M->SetScalarParameterValue(TEXT("UnitCm"), Cloud.RenderCellCm);
-	M->SetVectorParameterValue(TEXT("Colour"), Cloud.Look.Colour);
-	M->SetVectorParameterValue(TEXT("WarmColour"), Cloud.Look.WarmColour);
-	M->SetVectorParameterValue(TEXT("KeyColour"), Cloud.KeyColour);
-	M->SetVectorParameterValue(TEXT("Eye"), FLinearColor(EyeLocal.X, EyeLocal.Y, EyeLocal.Z, EyeClearCm));
-	M->SetVectorParameterValue(TEXT("Body"), FLinearColor(BodyLocal.X, BodyLocal.Y, BodyLocal.Z, BodyRadius));
-	Cloud.Volume->SetWorldTransform(FTransform(FQuat::Identity, Centre, FVector(Cloud.RenderCellCm)));
-	UpdateTunnels(Cloud);
+	Drawn.Sort([&Eye](const FCloud& A, const FCloud& B)
+	{
+		return FVector::DistSquared(A.Origin + FVector(A.DrawnCentre), Eye) < FVector::DistSquared(B.Origin + FVector(B.DrawnCentre), Eye);
+	});
+	Drawn.SetNum(FMath::Min(Drawn.Num(), MaxDrawn));
+	// GasData: a column a cloud, seven rows (Scripts/os_muzzle_fx.py, GAS_POST_HLSL).
+	constexpr int32 Rows = 7;
+	TArray<FLinearColor> Data;
+	Data.SetNumZeroed(MaxDrawn * Rows);
+	BoundGrids.SetNum(MaxDrawn);
+	for (int32 Index = 0; Index < Drawn.Num(); ++Index)
+	{
+		const FCloud& Cloud = *Drawn[Index];
+		const FVector Centre = Cloud.Origin + FVector(Cloud.DrawnCentre);
+		const float Half = 0.5f * RenderCells * Cloud.RenderCellCm;
+		const float LifeFade = 1.0f - FMath::SmoothStep(0.6f * Cloud.Look.LifeSeconds, Cloud.Look.LifeSeconds, Cloud.Age);
+		const float EvictFade = Cloud.Evict > 0.0f ? Cloud.Evict / EvictSeconds : 1.0f;
+		// The key light in display terms (the post-process is after the tonemapper): a soft knee, never blown white.
+		const FLinearColor K = Cloud.KeyColour;
+		const FLinearColor Key(1.0f - FMath::Exp(-K.R * 0.8f), 1.0f - FMath::Exp(-K.G * 0.8f), 1.0f - FMath::Exp(-K.B * 0.8f));
+		FLinearColor Top, Bottom;
+		AmbientFor(Cloud.bAir, Top, Bottom);
+		Data[0 * MaxDrawn + Index] = FLinearColor(Centre.X, Centre.Y, Centre.Z, Half);
+		Data[1 * MaxDrawn + Index] = FLinearColor(float(RenderCells), Cloud.RenderCellCm, LifeFade * EvictFade, Cloud.Look.Extinction);
+		Data[2 * MaxDrawn + Index] = Key;
+		Data[3 * MaxDrawn + Index] = Cloud.Look.Colour;
+		Data[4 * MaxDrawn + Index] = Cloud.Look.bEmbers ? Cloud.Look.WarmColour : FLinearColor::Black;
+		Data[5 * MaxDrawn + Index] = Top;
+		Data[6 * MaxDrawn + Index] = Bottom;
+		if (BoundGrids[Index] != Cloud.Texture)
+		{
+			BoundGrids[Index] = Cloud.Texture;
+			Post->SetTextureParameterValue(FName(*FString::Printf(TEXT("Grid%d"), Index)), Cloud.Texture);
+		}
+	}
+	{
+		uint8* Bytes = static_cast<uint8*>(FMemory::Malloc(Data.Num() * sizeof(FLinearColor)));
+		FMemory::Memcpy(Bytes, Data.GetData(), Data.Num() * sizeof(FLinearColor));
+		FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, MaxDrawn, Rows);
+		DataTexture->UpdateTextureRegions(0, 1, Region, MaxDrawn * sizeof(FLinearColor), sizeof(FLinearColor), Bytes,
+			[](uint8* Src, const FUpdateTextureRegion2D* Regions) { FMemory::Free(Src); delete Regions; });
+	}
+	Post->SetScalarParameterValue(TEXT("CloudCount"), float(Drawn.Num()));
+	// Tunnels (world), healing, and the bodies in the drawn clouds (a negative radius).
+	TArray<FLinearColor> TRows;
+	TRows.SetNumZeroed(MaxTunnels * 2);
+	int32 Count = 0;
+	for (const FTunnel& T : Tunnels)
+	{
+		if (Count >= MaxTunnels)
+		{
+			break;
+		}
+		const float Slow = T.bVacuum ? 2.0f : 1.0f;
+		const float Heal = FMath::SmoothStep(0.8f * Slow, 3.3f * Slow, T.Age);
+		const float Ragged = FMath::SmoothStep(0.8f * Slow, (0.8f + 1.25f) * Slow, T.Age) * 0.75f;
+		if (T.RadiusCm * (1.0f - Heal) < 0.3f)
+		{
+			continue;
+		}
+		TRows[Count] = FLinearColor(T.Start.X, T.Start.Y, T.Start.Z, T.RadiusCm * (1.0f - Heal));
+		TRows[MaxTunnels + Count] = FLinearColor(T.End.X, T.End.Y, T.End.Z, Ragged);
+		++Count;
+	}
+	for (const FCloud* Cloud : Drawn)
+	{
+		for (const FOSSmokeSim::FMover& M : Cloud->Movers)
+		{
+			if (Count < MaxTunnels && M.Extent.IsZero())
+			{
+				const FVector C = Cloud->Origin + FVector(M.Centre);
+				TRows[Count] = FLinearColor(C.X, C.Y, C.Z, -M.RadiusCm);
+				TRows[MaxTunnels + Count] = FLinearColor(C.X, C.Y, C.Z, 0.0f);
+				++Count;
+			}
+		}
+	}
+	{
+		uint8* Bytes = static_cast<uint8*>(FMemory::Malloc(TRows.Num() * sizeof(FLinearColor)));
+		FMemory::Memcpy(Bytes, TRows.GetData(), TRows.Num() * sizeof(FLinearColor));
+		FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, MaxTunnels, 2);
+		TunnelTexture->UpdateTextureRegions(0, 1, Region, MaxTunnels * sizeof(FLinearColor), sizeof(FLinearColor), Bytes,
+			[](uint8* Src, const FUpdateTextureRegion2D* Regions) { FMemory::Free(Src); delete Regions; });
+	}
+	Post->SetScalarParameterValue(TEXT("TunnelCount"), float(Count));
+	for (FCloud* Cloud : Drawn)
+	{
+		Cloud->TunnelCount = Count;
+	}
+	// The screen block: round(H / 270) px (4 at 1080p) - the same block at the muzzle and at 5 m.
+	FVector2D View(1920.0, 1080.0);
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->GetViewportSize(View);
+	}
+	Post->SetScalarParameterValue(TEXT("BlockPx"), FMath::Max(1.0f, FMath::RoundToFloat(float(View.Y) / 270.0f)));
+	Post->SetScalarParameterValue(TEXT("EyeClear"), EyeClearCm);
 }
+
 
 void UOSGasSubsystem::LaunchStep(FCloud& Cloud, int32 Steps, float Dt)
 {
@@ -1273,6 +1399,10 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			for (int32 X = Lo.X; X <= Hi.X; ++X)
 			{
 				const int32 I = (Z * N + Y) * N + X;
+				if (D[I] <= 1e-4f)
+				{
+					continue;
+				}
 				const float Dens = FMath::Min(D[I] * DensityGain, 1.0f);
 				const float Around = At(X + 2, Y, Z) + At(X - 2, Y, Z) + At(X, Y + 2, Z) + At(X, Y - 2, Z) + At(X, Y, Z + 2) + At(X, Y, Z - 2);
 				const float Heat = W[I] > 1e-4f ? H[I] / W[I] : 0.0f;
@@ -1318,115 +1448,20 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 
 void UOSGasSubsystem::EnsureRender(FCloud& Cloud)
 {
-	if (Cloud.Volume)
+	if (Cloud.Texture)
 	{
 		return;
 	}
-	UWorld* World = GetWorld();
-	if (!Host)
-	{
-		FActorSpawnParameters Params;
-		Params.ObjectFlags |= RF_Transient;
-		Host = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity, Params);
-		USceneComponent* Root = NewObject<USceneComponent>(Host, TEXT("GasRoot"));
-		Host->SetRootComponent(Root);
-		Root->RegisterComponent();
-	}
-	UHeterogeneousVolumeComponent* Volume = NewObject<UHeterogeneousVolumeComponent>(Host);
-	Volume->SetUsingAbsoluteLocation(true);
-	Volume->SetUsingAbsoluteRotation(true);
-	Volume->SetUsingAbsoluteScale(true);
-	Volume->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Volume->bPivotAtCentroid = true;
-	Volume->LightingDownsampleFactor = 1.0f;
-	Volume->StepFactor = 1.0f;
-	Volume->ShadowStepFactor = 1.0f;
-	Volume->RegisterComponent();
-	Volume->SetVolumeResolution(FIntVector(RenderCells));
-	Volume->SetVisibility(false);
-	UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(CloudMaterial.LoadSynchronous(), Host);
-	Volume->SetMaterial(0, Material);
 	const FIntPoint Size = FOSSmokeSim::AtlasSize(RenderCells);
 	UTexture2D* Texture = UTexture2D::CreateTransient(Size.X, Size.Y, PF_B8G8R8A8);
 	Texture->SRGB = false;
 	Texture->Filter = TF_Bilinear;
+	Texture->AddressX = TA_Clamp;
+	Texture->AddressY = TA_Clamp;
 	Texture->NeverStream = true;
 	Texture->UpdateResource();
-	Material->SetTextureParameterValue(TEXT("Grid"), Texture);
-	Cloud.Volume = Volume;
-	Cloud.Material = Material;
 	Cloud.Texture = Texture;
-	Keep.Add(Volume);
-	Keep.Add(Material);
 	Keep.Add(Texture);
-}
-
-void UOSGasSubsystem::UpdateTunnels(FCloud& Cloud)
-{
-	const FVector Centre = Cloud.Origin + FVector(Cloud.DrawnCentre);
-	const float Half = 0.5f * RenderCells * Cloud.RenderCellCm;
-	TArray<FLinearColor, TInlineAllocator<MaxTunnels * 2>> Rows;
-	Rows.SetNumZeroed(MaxTunnels * 2);
-	int32 Count = 0;
-	for (const FTunnel& T : Tunnels)
-	{
-		if (Count >= MaxTunnels || Cloud.Age < T.Age + 0.15f)
-		{
-			continue;
-		}
-		const FVector Closest = FMath::ClosestPointOnSegment(Centre, T.Start, T.End);
-		if (FVector::Dist(Closest, Centre) > Half * 1.74f + T.RadiusCm)
-		{
-			continue;
-		}
-		const float Slow = T.bVacuum ? 2.0f : 1.0f;
-		const float Heal = FMath::SmoothStep(0.8f * Slow, 3.3f * Slow, T.Age);
-		const float Ragged = FMath::SmoothStep(0.8f * Slow, (0.8f + 1.25f) * Slow, T.Age) * 0.75f;
-		if (T.RadiusCm * (1.0f - Heal) < 0.3f)
-		{
-			continue;
-		}
-		const FVector A = T.Start - Centre, B = T.End - Centre;
-		Rows[Count] = FLinearColor(A.X, A.Y, A.Z, T.RadiusCm * (1.0f - Heal));
-		Rows[MaxTunnels + Count] = FLinearColor(B.X, B.Y, B.Z, Ragged);
-		++Count;
-	}
-	for (const FOSSmokeSim::FMover& M : Cloud.Movers)
-	{
-		if (Count >= MaxTunnels || !M.Extent.IsZero())
-		{
-			continue;
-		}
-		const FVector C = Cloud.Origin + FVector(M.Centre) - Centre;
-		Rows[Count] = FLinearColor(C.X, C.Y, C.Z, -M.RadiusCm);
-		Rows[MaxTunnels + Count] = FLinearColor(C.X, C.Y, C.Z, 0.0f);
-		++Count;
-	}
-	if (Count == 0 && Cloud.TunnelCount == 0)
-	{
-		return;
-	}
-	if (!Cloud.TunnelTexture)
-	{
-		UTexture2D* Texture = UTexture2D::CreateTransient(MaxTunnels, 2, PF_A32B32G32R32F);
-		Texture->SRGB = false;
-		Texture->Filter = TF_Nearest;
-		Texture->NeverStream = true;
-		Texture->UpdateResource();
-		Cloud.TunnelTexture = Texture;
-		Keep.Add(Texture);
-		Cloud.Material->SetTextureParameterValue(TEXT("Tunnels"), Texture);
-	}
-	Cloud.TunnelCount = Count;
-	Cloud.Material->SetScalarParameterValue(TEXT("TunnelCount"), float(Count));
-	if (Count > 0)
-	{
-		uint8* Data = static_cast<uint8*>(FMemory::Malloc(Rows.Num() * sizeof(FLinearColor)));
-		FMemory::Memcpy(Data, Rows.GetData(), Rows.Num() * sizeof(FLinearColor));
-		FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, MaxTunnels, 2);
-		Cloud.TunnelTexture->UpdateTextureRegions(0, 1, Region, MaxTunnels * sizeof(FLinearColor), sizeof(FLinearColor), Data,
-			[](uint8* Src, const FUpdateTextureRegion2D* Regions) { FMemory::Free(Src); delete Regions; });
-	}
 }
 
 void UOSGasSubsystem::FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey<UPrimitiveComponent>>& Seen)

@@ -349,6 +349,194 @@ def _volume(m, node, custom, data, scalar, colour, mul):
     mel.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 
+# The gas, v11 stage 3 (Docs/RecoilWeapons-SmokeV11.md): a post-process After Tonemapping - after DLAA (the spike: the
+# Before Tonemapping point is before it in 5.8 and smears the edges) - marches up to 6 clouds' render grids
+# (UOSGasSubsystem atlases, Grid0..5; their boxes, colours and light in GasData, a float texture: column = cloud,
+# rows 0 centre + half, 1 cells + cell cm + gain + extinction, 2 key light, 3 colour, 4 warm colour, 5 ambient top,
+# 6 ambient bottom) against the scene depth of every pixel: the gun and a barrel hide the gas with their own crisp
+# edges. The density is read once per screen block (BlockPx: round(H / 270), 4 px at 1080p, the same at the muzzle and
+# at 5 m), cut into 4 bands by a stable per-block hash. Tunnels and bodies (Tunnels: row 0 start + radius, row 1 end +
+# ragged; a negative radius a body) skip their stretch of the ray. Colours are display colours (after the tonemapper:
+# no exposure, no bloom on the gas).
+GAS_POST_HLSL = """
+float3 toPix = W - Cam;
+float sceneDist = length(toPix);
+float3 dirP = toPix / max(sceneDist, 1e-3);
+float B = max(BlockPx, 1.0);
+float2 px = Parameters.SvPosition.xy;
+float2 bc = floor(px / B) * B + 0.5 * B;
+float3 dir = normalize(dirP + ddx(dirP) * (bc.x - px.x) + ddy(dirP) * (bc.y - px.y));
+float jit = frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453);
+float2 holes[8];
+int nh = 0;
+int nt = (int)(TN + 0.5);
+[loop] for (int k = 0; k < nt && nh < 8; k++)
+{
+    float4 ta = Tun.Load(int3(k, 0, 0));
+    float4 tb = Tun.Load(int3(k, 1, 0));
+    float r = abs(ta.w) * (ta.w > 0 ? 1.0 - 0.5 * tb.w : 1.0);
+    if (r < 0.3) continue;
+    // The ray against the tunnel's cylinder (start ta, end tb), clipped to its ends; a body (negative radius) a sphere.
+    float3 u = tb.xyz - ta.xyz;
+    float L = length(u);
+    float3 m = Cam - ta.xyz;
+    float2 iv = float2(1e9, -1e9);
+    if (ta.w < 0 || L < 1e-3)
+    {
+        float bq = dot(m, dir);
+        float cq = dot(m, m) - r * r;
+        float disc = bq * bq - cq;
+        if (disc > 0) { float sq = sqrt(disc); iv = float2(-bq - sq, -bq + sq); }
+    }
+    else
+    {
+        float3 ax = u / L;
+        float da = dot(dir, ax), ma = dot(m, ax);
+        float3 dp = dir - ax * da, mp = m - ax * ma;
+        float A = dot(dp, dp), Bq = dot(dp, mp), Cq = dot(mp, mp) - r * r;
+        float2 side = float2(-1e9, 1e9);
+        if (A > 1e-6)
+        {
+            float disc = Bq * Bq - A * Cq;
+            side = disc > 0 ? float2((-Bq - sqrt(disc)) / A, (-Bq + sqrt(disc)) / A) : float2(1e9, -1e9);
+        }
+        else if (Cq > 0)
+        {
+            side = float2(1e9, -1e9);
+        }
+        float2 caps = float2(-1e9, 1e9);
+        if (abs(da) > 1e-6)
+        {
+            float c0 = (0.0 - ma) / da, c1 = (L - ma) / da;
+            caps = float2(min(c0, c1), max(c0, c1));
+        }
+        else if (ma < 0 || ma > L)
+        {
+            caps = float2(1e9, -1e9);
+        }
+        iv = float2(max(side.x, caps.x), min(side.y, caps.y));
+    }
+    if (iv.y > iv.x && iv.y > 0)
+    {
+        holes[nh] = iv;
+        nh++;
+    }
+}
+float T = 1.0;
+float3 acc = 0;
+int nc = (int)(CC + 0.5);
+[loop] for (int c = 0; c < nc; c++)
+{
+    float4 d0 = Data.Load(int3(c, 0, 0));
+    float4 d1 = Data.Load(int3(c, 1, 0));
+    float3 C = d0.xyz;
+    float H = d0.w;
+    float n = d1.x, cell = d1.y, gain = d1.z, ext = d1.w;
+    if (gain <= 0.0 || H <= 0.0) continue;
+    float3 key = Data.Load(int3(c, 2, 0)).rgb;
+    float3 base = Data.Load(int3(c, 3, 0)).rgb;
+    float3 warm = Data.Load(int3(c, 4, 0)).rgb;
+    float3 top = Data.Load(int3(c, 5, 0)).rgb;
+    float3 bot = Data.Load(int3(c, 6, 0)).rgb;
+    float3 o = Cam - C;
+    float3 inv = 1.0 / dir;
+    float3 t0 = (-H - o) * inv, t1 = (H - o) * inv;
+    float3 tn = min(t0, t1), tf = max(t0, t1);
+    float a = max(max(max(tn.x, tn.y), tn.z), EyeClear);
+    float b = min(min(min(tf.x, tf.y), tf.z), sceneDist);
+    if (b <= a) continue;
+    float stepCm = max(cell, 1.5);
+    int ns = min((int)((b - a) / stepCm) + 1, 128);
+    float2 atlas = float2(8.0 * n, ceil(n / 8.0) * n);
+    [loop] for (int s = 0; s < ns; s++)
+    {
+        float t = a + (s + jit) * stepCm;
+        if (t > b) break;
+        bool hole = false;
+        for (int q = 0; q < nh; q++) { hole = hole || (t > holes[q].x && t < holes[q].y); }
+        if (hole) continue;
+        float3 p = Cam + dir * t - C;
+        float3 g = clamp((p + H) / cell - 0.5, 0.0, n - 1.001);
+        float z0 = floor(g.z);
+        float z1 = min(z0 + 1.0, n - 1.0);
+        float2 xy = clamp(g.xy + 0.5, 0.5, n - 0.5);
+        float2 uv0 = (float2(fmod(z0, 8.0) * n, floor(z0 / 8.0) * n) + xy) / atlas;
+        float2 uv1 = (float2(fmod(z1, 8.0) * n, floor(z1 / 8.0) * n) + xy) / atlas;
+        float4 s0, s1;
+        if (c == 0) { s0 = G0.SampleLevel(G0Sampler, uv0, 0); s1 = G0.SampleLevel(G0Sampler, uv1, 0); }
+        else if (c == 1) { s0 = G1.SampleLevel(G1Sampler, uv0, 0); s1 = G1.SampleLevel(G1Sampler, uv1, 0); }
+        else if (c == 2) { s0 = G2.SampleLevel(G2Sampler, uv0, 0); s1 = G2.SampleLevel(G2Sampler, uv1, 0); }
+        else if (c == 3) { s0 = G3.SampleLevel(G3Sampler, uv0, 0); s1 = G3.SampleLevel(G3Sampler, uv1, 0); }
+        else if (c == 4) { s0 = G4.SampleLevel(G4Sampler, uv0, 0); s1 = G4.SampleLevel(G4Sampler, uv1, 0); }
+        else { s0 = G5.SampleLevel(G5Sampler, uv0, 0); s1 = G5.SampleLevel(G5Sampler, uv1, 0); }
+        float4 v = lerp(s0, s1, g.z - z0);
+        float dens = v.r * gain;
+        if (dens < 0.01) continue;
+        float aStep = 1.0 - exp(-ext * dens * stepCm);
+        float3 amb = lerp(bot, top, saturate(0.5 + 0.5 * p.z / H));
+        float3 col = base * 1.5 * (amb * (0.35 + 0.65 * v.a) + key * v.b) + warm * v.g * v.g;
+        acc += T * aStep * col;
+        T *= 1.0 - aStep;
+        if (T < 0.02) break;
+    }
+}
+float alpha = 1.0 - T;
+float hb = frac(sin(dot(floor(px / B), float2(41.3, 289.1))) * 43758.5453);
+// The faint tail off (no snow of lone blocks), the threshold's spread halved: stable bands, few stray blocks.
+float aq = alpha < 0.08 ? 0.0 : floor(alpha * 4.0 + 0.25 + 0.5 * hb) / 4.0;
+float3 smoke = alpha > 1e-3 ? acc / alpha : float3(0, 0, 0);
+return float4(lerp(Col.rgb, smoke, aq), 1);
+"""
+
+
+def _gas_post():
+    name = "M_OS_GasPost"
+    path = FOLDER + "/" + name
+    if eal.does_asset_exist(path):
+        m = unreal.load_asset(path)
+        mel.delete_all_material_expressions(m)
+    else:
+        m = unreal.AssetToolsHelpers.get_asset_tools().create_asset(name, FOLDER, unreal.Material, unreal.MaterialFactoryNew())
+    m.set_editor_property("material_domain", unreal.MaterialDomain.MD_POST_PROCESS)
+    m.set_editor_property("blendable_location", unreal.BlendableLocation.BL_SCENE_COLOR_AFTER_TONEMAPPING)
+    y = [0]
+
+    def node(cls, **props):
+        y[0] += 120
+        n = mel.create_material_expression(m, cls, -900, y[0])
+        for k, v in props.items():
+            n.set_editor_property(k, v)
+        return n
+
+    def tex(pname):
+        return node(unreal.MaterialExpressionTextureObjectParameter, parameter_name=pname,
+                    texture=unreal.load_asset("/Engine/EngineResources/DefaultTexture"))
+
+    inputs = {
+        "Col": node(unreal.MaterialExpressionSceneTexture, scene_texture_id=unreal.SceneTextureId.PPI_POST_PROCESS_INPUT0),
+        "W": node(unreal.MaterialExpressionWorldPosition),
+        "Cam": node(unreal.MaterialExpressionCameraPositionWS),
+        "Data": tex("GasData"),
+        "Tun": tex("Tunnels"),
+        "CC": node(unreal.MaterialExpressionScalarParameter, parameter_name="CloudCount", default_value=0.0),
+        "TN": node(unreal.MaterialExpressionScalarParameter, parameter_name="TunnelCount", default_value=0.0),
+        "BlockPx": node(unreal.MaterialExpressionScalarParameter, parameter_name="BlockPx", default_value=4.0),
+        "EyeClear": node(unreal.MaterialExpressionScalarParameter, parameter_name="EyeClear", default_value=20.0),
+    }
+    for i in range(6):
+        inputs["G%d" % i] = tex("Grid%d" % i)
+    n = node(unreal.MaterialExpressionCustom, code=GAS_POST_HLSL, description="GasPost",
+             output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT4, inputs=[_input(k) for k in inputs])
+    for k, src in inputs.items():
+        pin = "Color" if k == "Col" else ""
+        if not mel.connect_material_expressions(src, pin, n, k):
+            raise RuntimeError("link failed: " + k)
+    mel.connect_material_property(n, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    mel.recompile_material(m)
+    os_build.save(path)
+    unreal.log("muzzle fx material: " + path)
+
+
 def build():
     _material("M_OS_MuzzleFlash", unreal.BlendMode.BLEND_ADDITIVE, _flash)
     _material("M_OS_MuzzleSmoke", unreal.BlendMode.BLEND_TRANSLUCENT, _smoke)
@@ -356,7 +544,9 @@ def build():
     # (HeterogeneousVolumesLiveShadingUtils.ush, SampleExtinctionCoefficients: not for an Unlit material), and the
     # pin is compiled only for a subsurface shading model. Until 22.10 it was Unlit - no extinction, no
     # self-shadow, no scattering: the cloud was its emission alone (the milky veil).
-    _material("M_OS_MuzzleSmokeVolume", unreal.BlendMode.BLEND_ADDITIVE, _volume, unreal.MaterialShadingModel.MSM_SUBSURFACE)
+    # v11 stage 3: the gas is drawn by the post-process M_OS_GasPost; the volume material is no longer built (the asset
+    # stays until the old cloud code goes).
+    _gas_post()
 
 
 if __name__ == "__main__":
