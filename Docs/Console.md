@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 100 команд, 8 переменных.
+Всего: 106 команд, 11 переменных.
 
 ## `os.Attach`
 
@@ -40,6 +40,7 @@
 | `os.Debug.FixedStep` | `<Hz\|0>` | os.Debug.FixedStep <Hz\|0>: fixed simulation step (FApp), 0 = off. | `Source/MindKore/OSDebug.cpp` |
 | `os.Debug.Fps` | `<N\|0>` | os.Debug.Fps <N\|0>: frame-rate cap (UGameUserSettings + t.MaxFPS), 0 = none. | `Source/MindKore/OSDebug.cpp` |
 | `os.Debug.Get` | `<key>` | os.Debug.Get <key>: a parameter's value, and its original if changed. | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.GiveGun` | `<pistol\|shotgun\|sv98\|rmb93\|all>` | os.Debug.GiveGun <pistol\|shotgun\|sv98\|rmb93\|all>: the player gets that gun on any map (the menu's «Оружие» buttons). | `Source/MindKore/OSDebug.cpp` |
 | `os.Debug.Gravity` | `<scale>` | os.Debug.Gravity <scale>: every zone's gravity times this (0 = zero-G everywhere). | `Source/MindKore/OSDebug.cpp` |
 | `os.Debug.Group` | — | Debug menu: open the groups of the current tab whose name has this text; 'all' opens them all, 'none' folds every group (remembered in Saved/OSDebug/OpenGroups.txt). | `Source/MindKore/OSDebug.cpp` |
 | `os.Debug.Hitch` | `<ms> <s>` | os.Debug.Hitch <ms> <s>: a frame of <ms> every <s> seconds of real time (0 ms = off). | `Source/MindKore/OSDebug.cpp` |
@@ -83,6 +84,11 @@
 | Команда | Аргументы | Что делает | Файл |
 |---|---|---|---|
 | `os.Fx.ClearSmoke` | — | Remove every muzzle smoke cloud of the player (stills). | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Fx.MoverStill` | `[after s]` | [after s] Wait for the player's next smoke cloud (0.6 s old), throw the nearest simulating prop through it across the view at 3.5 m/s, HighResShot OSMover_0100/0250/0500ms. | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Fx.SmokeCost` | — | Log what the smoke grids cost since the last call - a step (on a worker thread): mean / max us; the game thread in a frame with a grid stepping (waiting for the steps, the box, the upload): mean / max us - then start over. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Fx.SmokeStamp` (переменная) | значение (умолч. `1`) | 1: a shot's first frame of gas is laid into its grid on the game thread (seen on the shot's frame); 0: only the grid's step lays it (a frame later). | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Fx.SmokeTune` (переменная) | значение (умолч. `TEXT("")`) | Tuning overrides: 'Field=Value ...' on every gun's FOSMuzzleFx (Sim.Buoyancy=300) and mat.<Param>=Value (or R/G/B) on the cloud material. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Fx.TunnelStill` | `[after s]` | [after s] Wait (from world time 'after') for the player's next smoke cloud (0.6 s old), carve a 3 x 3 grid of tunnels along the view through it (CarveRay, 7 cm), HighResShot OSTunnels_0/1000/2000ms. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Fx.VolumetricSmoke` (переменная) | значение (умолч. `1`) | 1: muzzle smoke as volumetric voxel clouds (heterogeneous volumes); 0: card puffs. Both live in the world. | `Source/MindKore/OSMuzzleFx.cpp` |
 
 ## `os.Gravity`
@@ -135,10 +141,10 @@
 
 ## `os.Laser`
 
-| Команда | Аргументы | Что делает | Где |
+| Команда | Аргументы | Что делает | Файл |
 |---|---|---|---|
+| `os.Laser.Mask` (переменная) | значение (умолч. `0`) | 1: show the laser's view of the gun on the HUD - the gun's mask over the beam in blue, the lens in green (yellow: no mask, the boxes' fallback). | `Source/MindKore/OSLaserSight.cpp` |
 | `os.Laser.Tint` | `[N]` | os.Laser.Tint [N]: the laser's colour from its palette (0-5: red, green, blue, sodium, black light, IR); no N: the next one. | `Source/MindKore/OSLaserSight.cpp` |
-| `os.Laser.Mask` | `0` / `1` | 1: on the HUD, the laser's view of the gun - the gun's mask over the beam in blue, the lens in green (yellow: no mask, the boxes' fallback). Console variable. | `Source/MindKore/OSLaserSight.cpp` |
 
 ## `os.Move`
 
@@ -211,6 +217,7 @@
 | `os.Weapons.Fx` | — | First-person stills of each gun's muzzle flash frame by frame (60 fps frames 0-12 at time dilation 0.01), its smoke over 3 s and two more bursts (HighResShot; needs a real RHI). 'space': look away from the wall. | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Weapons.MagFrames` | — | The USP's and the SV-98's magazine drop and insert in first person at 60 fps (HighResShot; needs a real RHI). | `Source/MindKore/OSWeaponParts.cpp` |
 | `os.Weapons.MagTrace` | — | Log the magazines' pose on the gun every 1/60 s through the reload. | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.PortSmoke` | — | The RMB-93's shroud smoke up close on Lvl_OS_TestRoom (HighResShot OSPorts_*; needs a real RHI, -UseFixedTimeStep -FPS=60): three quick shots, stills 0.2-2 s after, two more and a turn. *не в Shipping* | `Source/MindKore/OSPortSmokeStand.cpp` |
 | `os.Weapons.PoseAt` (переменная) | значение (умолч. `-1.0f`) | Hold the gun in view (kick and moving part) this many seconds after its last shot; < 0: live. | `Source/MindKore/OSWeapons.cpp` |
 | `os.Weapons.PoseTrace` | — | Log the guns' pose springs and part curves every 10 ms through a cycle and a reload. | `Source/MindKore/OSWeaponParts.cpp` |
 | `os.Weapons.ReloadPoseAt` (переменная) | значение (умолч. `-1.0f`) | Hold the gun in view this many seconds into a reload (a round-by-round gun loads two rounds); < 0: live. | `Source/MindKore/OSWeaponParts.cpp` |
@@ -219,7 +226,7 @@
 | `os.Weapons.SlideFrames` | — | The USP's slide locking open on the last round and released in the empty reload, stills every 33 ms (HighResShot; needs a real RHI). | `Source/MindKore/OSWeaponParts.cpp` |
 | `os.Weapons.SlideProbe` | — | The USP's slide stop live: locked open on the last round, a dead trigger, switches, the empty reload's release, the tactical reload unchanged (PASS / FAIL). | `Source/MindKore/OSWeaponParts.cpp` |
 | `os.Weapons.SlideTake` | — | The USP's slide stop recorded for listening: the last shot, the empty reload with the release, the release only (Saved/Clips/SlideTake.wav and .csv). | `Source/MindKore/OSWeaponParts.cpp` |
-| `os.Weapons.Smoke` | — | Stills of the smoke's moments in play on Lvl_OS_Range (run with -UseFixedTimeStep -FPS=60): on foot, holding on, a pistol burst, an SV-98 shot drifting off and back (or only those named: foot, cling, burst, sv98). 'budget': three shotgun clouds on the os.Weapons.Fx stand, then ProfileGPU. | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Weapons.Smoke` | — | Stills of the smoke's moments in play on Lvl_OS_Range (run with -UseFixedTimeStep -FPS=60): on foot, holding on, a pistol burst, an SV-98 shot drifting off and back (or only those named: foot, cling, burst, sv98). 'budget': three shotgun clouds on the os.Weapons.Fx stand, then ProfileGPU. 'room': the RMB-93 at the floor of Lvl_OS_TestRoom, 'roomspace': the same shot on Lvl_OS_ZeroG into the black. | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Weapons.StowPoseAt` (переменная) | значение (умолч. `-1.0f`) | Hold the gun in view this many seconds into its put-away; < 0: live. | `Source/MindKore/OSWeaponParts.cpp` |
 | `os.Weapons.SwitchFrames` | — | Every gun put away and drawn, stills every 33 ms (os.Weapons.StowPoseAt / DrawPoseAt; HighResShot, needs a real RHI). | `Source/MindKore/OSWeaponParts.cpp` |
 | `os.Weapons.SwitchProbe` | — | Live switching with quick changes of mind and a holster/draw, logged every frame with the largest pose jump. | `Source/MindKore/OSWeaponParts.cpp` |
