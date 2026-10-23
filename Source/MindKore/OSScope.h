@@ -104,6 +104,10 @@ struct FOSGunAim
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Aim", meta = (ClampMin = "0.0"))
 	float ZeroCm = 1500.0f;
 
+	/** The zero's point of aim over the front sight point, cm up in the gun's mesh: the dot sits on the blade's top, not on its insert (hidden by the blade). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Aim")
+	float ZeroOverFrontCm = 0.0f;
+
 	/** Eye to the rear sight when aimed, cm: more than the 10 cm near clip plane, with room for the kick. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Aim", meta = (ClampMin = "10.0"))
 	float EyeCm = 20.0f;

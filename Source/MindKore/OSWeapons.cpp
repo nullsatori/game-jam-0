@@ -568,7 +568,10 @@ FTransform UOSWeaponsComponent::GetMuzzleTransform() const
 		const FVector Sight = (Aim.SightFrontCm - Aim.SightRearCm).GetSafeNormal();
 		if (Aim.ZeroCm > 0.0f && !Sight.IsNearlyZero())
 		{
-			const FVector ZeroAt = ViewModel->GetComponentTransform().TransformPosition(Aim.SightRearCm + Sight * (Aim.ZeroCm - Aim.EyeCm));
+			// The aimed eye, and its ray over the front sight (ZeroOverFrontCm above it) out to the zero.
+			const FVector EyeAt = Aim.SightRearCm - Sight * Aim.EyeCm;
+			const FVector OverFront = (Aim.SightFrontCm + FVector::UpVector * Aim.ZeroOverFrontCm - EyeAt).GetSafeNormal();
+			const FVector ZeroAt = ViewModel->GetComponentTransform().TransformPosition(EyeAt + OverFront * Aim.ZeroCm);
 			const FVector Toward = (ZeroAt - Location).GetSafeNormal();
 			// Only a small regulation (a few degrees): sight data far off the bore is left alone.
 			if ((Toward | Bore.GetAxisX()) > 0.995)

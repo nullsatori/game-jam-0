@@ -715,18 +715,29 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 	const bool bDot = bDotHit && bDotSeen && OSProjectToHud(Camera, Canvas, DotAt, false, Dot2D);
 	FVector2D Ghost2D;
 	const bool bGhostShown = bGhost && bDotHit && OSProjectToHud(Camera, Canvas, GhostAt, false, Ghost2D);
-	// The gun's own depth on the grid over the beam (and the ghost): the beam leaves from behind its silhouette exactly.
+	// The gun's own depth on the grid over the beam, the ghost and the dot: the beam leaves from behind its silhouette
+	// exactly, and the gun hides the dot and the ghost behind it (owner 23.10: aimed, the dot rode over the rear sight).
 	bool bMask = false;
 	FVector2D Lens2D = FVector2D::ZeroVector;
 	FVector2D End2D;
+	FBox2D Reach(ForceInit);
 	if (bThreadShown && OSProjectToHud(Camera, Canvas, LensAt, true, Lens2D) && OSProjectToHud(Camera, Canvas, BeamEnd, true, End2D))
 	{
-		FBox2D Reach(Lens2D / Texel, Lens2D / Texel);
+		Reach += Lens2D / Texel;
 		Reach += End2D / Texel;
-		if (bGhostShown)
-		{
-			Reach += Ghost2D / Texel;
-		}
+	}
+	if (bGhostShown)
+	{
+		Reach += Ghost2D / Texel;
+	}
+	if (bDot)
+	{
+		// The dot's glow and speckle reach (at most 24 texels; DrawHud's Span).
+		Reach += Dot2D / Texel - FVector2D(25.0, 25.0);
+		Reach += Dot2D / Texel + FVector2D(25.0, 25.0);
+	}
+	if (Reach.bIsValid)
+	{
 		const FIntRect Region(
 			FMath::Max(0, FMath::FloorToInt32(float(Reach.Min.X)) - 3), FMath::Max(0, FMath::FloorToInt32(float(Reach.Min.Y)) - 3),
 			FMath::Min(FMath::CeilToInt32(Canvas.ClipX / Texel), FMath::CeilToInt32(float(Reach.Max.X)) + 4),
@@ -912,7 +923,10 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 					Core = FMath::Exp(-FMath::Square(R) * 1.4f);
 				}
 				const float Glow = GlowShare * FMath::Exp(-float(P.SizeSquared()) / (2.0f * GlowTexels * GlowTexels));
-				Frame.Add(X, Y, FMath::Lerp(GlowColour, Hot, FMath::Clamp(Core * CoreShare * 1.2f - 0.3f, 0.0f, 1.0f)), (Core * CoreShare + Glow) * Drive);
+				if (!GunBefore(X, Y, UE_BIG_NUMBER))
+				{
+					Frame.Add(X, Y, FMath::Lerp(GlowColour, Hot, FMath::Clamp(Core * CoreShare * 1.2f - 0.3f, 0.0f, 1.0f)), (Core * CoreShare + Glow) * Drive);
+				}
 			}
 		}
 		if (SpeckleShare > 0.0f)
@@ -925,7 +939,12 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 				const float Angle = UE_TWO_PI * OSProjectorHash(Seed, 3301);
 				const float Out = 0.3f + 0.8f * OSProjectorHash(Seed, 4409);
 				const FVector2D At = Centre + (AxisU * FMath::Cos(Angle) + AxisV * FMath::Sin(Angle)) * Out;
-				Frame.Add(FMath::FloorToInt32(float(At.X)), FMath::FloorToInt32(float(At.Y)), Hot, SpeckleShare * Drive);
+				const int32 GX = FMath::FloorToInt32(float(At.X));
+				const int32 GY = FMath::FloorToInt32(float(At.Y));
+				if (!GunBefore(GX, GY, UE_BIG_NUMBER))
+				{
+					Frame.Add(GX, GY, Hot, SpeckleShare * Drive);
+				}
 			}
 		}
 		// The streak as the dot sweeps the screen: back toward last frame's place, a hair thin and at most TrailTexels long,
@@ -948,10 +967,17 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 					const float FX = float(At.X) - X;
 					const float FY = float(At.Y) - Y;
 					const float Level = TrailShare * Drive * (1.0f - S) * float(Length) / Steps;
-					Frame.Add(X, Y, RedColour, Level * (1.0f - FX) * (1.0f - FY));
-					Frame.Add(X + 1, Y, RedColour, Level * FX * (1.0f - FY));
-					Frame.Add(X, Y + 1, RedColour, Level * (1.0f - FX) * FY);
-					Frame.Add(X + 1, Y + 1, RedColour, Level * FX * FY);
+					const auto Splat = [&](int32 TX, int32 TY, float Share)
+					{
+						if (!GunBefore(TX, TY, UE_BIG_NUMBER))
+						{
+							Frame.Add(TX, TY, RedColour, Level * Share);
+						}
+					};
+					Splat(X, Y, (1.0f - FX) * (1.0f - FY));
+					Splat(X + 1, Y, FX * (1.0f - FY));
+					Splat(X, Y + 1, (1.0f - FX) * FY);
+					Splat(X + 1, Y + 1, FX * FY);
 				}
 			}
 		}

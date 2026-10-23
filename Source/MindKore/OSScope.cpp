@@ -39,6 +39,8 @@ UOSScopeComponent::UOSScopeComponent()
 	Pistol.SightRearCm = FVector(3.6f, -1.431f, 5.82f);
 	Pistol.SightFrontCm = FVector(-13.303f, -1.4534f, 6.134f);
 	Pistol.EyeCm = 50.0f;
+	// The dot just over the front blade's top (its 1.8 mm insert sits mid-blade at the sight line).
+	Pistol.ZeroOverFrontCm = 0.35f;
 	Pistol.GunFieldOfView = 100.0f;
 	Pistol.KickScale = 0.55f;
 	Pistol.In = { { 3.0f, 0.55f, 0.08f }, { 3.2f, 0.6f, 0.06f }, { 3.4f, 0.5f, 0.0f }, { 2.6f, 0.45f, 0.0f }, { 2.6f, 0.45f, 0.0f }, { 2.2f, 0.36f, 0.0f } };
