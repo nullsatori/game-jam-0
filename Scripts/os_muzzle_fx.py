@@ -450,14 +450,18 @@ float3 inv = 1.0 / dir;
     if (b <= a) continue;
     // Coarse cells (a vacuum cone metres long) at 1.5 cells a step: the jitter hides it, a third fewer samples.
     float stepCm = max(min(cell, cellP), 1.5) * (min(cell, cellP) >= 4.0 ? 1.5 : 1.0);
-    int ns = min((int)((b - a) / stepCm) + 1, 160);
+    // 96 samples a cloud at most (a doubled step through thin gas lost half the thin smoke: not taken).
+    int ns = min((int)((b - a) / stepCm) + 1, 96);
+    float t = a + jit * stepCm;
+    float adv = 0.0;
     float rows = ceil(n / 8.0) * n;
     float2 atlas = float2(8.0 * n, 2.0 * rows);
     float vC0 = curHalf * rows, vP0 = (1.0 - curHalf) * rows;
     [loop] for (int s = 0; s < ns; s++)
     {
-        float t = a + (s + jit) * stepCm;
+        t += adv;
         if (t > b) break;
+        adv = stepCm;
         // Soft tunnels: the density scaled down within 0.6 r of a tunnel's axis, 0 on it.
         float keep = 1.0;
         for (int q = 0; q < nh; q++)
@@ -499,8 +503,9 @@ float3 inv = 1.0 / dir;
         }
         float4 sA0 = 0, sA1 = 0, sB0 = 0, sB1 = 0;
         GAS_SAMPLE
-        if (inC) vC = lerp(sA0, sA1, fA);
-        if (inP) vP = lerp(sB0, sB1, fB);
+        // Gas reaching a box's face fades over its last 1.5 cells (a cut face read as a flat soft square).
+        if (inC) vC = lerp(sA0, sA1, fA) * saturate(min(min(H - abs(p.x), H - abs(p.y)), H - abs(p.z)) / (1.5 * cell));
+        if (inP) vP = lerp(sB0, sB1, fB) * saturate(min(min(HP - abs(pp.x), HP - abs(pp.y)), HP - abs(pp.z)) / (1.5 * cellP));
         float4 v = lerp(vP, vC, phase);
         float near = smoothstep(EyeClear * 0.5, EyeClear * 1.5, t);
         float dens = v.r * gain * keep * near;
@@ -510,7 +515,7 @@ float3 inv = 1.0 / dir;
         float3 col = base * 1.5 * (amb * (0.35 + 0.65 * v.a) + key * v.b) + warm * v.g * v.g;
         acc += T * aStep * col;
         T *= 1.0 - aStep;
-        if (T < 0.02) break;
+        if (T < 0.05) break;
     }
 }
 float alpha = 1.0 - T;

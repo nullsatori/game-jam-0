@@ -1635,7 +1635,9 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	Spread /= FMath::Max(Mass, 1e-3f);
 	// The box: the frame round every parcel with its reach, 10% more; it grows and shrinks with the gas, never jumps
 	// (owner 23.10: «респавнится у оружия», «кубом обрезается»). Its cell: the size over 48, 2 to 8 cm.
+	// An outlier (farther than 3x the mean spread) does not set the box; its gas fades at the box's faces (the shader).
 	const float FarCm = FMath::Max(3.0f * Spread, 40.0f);
+	const float MaxCell = 8.0f;
 	FVector3f BoxLo(1e9f), BoxHi(-1e9f);
 	for (const FOSGasParcel& P : Parcels)
 	{
@@ -1651,7 +1653,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	{
 		BoxLo = BoxHi = Centre;
 	}
-	const float Need = FMath::Clamp((BoxHi - BoxLo).GetMax() * 1.1f / N, 2.0f, 8.0f);
+	const float Need = FMath::Clamp((BoxHi - BoxLo).GetMax() * 1.1f / N, 2.0f, MaxCell);
 	float Cell = Need;
 	const FVector3f MassCentre = Centre;
 	Centre = SnapTo((BoxLo + BoxHi) * 0.5f, 0.5f);
@@ -1670,7 +1672,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			Cloud.LooseSince = Need < 0.6f * OldCell ? (Cloud.LooseSince < 0.0f ? Now : Cloud.LooseSince) : -1.0f;
 			if (Cloud.LooseSince >= 0.0f && Now - Cloud.LooseSince >= 0.5f && Now - Cloud.LastRebox >= 0.5f)
 			{
-				Cell = FMath::Clamp(FMath::Max(Need * 1.15f, OldCell * 0.8f), 2.0f, 8.0f);
+				Cell = FMath::Clamp(FMath::Max(Need * 1.15f, OldCell * 0.8f), 2.0f, MaxCell);
 				Cloud.LastRebox = Now;
 				Cloud.LooseSince = -1.0f;
 			}
@@ -1682,7 +1684,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		}
 		else
 		{
-			Cell = FMath::Clamp(FMath::Max(Need * 1.15f, Cloud.bHasGas ? OldCell : 0.0f), 2.0f, 8.0f);
+			Cell = FMath::Clamp(FMath::Max(Need * 1.15f, Cloud.bHasGas ? OldCell : 0.0f), 2.0f, MaxCell);
 			Cloud.LastRebox = Now;
 			Cloud.LooseSince = -1.0f;
 		}

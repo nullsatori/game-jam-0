@@ -2639,10 +2639,12 @@ namespace
 			const bool bBack = Args.Num() > 1 && Args[1] == TEXT("back");
 			// [after s] back [shots] [interval s]: how many (5), how far apart (0.3 s). near: standing, two shots, then the
 			// shots 2.5 s later beside their clouds.
-			const bool bNear = Args.Num() > 1 && Args[1] == TEXT("near");
+			// space: as near, but facing the farthest open way (8 tried, 30 m) - a vacuum's cone seen against the stars.
+			const bool bSpace = Args.Num() > 1 && Args[1] == TEXT("space");
+			const bool bNear = Args.Num() > 1 && (Args[1] == TEXT("near") || bSpace);
 			const int32 BackCount = Args.Num() > 2 ? FCString::Atoi(*Args[2]) : 5;
 			const float BackEvery = Args.Num() > 3 ? FMath::Max(FCString::Atof(*Args[3]), 0.05f) : 0.3f;
-			World->GetTimerManager().SetTimer(Later, FTimerDelegate::CreateLambda([World, bBack, bNear, BackCount, BackEvery]()
+			World->GetTimerManager().SetTimer(Later, FTimerDelegate::CreateLambda([World, bBack, bNear, bSpace, BackCount, BackEvery]()
 			{
 			APlayerController* Controller = World->GetFirstPlayerController();
 			AOSZeroGPawn* Pawn = Controller ? Cast<AOSZeroGPawn>(Controller->GetPawn()) : nullptr;
@@ -2667,6 +2669,23 @@ namespace
 				{
 					Look.Yaw += 180.0f;
 				}
+			}
+			if (bSpace)
+			{
+				float Best = -1.0f;
+				const float Yaw0 = Look.Yaw;
+				for (int32 K = 0; K < 8; ++K)
+				{
+					const FVector Way = FRotator(0.0f, Yaw0 + K * 45.0f, 0.0f).Vector();
+					FHitResult Hit;
+					const float Free = World->LineTraceSingleByChannel(Hit, Home, Home + Way * 3000.0f, ECC_Visibility, FCollisionQueryParams(SCENE_QUERY_STAT(OSWalkProbe), false, Pawn)) ? Hit.Distance : 3000.0f;
+					if (Free > Best)
+					{
+						Best = Free;
+						Look.Yaw = Yaw0 + K * 45.0f;
+					}
+				}
+				UE_LOG(LogMindKore, Log, TEXT("Walk probe: facing yaw %.0f, open %.0f cm"), Look.Yaw, Best);
 			}
 			Controller->SetControlRotation(Look);
 			// os.Gas.DebugAlpha 1: the gas's opacity a frame, per screen block; its largest jump a frame (the gun's corner
@@ -2862,6 +2881,36 @@ namespace
 					else
 					{
 						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s, no cloud"), T);
+					}
+				}
+				// near / space: a GPU profile at 3.2 s (the clouds alive then; M_OS_GasPost's line in the log).
+				static bool bProfiled = false;
+				if (T < 0.1f) { bProfiled = false; }
+				if (bNear && !bProfiled && T >= 3.2f)
+				{
+					bProfiled = true;
+					UE_LOG(LogMindKore, Log, TEXT("Walk probe: ProfileGPU with %d cloud(s)"), Gas->GetCloudCount());
+					Controller->ConsoleCommand(TEXT("ProfileGPU"));
+				}
+				// What came into the world since the probe began (at 0.6 s): a self-check of what draws near the shot.
+				static bool bListed = false;
+				if (T < 0.1f) { bListed = false; }
+				if (!bListed && T >= 0.6f)
+				{
+					bListed = true;
+					for (TActorIterator<AActor> It(World); It; ++It)
+					{
+						if (It->CreationTime >= Start - 0.01 && FVector::Dist(It->GetActorLocation(), Home) < 1500.0f)
+						{
+							TArray<UActorComponent*> Parts;
+							It->GetComponents(Parts);
+							FString Names;
+							for (const UActorComponent* Part : Parts)
+							{
+								Names += TEXT(" ") + Part->GetClass()->GetName();
+							}
+							UE_LOG(LogMindKore, Log, TEXT("Walk probe: new actor %s (%s) at %.0f cm:%s"), *It->GetName(), *It->GetClass()->GetName(), FVector::Dist(It->GetActorLocation(), Home), *Names);
+						}
 					}
 				}
 				static const float ShotAt[] = { 0.4f, 1.5f, 2.0f, 3.0f };
