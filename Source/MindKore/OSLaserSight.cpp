@@ -15,7 +15,7 @@
 #include "OSWeapons.h"
 #include "OSSuitProjector.h"
 #include "OSWeldProjector.h"
-#include "RenderUtils.h"
+#include "Engine/Texture2D.h"
 
 UOSLaserSightComponent::UOSLaserSightComponent()
 {
@@ -387,9 +387,11 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas) const
 		OSSoftDisc(Tris, Dot2D, DotGlowPixels * Size, DotGlowPixels * Size, OSLit(RedColour, 0.85f * Drive), 20);
 		OSSoftDisc(Tris, Dot2D, DotCorePixels * Size + 0.5f, DotCorePixels * Size + 0.5f, OSLit(Hot, Drive), 12);
 	}
-	if (Tris.Num() > 0)
+	// The canvas' own white texture: GWhiteTexture lives in RenderCore (not linked), and a triangle item asserts on none.
+	const FTexture* White = Canvas.DefaultTexture ? Canvas.DefaultTexture->GetResource() : nullptr;
+	if (Tris.Num() > 0 && White)
 	{
-		FCanvasTriangleItem Light(Tris, GWhiteTexture);
+		FCanvasTriangleItem Light(Tris, White);
 		Light.BlendMode = SE_BLEND_Additive;
 		Canvas.DrawItem(Light);
 	}
