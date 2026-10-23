@@ -292,16 +292,16 @@ struct FOSPortSmoke
 
 	/** A wisp's diameter out of the vent and at the end of its life, its life (each 0.75..1.25) and peak opacity. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
-	float StartCm = 1.0f;
+	float StartCm = 1.1f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
-	float EndCm = 6.0f;
+	float EndCm = 6.7f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.1"))
 	float Seconds = 2.2f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float Opacity = 0.1f;
+	float Opacity = 0.13f;
 
 
 	/**

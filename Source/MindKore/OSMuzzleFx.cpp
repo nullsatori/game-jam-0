@@ -440,7 +440,7 @@ void UOSMuzzleFxComponent::Seep(const FOSWeapon& Def, const FTransform& Muzzle, 
 	for (int32 Index = 0; Smoke && !Seeping.IsEmpty() && Index < Count; ++Index)
 	{
 		// A seep barely leaves the hole: a tenth of the vent's speed.
-		EmitWisp(*Seeping[FMath::RandHelper(Seeping.Num())], Def.PortSmoke, Muzzle, Action, 0.1f, FMath::FRand() * AgeSpread, 0.5f);
+		EmitWisp(*Seeping[FMath::RandHelper(Seeping.Num())], Def.PortSmoke, Muzzle, Action, 0.1f, FMath::FRand() * AgeSpread, 0.6f);
 	}
 }
 

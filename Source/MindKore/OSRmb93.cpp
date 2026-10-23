@@ -146,10 +146,10 @@ FOSWeapon OSMakeRmb93(const FOSWeapon& PumpShotgun)
 	// with 2 s (after three shots ~5 s of a thinning seep, not ~12 s of a stream).
 	Smoke.SeepPerSecond = 8.0f;
 	Smoke.HeatSeconds = 2.0f;
-	Smoke.StartCm = 1.5f;
-	Smoke.EndCm = 9.0f;
+	Smoke.StartCm = 1.7f;
+	Smoke.EndCm = 10.0f;
 	Smoke.Seconds = 2.2f;
-	Smoke.Opacity = 0.36f;
+	Smoke.Opacity = 0.46f;
 	Smoke.SwirlCmPerSecond = 20.0f;
 	Smoke.RiseShare = 0.08f;
 	Smoke.AirDragSeconds = 0.7f;
