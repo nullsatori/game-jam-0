@@ -18,6 +18,12 @@
 
 #define LOCTEXT_NAMESPACE "OSAttachMenu"
 
+namespace
+{
+	/** The laser's colour line shows this many swatches at most (the palette's six). */
+	constexpr int32 OSTintSwatches = 6;
+}
+
 UOSAttachMenu::UOSAttachMenu()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -361,7 +367,7 @@ void UOSAttachMenu::ReadRows()
 		{
 			FRow Row;
 			Row.Id = TEXT("LaserTint");
-			Row.Name = FText::Format(LOCTEXT("TintRow", "ЦВЕТ: {0}"), Tint->Name);
+			Row.Name = LOCTEXT("TintRow", "ЦВЕТ");
 			Row.Description = Tint->Description;
 			Row.Mount = Rows[Index].Mount;
 			Row.bTint = true;
@@ -393,7 +399,7 @@ FText UOSAttachMenu::Verb() const
 	const FRow& Row = Rows[Selected];
 	if (Row.bTint)
 	{
-		return LOCTEXT("NextTint", "СЛЕДУЮЩИЙ ЦВЕТ");
+		return HoveredTint != INDEX_NONE ? LOCTEXT("PickTint", "ВЗЯТЬ ЦВЕТ") : LOCTEXT("NextTint", "СЛЕДУЮЩИЙ ЦВЕТ");
 	}
 	if (Row.bMagazine)
 	{
@@ -416,7 +422,8 @@ bool UOSAttachMenu::ApplySelected()
 		{
 			return false;
 		}
-		Guns->LaserSight->SetTint(Guns->LaserSight->Tint + 1);
+		// The swatch under the cursor, else (the wheel's choice, the cursor off the swatches) the next one.
+		Guns->LaserSight->SetTint(HoveredTint != INDEX_NONE ? HoveredTint : Guns->LaserSight->Tint + 1);
 		if (const FOSAttachment* Laser = Guns->GetShownOn(EOSMountType::Rail); Laser && Laser->SwitchSound)
 		{
 			UGameplayStatics::PlaySound2D(this, Laser->SwitchSound, 0.35f, 1.3f);
@@ -654,7 +661,9 @@ void UOSAttachMenu::LayOut(const UCanvas& Canvas, float Cell)
 		for (const int32 Line : Box.Lines)
 		{
 			const FRow& Row = Rows[Line];
-			Inner = FMath::Max(Inner, Row.bEmpty ? double(Width(EmptyWord)) : Width(Row.Name.ToString()) + 10.0 * Cell + Width(OnWord));
+			Inner = FMath::Max(Inner, Row.bEmpty ? double(Width(EmptyWord))
+				: Row.bTint ? Width(Row.Name.ToString()) + (5.0 + 11.0 * OSTintSwatches) * Cell
+				: Width(Row.Name.ToString()) + 10.0 * Cell + Width(OnWord));
 		}
 		Box.Size = FVector2D(Snap(FMath::Max(Inner + 12.0 * Cell, 70.0 * Cell)), Snap(14.0 * Cell + 3.0 * Cell + Box.Lines.Num() * 14.0 * Cell + 4.0 * Cell));
 
@@ -885,6 +894,7 @@ void UOSAttachMenu::DrawHud(AHUD& Hud, UCanvas& Canvas)
 	const FString EmptyWord = LOCTEXT("EmptyWord", "ПУСТО").ToString();
 	// The boxes: leader out of the node (a 45 degree run, then square to the box), the frame unfolds, the text decodes.
 	int32 Hovered = INDEX_NONE;
+	HoveredTint = INDEX_NONE;
 	for (int32 Index = 0; bLaidOut && Index < Boxes.Num(); ++Index)
 	{
 		const FPlaceBox& Box = Boxes[Index];
@@ -1010,14 +1020,31 @@ void UOSAttachMenu::DrawHud(AHUD& Hud, UCanvas& Canvas)
 					Rect(bInk ? Ink : Light(0.9f), X + W - 9.0f * Cell, Top + 4.0f * Cell, 3.0f * Cell, 3.0f * Cell);
 				}
 			}
-			else if (Row.bTint)
+			else if (Row.bTint && Guns->LaserSight)
 			{
-				// A swatch of the colour in use, where «НАДЕТ» goes.
-				const FOSLaserTint* Swatch = Guns->LaserSight ? Guns->LaserSight->GetTint() : nullptr;
-				if (Swatch)
+				// The whole palette in a row after «ЦВЕТ» (owner 23.10: an easier choice): each swatch the dot's colour
+				// under a band of the beam's; the one in use framed bright, the one under the cursor framed dim - a click takes it.
+				const UOSLaserSightComponent* Laser = Guns->LaserSight;
+				const float SwatchX = X + 6.0f * Cell + Width(Row.Name.ToString()) + 5.0f * Cell;
+				for (int32 Swatch = 0; Swatch < FMath::Min(Laser->Palette.Num(), OSTintSwatches); ++Swatch)
 				{
-					Rect(bInk ? Ink : Light(0.5f), X + W - 13.0f * Cell, Top + 2.0f * Cell, 7.0f * Cell, 9.0f * Cell);
-					Rect(FLinearColor(Swatch->Dot.R, Swatch->Dot.G, Swatch->Dot.B, Fade), X + W - 12.0f * Cell, Top + 3.0f * Cell, 5.0f * Cell, 7.0f * Cell);
+					const FOSLaserTint& Colour = Laser->Palette[Swatch];
+					const float SX = SwatchX + Swatch * 11.0f * Cell;
+					const float SY = Top + 2.0f * Cell;
+					if (Cursor.X >= SX - Cell && Cursor.X < SX + 10.0f * Cell && Cursor.Y >= Top && Cursor.Y < Top + 13.0f * Cell)
+					{
+						HoveredTint = Swatch;
+					}
+					if (Swatch == Laser->Tint)
+					{
+						Outline(SX, SY, 9.0f * Cell, 9.0f * Cell, bInk ? Ink : Light(1.0f));
+					}
+					else if (Swatch == HoveredTint)
+					{
+						Outline(SX, SY, 9.0f * Cell, 9.0f * Cell, bInk ? Ink : Light(0.45f));
+					}
+					Rect(FLinearColor(Colour.Beam.R, Colour.Beam.G, Colour.Beam.B, Fade), SX + Cell, SY + Cell, 7.0f * Cell, 2.0f * Cell);
+					Rect(FLinearColor(Colour.Dot.R, Colour.Dot.G, Colour.Dot.B, Fade), SX + Cell, SY + 3.0f * Cell, 7.0f * Cell, 5.0f * Cell);
 				}
 			}
 			else if (Row.bOn)
@@ -1048,7 +1075,17 @@ void UOSAttachMenu::DrawHud(AHUD& Hud, UCanvas& Canvas)
 	{
 		if (Rows.IsValidIndex(Selected) && !Rows[Selected].bEmpty)
 		{
-			const FString About = FString::Printf(TEXT("%s — %s"), *Rows[Selected].Name.ToString(), *Rows[Selected].Description.ToString());
+			FString About = FString::Printf(TEXT("%s — %s"), *Rows[Selected].Name.ToString(), *Rows[Selected].Description.ToString());
+			if (Rows[Selected].bTint && Guns->LaserSight)
+			{
+				// The colour under the cursor, else the one in use: its name and what it is.
+				const UOSLaserSightComponent* Laser = Guns->LaserSight;
+				const int32 Pick = Laser->Palette.IsValidIndex(HoveredTint) ? HoveredTint : Laser->Tint;
+				if (Laser->Palette.IsValidIndex(Pick))
+				{
+					About = FString::Printf(TEXT("%s — %s"), *Laser->Palette[Pick].Name.ToString(), *Laser->Palette[Pick].Description.ToString());
+				}
+			}
 			Text(Decode(About, FMath::Max(SelectedAt, LaidOutAt + 0.3), Selected * 17 + 3), Snap((Canvas.ClipX - Width(About)) * 0.5), FootY - 14.0f * Cell, Light(0.55f));
 		}
 		const bool bBusy = Now - BusyAt < 0.8;

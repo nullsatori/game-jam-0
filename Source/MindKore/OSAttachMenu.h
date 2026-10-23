@@ -230,6 +230,8 @@ private:
 	bool bCursorMoved = false;
 	bool bWheelChose = false;
 	bool bHovering = false;
+	/** The laser's colour swatch under the cursor on the colour line (palette index), none: INDEX_NONE. */
+	int32 HoveredTint = INDEX_NONE;
 	FVector2D LastClip = FVector2D(1920.0, 1080.0);
 
 	UPROPERTY(Transient)
