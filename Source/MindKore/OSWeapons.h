@@ -197,20 +197,79 @@ struct FOSLid
 	bool bCatchPending = false;
 };
 
+/** Where a gas vent sits: on the muzzle (its frame: X along the bore, Y out of the gun's side) or on the action part. */
+UENUM(BlueprintType)
+enum class EOSVentSpace : uint8
+{
+	Muzzle,
+	Action
+};
+
 /**
- * Smoke out of the holes of a perforated barrel shroud (the RMB-93's, Docs/RecoilWeapons-Rmb93.md): a
- * puff out of the holes at each shot, then, while the barrel is hot, a thin seep out of them that the
- * gun leaves behind as it moves. In a vacuum it floats on with the shooter's velocity; in air it is
- * slowed by it and, where there is gravity, hot smoke rises. Drawn as UOSMuzzleFxComponent's card puffs.
+ * One way gas leaves a gun (Docs/RecoilWeapons-Fx.md, «Газовые отверстия»): any weapon declares a list of them - the
+ * muzzle is just the first - and UOSMuzzleFxComponent emits from each the same way. Over Seconds after a shot the vent
+ * flows at SpeedCm out of it along Direction (spread within ConeDeg), the flow dying with DecaySeconds:
+ * - into the shot's smoke grid (bJet): density Rate a step through a mouth WidthCm wide - a long jet, not a ball;
+ * - as streaks of card wisps (Rate a second, chained along the stream; bCling: in the gun's space at first, round its
+ *   bore, then the world's);
+ * and, if bSeep, while the gun is hot (FOSPortSmoke's heat) a thin seep of the same wisps.
+ */
+USTRUCT(BlueprintType)
+struct FOSGasVent
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Gas")
+	EOSVentSpace Space = EOSVentSpace::Muzzle;
+
+	/** In the vent space's frame, cm, and its outward direction (normalised on use). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Gas")
+	FVector Location = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Gas")
+	FVector Direction = FVector::ForwardVector;
+
+	/** Into the grid (true) or as card wisps (false). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Gas")
+	bool bJet = false;
+
+	/** Wisps cling to the gun at first (a shroud's holes) or leave it straight (the muzzle's). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Gas")
+	bool bCling = false;
+
+	/** Seeps while the gun is hot. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Gas")
+	bool bSeep = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Gas", meta = (ClampMin = "0.0"))
+	float Seconds = 0.3f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Gas", meta = (ClampMin = "0.01"))
+	float DecaySeconds = 0.15f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Gas", meta = (ClampMin = "0.0"))
+	float SpeedCm = 300.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Gas", meta = (ClampMin = "0.0", ClampMax = "90.0"))
+	float ConeDeg = 6.0f;
+
+	/** A jet's density per step at the mouth (0..1), or wisps a second at the shot. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Gas", meta = (ClampMin = "0.0"))
+	float Rate = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Gas", meta = (ClampMin = "0.1"))
+	float WidthCm = 3.0f;
+};
+
+/**
+ * A gun's heat and the look of its gas wisps (FOSGasVent streams and seep, drawn as UOSMuzzleFxComponent's card
+ * puffs): each shot heats the gun; while it is hot the bSeep vents seep (Docs/RecoilWeapons-Fx.md). In a vacuum
+ * the wisps float on with the shooter's velocity; in air they are slowed by it and hot smoke rises.
  */
 USTRUCT(BlueprintType)
 struct FOSPortSmoke
 {
 	GENERATED_BODY()
-
-	/** The holes, in ActionMesh's space (the shroud rides the action), cm; none: no port smoke. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke")
-	TArray<FVector> Ports;
 
 	/** The bore's height in ActionMesh's space, cm: each hole faces away from it, across the bore. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke")
@@ -227,34 +286,37 @@ struct FOSPortSmoke
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
 	float MaxHeat = 3.0f;
 
-	/** Puffs out of the holes at the shot, thrown this far, and seeping puffs per second per unit of heat. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0"))
-	int32 ShotPuffs = 8;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
-	float ShotThrowCm = 2.5f;
-
+	/** Seeping wisps per second per unit of heat (out of the bSeep vents). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
 	float SeepPerSecond = 5.0f;
 
+	/** A wisp's diameter out of the vent and at the end of its life, its life (each 0.75..1.25) and peak opacity. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
-	float SeepThrowCm = 0.8f;
-
-	/** A puff's diameter out of the hole and at the end of its life, its life (each 0.75..1.25), peak opacity and drift, cm/s. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
-	float StartCm = 1.0f;
+	float StartCm = 1.1f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
-	float EndCm = 6.0f;
+	float EndCm = 6.7f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.1"))
 	float Seconds = 2.2f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float Opacity = 0.1f;
+	float Opacity = 0.13f;
+
+
+	/**
+	 * The wisps envelop the gun (owner 22.10, «плавно обволакивать оружие»): for about ClingSeconds a wisp lives in the
+	 * gun's space - it creeps back along the shroud, CreepCmPerSecond, and swirls round the bore, SwirlCmPerSecond - then
+	 * hands over to the world (the air or the vacuum's rules below).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float ClingSeconds = 0.4f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
-	float DriftCm = 1.5f;
+	float SwirlCmPerSecond = 12.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float CreepCmPerSecond = 3.0f;
 
 	/** In air only: the hot smoke's lift as a share of the local gravity (against it), and how fast the air takes its speed, s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
@@ -324,6 +386,10 @@ struct FOSWeapon
 	/** Round speed, cm/s (near real: 35000 / 40000 / 80000): each pellet flies as a round with a tracer and hits on arrival. 0: hitscan. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon", meta = (ClampMin = "0.0"))
 	float ProjectileSpeed = 9000.0f;
+
+	/** The tunnel each of its rounds punches through smoke, radius cm (UOSMuzzleFxComponent::CarveRay; owner 23.10: «как в кс2»). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float SmokeHoleCm = 3.0f;
 
 	/** The view's kick per shot, degrees up; RecoilSettleFraction of it comes back by itself. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Recoil", meta = (ClampMin = "0.0"))
@@ -635,9 +701,16 @@ struct FOSWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Lid")
 	FOSLid Lid;
 
-	/** Smoke out of a perforated shroud's holes (the RMB-93's). */
+	/** The gun's heat and its wisps' look (the vents with bSeep seep while it is hot). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke")
 	FOSPortSmoke PortSmoke;
+
+	/** Every way gas leaves this gun (the muzzle first; a brake's ports, a shroud's holes): FOSGasVent. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke")
+	TArray<FOSGasVent> GasVents;
+
+	/** Vents with bSeep (the heat drives them). */
+	bool HasSeep() const { return GasVents.ContainsByPredicate([](const FOSGasVent& V) { return V.bSeep; }); }
 
 	/**
 	 * Putting the gun away and drawing it (owner 19.10: the pistol to a holster on the right
@@ -903,6 +976,8 @@ public:
 
 	/** Loose cases and magazines in the world now. */
 	int32 GetDebrisCount() const { return Debris.Num(); }
+	/** The case or magazine thrown last, if it is still there (stills). */
+	AActor* GetLastDebris() const { return Debris.IsEmpty() ? nullptr : Debris.Last().Get(); }
 
 	/** A drawn gun fires only once its pose is this close to rest (and DrawReadySeconds into the draw). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapons|Pose", meta = (ClampMin = "0.0"))

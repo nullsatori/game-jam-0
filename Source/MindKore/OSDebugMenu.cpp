@@ -2084,6 +2084,26 @@ TSharedRef<ITableRow> SOSDebugMenu::MakeRow(TSharedPtr<FOSDebugRow> Row, const T
 				MakeGroupHeader(Row)
 			];
 	}
+	if (Row->Kind == FOSDebugRow::EKind::Give)
+	{
+		TWeakObjectPtr<UOSDebugSubsystem> Weak = Debug;
+		TSharedRef<SWrapBox> Buttons = SNew(SWrapBox).UseAllottedSize(true).InnerSlotPadding(FVector2D(4.0f, 4.0f));
+		const TPair<const TCHAR*, const TCHAR*> Guns[] = { { TEXT("Пистолет"), TEXT("pistol") }, { TEXT("Дробовик"), TEXT("shotgun") },
+			{ TEXT("СВ-98"), TEXT("sv98") }, { TEXT("Рысь"), TEXT("rmb93") }, { TEXT("Все"), TEXT("all") } };
+		for (const TPair<const TCHAR*, const TCHAR*>& Gun : Guns)
+		{
+			const FString Id = Gun.Value;
+			Buttons->AddSlot()[MenuButton(Gun.Key, [Weak, Id]() { if (UOSDebugSubsystem* D = Weak.Get()) { D->GiveGun(Id); } })];
+		}
+		return SNew(STableRow<TSharedPtr<FOSDebugRow>>, Table)
+			.Style(&Look.Row)
+			.Padding(FMargin(0.0f, 4.0f, 6.0f, 6.0f))
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()[MenuSection(TEXT("Выдать"))]
+				+ SVerticalBox::Slot().AutoHeight()[Buttons]
+			];
+	}
 	if (Row->Kind == FOSDebugRow::EKind::Section)
 	{
 		return SNew(STableRow<TSharedPtr<FOSDebugRow>>, Table)
@@ -2107,6 +2127,13 @@ void SOSDebugMenu::Rebuild()
 {
 	Rows.Reset();
 	Found = 0;
+	// «Оружие» opens with the give-a-gun buttons: every map, whatever the player holds.
+	if (Tab == TEXT("Оружие") && Search.IsEmpty())
+	{
+		TSharedPtr<FOSDebugRow> Give = MakeShared<FOSDebugRow>();
+		Give->Kind = FOSDebugRow::EKind::Give;
+		Rows.Add(Give);
+	}
 	UOSDebugSubsystem* DebugMenu = Debug.Get();
 	if (DebugMenu)
 	{

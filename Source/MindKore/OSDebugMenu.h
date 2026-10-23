@@ -23,6 +23,8 @@ struct FOSDebugRow
 		Group,
 		/** A section label of «Главное» (Мир, Взгляд, Рука...). */
 		Section,
+		/** «Оружие»: the give-a-gun buttons (UOSDebugSubsystem::GiveGun), on any map. */
+		Give,
 	};
 	EKind Kind = EKind::Param;
 	/** Group: Param.Group; section: its title. */

@@ -369,7 +369,7 @@ void UOSWeaponsComponent::UpdatePortSmoke(FOSWeapon& Weapon, float DeltaTime)
 {
 	FOSPortSmoke& Smoke = Weapon.PortSmoke;
 	UOSMuzzleFxComponent* Fx = MuzzleFx.Get();
-	if (Smoke.Ports.IsEmpty() || !Fx || !ActionInView || DeltaTime <= 0.0f)
+	if (!Weapon.HasSeep() || !Fx || !ActionInView || DeltaTime <= 0.0f)
 	{
 		return;
 	}
@@ -387,22 +387,19 @@ void UOSWeaponsComponent::UpdatePortSmoke(FOSWeapon& Weapon, float DeltaTime)
 	if (const int32 Count = FMath::FloorToInt(Smoke.SeepCarry); Count > 0)
 	{
 		Smoke.SeepCarry -= Count;
-		Fx->PortPuffs(Smoke, *ActionInView, Count, Smoke.SeepThrowCm, DeltaTime);
+		Fx->Seep(Weapon, GetMuzzleTransform(), ActionInView, Count, DeltaTime);
 	}
 }
 
 void UOSWeaponsComponent::PortSmokeShot(FOSWeapon& Weapon)
 {
-	FOSPortSmoke& Smoke = Weapon.PortSmoke;
-	if (Smoke.Ports.IsEmpty())
+	// The shot heats the gun (its seep goes as the heat); the shot's own gas comes out of the vents (UOSMuzzleFxComponent::Vents).
+	if (!Weapon.HasSeep())
 	{
 		return;
 	}
+	FOSPortSmoke& Smoke = Weapon.PortSmoke;
 	const double Now = GetWorld()->GetTimeSeconds();
 	Smoke.Heat = FMath::Min(Smoke.HeatAt(Now) + Smoke.HeatPerShot, Smoke.MaxHeat);
 	Smoke.HeatTime = Now;
-	if (UOSMuzzleFxComponent* Fx = MuzzleFx.Get(); Fx && ActionInView && ActionInView->GetStaticMesh())
-	{
-		Fx->PortPuffs(Smoke, *ActionInView, Smoke.ShotPuffs, Smoke.ShotThrowCm, 0.0f);
-	}
 }
