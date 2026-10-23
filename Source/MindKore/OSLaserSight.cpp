@@ -1,6 +1,7 @@
 #include "OSLaserSight.h"
 
 #include "Camera/CameraComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "CanvasItem.h"
 #include "Engine/Canvas.h"
@@ -46,6 +47,23 @@ void UOSLaserSightComponent::BeginPlay()
 		Part->SetVisibility(false);
 		return Part;
 	};
+	// The dot's spill on the surface: a tiny red light, no shadow, no bounce (the torch's reasons, OSWeaponAttach.cpp).
+	DotLight = NewObject<UPointLightComponent>(GetOwner(), TEXT("LaserDotLight"));
+	DotLight->SetupAttachment(GetOwner()->GetRootComponent());
+	DotLight->SetUsingAbsoluteLocation(true);
+	DotLight->SetUsingAbsoluteRotation(true);
+	DotLight->CastShadows = false;
+	DotLight->bAllowMegaLights = false;
+	DotLight->IndirectLightingIntensity = 0.0f;
+	DotLight->VolumetricScatteringIntensity = 0.0f;
+	DotLight->IntensityUnits = ELightUnits::Candelas;
+	DotLight->bUseInverseSquaredFalloff = true;
+	DotLight->SetAttenuationRadius(DotLightRadiusCm);
+	DotLight->SetSourceRadius(0.5f);
+	DotLight->SetLightColor(RedColour);
+	DotLight->SetIntensity(0.0f);
+	DotLight->SetVisibleFlag(false);
+	DotLight->RegisterComponent();
 	Dot = Make(TEXT("LaserDot"), TEXT("/Engine/BasicShapes/Plane.Plane"));
 	Thread = Make(TEXT("LaserThread"), TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	if (UMaterialInterface* Material = DotMaterial.LoadSynchronous())
@@ -86,6 +104,10 @@ void UOSLaserSightComponent::Hide()
 	{
 		Dot->SetVisibility(false);
 		Thread->SetVisibility(false);
+	}
+	if (DotLight && DotLight->IsVisible())
+	{
+		DotLight->SetVisibility(false);
 	}
 	bLit = bDotHit = bDotSeen = bThreadShown = false;
 	BeamSpans.Reset();
@@ -252,6 +274,7 @@ void UOSLaserSightComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 #if !UE_BUILD_SHIPPING
 	const FOSAttachCostScope Timed(GOSAttachCost.LaserSeconds, GOSAttachCost.LaserMaxSeconds, GOSAttachCost.LaserFrames);
 #endif
+	DeltaSecondsNow = DeltaTime;
 	FTransform Lens;
 	const FOSWeapon* Weapon = Guns ? Guns->GetWeapon() : nullptr;
 	const bool bWant = bAwake && Weapon && Dot && Guns->GetLaserLens(Lens) && Guns->ViewModel && Guns->ViewModel->GetAttachParent();
@@ -266,16 +289,43 @@ void UOSLaserSightComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		}
 		DotDrive = StepDrive(DeltaTime, false, false);
 		ThreadLevel = ThreadShare * AirShare * DotDrive;
+		if (DotLight)
+		{
+			DotLight->SetIntensity(DotLightCandela * DotDrive);
+		}
 		return;
 	}
 	bLit = true;
 	const bool bShot = Weapon->SinceShot < LastSinceShot;
 	LastSinceShot = Weapon->SinceShot;
 	DotDrive = StepDrive(DeltaTime, true, bShot);
+	// The beam: only where there is something to scatter it - air round the eye (polled), smoke later.
+	SinceAirPoll += DeltaTime;
+	if (SinceAirPoll >= AirPollSeconds)
+	{
+		SinceAirPoll = 0.0f;
+		bAir = Guns->IsInAir();
+	}
+	AirShare = FMath::FInterpConstantTo(AirShare, bAir ? 1.0f : 0.0f, DeltaTime, 1.0f / AirFadeSeconds);
+	ThreadLevel = ThreadShare * AirShare * DotDrive;
+	// The geometry from the camera as it stands now (the probes read it); DrawHud does it again if the camera has
+	// turned since (the mouse's turn lands on the camera after this tick).
+	Refresh();
+}
+
+void UOSLaserSightComponent::Refresh()
+{
+	FTransform Lens;
+	const FOSWeapon* Weapon = Guns ? Guns->GetWeapon() : nullptr;
+	if (!Weapon || !Guns->GetLaserLens(Lens) || !Guns->ViewModel || !Guns->ViewModel->GetAttachParent())
+	{
+		return;
+	}
+	const USceneComponent* Eye = Guns->ViewModel->GetAttachParent();
+	RefreshedView = Eye->GetComponentTransform();
+	const FVector EyeAt = RefreshedView.GetLocation();
 	// The dot: the first thing on the round's line within the gun's reach - out of the muzzle along the bore as the
 	// gun is drawn, as UOSWeaponsComponent::Fire sends it (owner 23.10: the laser tells honestly where the round flies).
-	const USceneComponent* Eye = Guns->ViewModel->GetAttachParent();
-	const FVector EyeAt = Eye->GetComponentLocation();
 	FVector From;
 	FVector Along;
 	Guns->GetShotLine(EyeAt, Eye->GetForwardVector(), From, Along);
@@ -304,18 +354,30 @@ void UOSLaserSightComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		++Traces;
 		bDotSeen = !GetWorld()->LineTraceSingleByChannel(Sight, EyeAt, DotAt - FVector(Hit.ImpactNormal) * (DotLiftCm * 0.5f), ECC_Visibility, Params)
 			|| Sight.Distance > FVector::Dist(EyeAt, DotAt) - 2.0f;
+		// The speckle boils with the dot's travel over the surface and barely at rest.
+		Boil += float(FVector::Dist(LastDotAt, DotAt)) / SpeckleBoilCm + DeltaSecondsNow / SpeckleRestSeconds;
+		DeltaSecondsNow = 0.0f; // the rest counts once a frame, whichever pass runs first
+		LastDotAt = DotAt;
+		if (Boil > 1.0e6f)
+		{
+			Boil = 0.0f;
+		}
 	}
-	// The beam: only where there is something to scatter it - air round the eye (polled), smoke later.
-	SinceAirPoll += DeltaTime;
-	if (SinceAirPoll >= AirPollSeconds)
+	if (DotLight)
 	{
-		SinceAirPoll = 0.0f;
-		bAir = Guns->IsInAir();
+		const bool bSpill = bDotHit && DotLightCandela > 0.0f;
+		if (bSpill)
+		{
+			DotLight->SetWorldLocation(DotAt + FVector(Hit.ImpactNormal) * 1.0);
+			DotLight->SetIntensity(DotLightCandela * DotDrive);
+		}
+		if (DotLight->IsVisible() != bSpill)
+		{
+			DotLight->SetVisibility(bSpill);
+		}
 	}
-	AirShare = FMath::FInterpConstantTo(AirShare, bAir ? 1.0f : 0.0f, DeltaTime, 1.0f / AirFadeSeconds);
 	LensAt = Lens.GetLocation();
 	bThreadShown = AirShare > 0.0f && bDotHit;
-	ThreadLevel = ThreadShare * AirShare * DotDrive;
 	if (bThreadShown)
 	{
 		// From the lens to the dot in the gun's own space: the drawn gun's projection (OSProjectToHud, first person)
@@ -351,83 +413,83 @@ namespace
 		Tri.V0_UV = Tri.V1_UV = Tri.V2_UV = FVector2D::ZeroVector;
 	}
 
-	/** A soft band A -> B: its colour along the middle, nothing at its edges (half widths at either end). */
-	void OSSoftBand(TArray<FCanvasUVTri>& Tris, const FVector2D& A, const FVector2D& B, float HalfA, float HalfB, const FLinearColor& ColourA,
-		const FLinearColor& ColourB)
+	/**
+	 * The low-res frame of the light: texels of the screen's coarse grid, their light summed as it comes; drawn each as
+	 * a tent to its neighbours' centres (the tents sum to one: the bilinear upscale of that frame).
+	 */
+	struct FOSTexelFrame
 	{
-		const FVector2D Way = B - A;
-		const FVector2D Side = FVector2D(-Way.Y, Way.X).GetSafeNormal();
-		if (Side.IsZero())
-		{
-			return;
-		}
-		const FLinearColor Dark(0.0f, 0.0f, 0.0f, 1.0f);
-		for (const float Sign : { 1.0f, -1.0f })
-		{
-			const FVector2D EdgeA = A + Side * (HalfA * Sign);
-			const FVector2D EdgeB = B + Side * (HalfB * Sign);
-			OSLightTri(Tris, EdgeA, Dark, A, ColourA, EdgeB, Dark);
-			OSLightTri(Tris, EdgeB, Dark, A, ColourA, B, ColourB);
-		}
-	}
+		float Texel = 5.0f;
+		TMap<int64, FLinearColor> Light;
 
-	/** A soft ellipse on two half axes: its colour at the centre, nothing at the rim. */
-	void OSSoftEllipse(TArray<FCanvasUVTri>& Tris, const FVector2D& Centre, const FVector2D& AxisA, const FVector2D& AxisB, const FLinearColor& Colour, int32 Sides)
-	{
-		const FLinearColor Dark(0.0f, 0.0f, 0.0f, 1.0f);
-		for (int32 Side = 0; Side < Sides; ++Side)
+		static int64 KeyOf(int32 X, int32 Y) { return (int64(X) << 32) ^ int64(uint32(Y)); }
+
+		void Add(int32 X, int32 Y, const FLinearColor& Colour, float Level)
 		{
-			const float A0 = UE_TWO_PI * Side / Sides;
-			const float A1 = UE_TWO_PI * (Side + 1) / Sides;
-			OSLightTri(Tris, Centre, Colour, Centre + AxisA * FMath::Cos(A0) + AxisB * FMath::Sin(A0), Dark,
-				Centre + AxisA * FMath::Cos(A1) + AxisB * FMath::Sin(A1), Dark);
+			if (Level <= 0.001f)
+			{
+				return;
+			}
+			FLinearColor& Sum = Light.FindOrAdd(KeyOf(X, Y), FLinearColor(0.0f, 0.0f, 0.0f, 1.0f));
+			Sum.R += Colour.R * Level;
+			Sum.G += Colour.G * Level;
+			Sum.B += Colour.B * Level;
 		}
-	}
+
+		void Draw(TArray<FCanvasUVTri>& Tris) const
+		{
+			const FLinearColor Dark(0.0f, 0.0f, 0.0f, 1.0f);
+			for (const TPair<int64, FLinearColor>& Each : Light)
+			{
+				const int32 X = int32(Each.Key >> 32);
+				const int32 Y = int32(uint32(Each.Key & 0xFFFFFFFF));
+				const FVector2D C((X + 0.5) * Texel, (Y + 0.5) * Texel);
+				const FVector2D L = C - FVector2D(Texel, 0.0);
+				const FVector2D R = C + FVector2D(Texel, 0.0);
+				const FVector2D U = C - FVector2D(0.0, Texel);
+				const FVector2D D = C + FVector2D(0.0, Texel);
+				OSLightTri(Tris, C, Each.Value, L, Dark, U, Dark);
+				OSLightTri(Tris, C, Each.Value, U, Dark, R, Dark);
+				OSLightTri(Tris, C, Each.Value, R, Dark, D, Dark);
+				OSLightTri(Tris, C, Each.Value, D, Dark, L, Dark);
+			}
+		}
+	};
 }
 
-void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas) const
+void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 {
 	if (!bLit || !Camera)
 	{
 		return;
 	}
-	// Light adds over the picture (never darkens it), smooth-shaded like the PS1/PS2's lights: soft bands and soft
-	// discs, colour per corner, no pixel grid (owner 23.10: «ближе к psx-ps2 эстетике», not pixel art), and little
-	// of it (owner 23.10: «subtle, industrial, gritty»).
-	const float Res = Canvas.ClipY / 1080.0f;
+	// The camera has turned with the mouse since the tick: the lens, the dot and the spans from where it stands now.
+	if (!Camera->GetComponentTransform().Equals(RefreshedView, 0.001))
+	{
+		Refresh();
+	}
+	// Light adds over the picture (never darkens it) on the game's coarse grid - not pixel art (owner 23.10): the
+	// brightness is continuous and each texel a soft tent, as a low-res frame comes up through a bilinear upscale.
+	FOSTexelFrame Frame;
+	Frame.Texel = FMath::Max(1.0f, FMath::RoundToFloat(Canvas.ClipY / GridLines));
+	const float Texel = Frame.Texel;
 	const double Now = GetWorld()->GetTimeSeconds();
-	const int64 DeviceTick = int64(Now * OSProjectorClockHz);
-	const float TickShare = float(Now * OSProjectorClockHz - double(DeviceTick));
 	const FLinearColor Hot(1.0f, 0.82f, 0.74f);
 	const FLinearColor CoreTint = FMath::Lerp(RedColour, Hot, 0.45f);
-	TArray<FCanvasUVTri> Tris;
-	Tris.Reserve(512);
-	const FTransform View = Camera->GetComponentTransform();
-	// A world size in pixels where a point is: the view's scale over its depth (the gun's own field of view for the lens).
-	const auto PixelsPerCm = [&Canvas, &View, this](const FVector& World, bool bFirstPerson)
-	{
-		const float FieldOfView = bFirstPerson && Camera->bEnableFirstPersonFieldOfView ? Camera->FirstPersonFieldOfView : Camera->FieldOfView;
-		const float Scale = Canvas.ClipX * 0.5f / FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(FieldOfView, 5.0f, 170.0f) * 0.5f));
-		return Scale / FMath::Max(1.0f, float(View.InverseTransformPositionNoScale(World).X));
-	};
 
 	FVector2D Dot2D;
 	const bool bDot = bDotHit && bDotSeen && OSProjectToHud(Camera, Canvas, DotAt, false, Dot2D);
 	if (bThreadShown && BeamSpans.Num() > 0)
 	{
-		// A hard thin line out of the lens in a faint sheath: the ends of each visible span in the drawn gun's
-		// projection; its light falls from the lens to the dot and varies with the haze it passes through - noise fixed
-		// in the world, drifting slowly, which the beam sweeps across as the gun sways (no crawl of its own).
-		const float HalfLens = FMath::Clamp(ThreadCm * 0.5f * PixelsPerCm(LensAt, true), BeamMinPixels * 0.5f * Res, 3.0f * Res);
-		const float HalfDot = BeamMinPixels * 0.5f * Res;
+		// One texel wide, Wu-weighted across the rows (a hair's line steps softly as it moves), a dim sheath either
+		// side; its light falls from the lens to the dot and varies with the haze it passes through - noise fixed in the
+		// world, drifting slowly, which the beam sweeps across as the gun sways; the densest haze glints.
 		const float Base = ThreadLevel * ThreadBrightness;
 		const FVector Drift = FVector(0.3, 0.9, 0.2) * (HazeDriftCmPerSec * Now);
 		const auto HazeAt = [&](float T)
 		{
 			const FVector P = (LensAt + (BeamEnd - LensAt) * T + Drift) / HazeCellCm;
-			const float Coarse = OSNoise3(P * 0.35);
-			const float Fine = OSNoise3(P + FVector(37.0, 11.0, 5.0));
-			return 1.0f - HazeGrit + HazeGrit * 2.0f * (0.6f * Coarse + 0.4f * Fine);
+			return 0.6f * OSNoise3(P * 0.35) + 0.4f * OSNoise3(P + FVector(37.0, 11.0, 5.0));
 		};
 		for (const FVector2f& Span : BeamSpans)
 		{
@@ -438,30 +500,41 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas) const
 			{
 				continue;
 			}
-			const float Length = float((B2 - A2).Size());
-			const int32 Pieces = FMath::Clamp(FMath::CeilToInt32(Length / (8.0f * Res)), 1, 96);
-			for (int32 Piece = 0; Piece < Pieces; ++Piece)
+			const FVector2D A = A2 / Texel;
+			const FVector2D B = B2 / Texel;
+			const FVector2D Way = B - A;
+			const bool bFlat = FMath::Abs(Way.X) >= FMath::Abs(Way.Y);
+			const int32 Steps = FMath::Clamp(FMath::CeilToInt32(float(bFlat ? FMath::Abs(Way.X) : FMath::Abs(Way.Y))), 1, 800);
+			for (int32 Step = 0; Step <= Steps; ++Step)
 			{
-				const float S0 = float(Piece) / Pieces;
-				const float S1 = float(Piece + 1) / Pieces;
-				const float T0 = FMath::Lerp(Span.X, Span.Y, S0);
-				const float T1 = FMath::Lerp(Span.X, Span.Y, S1);
-				const auto LightAt = [&](float T) { return Base * HazeAt(T) * (0.35f + 0.65f * FMath::Pow(1.0f - T, 1.3f)); };
-				const float L0 = LightAt(T0);
-				const float L1 = LightAt(T1);
-				const FVector2D P0 = FMath::Lerp(A2, B2, double(S0));
-				const FVector2D P1 = FMath::Lerp(A2, B2, double(S1));
-				const float W0 = FMath::Lerp(HalfLens, HalfDot, T0);
-				const float W1 = FMath::Lerp(HalfLens, HalfDot, T1);
-				OSSoftBand(Tris, P0, P1, W0 * 2.6f + Res, W1 * 2.6f + Res, OSLit(RedColour, 0.12f * L0), OSLit(RedColour, 0.12f * L1));
-				OSSoftBand(Tris, P0, P1, W0, W1, OSLit(CoreTint, 0.8f * L0), OSLit(CoreTint, 0.8f * L1));
+				const float S = float(Step) / Steps;
+				const float T = FMath::Lerp(Span.X, Span.Y, S);
+				const FVector2D At = A + Way * S;
+				const float Haze = HazeAt(T);
+				const float Light = Base * (0.35f + 0.65f * FMath::Pow(1.0f - T, 1.3f)) * (1.0f - HazeGrit + HazeGrit * 2.0f * Haze);
+				const FLinearColor Colour = Haze > GlintAbove ? FMath::Lerp(CoreTint, Hot, (Haze - GlintAbove) / (1.0f - GlintAbove)) : CoreTint;
+				const float Flash = Haze > GlintAbove ? 1.0f + Glint * (Haze - GlintAbove) / (1.0f - GlintAbove) : 1.0f;
+				// The major axis steps a texel; the minor coordinate splits between its two rows (Wu).
+				const double Major = bFlat ? At.X : At.Y;
+				const double Minor = bFlat ? At.Y : At.X;
+				const int32 M = FMath::FloorToInt32(float(Major));
+				const int32 N0 = FMath::FloorToInt32(float(Minor - 0.5));
+				const float Share = float(Minor - 0.5 - N0);
+				const auto Put = [&](int32 N, float Level)
+				{
+					Frame.Add(bFlat ? M : N, bFlat ? N : M, Colour, Level * Light * Flash);
+				};
+				Put(N0, 1.0f - Share);
+				Put(N0 + 1, Share);
+				Put(N0 - 1, BeamSheath * (1.0f - Share));
+				Put(N0 + 2, BeamSheath * Share);
 			}
 		}
 	}
 	if (bDot)
 	{
-		// The disc as it lies on the surface, never under DotCorePixels across: a small hard centre in a tight red
-		// glow, a faint halo, and a few grains of speckle that re-roll on the device's ticks (blended between).
+		// The disc as it lies on the surface, in texels, never under DotCoreTexels across: a blob with a hot centre
+		// in a red glow, and grains of speckle that boil as the dot moves over the surface and rest when it rests.
 		FVector2D AxisU;
 		FVector2D AxisV;
 		if (!OSProjectToHud(Camera, Canvas, DotAt + DotAxisU, false, AxisU) || !OSProjectToHud(Camera, Canvas, DotAt + DotAxisV, false, AxisV))
@@ -469,41 +542,61 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas) const
 			AxisU = Dot2D + FVector2D(1.0, 0.0);
 			AxisV = Dot2D + FVector2D(0.0, 1.0);
 		}
-		AxisU -= Dot2D;
-		AxisV -= Dot2D;
-		const float MinPx = DotCorePixels * Res;
-		const auto AtLeast = [MinPx](const FVector2D& Axis, const FVector2D& Fallback)
+		AxisU = (AxisU - Dot2D) / Texel;
+		AxisV = (AxisV - Dot2D) / Texel;
+		const auto AtLeast = [this](const FVector2D& Axis, const FVector2D& Fallback)
 		{
 			const double Size = Axis.Size();
-			return Size < 0.01 ? Fallback * MinPx : Axis * FMath::Max(1.0, MinPx / Size);
+			return Size < 0.01 ? Fallback * DotCoreTexels : Axis * FMath::Max(1.0, DotCoreTexels / Size);
 		};
 		AxisU = AtLeast(AxisU, FVector2D(1.0, 0.0));
 		AxisV = AtLeast(AxisV, FVector2D(0.0, 1.0));
-		const auto Padded = [](const FVector2D& Axis, float Pad) { return Axis * ((Axis.Size() + Pad) / Axis.Size()); };
+		const FVector2D Centre = Dot2D / Texel;
 		const float Drive = FMath::Clamp(DotDrive, 0.0f, 1.2f);
-		if (DotHaloPixels > 0.0f)
+		// The disc's metric: u, v along the axes; the core falls off past the rim, the glow wider.
+		const double Det = AxisU.X * AxisV.Y - AxisU.Y * AxisV.X;
+		const float Reach = float(FMath::Max(AxisU.Size(), AxisV.Size())) + 3.0f * DotGlowTexels;
+		const int32 Span = FMath::Clamp(FMath::CeilToInt32(Reach), 1, 24);
+		const int32 CX = FMath::FloorToInt32(float(Centre.X));
+		const int32 CY = FMath::FloorToInt32(float(Centre.Y));
+		for (int32 Y = CY - Span; Y <= CY + Span; ++Y)
 		{
-			OSSoftEllipse(Tris, Dot2D, Padded(AxisU, DotHaloPixels * Res), Padded(AxisV, DotHaloPixels * Res), OSLit(RedColour, 0.1f * Drive), 12);
+			for (int32 X = CX - Span; X <= CX + Span; ++X)
+			{
+				const FVector2D P(X + 0.5 - Centre.X, Y + 0.5 - Centre.Y);
+				float Core = 0.0f;
+				if (FMath::Abs(Det) > 1e-6)
+				{
+					const double U = (P.X * AxisV.Y - P.Y * AxisV.X) / Det;
+					const double V = (AxisU.X * P.Y - AxisU.Y * P.X) / Det;
+					const float R = float(FMath::Sqrt(U * U + V * V)); // 1 at the rim
+					Core = FMath::Exp(-FMath::Square(R) * 1.4f);
+				}
+				const float Glow = DotGlowShare * FMath::Exp(-float(P.SizeSquared()) / (2.0f * DotGlowTexels * DotGlowTexels));
+				Frame.Add(X, Y, FMath::Lerp(RedColour, Hot, FMath::Clamp(Core * 1.2f - 0.3f, 0.0f, 1.0f)), (Core + Glow) * Drive);
+			}
 		}
-		OSSoftEllipse(Tris, Dot2D, Padded(AxisU, DotGlowPixels * Res), Padded(AxisV, DotGlowPixels * Res), OSLit(RedColour, 0.7f * Drive), 10);
-		OSSoftEllipse(Tris, Dot2D, Padded(AxisU, 0.5f), Padded(AxisV, 0.5f), OSLit(CoreTint, Drive), 8);
 		if (Speckle > 0.0f)
 		{
-			for (int32 Grain = 0; Grain < 4; ++Grain)
+			const int64 Set = FMath::FloorToInt64(Boil);
+			const float Blend = float(Boil - double(Set));
+			for (int32 Grain = 0; Grain < 3; ++Grain)
 			{
 				for (int32 Which = 0; Which < 2; ++Which)
 				{
-					const int64 Tick = DeviceTick + Which;
-					const float Weight = Which == 0 ? 1.0f - TickShare : TickShare;
-					const float Angle = UE_TWO_PI * OSProjectorHash(Tick * 7 + Grain, 3301);
-					const float Out = 0.3f + 0.9f * OSProjectorHash(Tick * 7 + Grain, 4409);
-					const FVector2D At = Dot2D + (AxisU * FMath::Cos(Angle) + AxisV * FMath::Sin(Angle)) * Out;
-					const FVector2D Tiny(FMath::Max(0.8f * Res, 0.8f), 0.0);
-					OSSoftEllipse(Tris, At, Tiny, FVector2D(0.0, Tiny.X), OSLit(Hot, Speckle * Drive * Weight), 6);
+					const int64 Seed = (Set + Which) * 7 + Grain;
+					const float Weight = Which == 0 ? 1.0f - Blend : Blend;
+					const float Angle = UE_TWO_PI * OSProjectorHash(Seed, 3301);
+					const float Out = 0.3f + 0.8f * OSProjectorHash(Seed, 4409);
+					const FVector2D At = Centre + (AxisU * FMath::Cos(Angle) + AxisV * FMath::Sin(Angle)) * Out;
+					Frame.Add(FMath::FloorToInt32(float(At.X)), FMath::FloorToInt32(float(At.Y)), Hot, Speckle * Drive * Weight);
 				}
 			}
 		}
 	}
+	TArray<FCanvasUVTri> Tris;
+	Tris.Reserve(Frame.Light.Num() * 4);
+	Frame.Draw(Tris);
 	// The canvas' own white texture: GWhiteTexture lives in RenderCore (not linked), and a triangle item asserts on none.
 	const FTexture* White = Canvas.DefaultTexture ? Canvas.DefaultTexture->GetResource() : nullptr;
 	if (Tris.Num() > 0 && White)

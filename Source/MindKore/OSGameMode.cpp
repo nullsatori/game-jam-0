@@ -186,7 +186,7 @@ void AOSZeroGHUD::DrawHUD()
 	}
 
 	// The laser's dot and thread (UOSLaserSightComponent::DrawHud: on the HUD, not smeared by the upscaler).
-	if (const UOSLaserSightComponent* Laser = Pawn->Guns ? Pawn->Guns->LaserSight.Get() : nullptr)
+	if (UOSLaserSightComponent* Laser = Pawn->Guns ? Pawn->Guns->LaserSight.Get() : nullptr)
 	{
 		Laser->DrawHud(*this, *Canvas);
 	}

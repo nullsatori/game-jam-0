@@ -10,6 +10,7 @@ class UCanvas;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UOSWeaponsComponent;
+class UPointLightComponent;
 class UStaticMeshComponent;
 
 /**
@@ -21,11 +22,16 @@ class UStaticMeshComponent;
  * the RMB-93's smoke once the smoke exists (stub). Off: hidden, no trace.
  *
  * Both are drawn on the HUD (DrawHud), not as meshes in the world (owner's playtest 22.10: «лазер гостит»): the
- * temporal upscaler smeared a few-pixel dot that moves with the view. The look is the PS1/PS2's light (owner 23.10:
- * «ближе к psx-ps2 эстетике», then «subtle, industrial, gritty»): smooth-shaded additive bands and discs, colour per
- * corner - a thin hard beam in a faint sheath, a small dot in a tight glow. What of the beam the gun's own parts stand
- * in front of (their boxes between the eye and the beam) is not drawn: out of the lens from the side, from under the
- * slide at the hip, unseen in the aim.
+ * temporal upscaler smeared a few-pixel dot that moves with the view. The geometry is worked out again at draw time
+ * from the camera as it stands for this frame (the tick ran before the camera turned with the mouse: a stored world
+ * point lagged a frame behind the picture - owner 23.10: «дёрганно двигается за мышью»); the tick's pass is for the
+ * probes. The look is the game's low resolution without pixel art (owner 23.10: «psx-ps2», «лоурезовость перестала
+ * считываться»): the light is rasterised onto a coarse texel grid (GridLines; the smoke's texel) with its brightness
+ * continuous, and each texel is drawn as a tent of light to its neighbours - a bilinear upscale of a low-res frame,
+ * soft steps, no dither, no sprite. A thin beam of one texel, Wu-weighted across the rows; a dot as a small blob,
+ * stretched by its slant, with grains of speckle that boil while the dot moves and freeze when it rests; a faint red
+ * light on the surface (DotLight). What of the beam the gun's own parts stand in front of (their boxes between the eye
+ * and the beam) is not drawn: out of the lens from the side, from under the slide at the hip, unseen in the aim.
  *
  * Its motion is the project's kind (owner 23.10: «анимация должна соответствовать уровню анимаций проекта»), not
  * noise a frame: the diode's drive drifts slowly and ripples with its supply (the ripple beats against the frame
@@ -56,26 +62,36 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "1.0"))
 	float DotStretchMax = 6.0f;
 
-	/** On screen the dot's core is never under this, pixels at 1080 lines; the glow and the halo reach this far past its rim. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.5"))
-	float DotCorePixels = 1.4f;
+	/** The grid of the light, lines of the screen (5 px a texel at 1080, the smoke's texel). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "90.0"))
+	float GridLines = 216.0f;
+
+	/** On screen the dot's core is never under this many texels across; its glow's width (sigma, texels) and share. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.3"))
+	float DotCoreTexels = 0.9f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.3"))
+	float DotGlowTexels = 1.4f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.0"))
-	float DotGlowPixels = 3.0f;
+	float DotGlowShare = 0.18f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.0"))
-	float DotHaloPixels = 8.0f;
-
-	/** The speckle in the dot's glow: a few grains, this bright against the core, re-rolled on the device's ticks. */
+	/** The speckle in the dot: grains this bright against the core; they boil as the dot moves (a new set every this many cm) and rest when it rests (every this many seconds). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float Speckle = 0.15f;
+	float Speckle = 0.2f;
 
-	/** The beam's hot core, cm across in the world (fat by the lens, a hair far off), never under BeamMinPixels at 1080. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.01"))
-	float ThreadCm = 0.25f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.1"))
+	float SpeckleBoilCm = 1.5f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.5"))
-	float BeamMinPixels = 1.5f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.1"))
+	float SpeckleRestSeconds = 2.0f;
+
+	/** The dot's light on the surface, candelas (none at 0) and its reach, cm: a faint red spill on the wall. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.0"))
+	float DotLightCandela = 0.05f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "1.0"))
+	float DotLightRadiusCm = 12.0f;
 
 	/** The beam's light against the dot's, and its brightness by the lens. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0"))
@@ -83,6 +99,17 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0"))
 	float ThreadBrightness = 1.8f;
+
+	/** The beam's sheath: the texels either side of it, share of its light (the bilinear softness is on top). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BeamSheath = 0.12f;
+
+	/** Glints: where the haze is densest (above this of its noise) a texel of the beam flashes hot, this bright. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.5", ClampMax = "1.0"))
+	float GlintAbove = 0.86f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0"))
+	float Glint = 0.5f;
 
 	/** The haze the beam shows in: how much its density varies (share of the light), its cell, cm, and its drift, cm/s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -158,8 +185,8 @@ public:
 	/** Traces since play began (os.Attach.Cost: two a lit frame - the round's line and the eye's sight of the dot). */
 	int32 GetTraceCount() const { return Traces; }
 
-	/** The dot and the thread on the HUD's canvas, every frame while lit (AOSZeroGHUD). */
-	void DrawHud(AHUD& Hud, UCanvas& Canvas) const;
+	/** The dot and the thread on the HUD's canvas, every frame while lit (AOSZeroGHUD); the geometry is refreshed from this frame's camera first. */
+	void DrawHud(AHUD& Hud, UCanvas& Canvas);
 
 	/** UOSWeaponsComponent: a laser is (or is no longer) on the gun in view and switched on - the tick runs only then (and through the off fade). */
 	void Wake(bool bAwake);
@@ -175,6 +202,8 @@ private:
 	float StepDrive(float DeltaTime, bool bWant, bool bShot);
 	/** The spans of the beam (0..1 of LensAt -> BeamEnd) that no part of the gun stands in front of, from the eye. */
 	void FindBeamSpans(const FVector& EyeAt);
+	/** The geometry from the camera as it stands: the round's line, the dot, its disc, the beam's spans, the light. */
+	void Refresh();
 
 	UPROPERTY(Transient)
 	TObjectPtr<UOSWeaponsComponent> Guns = nullptr;
@@ -187,6 +216,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UCameraComponent> Camera = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UPointLightComponent> DotLight = nullptr;
 
 	bool bAwake = false;
 	bool bLit = false;
@@ -203,6 +235,11 @@ private:
 	FVector DotAxisV = FVector::ZeroVector;
 	float DotDrive = 1.0f;
 	float ThreadLevel = 0.0f;
+	/** The camera the geometry was last worked out from; the speckle's boil (cm travelled + rest time). */
+	FTransform RefreshedView;
+	FVector LastDotAt = FVector::ZeroVector;
+	float Boil = 0.0f;
+	float DeltaSecondsNow = 0.0f;
 	// The diode's drive.
 	float OnLevel = 0.0f;
 	float OnVelocity = 0.0f;
