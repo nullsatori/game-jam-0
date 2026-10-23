@@ -223,7 +223,7 @@ public:
 	/** A cloud's parcels: the Рысь's shot is 160 from the muzzle, 80 from its 16 shroud holes, its thread and seep. */
 	static constexpr int32 MaxParcels = 300;
 	/** GasData's rows a cloud (Scripts/os_muzzle_fx.py, GAS_POST_HLSL). */
-	static constexpr int32 DataRows = 9;
+	static constexpr int32 DataRows = 13;
 	/** The velocity grid (air): 20 cells of 6 cm; the render grid: 48 of 2 cm (3 cm in a vacuum), same centre. */
 	static constexpr int32 VelocityCells = 20;
 	static constexpr float VelocityCellCm = 6.0f;
@@ -257,6 +257,8 @@ private:
 		 */
 		FVector3f PrevCentre = FVector3f::ZeroVector;
 		float PrevCellCm = 2.0f;
+		/** The cells each atlas holds gas in (origin frame): the drawing marches only through them. */
+		FVector3f CurOccLo = FVector3f::ZeroVector, CurOccHi = FVector3f::ZeroVector, PrevOccLo = FVector3f::ZeroVector, PrevOccHi = FVector3f::ZeroVector;
 		float CurTime = 0.0f, PrevTime = 0.0f, ShowTime = 0.0f, PackedTime = 0.0f, SimTime = 0.0f, StepDt = 1.0f / 60.0f;
 		int32 CurHalf = 0;
 		/** The atlas being packed is a burst's stamp: shown at once (both halves). */
@@ -289,6 +291,8 @@ private:
 		float StepCarry = 0.0f;
 		uint32 Seed = 0;
 		TArray<FColor> Atlas;
+		/** The cells the last atlas wrote (cleared before the next: no 440 KB re-zeroed each step). */
+		FIntVector AtlasLo = FIntVector(0), AtlasHi = FIntVector(-1);
 		bool bPendingAtlas = false;
 		bool bHasGas = false;
 		/** A burst began this frame: its first parcels are splatted on the game thread and drawn on the shot's frame. */

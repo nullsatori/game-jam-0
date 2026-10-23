@@ -402,8 +402,10 @@ int nt = (int)(TN + 0.5);
         caps = float2(min(c0, c1), max(c0, c1));
     }
     else if (ma < 0 || ma > L) continue;
+    // Only the stretch of the ray inside the cylinder is checked per sample (it was the caps' whole span).
+    float hw = sqrt(r * r - dmin * dmin) / max(sqrt(A), 0.05);
     hq[nh] = float4(tc, dmin, sqrt(A), r);
-    hc[nh] = caps;
+    hc[nh] = float2(max(caps.x, tc - hw), min(caps.y, tc + hw));
     hb[nh] = birth;
     nh++;
 }
@@ -434,19 +436,20 @@ float3 inv = 1.0 / dir;
     float3 warm = d4.rgb;
     float3 top = Data.Load(int3(c, 5, 0)).rgb;
     float3 bot = Data.Load(int3(c, 6, 0)).rgb;
-    // Both boxes: the march over their union.
-    float3 o = Cam - C;
-    float3 t0 = (-H - o) * inv, t1 = (H - o) * inv;
+    // Where both atlases hold gas (rows 9-12, the cells they wrote): the march over their union, not the boxes.
+    float3 qa0 = Data.Load(int3(c, 9, 0)).xyz, qa1 = Data.Load(int3(c, 10, 0)).xyz;
+    float3 qb0 = Data.Load(int3(c, 11, 0)).xyz, qb1 = Data.Load(int3(c, 12, 0)).xyz;
+    float3 t0 = (qa0 - Cam) * inv, t1 = (qa1 - Cam) * inv;
     float3 tn = min(t0, t1), tf = max(t0, t1);
     float aC = max(max(tn.x, tn.y), tn.z), bC = min(min(tf.x, tf.y), tf.z);
-    float3 oP = Cam - CP;
-    float3 p0 = (-HP - oP) * inv, p1 = (HP - oP) * inv;
+    float3 p0 = (qb0 - Cam) * inv, p1 = (qb1 - Cam) * inv;
     float3 pn = min(p0, p1), pf = max(p0, p1);
     float aP = max(max(pn.x, pn.y), pn.z), bP = min(min(pf.x, pf.y), pf.z);
     float a = max(min(bC > aC ? aC : 1e9, bP > aP ? aP : 1e9), EyeClear * 0.5);
     float b = min(max(bC > aC ? bC : -1e9, bP > aP ? bP : -1e9), sceneDist);
     if (b <= a) continue;
-    float stepCm = max(min(cell, cellP), 1.5);
+    // Coarse cells (a vacuum cone metres long) at 1.5 cells a step: the jitter hides it, a third fewer samples.
+    float stepCm = max(min(cell, cellP), 1.5) * (min(cell, cellP) >= 4.0 ? 1.5 : 1.0);
     int ns = min((int)((b - a) / stepCm) + 1, 160);
     float rows = ceil(n / 8.0) * n;
     float2 atlas = float2(8.0 * n, 2.0 * rows);
@@ -469,9 +472,9 @@ float3 inv = 1.0 / dir;
         float3 pw = Cam + dir * t;
         float4 vC = 0, vP = 0;
         float3 p = pw - C;
-        bool inC = all(abs(p) < H);
+        bool inC = phase > 0.001 && all(abs(p) < H);
         float3 pp = pw - CP;
-        bool inP = all(abs(pp) < HP);
+        bool inP = phase < 0.999 && all(abs(pp) < HP);
         float2 uA0 = 0, uA1 = 0, uB0 = 0, uB1 = 0;
         float fA = 0, fB = 0;
         if (inC)

@@ -2625,6 +2625,8 @@ namespace
 	 * box centre and pawn distance every 0.25 s; HighResShot OSWalk_* at the shot, 1 s, the step back and the turn
 	 * (os.Gas.Debug 1 draws the gas's insides).
 	 */
+	TAutoConsoleVariable<int32> CVarGasCapture(TEXT("os.Gas.Capture"), 0, TEXT("1: os.Gas.WalkProbe saves every frame from 0.2 to 3.2 s (a self-check)."));
+
 	FAutoConsoleCommandWithWorldAndArgs GGasWalkProbe(
 		TEXT("os.Gas.WalkProbe"),
 		TEXT("[after s] Shoot while walking, stop, step back, turn, walk round the cloud; log the cloud's centroid every 0.25 s (and HighResShot OSWalk_*)."),
@@ -2794,9 +2796,16 @@ namespace
 					const float At = NearShots < 2 ? 0.3f + 0.3f * NearShots : 2.8f + BackEvery * (NearShots - 2);
 					if (NearShots < 2 + BackCount && T >= At) { ++NearShots; Pawn->Fire(); Clock->Y = T; }
 				}
+				// os.Gas.Capture 1: every frame 0.2-3.2 s saved (ScreenShot*.png) - a self-check at -FPS=30.
+				static uint64 CaptureFrame = 0;
+				if (CaptureFrame != GFrameCounter && T >= 0.2f && T <= 3.2f && IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.Capture"))->GetInt() > 0)
+				{
+					CaptureFrame = GFrameCounter;
+					FScreenshotRequest::RequestScreenshot(false);
+				}
 				// Once a frame (the timer may fire several times in one): a screenshot of the frame to the delegate below.
 				static uint64 AlphaFrame = 0;
-				if (AlphaFrame != GFrameCounter && IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.DebugAlpha"))->GetInt() > 0)
+				if (AlphaFrame != GFrameCounter && IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.DebugAlpha"))->GetInt() == 1)
 				{
 					AlphaFrame = GFrameCounter;
 					FScreenshotRequest::RequestScreenshot(false);

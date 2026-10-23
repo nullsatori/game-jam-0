@@ -1,4 +1,5 @@
 #include "OSGas.h"
+#include <atomic>
 
 #include "Async/ParallelFor.h"
 #include "Camera/PlayerCameraManager.h"
@@ -10,6 +11,7 @@
 #include "Components/LocalLightComponent.h"
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
+#include "Misc/ScopeExit.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -82,6 +84,11 @@ namespace
 	TAutoConsoleVariable<int32> CVarGasDebug(
 		TEXT("os.Gas.Debug"), 0,
 		TEXT("1: draw every cloud's box (white), parcels (points, red heavy to blue light), bodies (yellow, velocity arrow), tunnels (cyan), wall/floor planes (green) and sources (magenta)."));
+
+	/** os.Fx.SmokeCost: the splat's share of the steps. */
+	std::atomic<int64> GSplatUs{0}, GSplats{0};
+	/** The splat's parts: light, kernels, noise, sharpen, atlas, the rest. */
+	std::atomic<int64> GSplatPartUs[6] = {};
 
 	uint32 Hash3(int32 X, int32 Y, int32 Z, uint32 Seed)
 	{
@@ -396,8 +403,14 @@ void UOSGasSubsystem::DrawDebug() const
 FString UOSGasSubsystem::TakeCostLine()
 {
 	FScopeLock Lock(&CostLock);
-	const FString Line = FString::Printf(TEXT("Gas cost: %d step(s) off the game thread, %.0f us mean, %.0f us max; game thread in %d frame(s), %.0f us mean, %.0f us max; %d cloud(s), %d parcel(s)"),
-		CostSteps, CostSteps ? CostStepUs / CostSteps : 0.0, CostMaxStepUs, CostFrames, CostFrames ? CostFrameUs / CostFrames : 0.0, CostMaxFrameUs,
+	const int64 Splats = GSplats.exchange(0), SplatUs = GSplatUs.exchange(0);
+	FString Parts;
+	for (int32 I = 0; I < 6; ++I)
+	{
+		Parts += FString::Printf(TEXT(" %.0f"), Splats ? double(GSplatPartUs[I].exchange(0)) / Splats : 0.0);
+	}
+	const FString Line = FString::Printf(TEXT("Gas cost: %d step(s) off the game thread, %.0f us mean (the splat %.0f: light, kernels, noise, sharpen, atlas, rest%s), %.0f us max; game thread in %d frame(s), %.0f us mean, %.0f us max; %d cloud(s), %d parcel(s)"),
+		CostSteps, CostSteps ? CostStepUs / CostSteps : 0.0, Splats ? double(SplatUs) / Splats : 0.0, *Parts, CostMaxStepUs, CostFrames, CostFrames ? CostFrameUs / CostFrames : 0.0, CostMaxFrameUs,
 		GetCloudCount(), GetParcelCount());
 	CostStepUs = CostMaxStepUs = CostFrameUs = CostMaxFrameUs = 0.0;
 	CostSteps = CostFrames = 0;
@@ -945,6 +958,14 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		Cloud.PrevCentre = bBoth ? Cloud.PackedCentre : Cloud.DrawnCentre;
 		Cloud.PrevCellCm = bBoth ? Cloud.PackedCellCm : Cloud.RenderCellCm;
 		Cloud.PrevTime = bBoth ? Cloud.PackedTime : Cloud.CurTime;
+		{
+			const FVector3f OccLo = Cloud.PackedCentre + (FVector3f(Cloud.AtlasLo) - FVector3f(0.5f * RenderCells)) * Cloud.PackedCellCm;
+			const FVector3f OccHi = Cloud.AtlasHi.X >= Cloud.AtlasLo.X ? Cloud.PackedCentre + (FVector3f(Cloud.AtlasHi) + FVector3f(1.0f - 0.5f * RenderCells)) * Cloud.PackedCellCm : OccLo;
+			Cloud.PrevOccLo = bBoth ? OccLo : Cloud.CurOccLo;
+			Cloud.PrevOccHi = bBoth ? OccHi : Cloud.CurOccHi;
+			Cloud.CurOccLo = OccLo;
+			Cloud.CurOccHi = OccHi;
+		}
 		Cloud.DrawnCentre = Cloud.PackedCentre;
 		Cloud.RenderCellCm = Cloud.PackedCellCm;
 		Cloud.CurTime = Cloud.PackedTime;
@@ -1113,6 +1134,13 @@ void UOSGasSubsystem::UpdatePost()
 		Data[6 * MaxDrawn + Index] = Bottom;
 		Data[7 * MaxDrawn + Index] = FLinearColor(PrevCentre.X, PrevCentre.Y, PrevCentre.Z, 0.5f * RenderCells * Cloud.PrevCellCm);
 		Data[8 * MaxDrawn + Index] = FLinearColor(Cloud.PrevCellCm, 0.0f, 0.0f, 0.0f);
+		// 9-12: where each atlas holds gas (world): the march goes through these, not the whole boxes.
+		const FVector O(Cloud.Origin);
+		const FVector A0 = O + FVector(Cloud.CurOccLo), A1 = O + FVector(Cloud.CurOccHi), B0 = O + FVector(Cloud.PrevOccLo), B1 = O + FVector(Cloud.PrevOccHi);
+		Data[9 * MaxDrawn + Index] = FLinearColor(A0.X, A0.Y, A0.Z, 0.0f);
+		Data[10 * MaxDrawn + Index] = FLinearColor(A1.X, A1.Y, A1.Z, 0.0f);
+		Data[11 * MaxDrawn + Index] = FLinearColor(B0.X, B0.Y, B0.Z, 0.0f);
+		Data[12 * MaxDrawn + Index] = FLinearColor(B1.X, B1.Y, B1.Z, 0.0f);
 		if (BoundGrids[Index] != Cloud.Texture)
 		{
 			BoundGrids[Index] = Cloud.Texture;
@@ -1580,7 +1608,10 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 		}
 	}
 	(void)Down;
+	const double SplatStart = FPlatformTime::Seconds();
 	Splat(Cloud);
+	GSplatUs += int64((FPlatformTime::Seconds() - SplatStart) * 1e6);
+	++GSplats;
 }
 
 void UOSGasSubsystem::Splat(FCloud& Cloud)
@@ -1668,6 +1699,19 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		const float In = P.bInstant ? 1.0f : FMath::SmoothStep(0.0f, 0.12f, P.Age);
 		Weight[I] = In * (1.0f - FMath::SmoothStep(0.6f * P.Life, P.Life, P.Age));
 	}
+	double LapAt = FPlatformTime::Seconds();
+	int32 LapPart = -1;
+	const auto SplatLap = [&LapAt, &LapPart](int32 Part)
+	{
+		const double Now = FPlatformTime::Seconds();
+		if (LapPart >= 0)
+		{
+			GSplatPartUs[LapPart] += int64((Now - LapAt) * 1e6);
+		}
+		LapAt = Now;
+		LapPart = Part;
+	};
+	SplatLap(0);
 	// Each parcel's light: the others in front of it toward the key light (a cylinder of their summed radii).
 	const FVector3f Key = Cloud.KeyDir;
 	TArray<float> Light;
@@ -1685,7 +1729,8 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			const FOSGasParcel& B = Parcels[J];
 			const FVector3f D = B.P - A.P;
 			const float Along = D | Key;
-			if (Along <= 0.0f)
+			// Gas more than 60 cm toward the light is past the reach of its shadow here (a cutoff: the pairs cost N^2).
+			if (Along <= 0.0f || Along > 60.0f)
 			{
 				continue;
 			}
@@ -1701,16 +1746,59 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	const float Cut = Cloud.bAir ? NoiseCut + 0.1f : 0.15f;
 	const float Scale = Cloud.bAir ? NoiseCm : 12.0f;
 	const uint32 CloudSeed = Cloud.Seed;
+	SplatLap(1);
 	// The splat, slice by slice: the parcels' smooth kernels only (the noise comes once per cell below).
 	const int32 Cells = N * N * N;
-	TArray<float> D, H, L, W, TX, TY, TZ;
-	D.SetNumZeroed(Cells);
-	H.SetNumZeroed(Cells);
-	L.SetNumZeroed(Cells);
-	W.SetNumZeroed(Cells);
-	TX.SetNumZeroed(Cells);
-	TY.SetNumZeroed(Cells);
-	TZ.SetNumZeroed(Cells);
+	// The fields: one from a pool, kept between splats - only the last splat's cells are cleared (zeroing 3.5 MB of
+	// fresh arrays every step was much of its cost). A pool, not thread_local: a thread waiting in a ParallelFor may
+	// run another cloud's step.
+	struct FScratch
+	{
+		TArray<float> D, H, L, W, TX, TY, TZ, T0, T1;
+		FIntVector Lo = FIntVector(0), Hi = FIntVector(-1);
+	};
+	static FCriticalSection PoolLock;
+	static TArray<TUniquePtr<FScratch>> Pool;
+	TUniquePtr<FScratch> Taken;
+	{
+		FScopeLock Lock(&PoolLock);
+		Taken = Pool.IsEmpty() ? MakeUnique<FScratch>() : Pool.Pop();
+	}
+	ON_SCOPE_EXIT
+	{
+		FScopeLock Lock(&PoolLock);
+		Pool.Add(MoveTemp(Taken));
+	};
+	FScratch& Scratch = *Taken;
+	if (Scratch.D.Num() != Cells)
+	{
+		for (TArray<float>* F : { &Scratch.D, &Scratch.H, &Scratch.L, &Scratch.W, &Scratch.TX, &Scratch.TY, &Scratch.TZ, &Scratch.T0, &Scratch.T1 })
+		{
+			F->SetNumZeroed(Cells);
+		}
+	}
+	else
+	{
+		for (int32 Z = Scratch.Lo.Z; Z <= Scratch.Hi.Z; ++Z)
+		{
+			for (int32 Y = Scratch.Lo.Y; Y <= Scratch.Hi.Y; ++Y)
+			{
+				const int32 Row = (Z * N + Y) * N;
+				const int32 Count = Scratch.Hi.X - Scratch.Lo.X + 1;
+				for (TArray<float>* F : { &Scratch.D, &Scratch.H, &Scratch.L, &Scratch.W, &Scratch.TX, &Scratch.TY, &Scratch.TZ, &Scratch.T0, &Scratch.T1 })
+				{
+					FMemory::Memzero(F->GetData() + Row + Scratch.Lo.X, Count * sizeof(float));
+				}
+			}
+		}
+	}
+	TArray<float>& D = Scratch.D;
+	TArray<float>& H = Scratch.H;
+	TArray<float>& L = Scratch.L;
+	TArray<float>& W = Scratch.W;
+	TArray<float>& TX = Scratch.TX;
+	TArray<float>& TY = Scratch.TY;
+	TArray<float>& TZ = Scratch.TZ;
 	const float Fade = 1.0f;
 	// How much a parcel's kernel fills its cell (the calibration of the cloud's opacity, os.Fx.SmokeCost's T).
 	const float MassScale = Cloud.bAir ? AirMassScale : VacuumMassScale;
@@ -1730,6 +1818,8 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		Lo = FIntVector(0);
 		Hi = FIntVector(-1);
 	}
+	Scratch.Lo = Lo;
+	Scratch.Hi = Hi;
 	const int32 Slices = FMath::Max(0, Hi.Z - Lo.Z + 1);
 	GasFor(Slices, [&](int32 K)
 	{
@@ -1743,10 +1833,14 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			const float Speed = P.V.Size();
 			const FVector3f Along = Speed > 1.0f ? P.V / Speed : FVector3f::ZeroVector;
 			const float Long = FMath::Max(P.RadiusCm, Speed * 0.08f);
-			const float R = Long;
 			const float InvAcross2 = 1.0f / (P.RadiusCm * P.RadiusCm);
 			const float InvLong2 = 1.0f / (Long * Long);
-			if (FMath::Abs(P.P.Z - CZ) >= R || P.Mass * Weight[Index] < 1e-4f)
+			// The ellipsoid's own bounds per axis (a streak along X is long in X only): its sphere's box made a fast
+			// parcel visit ~14000 cells a splat.
+			const float Stretch = Long * Long - P.RadiusCm * P.RadiusCm;
+			const FVector3f Ext(FMath::Sqrt(Stretch * Along.X * Along.X + P.RadiusCm * P.RadiusCm), FMath::Sqrt(Stretch * Along.Y * Along.Y + P.RadiusCm * P.RadiusCm),
+				FMath::Sqrt(Stretch * Along.Z * Along.Z + P.RadiusCm * P.RadiusCm));
+			if (FMath::Abs(P.P.Z - CZ) >= Ext.Z || P.Mass * Weight[Index] < 1e-4f)
 			{
 				continue;
 			}
@@ -1754,10 +1848,10 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			// The same matter in more room: a parcel thins as it grows (air: (3 cm / r)^2; vacuum: 5 cm / r, it spreads metres).
 			const float Thin = Cloud.bAir ? FMath::Clamp(FMath::Square(3.0f / P.RadiusCm), 0.02f, 1.0f) : FMath::Clamp(5.0f / P.RadiusCm, 0.05f, 1.0f);
 			const float M = P.Mass * Weight[Index] * Fade * Thin;
-			const int32 X0 = FMath::Max(0, FMath::FloorToInt((P.P.X - R - Centre.X + Half) / Cell));
-			const int32 X1 = FMath::Min(N - 1, FMath::FloorToInt((P.P.X + R - Centre.X + Half) / Cell));
-			const int32 Y0 = FMath::Max(0, FMath::FloorToInt((P.P.Y - R - Centre.Y + Half) / Cell));
-			const int32 Y1 = FMath::Min(N - 1, FMath::FloorToInt((P.P.Y + R - Centre.Y + Half) / Cell));
+			const int32 X0 = FMath::Max(0, FMath::FloorToInt((P.P.X - Ext.X - Centre.X + Half) / Cell));
+			const int32 X1 = FMath::Min(N - 1, FMath::FloorToInt((P.P.X + Ext.X - Centre.X + Half) / Cell));
+			const int32 Y0 = FMath::Max(0, FMath::FloorToInt((P.P.Y - Ext.Y - Centre.Y + Half) / Cell));
+			const int32 Y1 = FMath::Min(N - 1, FMath::FloorToInt((P.P.Y + Ext.Y - Centre.Y + Half) / Cell));
 
 			for (int32 Y = Y0; Y <= Y1; ++Y)
 			{
@@ -1789,6 +1883,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			}
 		}
 	});
+	SplatLap(2);
 	// The rags: one two-octave noise per cell with gas, torn by a threshold (was one per parcel per cell: 4x the budget).
 	GasFor(Slices, [&](int32 K)
 	{
@@ -1811,49 +1906,99 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			}
 		}
 	});
+	SplatLap(3);
 	// A soft sharpen: the density less 0.4 of its blur (5 cells a side) - the low cushion goes, the lumps stay.
 	{
-		TArray<float> T0, T1;
-		T0.SetNumZeroed(Cells);
-		T1.SetNumZeroed(Cells);
-		const auto Box = [N, Lo, Hi, Slices](const TArray<float>& From, TArray<float>& To, int32 AX, int32 AY, int32 AZ)
+		TArray<float>& T0 = Scratch.T0;
+		TArray<float>& T1 = Scratch.T1;
+		// A 5-cell box along one axis by running sums (a cell costs two reads, not five), rows contiguous in X.
+		const auto Clamp = [N](int32 V) { return FMath::Clamp(V, 0, N - 1); };
+		const auto At3 = [N](int32 X, int32 Y, int32 Z) { return (Z * N + Y) * N + X; };
+		const int32 Rows = FMath::Max(0, Hi.Y - Lo.Y + 1);
+		// Along X.
+		GasFor(Slices, [&](int32 KZ)
 		{
-			GasFor(Slices, [&](int32 KZ)
-			{
-				const int32 Z = Lo.Z + KZ;
-				for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
-				{
-					for (int32 X = Lo.X; X <= Hi.X; ++X)
-					{
-						float Sum = 0.0f;
-						for (int32 K = -2; K <= 2; ++K)
-						{
-							const int32 QX = FMath::Clamp(X + AX * K, 0, N - 1), QY = FMath::Clamp(Y + AY * K, 0, N - 1), QZ = FMath::Clamp(Z + AZ * K, 0, N - 1);
-							Sum += From[(QZ * N + QY) * N + QX];
-						}
-						To[(Z * N + Y) * N + X] = Sum * 0.2f;
-					}
-				}
-			});
-		};
-		Box(D, T0, 1, 0, 0);
-		Box(T0, T1, 0, 1, 0);
-		Box(T1, T0, 0, 0, 1);
-		for (int32 Z = Lo.Z; Z <= Hi.Z; ++Z)
-		{
+			const int32 Z = Lo.Z + KZ;
 			for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
+			{
+				float Sum = 0.0f;
+				for (int32 K = -2; K <= 2; ++K)
+				{
+					Sum += D[At3(Clamp(Lo.X + K), Y, Z)];
+				}
+				for (int32 X = Lo.X; X <= Hi.X; ++X)
+				{
+					T0[At3(X, Y, Z)] = Sum * 0.2f;
+					Sum += D[At3(Clamp(X + 3), Y, Z)] - D[At3(Clamp(X - 2), Y, Z)];
+				}
+			}
+			// Along Y in the same slice (a row of sums slides down it): one pass over the slices for both. The rows
+			// outside the region the X pass did not write are zero (cleared).
+			TArray<float, TInlineAllocator<64>> Sum;
+			Sum.SetNumZeroed(N);
+			for (int32 K = -2; K <= 2; ++K)
 			{
 				for (int32 X = Lo.X; X <= Hi.X; ++X)
 				{
-					const int32 I = (Z * N + Y) * N + X;
-					D[I] = FMath::Max(0.0f, D[I] - 0.4f * T0[I]) / 0.6f;
+					Sum[X] += T0[At3(X, Clamp(Lo.Y + K), Z)];
 				}
+			}
+			for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
+			{
+				const int32 In = Clamp(Y + 3), Out = Clamp(Y - 2);
+				for (int32 X = Lo.X; X <= Hi.X; ++X)
+				{
+					T1[At3(X, Y, Z)] = Sum[X] * 0.2f;
+					Sum[X] += T0[At3(X, In, Z)] - T0[At3(X, Out, Z)];
+				}
+			}
+		});
+		// Along Z (by rows of Y: a row of sums slides through the slices), and the sharpen with it.
+		GasFor(Rows, [&](int32 KY)
+		{
+			const int32 Y = Lo.Y + KY;
+			TArray<float, TInlineAllocator<64>> Sum;
+			Sum.SetNumZeroed(N);
+			for (int32 K = -2; K <= 2; ++K)
+			{
+				for (int32 X = Lo.X; X <= Hi.X; ++X)
+				{
+					Sum[X] += T1[At3(X, Y, Clamp(Lo.Z + K))];
+				}
+			}
+			for (int32 Z = Lo.Z; Z <= Hi.Z; ++Z)
+			{
+				const int32 In = Clamp(Z + 3), Out = Clamp(Z - 2);
+				for (int32 X = Lo.X; X <= Hi.X; ++X)
+				{
+					const int32 I = At3(X, Y, Z);
+					D[I] = FMath::Max(0.0f, D[I] - 0.4f * Sum[X] * 0.2f) / 0.6f;
+					Sum[X] += T1[At3(X, Y, In)] - T1[At3(X, Y, Out)];
+				}
+			}
+		});
+	}
+	SplatLap(4);
+	// The atlas: R density, G heat, B the key light, A the ambient's shadow (the gas around, 2 cells each way).
+	const FIntPoint Size = FOSSmokeSim::AtlasSize(N);
+	// The atlas kept: the last one's cells cleared, this one's all written (zeros too).
+	if (Cloud.Atlas.Num() != Size.X * Size.Y)
+	{
+		Cloud.Atlas.SetNumZeroed(Size.X * Size.Y);
+	}
+	else
+	{
+		for (int32 Z = Cloud.AtlasLo.Z; Z <= Cloud.AtlasHi.Z; ++Z)
+		{
+			const int32 OX = (Z % 8) * N, OY = (Z / 8) * N;
+			for (int32 Y = Cloud.AtlasLo.Y; Y <= Cloud.AtlasHi.Y; ++Y)
+			{
+				FMemory::Memzero(Cloud.Atlas.GetData() + (OY + Y) * Size.X + OX + Cloud.AtlasLo.X, (Cloud.AtlasHi.X - Cloud.AtlasLo.X + 1) * sizeof(FColor));
 			}
 		}
 	}
-	// The atlas: R density, G heat, B the key light, A the ambient's shadow (the gas around, 2 cells each way).
-	const FIntPoint Size = FOSSmokeSim::AtlasSize(N);
-	Cloud.Atlas.SetNumZeroed(Size.X * Size.Y);
+	Cloud.AtlasLo = Lo;
+	Cloud.AtlasHi = Hi;
 	const auto Byte = [](float V) { return uint8(FMath::Clamp(FMath::RoundToInt(V * 255.0f), 0, 255)); };
 	const auto At = [&D, N](int32 X, int32 Y, int32 Z) { return D[(FMath::Clamp(Z, 0, N - 1) * N + FMath::Clamp(Y, 0, N - 1)) * N + FMath::Clamp(X, 0, N - 1)]; };
 	bool bAny = false;
@@ -1896,14 +2041,21 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			}
 		}
 	});
-	for (float V : D)
+	for (int32 Z = Lo.Z; Z <= Hi.Z && !bAny; ++Z)
 	{
-		if (V > 0.004f)
+		for (int32 Y = Lo.Y; Y <= Hi.Y && !bAny; ++Y)
 		{
-			bAny = true;
-			break;
+			for (int32 X = Lo.X; X <= Hi.X; ++X)
+			{
+				if (D[(Z * N + Y) * N + X] > 0.004f)
+				{
+					bAny = true;
+					break;
+				}
+			}
 		}
 	}
+	SplatLap(5);
 	{
 		// Along X through the gas's mass centre (the box's own centre often misses the gas).
 		float Tau = 0.0f;
