@@ -75,6 +75,7 @@ UOSScopeComponent::UOSScopeComponent()
 	Sniper.SightRearCm = EyepieceCm;
 	Sniper.SightFrontCm = ObjectiveCm;
 	Sniper.EyeCm = 14.0f;
+	Sniper.ZeroCm = 10000.0f; // the scope zeroed at 100 m
 	// 96: the eyepiece ~44% of the frame (owner 18.10: «прицел можно помельче, чтобы и оружие было видно нормально»).
 	Sniper.GunFieldOfView = 96.0f;
 	Sniper.KickScale = 0.25f;

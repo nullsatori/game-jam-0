@@ -22,6 +22,13 @@
 #include "Engine/Texture2D.h"
 #include "OSLens.h"
 #include "StaticMeshResources.h"
+#include "HAL/IConsoleManager.h"
+
+namespace
+{
+	TAutoConsoleVariable<int32> CVarOSLaserMask(TEXT("os.Laser.Mask"), 0,
+		TEXT("1: show the laser's view of the gun on the HUD - the gun's mask over the beam in blue, the lens in green (yellow: no mask, the boxes' fallback)."));
+}
 
 UOSLaserSightComponent::UOSLaserSightComponent()
 {
@@ -710,7 +717,7 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 	const bool bGhostShown = bGhost && bDotHit && OSProjectToHud(Camera, Canvas, GhostAt, false, Ghost2D);
 	// The gun's own depth on the grid over the beam (and the ghost): the beam leaves from behind its silhouette exactly.
 	bool bMask = false;
-	FVector2D Lens2D;
+	FVector2D Lens2D = FVector2D::ZeroVector;
 	FVector2D End2D;
 	if (bThreadShown && OSProjectToHud(Camera, Canvas, LensAt, true, Lens2D) && OSProjectToHud(Camera, Canvas, BeamEnd, true, End2D))
 	{
@@ -954,6 +961,25 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 	else
 	{
 		bLastDotTexel = false;
+	}
+	if (CVarOSLaserMask.GetValueOnGameThread() != 0 && bThreadShown)
+	{
+		// The debug view: what the beam takes for the gun, and where it takes the lens to be.
+		if (bMask)
+		{
+			for (int32 Y = MaskRegion.Min.Y; Y < MaskRegion.Max.Y; ++Y)
+			{
+				for (int32 X = MaskRegion.Min.X; X < MaskRegion.Max.X; ++X)
+				{
+					if (MaskNearInv[(Y - MaskRegion.Min.Y) * MaskRegion.Width() + (X - MaskRegion.Min.X)] > 0.0f)
+					{
+						Frame.Add(X, Y, FLinearColor(0.0f, 0.15f, 0.5f), 0.4f);
+					}
+				}
+			}
+		}
+		const FVector2D LensTexel = Lens2D / Texel;
+		Frame.Add(FMath::FloorToInt32(float(LensTexel.X)), FMath::FloorToInt32(float(LensTexel.Y)), bMask ? FLinearColor(0.0f, 1.0f, 0.0f) : FLinearColor(1.0f, 1.0f, 0.0f), 1.0f);
 	}
 	TArray<FCanvasUVTri> Tris;
 	Tris.Reserve(Frame.Light.Num() * 4);

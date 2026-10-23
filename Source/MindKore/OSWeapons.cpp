@@ -554,11 +554,29 @@ FTransform UOSWeaponsComponent::GetMuzzleTransform() const
 	}
 	// The bore's line is the view's forward carried through the kick: the gun's
 	// world rotation without its rest turn in ViewOffset (the USP sits turned 180).
-	const FQuat Bore = ViewModel->GetComponentQuat() * Weapon->ViewOffset.GetRotation().Inverse();
+	FQuat Bore = ViewModel->GetComponentQuat() * Weapon->ViewOffset.GetRotation().Inverse();
 	const FVector Location = ViewModel->DoesSocketExist(TEXT("Muzzle"))
 		? ViewModel->GetSocketLocation(TEXT("Muzzle"))
 		// No socket (a mesh not from Scripts/os_weapons.py): its front, on its origin's line.
 		: ViewModel->GetComponentTransform().TransformPosition(FVector(ViewModel->GetStaticMesh()->GetBoundingBox().Max.X, 0.0f, 0.0f));
+	// The bore regulated to the sights, as a gun's are: from the muzzle to the point on the aimed eye's line of sight
+	// (the eye EyeCm behind the rear sight, through the front) ZeroCm out. Aimed, the round and the laser's dot land on
+	// the front sight there (owner 23.10: the dot sat on the slide's back - the USP's bore ran a degree under its sights).
+	if (Scope && Scope->Aims.IsValidIndex(CurrentWeapon))
+	{
+		const FOSGunAim& Aim = Scope->Aims[CurrentWeapon];
+		const FVector Sight = (Aim.SightFrontCm - Aim.SightRearCm).GetSafeNormal();
+		if (Aim.ZeroCm > 0.0f && !Sight.IsNearlyZero())
+		{
+			const FVector ZeroAt = ViewModel->GetComponentTransform().TransformPosition(Aim.SightRearCm + Sight * (Aim.ZeroCm - Aim.EyeCm));
+			const FVector Toward = (ZeroAt - Location).GetSafeNormal();
+			// Only a small regulation (a few degrees): sight data far off the bore is left alone.
+			if ((Toward | Bore.GetAxisX()) > 0.995)
+			{
+				Bore = FQuat::FindBetweenNormals(Bore.GetAxisX(), Toward) * Bore;
+			}
+		}
+	}
 	// A muzzle device carries the muzzle out to its own end (the suppressor), once it is on.
 	const FOSAttachment* Device = GetActiveOn(CurrentWeapon, EOSMountType::Muzzle);
 	return FTransform(Bore, Location + Bore.GetAxisX() * (Device ? Device->MuzzleOffsetCm : 0.0f));

@@ -133,6 +133,12 @@
 |---|---|---|---|
 | `os.Ladder.Probe` | — | The first ladder: grab, climb by the view, S, dead zone, strafe, over the top, down to the floor, jump off, strafe off; logs position and speed. 'shots': stills (needs a real RHI); 'trace': a line every frame (mode, ground, CanEnter, contacts). | `Source/MindKore/OSLadder.cpp` |
 
+## `os.Laser`
+
+| Команда | Аргументы | Что делает | Где |
+|---|---|---|---|
+| `os.Laser.Mask` | `0` / `1` | 1: on the HUD, the laser's view of the gun - the gun's mask over the beam in blue, the lens in green (yellow: no mask, the boxes' fallback). Console variable. | `Source/MindKore/OSLaserSight.cpp` |
+
 ## `os.Move`
 
 | Команда | Аргументы | Что делает | Файл |

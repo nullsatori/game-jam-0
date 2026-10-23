@@ -96,6 +96,14 @@ struct FOSGunAim
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Aim")
 	FVector SightFrontCm = FVector::ForwardVector;
 
+	/**
+	 * The zero, cm from the eye: the bore is regulated so the round's line crosses the sight line here (as a gun's
+	 * sights are). Aimed, the rounds and the laser's dot land on the front sight at this range (owner 23.10, ADS: the
+	 * pistol's bore ran 1 deg under its sight line, drawn 2, and the dot sat on the slide's back). 0: the bore as modelled.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Aim", meta = (ClampMin = "0.0"))
+	float ZeroCm = 1500.0f;
+
 	/** Eye to the rear sight when aimed, cm: more than the 10 cm near clip plane, with room for the kick. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Scope|Aim", meta = (ClampMin = "10.0"))
 	float EyeCm = 20.0f;
