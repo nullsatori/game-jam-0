@@ -387,6 +387,10 @@ struct FOSWeapon
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon", meta = (ClampMin = "0.0"))
 	float ProjectileSpeed = 9000.0f;
 
+	/** The tunnel each of its rounds punches through smoke, radius cm (UOSMuzzleFxComponent::CarveRay; owner 23.10: «как в кс2»). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Smoke", meta = (ClampMin = "0.0"))
+	float SmokeHoleCm = 3.0f;
+
 	/** The view's kick per shot, degrees up; RecoilSettleFraction of it comes back by itself. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapon|Recoil", meta = (ClampMin = "0.0"))
 	float KickPitchDeg = 1.5f;

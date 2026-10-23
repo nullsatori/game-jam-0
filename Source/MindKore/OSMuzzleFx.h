@@ -292,6 +292,28 @@ public:
 	/** Remove every cloud (stills). */
 	void ClearClouds();
 
+	/**
+	 * A projectile through the smoke (owner 23.10: «чтобы проджектайлы дырявили как в кс2»): every round, pellet or
+	 * hitscan line punches its own tunnel of RadiusCm from Start to End. Seen on the same frame - the material carves
+	 * it - clean for TunnelHoldSeconds, then healing over TunnelHealSeconds (the radius shrinks, the edge goes ragged;
+	 * twice as slow in a vacuum); the grid gets the hole and a push at once, its inflow closes it.
+	 */
+	void CarveRay(const FVector& Start, const FVector& End, float RadiusCm);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
+	float TunnelHoldSeconds = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.05"))
+	float TunnelHealSeconds = 2.0f;
+
+	/** Tunnels drawn at once (per cloud: the material's loop); the oldest go first. */
+	static constexpr int32 MaxTunnels = 32;
+
+	int32 GetTunnelCount() const { return Tunnels.Num(); }
+
+	/** The youngest cloud at least MinAge old: its box centre and half side (tests). */
+	bool GetYoungestCloud(float MinAge, FVector& OutCentre, float& OutHalf) const;
+
 	/** Oldest puffs go first past this. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx", meta = (ClampMin = "1"))
 	int32 MaxPuffs = 320;
@@ -474,6 +496,16 @@ private:
 		FVector3f KeyDir = FVector3f::UpVector;
 		FLinearColor KeyColour = FLinearColor::White;
 		FString KeyName;
+		/** The tunnels through it this frame (box frame), for the material: 32 x 2 floats. */
+		TObjectPtr<UTexture2D> TunnelTexture = nullptr;
+		int32 TunnelCount = 0;
+		/** Pushes that came while a step was in flight: applied once it is done (a round never misses a cloud). */
+		struct FDeferredBlast
+		{
+			FVector Origin, Direction;
+			float RadiusCm, Along, Push, Clear, LengthCm;
+		};
+		TArray<FDeferredBlast> Deferred;
 		/** Fading out early (another shot needed its slot): seconds left, 0 when not. */
 		float Evict = 0.0f;
 		/** A vacuum cloud frozen keeps turning at its gas's angular velocity at the freeze (box frame axis x rad/s). */
@@ -532,6 +564,20 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UObject>> CloudObjects;
 	FVector LastBody = FVector::ZeroVector;
+
+	struct FTunnel
+	{
+		FVector Start, End;
+		float RadiusCm = 3.0f;
+		float Age = 0.0f;
+		/** Heals twice as slow (no air to flow in). */
+		bool bVacuum = false;
+	};
+	TArray<FTunnel> Tunnels;
+	/** One cloud's share of a push (Blast): true if it touched gas. */
+	bool BlastCloud(FCloud& Cloud, const FVector& Origin, const FVector& Direction, float RadiusCm, float Along, float Push, float Clear, float LengthCm);
+	/** The tunnels through this cloud into its material (box frame, healed as of now). */
+	void UpdateTunnels(FCloud& Cloud, float Half);
 	/** The lights a cloud may take as its key, refreshed every second. */
 	TArray<TWeakObjectPtr<class ULightComponent>> KeyLights;
 	float KeyLightsAge = 1e6f;

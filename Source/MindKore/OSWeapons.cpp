@@ -150,6 +150,7 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	Pistol.bAutomatic = false;
 	// Near real muzzle velocities (owner 19.10: slow rounds made the flesh walls answer late): 9 mm 350 m/s.
 	Pistol.ProjectileSpeed = 35000.0f;
+	Pistol.SmokeHoleCm = 4.0f;
 	Pistol.KickPitchDeg = 1.2f;
 	Pistol.KickYawDeg = 0.3f;
 	Pistol.ViewKickBackCm = 3.0f;
@@ -184,6 +185,7 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	Shotgun.EmptySound = ShotgunEmpty.Object;
 	Shotgun.ShellInsertSound = ShotgunShell.Object;
 	Shotgun.ProjectileSpeed = 40000.0f; // buckshot ~400 m/s
+	Shotgun.SmokeHoleCm = 4.5f; // each pellet its own
 	Shotgun.KickPitchDeg = 5.0f;
 	Shotgun.KickYawDeg = 1.2f;
 	Shotgun.ViewKickBackCm = 7.0f;
@@ -227,6 +229,7 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	Sniper.MagOutSound = SniperMagOut.Object;
 	Sniper.MagInSound = SniperMagIn.Object;
 	Sniper.ProjectileSpeed = 80000.0f; // 7.62x54R ~800 m/s
+	Sniper.SmokeHoleCm = 8.0f;
 	Sniper.KickPitchDeg = 8.0f;
 	Sniper.KickYawDeg = 1.0f;
 	Sniper.ViewKickBackCm = 9.0f;
@@ -401,6 +404,11 @@ void UOSWeaponsComponent::UpdateRounds(float DeltaTime)
 		Round.TravelledCm += float(FVector::Dist(Round.Position, Impact));
 		Round.Position = Impact;
 		Round.bLanded = bLands;
+		// Its flight this frame punches a tunnel through any smoke on the way (along the streak: the round's path).
+		if (UOSMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UOSMuzzleFxComponent>())
+		{
+			Fx->CarveRay(Tail, TracerHead(Round), Weapon.SmokeHoleCm);
+		}
 		if (UStaticMeshComponent* Tracer = Round.Tracer.Get())
 		{
 			// The streak covers this frame's flight (a fast round is a long streak, as on film; at
@@ -820,7 +828,12 @@ bool UOSWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, F
 			: Direction;
 		if (Weapon->ProjectileSpeed <= 0.0f)
 		{
-			TraceShot(*Weapon, Start, Start + PelletDirection * Weapon->RangeCm, PelletDirection);
+			FVector Impact = Start + PelletDirection * Weapon->RangeCm;
+			TraceShot(*Weapon, Start, Impact, PelletDirection, &Impact);
+			if (UOSMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UOSMuzzleFxComponent>())
+			{
+				Fx->CarveRay(Start, Impact, Weapon->SmokeHoleCm);
+			}
 			continue;
 		}
 		FRound& Round = Rounds.AddDefaulted_GetRef();

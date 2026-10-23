@@ -261,10 +261,28 @@ float erode = Er * saturate((T - 0.25) / max(L - 0.25, 0.1)) * (0.35 + 0.65 * hv
 float dens = (g.r * Th * Gn - erode) * carve;
 int band = (int)min(floor(saturate(dens) * 4 + th), 4);
 if (band < 1) return 0;
+// Projectile tunnels (UOSMuzzleFxComponent::CarveRay, like CS2's smokes): a capsule per round through this box, at
+// the pixel's centre, only for pixels drawn at all (v7: before the band test it cost 6 ms; the hole's edge is the smoke's own 3 cm pixel). Row 0 start xyz + radius, row 1 end xyz +
+// ragged (0 clean .. 1 healing: a per-pixel share of the radius eaten). The pixels just outside light up a little.
+float3 pc = (q + 0.5) * cell;
+float rim = 0;
+int tn = (int)(TN + 0.5);
+float hr = frac(sin(dot(q + S * 7, float3(41.3, 289.1, 117.7))) * 43758.5453);
+[loop] for (int k = 0; k < tn; k++)
+{
+    float4 ta = Tun.Load(int3(k, 0, 0));
+    float4 tb = Tun.Load(int3(k, 1, 0));
+    float3 ab = tb.xyz - ta.xyz;
+    float t = saturate(dot(pc - ta.xyz, ab) / max(dot(ab, ab), 1e-3));
+    float td = length(pc - (ta.xyz + ab * t));
+    float tr = ta.w * (1 - tb.w * hr);
+    if (td < tr) return 0;
+    else if (td < tr + cell) rim = max(rim, 1 - tb.w);
+}
 float flick = frac(sin(dot(q, float3(12.9898, 78.233, 37.719)) + floor(Tm * 24) * 0.618) * 43758.5453);
 // Few: the hottest of the hot, a sparse hash (a ball of embers read as a lit grid, v3).
 float ember = (g.g > 0.82 + 0.15 * th && hv > 0.8) ? saturate(g.g - 0.75) * 4 * (0.4 + 0.6 * flick) : 0;
-return float4(SHARE[band], saturate(g.g * 1.4), ember, g.b * g.a);
+return float4(SHARE[band], saturate(g.g * 1.4), ember, lerp(g.b * g.a, 1, 0.45 * rim));
 """
 
 
@@ -279,7 +297,10 @@ def _volume(m, node, custom, data, scalar, colour, mul):
                 texture=unreal.load_asset("/Engine/EngineResources/DefaultTexture"))
     inputs = {"W": world, "H": scalar("HalfCm", 80.0), "N": scalar("Cells", 32.0), "S": scalar("Seed", 0.0),
               "T": scalar("Age", 0.0), "L": scalar("Life", 6.0), "Th": scalar("Thin", 1.0), "Er": scalar("Erode", 0.9),
-              "Gn": scalar("Gain", 1.0), "Px": scalar("PixelCm", 3.0), "Tm": node(unreal.MaterialExpressionTime), "Grid": grid}
+              "Gn": scalar("Gain", 1.0), "Px": scalar("PixelCm", 3.0), "Tm": node(unreal.MaterialExpressionTime), "Grid": grid,
+              "TN": scalar("TunnelCount", 0.0),
+              "Tun": node(unreal.MaterialExpressionTextureObjectParameter, parameter_name="Tunnels",
+                          texture=unreal.load_asset("/Engine/EngineResources/DefaultTexture"))}
     rgba = {"C": "CloudCentre", "BX": "CloudX", "BY": "CloudY", "BZ": "CloudZ", "E": "Eye", "Bod": "Body"}
     n = node(unreal.MaterialExpressionCustom, code=VOLUME_HLSL, description="Cloud",
              output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT4,

@@ -282,10 +282,8 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 	const FVector Bore = Muzzle.GetRotation().GetAxisX();
 	if (CVarVolumetricSmoke.GetValueOnGameThread() != 0 && CloudMaterial.LoadSynchronous())
 	{
-		// The round leaves the muzzle along the aim: through every older cloud in its way it throws the gas on its
-		// line aside and drives a jet down it (the pressure solve rolls its mouth into a vortex ring); a shotgun blast
-		// out of the muzzle shoves the older clouds ahead of it on. No wait: a cloud mid-step misses the push.
-		Blast(Muzzle.GetLocation(), View->GetForwardVector(), Gun.RoundRadiusCm, Gun.RoundAlongCm, Gun.RoundPushCm, Gun.RoundClear, nullptr);
+		// Every round punches its own tunnel as it flies (CarveRay from UOSWeaponsComponent); a shotgun blast out of
+		// the muzzle shoves the older clouds ahead of it on.
 		if (Gun.ShoveCm > 0.0f)
 		{
 			for (FCloud& Cloud : Clouds)
@@ -627,6 +625,8 @@ namespace
 	/** Late in life (from LateSeconds) the slow drift steps at 15 Hz: it moves under a pixel a step. */
 	constexpr float LateStep = 1.0f / 15.0f;
 	constexpr float LateSeconds = 2.0f;
+	/** A projectile's tunnel spares the clouds this young (its own shot's gas, born with it). */
+	constexpr float OwnShotSeconds = 0.15f;
 
 #if !UE_BUILD_SHIPPING
 	/** os.Fx.SmokeCost: what the grids cost on the game thread since the last call. */
@@ -856,24 +856,171 @@ void UOSMuzzleFxComponent::Blast(const FVector& Origin, const FVector& Direction
 {
 	for (FCloud& Cloud : Clouds)
 	{
-		if (Cloud.Age < 0.0f || &Cloud == Except || Cloud.IsBusy())
+		if (Cloud.Age < 0.0f || &Cloud == Except)
 		{
 			continue;
 		}
-		// Box frame; the line counts if it passes within the box's half diagonal of its centre.
-		FOSSmokeSim& Sim = *Cloud.Sim;
-		const FVector Local = Cloud.Basis.UnrotateVector(Origin - Cloud.Centre);
-		const FVector Dir = Cloud.Basis.UnrotateVector(Direction).GetSafeNormal();
-		const float Half = 0.5f * Sim.N * Guns[Cloud.Gun].CellCm * Cloud.Scale;
-		if ((Local - Dir * (Local | Dir)).Size() > Half * 1.75f)
+		// A cloud mid-step takes it once the step is done (TickClouds): a push is never lost.
+		if (Cloud.IsBusy())
 		{
+			Cloud.Deferred.Add({ Origin, Direction, RadiusCm, Along, Push, Clear, LengthCm });
 			continue;
 		}
-		if (Sim.Impulse(FVector3f(Local), FVector3f(Dir), RadiusCm, Along, Push, Clear, LengthCm))
+		BlastCloud(Cloud, Origin, Direction, RadiusCm, Along, Push, Clear, LengthCm);
+	}
+}
+
+bool UOSMuzzleFxComponent::BlastCloud(FCloud& Cloud, const FVector& Origin, const FVector& Direction, float RadiusCm, float Along, float Push, float Clear, float LengthCm)
+{
+	// Box frame; the line counts if it passes within the box's half diagonal of its centre.
+	FOSSmokeSim& Sim = *Cloud.Sim;
+	const FVector Local = Cloud.Basis.UnrotateVector(Origin - Cloud.Centre);
+	const FVector Dir = Cloud.Basis.UnrotateVector(Direction).GetSafeNormal();
+	const float Half = 0.5f * Sim.N * Guns[Cloud.Gun].CellCm * Cloud.Scale;
+	if ((Local - Dir * (Local | Dir)).Size() > Half * 1.75f)
+	{
+		return false;
+	}
+	if (Sim.Impulse(FVector3f(Local), FVector3f(Dir), RadiusCm, Along, Push, Clear, LengthCm))
+	{
+		Cloud.Awake = WakeSeconds;
+		return true;
+	}
+	return false;
+}
+
+bool UOSMuzzleFxComponent::GetYoungestCloud(float MinAge, FVector& OutCentre, float& OutHalf) const
+{
+	const FCloud* Best = nullptr;
+	for (const FCloud& Cloud : Clouds)
+	{
+		if (Cloud.Age >= MinAge && (!Best || Cloud.Age < Best->Age))
 		{
-			Cloud.Awake = WakeSeconds;
+			Best = &Cloud;
 		}
 	}
+	if (Best)
+	{
+		OutCentre = Best->Centre;
+		OutHalf = 0.5f * Best->Sim->N * Guns[Best->Gun].CellCm * Best->Scale;
+	}
+	return Best != nullptr;
+}
+
+void UOSMuzzleFxComponent::UpdateTunnels(FCloud& Cloud, float Half)
+{
+	TArray<FLinearColor, TInlineAllocator<MaxTunnels * 2>> Rows;
+	Rows.SetNumZeroed(MaxTunnels * 2);
+	int32 Count = 0;
+	for (const FTunnel& Tunnel : Tunnels)
+	{
+		// Not through the gas its own shot let out (born with it, within 0.15 s): the pellets fly down the very axis
+		// of their muzzle's jet and ate it whole.
+		if (Cloud.Age < Tunnel.Age + OwnShotSeconds)
+		{
+			continue;
+		}
+		const FVector Closest = FMath::ClosestPointOnSegment(Cloud.Centre, Tunnel.Start, Tunnel.End);
+		// Through the box at all (its half diagonal, 1.73 x the half side).
+		if (FVector::Dist(Closest, Cloud.Centre) > Half * 1.74f + Tunnel.RadiusCm)
+		{
+			continue;
+		}
+		// Clean for the hold, then the radius shrinks to nothing and the edge goes ragged over the heal.
+		const float Slow = Tunnel.bVacuum ? 2.0f : 1.0f;
+		const float Heal = FMath::SmoothStep(TunnelHoldSeconds * Slow, (TunnelHoldSeconds + TunnelHealSeconds) * Slow, Tunnel.Age);
+		const float Ragged = FMath::SmoothStep(TunnelHoldSeconds * Slow, (TunnelHoldSeconds + 0.5f * TunnelHealSeconds) * Slow, Tunnel.Age) * 0.75f;
+		if (Tunnel.RadiusCm * (1.0f - Heal) < 0.3f)
+		{
+			continue;
+		}
+		const FVector A = Cloud.Basis.UnrotateVector(Tunnel.Start - Cloud.Centre);
+		const FVector B = Cloud.Basis.UnrotateVector(Tunnel.End - Cloud.Centre);
+		// Newest first in the rows' order does not matter; the oldest were dropped in CarveRay.
+		Rows[Count] = FLinearColor(A.X, A.Y, A.Z, Tunnel.RadiusCm * (1.0f - Heal));
+		Rows[MaxTunnels + Count] = FLinearColor(B.X, B.Y, B.Z, Ragged);
+		++Count;
+	}
+	if (Count == 0 && Cloud.TunnelCount == 0)
+	{
+		return;
+	}
+	if (!Cloud.TunnelTexture)
+	{
+		UTexture2D* Texture = UTexture2D::CreateTransient(MaxTunnels, 2, PF_A32B32G32R32F);
+		Texture->SRGB = false;
+		Texture->Filter = TF_Nearest;
+		Texture->NeverStream = true;
+		Texture->UpdateResource();
+		Cloud.TunnelTexture = Texture;
+		CloudObjects.Add(Texture);
+		Cloud.Material->SetTextureParameterValue(TEXT("Tunnels"), Texture);
+	}
+	Cloud.TunnelCount = Count;
+	Cloud.Material->SetScalarParameterValue(TEXT("TunnelCount"), float(Count));
+	if (Count > 0)
+	{
+		uint8* Data = static_cast<uint8*>(FMemory::Malloc(Rows.Num() * sizeof(FLinearColor)));
+		FMemory::Memcpy(Data, Rows.GetData(), Rows.Num() * sizeof(FLinearColor));
+		FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, MaxTunnels, 2);
+		Cloud.TunnelTexture->UpdateTextureRegions(0, 1, Region, MaxTunnels * sizeof(FLinearColor), sizeof(FLinearColor), Data,
+			[](uint8* Src, const FUpdateTextureRegion2D* Regions) { FMemory::Free(Src); delete Regions; });
+	}
+}
+
+void UOSMuzzleFxComponent::CarveRay(const FVector& Start, const FVector& End, float RadiusCm)
+{
+	const FVector Along = End - Start;
+	const float Length = Along.Size();
+	if (Length < 1.0f || RadiusCm <= 0.0f)
+	{
+		return;
+	}
+	// Only where it crosses a cloud's box (a round flies metres a frame; most of them through no smoke).
+	bool bThrough = false;
+	FVector Where = Start;
+	for (const FCloud& Cloud : Clouds)
+	{
+		if (Cloud.Age >= OwnShotSeconds)
+		{
+			const float Half = 0.5f * Cloud.Sim->N * Guns[Cloud.Gun].CellCm * Cloud.Scale;
+			const FVector Closest = FMath::ClosestPointOnSegment(Cloud.Centre, Start, End);
+			if (FVector::Dist(Closest, Cloud.Centre) < Half * 1.75f)
+			{
+				bThrough = true;
+				Where = Closest;
+			}
+		}
+	}
+	if (!bThrough)
+	{
+		return;
+	}
+	// The shot's own cloud is spared (its gas flies with the pellets).
+	const FCloud* Fresh = LastSpawned && LastSpawned->Age >= 0.0f && LastSpawned->Age < OwnShotSeconds ? LastSpawned : nullptr;
+	// A round's flight comes a frame at a time: its next stretch lengthens its tunnel (one tunnel per round).
+	for (FTunnel& Each : Tunnels)
+	{
+		if (Each.RadiusCm == RadiusCm && FVector::DistSquared(Each.End, Start) < 1.0f
+			&& ((Each.End - Each.Start).GetSafeNormal() | (Along / Length)) > 0.999f)
+		{
+			Each.End = End;
+			Blast(Start, Along / Length, RadiusCm * 1.2f, 120.0f, 90.0f, 0.85f, Fresh, Length);
+			return;
+		}
+	}
+	FTunnel& Tunnel = Tunnels.AddDefaulted_GetRef();
+	Tunnel.Start = Start;
+	Tunnel.End = End;
+	Tunnel.RadiusCm = RadiusCm;
+	Tunnel.bVacuum = OSAirZoneAt(GetWorld(), Where) == nullptr;
+	if (Tunnels.Num() > MaxTunnels)
+	{
+		Tunnels.RemoveAt(0, Tunnels.Num() - MaxTunnels);
+	}
+	// The grid: the gas in the tunnel thrown aside and a push out of it and along it - when the drawn hole heals,
+	// the grid already has it and its inflow closes it with swirls. No vortex ring per pellet: a mild push.
+	Blast(Start, Along / Length, RadiusCm * 1.2f, 120.0f, 90.0f, 0.85f, Fresh, Length);
 }
 
 void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
@@ -887,6 +1034,16 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 	float BodyRadius = 0.0f, BodyHalfHeight = 0.0f;
 	GetOwner()->GetSimpleCollisionCylinder(BodyRadius, BodyHalfHeight);
 	BodyRadius = FMath::Clamp(BodyRadius, 15.0f, 45.0f);
+	// The tunnels heal; a healed one goes.
+	for (int32 Index = Tunnels.Num() - 1; Index >= 0; --Index)
+	{
+		FTunnel& Tunnel = Tunnels[Index];
+		Tunnel.Age += DeltaTime;
+		if (Tunnel.Age >= (TunnelHoldSeconds + TunnelHealSeconds) * (Tunnel.bVacuum ? 2.0f : 1.0f))
+		{
+			Tunnels.RemoveAt(Index);
+		}
+	}
 #if !UE_BUILD_SHIPPING
 	// Tuning overrides (os.Fx.SmokeTune): the fields on every gun when the string changes, the material's every frame.
 	static FString TuneApplied;
@@ -1018,6 +1175,14 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		{
 			Cloud.Centre += Move;
 			Cloud.PlaneMove += FVector3f(Cloud.Basis.UnrotateVector(Move));
+		}
+		if (!bBusy && !Cloud.Deferred.IsEmpty())
+		{
+			for (const FCloud::FDeferredBlast& D : Cloud.Deferred)
+			{
+				BlastCloud(Cloud, D.Origin, D.Direction, D.RadiusCm, D.Along, D.Push, D.Clear, D.LengthCm);
+			}
+			Cloud.Deferred.Reset();
 		}
 		if (!bBusy && !Cloud.PlaneMove.IsNearlyZero(0.01f))
 		{
@@ -1158,6 +1323,7 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 		Material->SetScalarParameterValue(TEXT("UnitCm"), G.CellCm * Cloud.Scale);
 		Material->SetVectorParameterValue(TEXT("Eye"), FLinearColor(EyeLocal.X, EyeLocal.Y, EyeLocal.Z, EyeClearCm));
 		Material->SetVectorParameterValue(TEXT("Body"), FLinearColor(BodyLocal.X, BodyLocal.Y, BodyLocal.Z, BodyRadius));
+		UpdateTunnels(Cloud, Half);
 #if !UE_BUILD_SHIPPING
 		for (const TPair<FName, FString>& Each : MaterialTune)
 		{
@@ -1699,7 +1865,7 @@ namespace
 		const auto Eye = [Pawn]() { return Pawn->Camera->GetComponentLocation(); };
 		const auto Still = [Pawn, Controller, Fx, Eye](const FString& Name)
 		{
-			UE_LOG(LogMindKore, Log, TEXT("Smoke moments: %s - eye %s, pawn %.0f cm/s, %d card puff(s), %d hot case(s);%s"), *Name, *Eye().ToCompactString(), Pawn->GetVelocity().Size(), Fx->GetPuffCount(), Fx->GetHotCaseCount(), *Fx->DescribeClouds());
+			UE_LOG(LogMindKore, Log, TEXT("Smoke moments: %s - eye %s, pawn %.0f cm/s, %d card puff(s), %d hot case(s), %d tunnel(s);%s"), *Name, *Eye().ToCompactString(), Pawn->GetVelocity().Size(), Fx->GetPuffCount(), Fx->GetHotCaseCount(), Fx->GetTunnelCount(), *Fx->DescribeClouds());
 			Fx->DumpClouds(Name);
 			Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=OSSmoke_%s"), *Name));
 		};
@@ -1886,7 +2052,7 @@ namespace
 			After(11.0f, [Fx, Controller, Place, Stand, Look]()
 			{
 				Place(Stand, Look);
-				UE_LOG(LogMindKore, Log, TEXT("Smoke moments: ProfileGPU with %d cloud(s) alive;%s"), Fx->GetCloudCount(), *Fx->DescribeClouds());
+				UE_LOG(LogMindKore, Log, TEXT("Smoke moments: ProfileGPU with %d cloud(s) alive, %d tunnel(s);%s"), Fx->GetCloudCount(), Fx->GetTunnelCount(), *Fx->DescribeClouds());
 				Controller->ConsoleCommand(TEXT("ProfileGPU"));
 			});
 			After(11.5f, [Still]() { Still(TEXT("budget_three_shotgun_clouds")); });
@@ -2063,6 +2229,59 @@ namespace
 		TEXT("os.Weapons.Smoke"),
 		TEXT("Stills of the smoke's moments in play on Lvl_OS_Range (run with -UseFixedTimeStep -FPS=60): on foot, holding on, a pistol burst, an SV-98 shot drifting off and back (or only those named: foot, cling, burst, sv98). 'budget': three shotgun clouds on the os.Weapons.Fx stand, then ProfileGPU. 'room': the RMB-93 at the floor of Lvl_OS_TestRoom, 'roomspace': the same shot on Lvl_OS_ZeroG into the black."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunSmokeMoments));
+
+#if !UE_BUILD_SHIPPING
+	/** os.Fx.TunnelStill: waits for a cloud 0.6 s old, carves a 3 x 3 grid of tunnels along the view through it, shoots it carved, at +1 s and +2 s (healing). */
+	FAutoConsoleCommandWithWorldAndArgs GTunnelStill(
+		TEXT("os.Fx.TunnelStill"),
+		TEXT("[after s] Wait (from world time 'after') for the player's next smoke cloud (0.6 s old), carve a 3 x 3 grid of tunnels along the view through it (CarveRay, 3.5 cm), HighResShot OSTunnels_0/1000/2000ms."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			const float After = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 0.0f;
+			TSharedRef<FTimerHandle> Handle = MakeShared<FTimerHandle>();
+			World->GetTimerManager().SetTimer(*Handle, FTimerDelegate::CreateLambda([World, Handle, After]()
+			{
+				if (World->GetTimeSeconds() < After)
+				{
+					return;
+				}
+				APlayerController* Controller = World->GetFirstPlayerController();
+				APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+				UOSMuzzleFxComponent* Fx = Pawn ? Pawn->FindComponentByClass<UOSMuzzleFxComponent>() : nullptr;
+				FVector Centre;
+				float Half;
+				if (!Fx || !Fx->GetYoungestCloud(0.6f, Centre, Half))
+				{
+					return;
+				}
+				World->GetTimerManager().ClearTimer(*Handle);
+				FVector Eye;
+				FRotator View;
+				Controller->GetPlayerViewPoint(Eye, View);
+				const FVector Right = FRotationMatrix(View).GetUnitAxis(EAxis::Y);
+				const FVector Up = FRotationMatrix(View).GetUnitAxis(EAxis::Z);
+				// A 3 x 3 grid along the view (as a shooter sees his own rounds' tunnels), 15 cm apart.
+				const FVector Forward = (Centre - Eye).GetSafeNormal();
+				for (int32 I = -1; I <= 1; ++I)
+				{
+					for (int32 J = -1; J <= 1; ++J)
+					{
+						const FVector Mid = Centre + Right * (I * 15.0f) + Up * (J * 15.0f);
+						Fx->CarveRay(Mid - Forward * Half * 1.5f, Mid + Forward * Half * 1.5f, 3.5f);
+					}
+				}
+				UE_LOG(LogMindKore, Log, TEXT("Tunnel still: 9 tunnels along the view through the cloud at %s (half %.0f cm), %d alive"), *Centre.ToCompactString(), Half, Fx->GetTunnelCount());
+				for (const float At : { 0.05f, 1.0f, 2.0f })
+				{
+					FTimerHandle Shot;
+					World->GetTimerManager().SetTimer(Shot, FTimerDelegate::CreateLambda([Controller, At]()
+					{
+						Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=OSTunnels_%04dms"), FMath::RoundToInt(At * 1000.0f)));
+					}), At, false);
+				}
+			}), 0.05f, true);
+		}));
+#endif
 
 	FAutoConsoleCommandWithWorld GClearSmoke(
 		TEXT("os.Fx.ClearSmoke"),
