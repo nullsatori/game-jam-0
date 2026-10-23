@@ -303,89 +303,49 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas) const
 	FVector2D Lens2D;
 	if (bThreadShown && bDot && Guns && OSProjectToHud(Camera, Canvas, LensAt, true, Lens2D))
 	{
-		// The gun is nearer than the beam: what of it lies over the gun's outline on screen is not drawn (the hull of
-		// its meshes' boxes - the beam comes out of the gun's front, not over the slide).
-		TArray<FVector2D> Points;
-		OSGunScreenPoints(*Guns, Camera, Canvas, Points);
-		const TArray<FVector2D> Hull = OSHull(MoveTemp(Points));
-		double Hidden0 = 2.0;
-		double Hidden1 = 2.0;
-		if (!OSInsideSpan(Hull, Lens2D, Dot2D, Hidden0, Hidden1))
-		{
-			Hidden0 = Hidden1 = 2.0;
-		}
+		// Out of the lens itself, a hard thin line in a faint sheath (playtest 23.10: «subtle, industrial, gritty»):
+		// no halo, no motes. Its grit: short pieces dimmer or brighter, redrawn on the device's ticks, not crawling.
 		const FVector2D Way = Dot2D - Lens2D;
 		const float Length = float(Way.Size());
-		const double Exit = Hidden0 <= 0.0 ? FMath::Min(Hidden1, 1.0) : 0.0;
-		// The beam's real thickness on screen at either end: fat by the lens, a hair at the dot - never thinner than BeamMinPixels.
-		const float HalfLens = FMath::Clamp(ThreadCm * 0.5f * PixelsPerCm(LensAt, true), BeamMinPixels * 0.5f * Res, 7.0f * Res);
-		const float HalfDot = FMath::Clamp(ThreadCm * 0.5f * PixelsPerCm(DotAt, false), BeamMinPixels * 0.5f * Res, 7.0f * Res);
+		const float HalfLens = FMath::Clamp(ThreadCm * 0.5f * PixelsPerCm(LensAt, true), BeamMinPixels * 0.5f * Res, 3.0f * Res);
+		const float HalfDot = BeamMinPixels * 0.5f * Res;
 		const float Base = ThreadLevel * ThreadBrightness;
-		// The light along the beam: brightest out of the gun, thinning toward the dot, coming up over a few pixels as it
-		// leaves the gun, and the haze it lights moving through it (two slow bands sliding toward the dot).
-		const auto LightAt = [&](double Share)
+		const int32 Pieces = FMath::Clamp(FMath::CeilToInt32(Length / (10.0f * Res)), 1, 96);
+		for (int32 Piece = 0; Piece < Pieces; ++Piece)
 		{
-			const float T = float(Share);
-			const float Emerge = FMath::Clamp(float(Share - Exit) * Length / (14.0f * Res), 0.0f, 1.0f);
-			const float Haze = 0.82f + 0.12f * FMath::Sin(38.0f * T - 5.0f * float(Now)) + 0.08f * FMath::Sin(91.0f * T - 9.0f * float(Now) + 1.7f);
-			return Base * Emerge * Haze * (0.28f + 0.72f * FMath::Pow(1.0f - T, 1.5f));
-		};
-		const auto DrawSpan = [&](double From, double To)
-		{
-			if (To <= From)
+			const float S0 = float(Piece) / Pieces;
+			const float S1 = float(Piece + 1) / Pieces;
+			const auto LightAt = [&](float T, int32 Key)
 			{
-				return;
-			}
-			const int32 Pieces = FMath::Clamp(FMath::CeilToInt32(float(To - From) * Length / (12.0f * Res)), 1, 48);
-			for (int32 Piece = 0; Piece < Pieces; ++Piece)
-			{
-				const double S0 = FMath::Lerp(From, To, double(Piece) / Pieces);
-				const double S1 = FMath::Lerp(From, To, double(Piece + 1) / Pieces);
-				const FVector2D A = Lens2D + Way * S0;
-				const FVector2D B = Lens2D + Way * S1;
-				const float W0 = FMath::Lerp(HalfLens, HalfDot, float(S0));
-				const float W1 = FMath::Lerp(HalfLens, HalfDot, float(S1));
-				const float L0 = LightAt(S0);
-				const float L1 = LightAt(S1);
-				// The halo wide and dim, the body, then the hot core: three soft bands make the glow's falloff.
-				OSSoftBand(Tris, A, B, W0 * 5.0f + 2.0f * Res, W1 * 5.0f + 2.0f * Res, OSLit(RedColour, 0.16f * L0), OSLit(RedColour, 0.16f * L1));
-				OSSoftBand(Tris, A, B, W0 * 2.2f + Res, W1 * 2.2f + Res, OSLit(RedColour, 0.5f * L0), OSLit(RedColour, 0.5f * L1));
-				OSSoftBand(Tris, A, B, W0, W1, OSLit(CoreTint, L0), OSLit(CoreTint, L1));
-			}
-		};
-		DrawSpan(0.0, FMath::Min(Hidden0, 1.0));
-		DrawSpan(FMath::Max(Hidden1, 0.0), 1.0);
-		// Where it leaves the gun the haze by the muzzle glows most.
-		if (Exit < 1.0)
-		{
-			const FVector2D Out = Lens2D + Way * Exit;
-			OSSoftDisc(Tris, Out, HalfLens * 6.0f + 4.0f * Res, HalfLens * 4.0f + 3.0f * Res, OSLit(RedColour, 0.35f * Base));
-		}
-		// Dust in the beam: motes catch the light and drift along it toward the dot, each its own speed and twinkle.
-		for (int32 Mote = 0; Mote < DustMotes; ++Mote)
-		{
-			const float Seed = OSProjectorHash(Mote, 9137);
-			const float Phase = FMath::Frac(Seed + float(Now) * DustDrift * (0.6f + 0.8f * OSProjectorHash(Mote, 271)));
-			if (Phase < Exit || (Phase > Hidden0 && Phase < Hidden1))
-			{
-				continue;
-			}
-			const float Twinkle = FMath::Sin(UE_PI * Phase) * (0.6f + 0.4f * FMath::Sin(float(Now) * (7.0f + 9.0f * Seed)));
-			const float Half = FMath::Lerp(HalfLens, HalfDot, Phase) * 1.6f + 1.2f * Res;
-			OSSoftDisc(Tris, Lens2D + Way * Phase, Half, Half, OSLit(Hot, FMath::Clamp(Base * 1.5f, 0.0f, 1.0f) * FMath::Max(0.0f, Twinkle)), 8);
+				const float Grit = 0.7f + 0.45f * OSProjectorHash(DeviceTick * 131 + Key, 5501);
+				return Base * Grit * (0.35f + 0.65f * FMath::Pow(1.0f - T, 1.3f));
+			};
+			const float L0 = LightAt(S0, Piece);
+			const float L1 = LightAt(S1, Piece + 1);
+			const FVector2D A = Lens2D + Way * S0;
+			const FVector2D B = Lens2D + Way * S1;
+			const float W0 = FMath::Lerp(HalfLens, HalfDot, S0);
+			const float W1 = FMath::Lerp(HalfLens, HalfDot, S1);
+			OSSoftBand(Tris, A, B, W0 * 2.6f + Res, W1 * 2.6f + Res, OSLit(RedColour, 0.12f * L0), OSLit(RedColour, 0.12f * L1));
+			OSSoftBand(Tris, A, B, W0, W1, OSLit(CoreTint, 0.8f * L0), OSLit(CoreTint, 0.8f * L1));
 		}
 	}
 	if (bDot)
 	{
-		// The dot: a white-hot centre, a red glow, a wide dim halo and a faint flat streak across (the lens it is seen
-		// through); a little smaller far off, all of it on the diode's flutter and the device's ticks.
-		const float Far = FMath::Clamp(FMath::Sqrt(400.0f / FMath::Max(1.0f, float(FVector::Dist(View.GetLocation(), DotAt)))), 0.55f, 1.25f);
+		// The dot: a small hard centre in a tight red glow - no streak, no wide halo; the diode's flutter on it.
+		const float Far = FMath::Clamp(FMath::Sqrt(400.0f / FMath::Max(1.0f, float(FVector::Dist(View.GetLocation(), DotAt)))), 0.6f, 1.2f);
 		const float Size = Res * Far;
-		const float Drive = FMath::Clamp(DotDrive, 0.0f, 1.2f) * (0.93f + 0.07f * OSProjectorHash(DeviceTick, 4421));
-		OSSoftDisc(Tris, Dot2D, DotHaloPixels * Size, DotHaloPixels * Size, OSLit(RedColour, 0.22f * Drive), 24);
-		OSSoftDisc(Tris, Dot2D, DotStreakPixels * Size, 1.6f * Size + 0.8f, OSLit(RedColour, 0.3f * Drive), 16);
-		OSSoftDisc(Tris, Dot2D, DotGlowPixels * Size, DotGlowPixels * Size, OSLit(RedColour, 0.85f * Drive), 20);
-		OSSoftDisc(Tris, Dot2D, DotCorePixels * Size + 0.5f, DotCorePixels * Size + 0.5f, OSLit(Hot, Drive), 12);
+		const float Drive = FMath::Clamp(DotDrive, 0.0f, 1.2f) * (0.9f + 0.1f * OSProjectorHash(DeviceTick, 4421));
+		if (DotHaloPixels > 0.0f)
+		{
+			OSSoftDisc(Tris, Dot2D, DotHaloPixels * Size, DotHaloPixels * Size, OSLit(RedColour, 0.1f * Drive), 12);
+		}
+		if (DotStreakPixels > 0.0f)
+		{
+			OSSoftDisc(Tris, Dot2D, DotStreakPixels * Size, 1.2f * Size, OSLit(RedColour, 0.15f * Drive), 8);
+		}
+		OSSoftDisc(Tris, Dot2D, DotGlowPixels * Size, DotGlowPixels * Size, OSLit(RedColour, 0.7f * Drive), 10);
+		OSSoftDisc(Tris, Dot2D, DotCorePixels * Size + 0.5f, DotCorePixels * Size + 0.5f, OSLit(CoreTint, Drive), 8);
 	}
 	// The canvas' own white texture: GWhiteTexture lives in RenderCore (not linked), and a triangle item asserts on none.
 	const FTexture* White = Canvas.DefaultTexture ? Canvas.DefaultTexture->GetResource() : nullptr;

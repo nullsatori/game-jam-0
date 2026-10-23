@@ -41,16 +41,16 @@ public:
 
 	/** The dot's light, pixels at 1080 lines (4 m off; a little smaller farther): the white core, the red glow, the halo, the streak's half length. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.5"))
-	float DotCorePixels = 2.5f;
+	float DotCorePixels = 1.4f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.5"))
-	float DotGlowPixels = 9.0f;
+	float DotGlowPixels = 4.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.5"))
-	float DotHaloPixels = 30.0f;
+	float DotHaloPixels = 9.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
-	float DotStreakPixels = 60.0f;
+	float DotStreakPixels = 0.0f;
 
 	/** The beam's hot core, cm across in the world (fat by the lens, a hair far off), never under BeamMinPixels at 1080. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.01"))
@@ -64,11 +64,11 @@ public:
 	float ThreadShare = 0.25f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
-	float ThreadBrightness = 2.6f;
+	float ThreadBrightness = 1.8f;
 
 	/** Dust caught in the beam: how many motes, and how fast they drift along it (beam lengths a second). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0"))
-	int32 DustMotes = 6;
+	int32 DustMotes = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
 	float DustDrift = 0.12f;

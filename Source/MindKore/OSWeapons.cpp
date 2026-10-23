@@ -573,12 +573,25 @@ void UOSWeaponsComponent::GetShotLine(const FVector& Eye, const FVector& ViewDir
 		return;
 	}
 	const FTransform Muzzle = GetMuzzleTransform();
+	FVector MuzzleAt = Muzzle.GetLocation();
 	OutDirection = Muzzle.GetRotation().GetAxisX();
+	// The gun is drawn with its own field of view (the scope blends FirstPersonFieldOfView in for the aim and the menu):
+	// the line that looks like the bore on screen is the drawn one's, its across-the-view parts scaled by
+	// tan(world / 2) / tan(gun / 2) in the camera's frame (playtest 23.10: «луч не туда, особенно в табе»).
+	if (const UCameraComponent* Eye3 = Cast<UCameraComponent>(ViewModel->GetAttachParent()); Eye3 && Eye3->bEnableFirstPersonFieldOfView)
+	{
+		const double Ratio = FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(Eye3->FieldOfView, 5.0f, 170.0f) * 0.5))
+			/ FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(Eye3->FirstPersonFieldOfView, 5.0f, 170.0f) * 0.5));
+		const FTransform View = Eye3->GetComponentTransform();
+		const FVector Across(1.0, Ratio, Ratio);
+		MuzzleAt = View.TransformPositionNoScale(View.InverseTransformPositionNoScale(MuzzleAt) * Across);
+		OutDirection = View.TransformVectorNoScale(View.InverseTransformVectorNoScale(OutDirection) * Across).GetSafeNormal();
+	}
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(OSShotLine), /*bTraceComplex=*/false, GetOwner());
 	FHitResult Blocked;
-	if (!GetWorld()->LineTraceSingleByChannel(Blocked, Eye, Muzzle.GetLocation(), ECC_GameTraceChannel2, Params))
+	if (!GetWorld()->LineTraceSingleByChannel(Blocked, Eye, MuzzleAt, ECC_GameTraceChannel2, Params))
 	{
-		OutStart = Muzzle.GetLocation();
+		OutStart = MuzzleAt;
 	}
 }
 
