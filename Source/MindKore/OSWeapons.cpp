@@ -150,7 +150,7 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	Pistol.bAutomatic = false;
 	// Near real muzzle velocities (owner 19.10: slow rounds made the flesh walls answer late): 9 mm 350 m/s.
 	Pistol.ProjectileSpeed = 35000.0f;
-	Pistol.SmokeHoleCm = 4.0f;
+	Pistol.SmokeHoleCm = 6.0f;
 	Pistol.KickPitchDeg = 1.2f;
 	Pistol.KickYawDeg = 0.3f;
 	Pistol.ViewKickBackCm = 3.0f;
@@ -185,7 +185,7 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	Shotgun.EmptySound = ShotgunEmpty.Object;
 	Shotgun.ShellInsertSound = ShotgunShell.Object;
 	Shotgun.ProjectileSpeed = 40000.0f; // buckshot ~400 m/s
-	Shotgun.SmokeHoleCm = 4.5f; // each pellet its own
+	Shotgun.SmokeHoleCm = 7.0f; // each pellet its own
 	Shotgun.KickPitchDeg = 5.0f;
 	Shotgun.KickYawDeg = 1.2f;
 	Shotgun.ViewKickBackCm = 7.0f;
@@ -229,7 +229,7 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	Sniper.MagOutSound = SniperMagOut.Object;
 	Sniper.MagInSound = SniperMagIn.Object;
 	Sniper.ProjectileSpeed = 80000.0f; // 7.62x54R ~800 m/s
-	Sniper.SmokeHoleCm = 8.0f;
+	Sniper.SmokeHoleCm = 12.0f;
 	Sniper.KickPitchDeg = 8.0f;
 	Sniper.KickYawDeg = 1.0f;
 	Sniper.ViewKickBackCm = 9.0f;

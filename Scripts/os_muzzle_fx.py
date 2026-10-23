@@ -266,6 +266,7 @@ if (band < 1) return 0;
 // ragged (0 clean .. 1 healing: a per-pixel share of the radius eaten). The pixels just outside light up a little.
 float3 pc = (q + 0.5) * cell;
 float rim = 0;
+float edge = 0;
 int tn = (int)(TN + 0.5);
 float hr = frac(sin(dot(q + S * 7, float3(41.3, 289.1, 117.7))) * 43758.5453);
 [loop] for (int k = 0; k < tn; k++)
@@ -277,12 +278,14 @@ float hr = frac(sin(dot(q + S * 7, float3(41.3, 289.1, 117.7))) * 43758.5453);
     float td = length(pc - (ta.xyz + ab * t));
     float tr = ta.w * (1 - tb.w * hr);
     if (td < tr) return 0;
-    else if (td < tr + cell) rim = max(rim, 1 - tb.w);
+    // The wall: a lit band a pixel and a half thick, then a thin dark one - the outline pops (v8, owner: «четче»).
+    else if (td < tr + 1.5 * cell) rim = max(rim, 1 - tb.w);
+    else if (td < tr + 2.5 * cell) edge = max(edge, 1 - tb.w);
 }
 float flick = frac(sin(dot(q, float3(12.9898, 78.233, 37.719)) + floor(Tm * 24) * 0.618) * 43758.5453);
 // Few: the hottest of the hot, a sparse hash (a ball of embers read as a lit grid, v3).
 float ember = (g.g > 0.82 + 0.15 * th && hv > 0.8) ? saturate(g.g - 0.75) * 4 * (0.4 + 0.6 * flick) : 0;
-return float4(SHARE[band], saturate(g.g * 1.4), ember, lerp(g.b * g.a, 1, 0.45 * rim));
+return float4(SHARE[band], saturate(g.g * 1.4), ember, lerp(g.b * g.a, 1, 0.8 * rim) * (1 - 0.45 * edge));
 """
 
 

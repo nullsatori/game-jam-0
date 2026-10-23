@@ -301,10 +301,10 @@ public:
 	void CarveRay(const FVector& Start, const FVector& End, float RadiusCm);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.0"))
-	float TunnelHoldSeconds = 0.5f;
+	float TunnelHoldSeconds = 0.8f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|MuzzleFx|Volume", meta = (ClampMin = "0.05"))
-	float TunnelHealSeconds = 2.0f;
+	float TunnelHealSeconds = 2.5f;
 
 	/** Tunnels drawn at once (per cloud: the material's loop); the oldest go first. */
 	static constexpr int32 MaxTunnels = 32;

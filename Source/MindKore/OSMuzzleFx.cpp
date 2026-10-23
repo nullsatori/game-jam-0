@@ -2234,7 +2234,7 @@ namespace
 	/** os.Fx.TunnelStill: waits for a cloud 0.6 s old, carves a 3 x 3 grid of tunnels along the view through it, shoots it carved, at +1 s and +2 s (healing). */
 	FAutoConsoleCommandWithWorldAndArgs GTunnelStill(
 		TEXT("os.Fx.TunnelStill"),
-		TEXT("[after s] Wait (from world time 'after') for the player's next smoke cloud (0.6 s old), carve a 3 x 3 grid of tunnels along the view through it (CarveRay, 3.5 cm), HighResShot OSTunnels_0/1000/2000ms."),
+		TEXT("[after s] Wait (from world time 'after') for the player's next smoke cloud (0.6 s old), carve a 3 x 3 grid of tunnels along the view through it (CarveRay, 7 cm), HighResShot OSTunnels_0/1000/2000ms."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
 		{
 			const float After = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 0.0f;
@@ -2260,14 +2260,14 @@ namespace
 				Controller->GetPlayerViewPoint(Eye, View);
 				const FVector Right = FRotationMatrix(View).GetUnitAxis(EAxis::Y);
 				const FVector Up = FRotationMatrix(View).GetUnitAxis(EAxis::Z);
-				// A 3 x 3 grid along the view (as a shooter sees his own rounds' tunnels), 15 cm apart.
+				// A 3 x 3 grid along the view (as a shooter sees his own rounds' tunnels), 25 cm apart.
 				const FVector Forward = (Centre - Eye).GetSafeNormal();
 				for (int32 I = -1; I <= 1; ++I)
 				{
 					for (int32 J = -1; J <= 1; ++J)
 					{
-						const FVector Mid = Centre + Right * (I * 15.0f) + Up * (J * 15.0f);
-						Fx->CarveRay(Mid - Forward * Half * 1.5f, Mid + Forward * Half * 1.5f, 3.5f);
+						const FVector Mid = Centre + Right * (I * 25.0f) + Up * (J * 25.0f);
+						Fx->CarveRay(Mid - Forward * Half * 1.5f, Mid + Forward * Half * 1.5f, 7.0f);
 					}
 				}
 				UE_LOG(LogMindKore, Log, TEXT("Tunnel still: 9 tunnels along the view through the cloud at %s (half %.0f cm), %d alive"), *Centre.ToCompactString(), Half, Fx->GetTunnelCount());
