@@ -137,27 +137,31 @@ namespace OSAttachProbe
 				OutcomeName(Menu->GetLastOutcome()));
 		});
 
-		// 3. Held: the row; the wheel round; let go: the laser rolled on, the dot lit; the gun back.
+		// 3. Held: the row; the wheel round; LMB: the laser rolls on with the menu still up (playtest 23.10); let go: closed, the gun back.
 		At(0.3f, [Pawn]() { Pawn->MenuPressed(); });
 		At(0.7f, [Pawn, Guns, Menu, R]()
 		{
 			R->Check(TEXT("the laser's row"), Menu->IsOpen() && Menu->GetRowCount() >= 1 && Menu->GetSelected() == 0, Menu->DescribeRows());
 			Menu->Step(1);
 			Menu->Step(-1);
-			const double Released = Pawn->GetWorld()->GetTimeSeconds();
-			Pawn->MenuReleased();
+			const double Clicked = Pawn->GetWorld()->GetTimeSeconds();
+			Pawn->Press(EOSHandKey::Primary, 1.0f);
+			R->Check(TEXT("LMB: seating, the menu still up"), Guns->IsSeating() && Menu->IsOpen(), Menu->DescribeRows());
 			const TSharedRef<double> SeatedAt = MakeShared<double>(-1.0);
-			EveryFrame(Pawn, [Pawn, Guns, Menu, R, Released, SeatedAt]()
+			const TSharedRef<double> ReleasedAt = MakeShared<double>(-1.0);
+			EveryFrame(Pawn, [Pawn, Guns, Menu, R, Clicked, SeatedAt, ReleasedAt]()
 			{
 				const double Now = Pawn->GetWorld()->GetTimeSeconds();
 				if (*SeatedAt < 0.0 && Guns->GetActiveOn(0, EOSMountType::Rail))
 				{
 					*SeatedAt = Now;
-					R->Check(TEXT("the laser seated"), Now - Released < 1.6, FString::Printf(TEXT("%.2f s after the release (close + roll-on)"), Now - Released));
+					R->Check(TEXT("the laser seated, the menu up"), Now - Clicked < 1.2 && Menu->IsOpen(), FString::Printf(TEXT("%.2f s after the click"), Now - Clicked));
+					Pawn->MenuReleased();
+					*ReleasedAt = Now;
 				}
-				if (*SeatedAt >= 0.0 && Menu->IsGunFree())
+				if (*ReleasedAt >= 0.0 && Menu->IsGunFree())
 				{
-					R->Check(TEXT("the gun back after the seat"), Now - *SeatedAt <= 0.6 + 0.3, FString::Printf(TEXT("%.2f s"), Now - *SeatedAt));
+					R->Check(TEXT("the gun back after the release"), Now - *ReleasedAt <= 0.6 + 0.3, FString::Printf(TEXT("%.2f s"), Now - *ReleasedAt));
 					return true;
 				}
 				return false;
@@ -384,11 +388,12 @@ namespace OSAttachProbe
 		At(0.9f, [Menu, Shot]() { UE_LOG(LogMindKore, Log, TEXT("Attach stills: menu %s"), *Menu->DescribeRows()); Shot(TEXT("menu_open")); });
 		At(0.3f, [Menu, Shot]() { Menu->Step(1); Shot(TEXT("menu_step")); });
 		At(0.3f, [Pawn, Menu]() { Menu->Step(-1); });
-		// Let go on the laser: the roll-on, three moments of it, then the dot.
-		At(0.3f, [Pawn]() { Pawn->MenuReleased(); });
+		// LMB on the laser: the roll-on in the menu, three moments of it; let go, then the dot.
+		At(0.3f, [Pawn]() { Pawn->Press(EOSHandKey::Primary, 1.0f); });
 		At(0.25f, [Shot]() { Shot(TEXT("seat_approach")); });
 		At(0.2f, [Shot]() { Shot(TEXT("seat_rail")); });
 		At(0.2f, [Shot]() { Shot(TEXT("seat_lock")); });
+		At(0.4f, [Pawn]() { Pawn->MenuReleased(); });
 		At(1.5f, [Pawn, Shot]()
 		{
 			GEngine->Exec(Pawn->GetWorld(), TEXT("os.Attach.Cost"));

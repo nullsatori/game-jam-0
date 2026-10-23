@@ -355,6 +355,12 @@ void AOSZeroGPawn::PawnClientRestart()
 
 void AOSZeroGPawn::Look(const FInputActionValue& Value)
 {
+	// The attachment menu up: the mouse moves its cursor, the view holds still (playtest 23.10: point and click).
+	if (GetHands() == EOSHands::Gun && Guns->AttachMenu && Guns->AttachMenu->TakesMouse())
+	{
+		Guns->AttachMenu->MoveCursor(Value.Get<FVector2D>());
+		return;
+	}
 	// Slower through the scope, as much as it magnifies (UOSScopeComponent::GetLookScale).
 	const FVector2D Axis = Value.Get<FVector2D>() * LookSensitivity * (Guns->Scope ? Guns->Scope->GetLookScale() : 1.0f);
 	AddControllerYawInput(Axis.X);
@@ -506,7 +512,8 @@ EOSHandAction AOSZeroGPawn::Route(EOSHandKey Key) const
 		/* Empty */        { A::None,        A::None,     A::Hands,  A::None,    A::None },
 	};
 	A Action = Table[uint8(GetHands())][uint8(Key)];
-	// The attachment menu up (a flag over Gun, Docs/ZeroG.md «Руки»): LMB applies, the wheel selects, the rest is swallowed.
+	// The attachment menu up (a flag over Gun, Docs/ZeroG.md «Руки»): LMB puts the selected line on or off (the menu
+	// stays up), the wheel selects, the mouse moves the cursor (Look), the rest is swallowed.
 	if (GetHands() == EOSHands::Gun && Guns->AttachMenu && Guns->AttachMenu->IsActive())
 	{
 		static const A MenuRow[5] = { A::MenuApply, A::None, A::None, A::MenuSelect, A::None };

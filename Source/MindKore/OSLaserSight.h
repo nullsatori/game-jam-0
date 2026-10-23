@@ -11,6 +11,7 @@ class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UOSWeaponsComponent;
 class UStaticMeshComponent;
+struct FCanvasTileItem;
 
 /**
  * The laser's light in the world (Docs/Attachments.md, «ЛЦУ»): while a laser sits on the gun in view, switched on
@@ -48,12 +49,26 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
 	float ThreadShare = 0.25f;
 
-	/** The HUD's dot: its core and halo, in screen pixels at 1080 lines (scaled with the screen). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "1.0"))
-	float HudDotPixels = 3.0f;
+	/**
+	 * The HUD's pixel grid for the dot and the thread: this many lines of the screen (3 px a pixel at 1080), the
+	 * game's low resolution - stepped, posterised, dithered light rather than a thin anti-aliased line.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "90.0"))
+	float PixelLines = 360.0f;
+
+	/** The thread's light levels (posterised, ordered dither between them) and its brightness by the lens. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "2"))
+	int32 ThreadLevels = 4;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
-	float HudHaloPixels = 4.0f;
+	float ThreadBrightness = 2.6f;
+
+	/** Dust caught in the beam: the share of its pixels that glint, and how fast the glints drift along it (pixels a second). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float DustShare = 0.035f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
+	float DustDrift = 9.0f;
 
 	/** The dot's Glow (M_OS_SightDot's param), its grain (+-share a frame) and its drive's flutter with a rare drop. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))

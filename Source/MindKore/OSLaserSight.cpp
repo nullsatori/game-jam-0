@@ -2,6 +2,7 @@
 
 #include "Camera/CameraComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "CanvasItem.h"
 #include "Engine/Canvas.h"
 #include "GameFramework/HUD.h"
 #include "OSAttachMenu.h"
@@ -12,6 +13,7 @@
 #include "Materials/MaterialInterface.h"
 #include "MindKore.h"
 #include "OSWeapons.h"
+#include "OSSuitProjector.h"
 #include "OSWeldProjector.h"
 
 UOSLaserSightComponent::UOSLaserSightComponent()
@@ -136,40 +138,227 @@ void UOSLaserSightComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	ThreadLevel = ThreadShare * AirShare * Drive;
 }
 
+namespace
+{
+	/** The 4 x 4 ordered dither (Bayer), 0..15. */
+	constexpr int32 OSBayer4[4][4] = { { 0, 8, 2, 10 }, { 12, 4, 14, 6 }, { 3, 11, 1, 9 }, { 15, 7, 13, 5 } };
+
+	/** The convex hull of the points, counter-clockwise on screen (Andrew's monotone chain). */
+	TArray<FVector2D> OSHull(TArray<FVector2D> Points)
+	{
+		Points.Sort([](const FVector2D& A, const FVector2D& B) { return A.X < B.X || (A.X == B.X && A.Y < B.Y); });
+		if (Points.Num() < 3)
+		{
+			return Points;
+		}
+		const auto Turn = [](const FVector2D& O, const FVector2D& A, const FVector2D& B) { return (A.X - O.X) * (B.Y - O.Y) - (A.Y - O.Y) * (B.X - O.X); };
+		TArray<FVector2D> Hull;
+		Hull.SetNum(Points.Num() * 2);
+		int32 Count = 0;
+		for (int32 Index = 0; Index < Points.Num(); ++Index)
+		{
+			while (Count >= 2 && Turn(Hull[Count - 2], Hull[Count - 1], Points[Index]) <= 0.0)
+			{
+				--Count;
+			}
+			Hull[Count++] = Points[Index];
+		}
+		for (int32 Index = Points.Num() - 2, Lower = Count + 1; Index >= 0; --Index)
+		{
+			while (Count >= Lower && Turn(Hull[Count - 2], Hull[Count - 1], Points[Index]) <= 0.0)
+			{
+				--Count;
+			}
+			Hull[Count++] = Points[Index];
+		}
+		Hull.SetNum(FMath::Max(Count - 1, 0));
+		return Hull;
+	}
+
+	/** Where the segment From -> To is inside the convex polygon (Cyrus-Beck): [OutIn, OutOut] in 0..1; false if never. */
+	bool OSInsideSpan(const TArray<FVector2D>& Hull, const FVector2D& From, const FVector2D& To, double& OutIn, double& OutOut)
+	{
+		if (Hull.Num() < 3)
+		{
+			return false;
+		}
+		// The hull's winding decides which side is out.
+		double Area = 0.0;
+		for (int32 Index = 0; Index < Hull.Num(); ++Index)
+		{
+			const FVector2D& A = Hull[Index];
+			const FVector2D& B = Hull[(Index + 1) % Hull.Num()];
+			Area += A.X * B.Y - B.X * A.Y;
+		}
+		const double Wind = Area >= 0.0 ? 1.0 : -1.0;
+		double Enter = 0.0;
+		double Leave = 1.0;
+		const FVector2D Way = To - From;
+		for (int32 Index = 0; Index < Hull.Num(); ++Index)
+		{
+			const FVector2D& A = Hull[Index];
+			const FVector2D Edge = Hull[(Index + 1) % Hull.Num()] - A;
+			const FVector2D Outward = FVector2D(Edge.Y, -Edge.X) * Wind;
+			const double Num = FVector2D::DotProduct(Outward, A - From);
+			const double Den = FVector2D::DotProduct(Outward, Way);
+			if (FMath::IsNearlyZero(Den))
+			{
+				if (Num < 0.0)
+				{
+					return false;
+				}
+				continue;
+			}
+			const double T = Num / Den;
+			if (Den > 0.0)
+			{
+				Leave = FMath::Min(Leave, T);
+			}
+			else
+			{
+				Enter = FMath::Max(Enter, T);
+			}
+		}
+		OutIn = Enter;
+		OutOut = Leave;
+		return Enter < Leave;
+	}
+}
+
 void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas) const
 {
 	if (!bLit || !Camera)
 	{
 		return;
 	}
-	const float Scale = Canvas.ClipY / 1080.0f;
-	const FLinearColor Core = FLinearColor::LerpUsingHSV(RedColour, FLinearColor(1.0f, 0.85f, 0.8f), 0.35f);
+	// Light adds (the beam and the dot glow over the dark, never darken it), on the game's coarse pixel grid.
+	const float Pixel = FMath::Max(1.0f, FMath::RoundToFloat(Canvas.ClipY / PixelLines));
+	const auto Emit = [&Canvas, Pixel](int32 GX, int32 GY, const FLinearColor& Colour, float Level)
+	{
+		if (Level <= 0.0f)
+		{
+			return;
+		}
+		FCanvasTileItem Tile(FVector2D(GX * Pixel, GY * Pixel), FVector2D(Pixel, Pixel), FLinearColor(Colour.R * Level, Colour.G * Level, Colour.B * Level, 1.0f));
+		Tile.BlendMode = SE_BLEND_Additive;
+		Canvas.DrawItem(Tile);
+	};
+	const FLinearColor Hot(1.0f, 0.78f, 0.72f);
+	const int64 DeviceTick = int64(GetWorld()->GetTimeSeconds() * OSProjectorClockHz);
+	const double Now = GetWorld()->GetTimeSeconds();
+
 	FVector2D Dot2D;
 	const bool bDot = bDotHit && OSProjectToHud(Camera, Canvas, DotAt, false, Dot2D);
-	// The thread first, under the dot: a pixel line from the lens, fading toward the dot (the beam spreads and thins).
 	FVector2D Lens2D;
-	if (bThreadShown && bDot && OSProjectToHud(Camera, Canvas, LensAt, true, Lens2D))
+	if (bThreadShown && bDot && Guns && OSProjectToHud(Camera, Canvas, LensAt, true, Lens2D))
 	{
-		const float Pixel = FMath::Max(1.0f, FMath::RoundToFloat(Scale));
+		// The gun is nearer than the beam: what of it lies over the gun's outline on screen is not drawn (the hull of
+		// its meshes' boxes - the beam comes out of the gun's front, not over the slide).
+		TArray<FVector2D> Points;
+		OSGunScreenPoints(*Guns, Camera, Canvas, Points);
+		const TArray<FVector2D> Hull = OSHull(MoveTemp(Points));
+		double Hidden0 = 2.0;
+		double Hidden1 = 2.0;
+		if (!OSInsideSpan(Hull, Lens2D, Dot2D, Hidden0, Hidden1))
+		{
+			Hidden0 = Hidden1 = 2.0;
+		}
+		// The beam in grid steps along its longer axis: one pixel a step, no gaps, no slant smoothing.
 		const FVector2D Way = Dot2D - Lens2D;
-		const int32 Steps = FMath::Clamp(FMath::CeilToInt32(float(Way.Size()) / (Pixel * 2.0f)), 1, 600);
+		const int32 Steps = FMath::Clamp(FMath::CeilToInt32(float(FMath::Max(FMath::Abs(Way.X), FMath::Abs(Way.Y))) / Pixel), 1, 1200);
+		const bool bFlat = FMath::Abs(Way.X) >= FMath::Abs(Way.Y);
+		const double Exit = Hidden0 <= 0.0 ? Hidden1 : 0.0;
+		const int32 DustStep = FMath::FloorToInt32(float(Now) * DustDrift);
+		int32 LastX = MIN_int32;
+		int32 LastY = MIN_int32;
 		for (int32 Step = 0; Step < Steps; ++Step)
 		{
-			const float Share = float(Step) / float(Steps);
+			const double Share = double(Step) / double(Steps);
+			if (Share > Hidden0 && Share < Hidden1)
+			{
+				continue;
+			}
 			const FVector2D At = Lens2D + Way * Share;
-			Hud.DrawRect(FLinearColor(RedColour.R, RedColour.G, RedColour.B, FMath::Clamp(ThreadLevel * 2.4f * (1.0f - 0.7f * Share), 0.0f, 1.0f)),
-				FMath::RoundToFloat(At.X / Pixel) * Pixel, FMath::RoundToFloat(At.Y / Pixel) * Pixel, Pixel, Pixel);
+			const int32 GX = FMath::FloorToInt32(float(At.X / Pixel));
+			const int32 GY = FMath::FloorToInt32(float(At.Y / Pixel));
+			if (GX == LastX && GY == LastY)
+			{
+				continue;
+			}
+			LastX = GX;
+			LastY = GY;
+			// Bright out of the lens, thinning toward the dot; it comes up over a few pixels where it leaves the gun.
+			const float Along = float(Share);
+			const float Emerge = FMath::Clamp(float((Share - Exit) * Steps) / 6.0f, 0.0f, 1.0f);
+			const float Light = ThreadLevel * ThreadBrightness * Emerge * (0.3f + 0.7f * FMath::Pow(1.0f - Along, 1.6f));
+			// Posterised into ThreadLevels with the ordered dither between: steps of light, as the low-res screen has.
+			const float Scaled = FMath::Clamp(Light, 0.0f, 1.0f) * ThreadLevels;
+			const int32 Base = FMath::FloorToInt32(Scaled);
+			const float Threshold = (OSBayer4[GY & 3][GX & 3] + 0.5f) / 16.0f;
+			const int32 Level = FMath::Min(Base + (Scaled - Base > Threshold ? 1 : 0), ThreadLevels);
+			if (Level <= 0)
+			{
+				continue;
+			}
+			const float Value = float(Level) / ThreadLevels;
+			Emit(GX, GY, Level == ThreadLevels ? FMath::Lerp(RedColour, Hot, 0.35f) : RedColour, Value);
+			// The halo either side, near the lens only, on a checker (half the pixels): the beam's soft edge.
+			if (Along < 0.5f && ((GX + GY) & 1) == 0)
+			{
+				const float Side = Value * 0.35f * (1.0f - Along * 2.0f);
+				Emit(bFlat ? GX : GX - 1, bFlat ? GY - 1 : GY, RedColour, Side);
+				Emit(bFlat ? GX : GX + 1, bFlat ? GY + 1 : GY, RedColour, Side);
+			}
+			// Dust in the beam: a few pixels glint and drift along it toward the dot.
+			if (OSProjectorHash(Step - DustStep, 9137) < DustShare)
+			{
+				Emit(GX, GY, Hot, FMath::Min(1.0f, 0.5f + ThreadLevel * ThreadBrightness) * Emerge);
+			}
 		}
 	}
 	if (bDot)
 	{
-		// The halo, then the core: whole pixels on the screen's grid, the drive's flutter in the halo's alpha only.
-		const float CoreSize = FMath::Max(1.0f, FMath::RoundToFloat(HudDotPixels * Scale));
-		const float HaloSize = CoreSize + 2.0f * FMath::RoundToFloat(HudHaloPixels * Scale);
-		const float X = FMath::RoundToFloat(Dot2D.X);
-		const float Y = FMath::RoundToFloat(Dot2D.Y);
-		Hud.DrawRect(FLinearColor(RedColour.R, RedColour.G, RedColour.B, FMath::Clamp(0.22f * DotDrive, 0.0f, 1.0f)),
-			X - FMath::RoundToFloat(HaloSize * 0.5f), Y - FMath::RoundToFloat(HaloSize * 0.5f), HaloSize, HaloSize);
-		Hud.DrawRect(FLinearColor(Core.R, Core.G, Core.B, 1.0f), X - FMath::RoundToFloat(CoreSize * 0.5f), Y - FMath::RoundToFloat(CoreSize * 0.5f), CoreSize, CoreSize);
+		// The dot as a sprite of the grid: a white-hot centre, a red cross, a dithered rim; the outer cross twinkles on
+		// the device's ticks, the drive's flutter scales it all.
+		const int32 CX = FMath::FloorToInt32(float(Dot2D.X / Pixel));
+		const int32 CY = FMath::FloorToInt32(float(Dot2D.Y / Pixel));
+		const float Drive = FMath::Clamp(DotDrive, 0.0f, 1.2f) * (0.92f + 0.08f * OSProjectorHash(DeviceTick, 4421));
+		for (int32 DY = -3; DY <= 3; ++DY)
+		{
+			for (int32 DX = -3; DX <= 3; ++DX)
+			{
+				const int32 Manhattan = FMath::Abs(DX) + FMath::Abs(DY);
+				const int32 Chebyshev = FMath::Max(FMath::Abs(DX), FMath::Abs(DY));
+				float Level = 0.0f;
+				FLinearColor Colour = RedColour;
+				if (Manhattan == 0)
+				{
+					Level = 1.0f;
+					Colour = Hot;
+				}
+				else if (Manhattan == 1)
+				{
+					Level = 0.95f;
+					Colour = FMath::Lerp(RedColour, Hot, 0.25f);
+				}
+				else if (Chebyshev == 1)
+				{
+					Level = 0.55f;
+				}
+				else if (Manhattan == 2)
+				{
+					Level = 0.4f;
+				}
+				else if (Manhattan == 3 && Chebyshev == 2)
+				{
+					Level = ((CX + DX + CY + DY) & 1) == 0 ? 0.22f : 0.0f;
+				}
+				else if (Manhattan == 3 && Chebyshev == 3)
+				{
+					Level = OSProjectorHash(DeviceTick, 811) < 0.6f ? 0.14f : 0.05f;
+				}
+				Emit(CX + DX, CY + DY, Colour, Level * Drive);
+			}
+		}
 	}
 }
