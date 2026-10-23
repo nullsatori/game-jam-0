@@ -13,6 +13,9 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "MindKore.h"
+#include "MKGlassPane.h"
+#include "MKImpactTypes.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "OSWeapons.h"
 #include "OSSuitProjector.h"
 #include "OSWeldProjector.h"
@@ -59,7 +62,8 @@ void UOSLaserSightComponent::BeginPlay()
 	DotLight->IntensityUnits = ELightUnits::Candelas;
 	DotLight->bUseInverseSquaredFalloff = true;
 	DotLight->SetAttenuationRadius(DotLightRadiusCm);
-	DotLight->SetSourceRadius(0.5f);
+	DotLight->SpecularScale = 0.0f; // its highlight on a glossy surface read as a second dot (playtest 23.10)
+	DotLight->SetSourceRadius(0.0f);
 	DotLight->SetLightColor(RedColour);
 	DotLight->SetIntensity(0.0f);
 	DotLight->SetVisibleFlag(false);
@@ -230,10 +234,23 @@ void UOSLaserSightComponent::FindBeamSpans(const FVector& EyeAt)
 	TArray<TPair<FTransform, FBox>, TInlineAllocator<8>> Boxes;
 	for (const UStaticMeshComponent* Part : Parts)
 	{
-		if (Part && Part->IsVisible() && Part->GetStaticMesh())
+		if (!Part || !Part->IsVisible() || !Part->GetStaticMesh())
 		{
-			Boxes.Emplace(Part->GetComponentTransform().Inverse(), Part->GetStaticMesh()->GetBoundingBox());
+			continue;
 		}
+		const FTransform ToLocal = Part->GetComponentTransform().Inverse();
+		const FBox Box = Part->GetStaticMesh()->GetBoundingBox();
+		const FVector Size = Box.GetSize();
+		if (Part == Guns->ViewModel && Size.Z > 0.45 * Size.X)
+		{
+			// A pistol's frame is an L: the slide's cover along the top and the grip at the back. One box over it
+			// also covers the air under the cover in front of the trigger guard, where the lens sits and the beam was
+			// hidden though in plain view (playtest 23.10: «оторванный»). Two boxes: the cover, the grip.
+			Boxes.Emplace(ToLocal, FBox(FVector(Box.Min.X, Box.Min.Y, Box.Max.Z - Size.Z * 0.38), Box.Max));
+			Boxes.Emplace(ToLocal, FBox(Box.Min, FVector(Box.Min.X + Size.X * 0.55, Box.Max.Y, Box.Max.Z)));
+			continue;
+		}
+		Boxes.Emplace(ToLocal, Box);
 	}
 	// Samples dense by the lens (where the gun is), sparse far out; the visible runs become spans.
 	constexpr int32 Samples = 40;
@@ -330,9 +347,34 @@ void UOSLaserSightComponent::Refresh()
 	FVector Along;
 	Guns->GetShotLine(EyeAt, Eye->GetForwardVector(), From, Along);
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(OSLaserSight), /*bTraceComplex=*/false, GetOwner());
+	Params.bReturnPhysicalMaterial = true;
 	FHitResult Hit;
-	++Traces;
-	bDotHit = GetWorld()->LineTraceSingleByChannel(Hit, From, From + Along * Weapon->RangeCm, ECC_GameTraceChannel2, Params);
+	bGhost = false;
+	Surface = EOSLaserSurface::Plain;
+	FVector Start = From;
+	for (int32 Pass = 0; Pass < 3; ++Pass)
+	{
+		++Traces;
+		bDotHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, From + Along * Weapon->RangeCm, ECC_GameTraceChannel2, Params);
+		if (!bDotHit)
+		{
+			break;
+		}
+		// What it lies on: the round's physical material (MindKore's surfaces), or the glass pane's class.
+		const EMKSurfaceKind Kind = Hit.PhysMaterial.IsValid() ? MKSurfaceKindFromPhysical(Hit.PhysMaterial->SurfaceType) : EMKSurfaceKind::Default;
+		const bool bGlass = Kind == EMKSurfaceKind::Glass || Cast<AMKGlassPane>(Hit.GetActor()) != nullptr;
+		if (bGlass && !bGhost)
+		{
+			// Through the glass: a ghost of the dot stays on the pane, the beam and the dot go on behind it.
+			bGhost = true;
+			GhostAt = FVector(Hit.ImpactPoint) + FVector(Hit.ImpactNormal) * DotLiftCm;
+			Params.AddIgnoredActor(Hit.GetActor());
+			Start = FVector(Hit.ImpactPoint) + Along * 1.0;
+			continue;
+		}
+		Surface = Kind == EMKSurfaceKind::Metal ? EOSLaserSurface::Metal : Kind == EMKSurfaceKind::Flesh ? EOSLaserSurface::Flesh : EOSLaserSurface::Plain;
+		break;
+	}
 	DotAt = bDotHit ? FVector(Hit.ImpactPoint) + FVector(Hit.ImpactNormal) * DotLiftCm : From + Along * Weapon->RangeCm;
 	bDotSeen = false;
 	if (bDotHit)
@@ -475,7 +517,6 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 	const float Texel = Frame.Texel;
 	const double Now = GetWorld()->GetTimeSeconds();
 	const FLinearColor Hot(1.0f, 0.82f, 0.74f);
-	const FLinearColor CoreTint = FMath::Lerp(RedColour, Hot, 0.45f);
 
 	FVector2D Dot2D;
 	const bool bDot = bDotHit && bDotSeen && OSProjectToHud(Camera, Canvas, DotAt, false, Dot2D);
@@ -485,6 +526,7 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 		// side; its light falls from the lens to the dot and varies with the haze it passes through - noise fixed in the
 		// world, drifting slowly, which the beam sweeps across as the gun sways; the densest haze glints.
 		const float Base = ThreadLevel * ThreadBrightness;
+		const float Half = BeamTexels * 0.5f;
 		const FVector Drift = FVector(0.3, 0.9, 0.2) * (HazeDriftCmPerSec * Now);
 		const auto HazeAt = [&](float T)
 		{
@@ -511,23 +553,47 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 				const float T = FMath::Lerp(Span.X, Span.Y, S);
 				const FVector2D At = A + Way * S;
 				const float Haze = HazeAt(T);
-				const float Light = Base * (0.35f + 0.65f * FMath::Pow(1.0f - T, 1.3f)) * (1.0f - HazeGrit + HazeGrit * 2.0f * Haze);
-				const FLinearColor Colour = Haze > GlintAbove ? FMath::Lerp(CoreTint, Hot, (Haze - GlintAbove) / (1.0f - GlintAbove)) : CoreTint;
+				// Nothing to show in below the haze's floor: the beam breaks into a sparse line.
+				const float Shown = FMath::Pow(FMath::Clamp((Haze - HazeFloor) / (1.0f - HazeFloor), 0.0f, 1.0f), 0.8f);
+				const float Light = Base * (0.35f + 0.65f * FMath::Pow(1.0f - T, 1.3f)) * Shown;
+				const FLinearColor Colour = Haze > GlintAbove ? FMath::Lerp(BeamColour, Hot, (Haze - GlintAbove) / (1.0f - GlintAbove)) : BeamColour;
 				const float Flash = Haze > GlintAbove ? 1.0f + Glint * (Haze - GlintAbove) / (1.0f - GlintAbove) : 1.0f;
-				// The major axis steps a texel; the minor coordinate splits between its two rows (Wu).
+				// The major axis steps a texel; across it the line's width is shared out by coverage over the rows it
+				// touches (a hair under a texel lights its row by its share), the sheath either side of those.
 				const double Major = bFlat ? At.X : At.Y;
 				const double Minor = bFlat ? At.Y : At.X;
 				const int32 M = FMath::FloorToInt32(float(Major));
-				const int32 N0 = FMath::FloorToInt32(float(Minor - 0.5));
-				const float Share = float(Minor - 0.5 - N0);
+				const float Low = float(Minor) - Half;
+				const float High = float(Minor) + Half;
+				const int32 NLow = FMath::FloorToInt32(Low);
+				const int32 NHigh = FMath::FloorToInt32(High);
 				const auto Put = [&](int32 N, float Level)
 				{
 					Frame.Add(bFlat ? M : N, bFlat ? N : M, Colour, Level * Light * Flash);
 				};
-				Put(N0, 1.0f - Share);
-				Put(N0 + 1, Share);
-				Put(N0 - 1, BeamSheath * (1.0f - Share));
-				Put(N0 + 2, BeamSheath * Share);
+				for (int32 N = NLow; N <= NHigh; ++N)
+				{
+					Put(N, FMath::Min(High, float(N + 1)) - FMath::Max(Low, float(N)));
+				}
+				Put(NLow - 1, BeamSheath * (1.0f - (Low - NLow)));
+				Put(NHigh + 1, BeamSheath * (High - NHigh));
+			}
+		}
+	}
+	FVector2D Ghost2D;
+	if (bGhost && bDotHit && OSProjectToHud(Camera, Canvas, GhostAt, false, Ghost2D))
+	{
+		// The ghost on the glass: a faint small blob where the beam went through.
+		const FVector2D G = Ghost2D / Texel;
+		const int32 GX = FMath::FloorToInt32(float(G.X));
+		const int32 GY = FMath::FloorToInt32(float(G.Y));
+		const float Drive = FMath::Clamp(DotDrive, 0.0f, 1.2f) * GlassGhost;
+		for (int32 Y = GY - 1; Y <= GY + 1; ++Y)
+		{
+			for (int32 X = GX - 1; X <= GX + 1; ++X)
+			{
+				const FVector2D P(X + 0.5 - G.X, Y + 0.5 - G.Y);
+				Frame.Add(X, Y, RedColour, Drive * FMath::Exp(-float(P.SizeSquared()) * 1.6f));
 			}
 		}
 	}
@@ -535,6 +601,26 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 	{
 		// The disc as it lies on the surface, in texels, never under DotCoreTexels across: a blob with a hot centre
 		// in a red glow, and grains of speckle that boil as the dot moves over the surface and rest when it rests.
+		// It reads the surface: tight with a spark on metal; sunk into flesh as a wide dark-red glow that throbs.
+		float CoreShare = 1.0f;
+		float GlowTexels = DotGlowTexels;
+		float GlowShare = DotGlowShare;
+		float SpeckleShare = Speckle;
+		FLinearColor GlowColour = RedColour;
+		if (Surface == EOSLaserSurface::Metal)
+		{
+			GlowShare *= MetalGlow;
+			SpeckleShare *= MetalSpeckle;
+		}
+		else if (Surface == EOSLaserSurface::Flesh)
+		{
+			const float Throb = 1.0f + FleshPulse * FMath::Sin(float(Now) * FleshPulseHz * UE_TWO_PI);
+			CoreShare = FleshCore;
+			GlowTexels *= FleshGlowTimes;
+			GlowShare = FleshGlowShare * Throb;
+			SpeckleShare = 0.0f;
+			GlowColour = FLinearColor(0.75f, 0.02f, 0.01f);
+		}
 		FVector2D AxisU;
 		FVector2D AxisV;
 		if (!OSProjectToHud(Camera, Canvas, DotAt + DotAxisU, false, AxisU) || !OSProjectToHud(Camera, Canvas, DotAt + DotAxisV, false, AxisV))
@@ -555,7 +641,7 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 		const float Drive = FMath::Clamp(DotDrive, 0.0f, 1.2f);
 		// The disc's metric: u, v along the axes; the core falls off past the rim, the glow wider.
 		const double Det = AxisU.X * AxisV.Y - AxisU.Y * AxisV.X;
-		const float Reach = float(FMath::Max(AxisU.Size(), AxisV.Size())) + 3.0f * DotGlowTexels;
+		const float Reach = float(FMath::Max(AxisU.Size(), AxisV.Size())) + 3.0f * GlowTexels;
 		const int32 Span = FMath::Clamp(FMath::CeilToInt32(Reach), 1, 24);
 		const int32 CX = FMath::FloorToInt32(float(Centre.X));
 		const int32 CY = FMath::FloorToInt32(float(Centre.Y));
@@ -572,11 +658,11 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 					const float R = float(FMath::Sqrt(U * U + V * V)); // 1 at the rim
 					Core = FMath::Exp(-FMath::Square(R) * 1.4f);
 				}
-				const float Glow = DotGlowShare * FMath::Exp(-float(P.SizeSquared()) / (2.0f * DotGlowTexels * DotGlowTexels));
-				Frame.Add(X, Y, FMath::Lerp(RedColour, Hot, FMath::Clamp(Core * 1.2f - 0.3f, 0.0f, 1.0f)), (Core + Glow) * Drive);
+				const float Glow = GlowShare * FMath::Exp(-float(P.SizeSquared()) / (2.0f * GlowTexels * GlowTexels));
+				Frame.Add(X, Y, FMath::Lerp(GlowColour, Hot, FMath::Clamp(Core * CoreShare * 1.2f - 0.3f, 0.0f, 1.0f)), (Core * CoreShare + Glow) * Drive);
 			}
 		}
-		if (Speckle > 0.0f)
+		if (SpeckleShare > 0.0f)
 		{
 			const int64 Set = FMath::FloorToInt64(Boil);
 			const float Blend = float(Boil - double(Set));
@@ -589,7 +675,7 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 					const float Angle = UE_TWO_PI * OSProjectorHash(Seed, 3301);
 					const float Out = 0.3f + 0.8f * OSProjectorHash(Seed, 4409);
 					const FVector2D At = Centre + (AxisU * FMath::Cos(Angle) + AxisV * FMath::Sin(Angle)) * Out;
-					Frame.Add(FMath::FloorToInt32(float(At.X)), FMath::FloorToInt32(float(At.Y)), Hot, Speckle * Drive * Weight);
+					Frame.Add(FMath::FloorToInt32(float(At.X)), FMath::FloorToInt32(float(At.Y)), Hot, SpeckleShare * Drive * Weight);
 				}
 			}
 		}

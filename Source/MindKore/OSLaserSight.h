@@ -40,6 +40,16 @@ class UStaticMeshComponent;
  * the world (3D value noise drifting slowly) that the beam sweeps through as the gun sways. The dot is a real disc on
  * the surface: stretched by the angle it lands at, a little wider far off, with a faint speckle.
  */
+/** What the dot lies on: it reads the surface (Docs/Attachments.md, «ЛЦУ читает поверхность»). */
+UENUM()
+enum class EOSLaserSurface : uint8
+{
+	Plain,
+	Metal,
+	Glass,
+	Flesh,
+};
+
 UCLASS(ClassGroup = (OS))
 class MINDKORE_API UOSLaserSightComponent : public UActorComponent
 {
@@ -86,12 +96,39 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.1"))
 	float SpeckleRestSeconds = 2.0f;
 
-	/** The dot's light on the surface, candelas (none at 0) and its reach, cm: a faint red spill on the wall. */
+	/** The dot's light on the surface, candelas (none at 0) and its reach, cm: a faint red spill on the wall, no specular (owner 23.10: its highlight read as a second dot). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "0.0"))
-	float DotLightCandela = 0.05f;
+	float DotLightCandela = 0.012f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Dot", meta = (ClampMin = "1.0"))
-	float DotLightRadiusCm = 12.0f;
+	float DotLightRadiusCm = 8.0f;
+
+	/** Glass: the beam goes through; the ghost of the dot left on the pane, share of the dot. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Surface", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float GlassGhost = 0.3f;
+
+	/** Metal: the core tight, the glow this share of the plain one, the speckle this many times. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Surface", meta = (ClampMin = "0.0"))
+	float MetalGlow = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Surface", meta = (ClampMin = "0.0"))
+	float MetalSpeckle = 2.0f;
+
+	/** Flesh: the dot sinks in - the core this share, the glow this many times wider and this bright, throbbing at this rate (Hz) by this share. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Surface", meta = (ClampMin = "0.0"))
+	float FleshCore = 0.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Surface", meta = (ClampMin = "1.0"))
+	float FleshGlowTimes = 3.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Surface", meta = (ClampMin = "0.0"))
+	float FleshGlowShare = 0.55f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Surface", meta = (ClampMin = "0.0"))
+	float FleshPulseHz = 1.1f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Surface", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float FleshPulse = 0.25f;
 
 	/** The beam's light against the dot's, and its brightness by the lens. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0"))
@@ -100,9 +137,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0"))
 	float ThreadBrightness = 1.8f;
 
-	/** The beam's sheath: the texels either side of it, share of its light (the bilinear softness is on top). */
+	/** The beam's width, texels (under one: a hair, its light split by coverage), its colour, and its sheath either side (share). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.1", ClampMax = "3.0"))
+	float BeamTexels = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam")
+	FLinearColor BeamColour = FLinearColor(1.0f, 0.09f, 0.03f);
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float BeamSheath = 0.12f;
+	float BeamSheath = 0.08f;
+
+	/** Below this of the haze's noise the beam has nothing to show in (gaps: a sparse beam). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0", ClampMax = "0.9"))
+	float HazeFloor = 0.3f;
 
 	/** Glints: where the haze is densest (above this of its noise) a texel of the beam flashes hot, this bright. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.5", ClampMax = "1.0"))
@@ -111,10 +158,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0"))
 	float Glint = 0.5f;
 
-	/** The haze the beam shows in: how much its density varies (share of the light), its cell, cm, and its drift, cm/s. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float HazeGrit = 0.45f;
-
+	/** The haze the beam shows in: its cell, cm, and its drift, cm/s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Beam", meta = (ClampMin = "1.0"))
 	float HazeCellCm = 6.0f;
 
@@ -230,6 +274,10 @@ private:
 	FVector BeamEnd = FVector::ZeroVector;
 	TArray<FVector2f> BeamSpans;
 	FVector DotAt = FVector::ZeroVector;
+	EOSLaserSurface Surface = EOSLaserSurface::Plain;
+	/** Glass on the way: the ghost of the dot on the pane. */
+	bool bGhost = false;
+	FVector GhostAt = FVector::ZeroVector;
 	/** The disc's half axes on the surface, cm: along the beam's slant (stretched) and across. */
 	FVector DotAxisU = FVector::ZeroVector;
 	FVector DotAxisV = FVector::ZeroVector;
