@@ -2658,11 +2658,13 @@ namespace
 			// [after s] back [shots] [interval s]: how many (5), how far apart (0.3 s). near: standing, two shots, then the
 			// shots 2.5 s later beside their clouds.
 			// space: as near, but facing the farthest open way (8 tried, 30 m) - a vacuum's cone seen against the stars.
-			const bool bSpace = Args.Num() > 1 && Args[1] == TEXT("space");
+			// side: as space, and 0.05 s after the first shot the view turns 55 degrees in 0.2 s (the cone seen from the side, still in view).
+			const bool bSide = Args.Num() > 1 && Args[1] == TEXT("side");
+			const bool bSpace = Args.Num() > 1 && (Args[1] == TEXT("space") || bSide);
 			const bool bNear = Args.Num() > 1 && (Args[1] == TEXT("near") || bSpace);
 			const int32 BackCount = Args.Num() > 2 ? FCString::Atoi(*Args[2]) : 5;
 			const float BackEvery = Args.Num() > 3 ? FMath::Max(FCString::Atof(*Args[3]), 0.05f) : 0.3f;
-			World->GetTimerManager().SetTimer(Later, FTimerDelegate::CreateLambda([World, bBack, bNear, bSpace, BackCount, BackEvery]()
+			World->GetTimerManager().SetTimer(Later, FTimerDelegate::CreateLambda([World, bBack, bNear, bSpace, bSide, BackCount, BackEvery]()
 			{
 			APlayerController* Controller = World->GetFirstPlayerController();
 			AOSZeroGPawn* Pawn = Controller ? Cast<AOSZeroGPawn>(Controller->GetPawn()) : nullptr;
@@ -2793,7 +2795,7 @@ namespace
 			TSharedRef<FVector> LastB = MakeShared<FVector>(FVector::ZeroVector);
 			TSharedRef<int32> LastN = MakeShared<int32>(0);
 			TSharedRef<FTimerHandle> Handle = MakeShared<FTimerHandle>();
-			World->GetTimerManager().SetTimer(*Handle, FTimerDelegate::CreateLambda([World, Handle, Controller, Pawn, Gas, Start, Home, Look, First, Logged, Shots, Fired, bBack, bNear, BackCount, BackEvery, Jumps, LastC, LastB, LastN, LastBlocks, Alpha, Clock]()
+			World->GetTimerManager().SetTimer(*Handle, FTimerDelegate::CreateLambda([World, Handle, Controller, Pawn, Gas, Start, Home, Look, First, Logged, Shots, Fired, bBack, bNear, bSide, BackCount, BackEvery, Jumps, LastC, LastB, LastN, LastBlocks, Alpha, Clock]()
 			{
 				const float T = float(World->GetTimeSeconds() - Start);
 				Clock->X = T;
@@ -2833,6 +2835,11 @@ namespace
 				{
 					View = Look;
 					View.Pitch = -10.0f;
+					if (bSide)
+					{
+						View.Yaw += 55.0f * FMath::Clamp((T - 0.35f) / 0.2f, 0.0f, 1.0f);
+						View.Pitch = 0.0f;
+					}
 					Velocity = FVector::ZeroVector;
 					static int32 NearShots = 0;
 					if (T < 0.1f) { NearShots = 0; }
