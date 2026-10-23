@@ -2675,6 +2675,8 @@ namespace
 	 * box centre and pawn distance every 0.25 s; HighResShot OSWalk_* at the shot, 1 s, the step back and the turn
 	 * (os.Gas.Debug 1 draws the gas's insides).
 	 */
+	TAutoConsoleVariable<FString> CVarGasProbeSpawn(TEXT("os.Gas.ProbeSpawn"), TEXT(""), TEXT("A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot."));
+
 	TAutoConsoleVariable<int32> CVarGasProbeSuppressor(TEXT("os.Gas.ProbeSuppressor"), 0, TEXT("1: os.Gas.WalkProbe mounts the suppressor first."));
 
 	TAutoConsoleVariable<int32> CVarGasCapture(TEXT("os.Gas.Capture"), 0, TEXT("1: os.Gas.WalkProbe saves every frame from 0.2 to 3.2 s (a self-check)."));
@@ -2898,7 +2900,13 @@ namespace
 					static int32 NearShots = 0;
 					if (T < 0.1f) { NearShots = 0; }
 					const float At = NearShots < 2 ? 0.3f + 0.3f * NearShots : 2.8f + BackEvery * (NearShots - 2);
-					if (NearShots < 2 + BackCount && T >= At) { ++NearShots; Pawn->Fire(); Clock->Y = T; }
+					if (NearShots < 2 + BackCount && T >= At)
+					{
+						++NearShots;
+						const FString Spawn = IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSpawn"))->GetString();
+						Spawn.IsEmpty() ? (void)Pawn->Fire() : (void)GEngine->Exec(World, *(TEXT("os.Gas.Spawn ") + Spawn));
+						Clock->Y = T;
+					}
 				}
 				// os.Gas.Capture 1: every frame 0.2-3.2 s saved (ScreenShot*.png) - a self-check at -FPS=30.
 				static uint64 CaptureFrame = 0;

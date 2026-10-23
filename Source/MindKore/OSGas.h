@@ -139,6 +139,10 @@ struct FOSGasRecipe
 	/** Always a cloud of its own and the shot's (as a burst of 20 or more), whatever its count. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
 	bool bShotCloud = false;
+
+	/** Heavy matter (dust): it falls along gravity at this, cm/s^2 (the air's drag gives it a terminal speed); 0 gas. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.0"))
+	float FallCmPerS2 = 0.0f;
 };
 
 /** One parcel of gas, box... cloud-origin frame (cm, world axes). */
@@ -159,6 +163,7 @@ struct FOSGasParcel
 	float Cling = 0.0f;
 	float MaxRadiusCm = 14.0f;
 	float DragSeconds = 0.0f;
+	float Fall = 0.0f;
 	bool bInstant = false;
 	uint32 Seed = 0;
 };
@@ -202,6 +207,15 @@ public:
 	void Burst(const FVector& Location, const FVector& Normal, float RadiusCm, float SpeedCm);
 	/** Air leaving through a hole (as UOSMuzzleFxComponent::AddAirFlow). */
 	void AddAirFlow(const FVector& Location, const FVector& Direction, float SpeedCm, float ReachCm, float Seconds);
+	/**
+	 * A level source's parcels (UOSGasSourceComponent): only into its own cloud (InOutCloud and InOutSerial remember it;
+	 * a new one when it is gone), never a shot's. Within the world's budget for sources - continuous ones 120 parcels
+	 * a second in all, a burst 90 - the rest is refused with a log line. Returns how many went out.
+	 */
+	int32 EmitForSource(const FOSGasRecipe& Recipe, const FOSGasLook& Look, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count,
+		bool bContinuous, int32& InOutCloud, uint32& InOutSerial);
+	static constexpr int32 SourceRatePerSecond = 120;
+	static constexpr int32 SourceBurstMax = 90;
 
 	/** Clouds alive; parcels in all of them (tests, log lines). */
 	int32 GetCloudCount() const;
@@ -362,6 +376,8 @@ private:
 	uint32 NextSerial = 1;
 	/** The last shot's cloud (a seep or a case joins only it) and the barrel's own small cloud (its thread), by serial. */
 	int32 ShotCloud = INDEX_NONE, SmallCloud = INDEX_NONE;
+	/** The level sources' continuous parcels in the last second (their budget): when, how many. */
+	TArray<TPair<double, int32>> SourceSpent;
 	uint32 ShotSerial = 0, SmallSerial = 0;
 	TMap<TObjectKey<UPrimitiveComponent>, FVector> LastMoverAt;
 	TArray<TWeakObjectPtr<ULightComponent>> KeyLights;

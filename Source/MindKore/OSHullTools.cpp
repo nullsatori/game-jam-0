@@ -360,7 +360,8 @@ void UOSHullToolsComponent::PrimaryHeld(float DeltaSeconds)
 				Look.WarmColour = FLinearColor(1.0f, 0.75f, 0.45f);
 				Look.Extinction = 0.02f;
 				Look.LifeSeconds = 4.0f;
-				Gas->EmitNow(Fumes, Look, Hit.ImpactPoint + Hit.ImpactNormal * 2.0f, Hit.ImpactNormal, FVector::ZeroVector, Count);
+				// Into its own small cloud (since 3h EmitNow joins only a shot's cloud, or starts one when allowed).
+				Gas->EmitNow(Fumes, Look, Hit.ImpactPoint + Hit.ImpactNormal * 2.0f, Hit.ImpactNormal, FVector::ZeroVector, Count, true);
 			}
 		}
 	}

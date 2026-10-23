@@ -654,6 +654,7 @@ void UOSGasSubsystem::Emit(FCloud& Cloud, const FOSGasRecipe& R, const FVector& 
 		P.MaxRadiusCm = R.MaxRadiusCm;
 		P.DragSeconds = R.DragSeconds;
 		P.bInstant = R.bInstant;
+		P.Fall = R.FallCmPerS2;
 		P.Seed = FMath::Rand();
 	}
 }
@@ -894,6 +895,56 @@ void UOSGasSubsystem::Burst(const FVector& Location, const FVector& Normal, floa
 			++Cloud.Blows;
 		}
 	}
+}
+
+int32 UOSGasSubsystem::EmitForSource(const FOSGasRecipe& Recipe, const FOSGasLook& Look, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count,
+	bool bContinuous, int32& InOutCloud, uint32& InOutSerial)
+{
+	if (Count <= 0)
+	{
+		return 0;
+	}
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (bContinuous)
+	{
+		SourceSpent.RemoveAll([Now](const TPair<double, int32>& Each) { return Now - Each.Key > 1.0; });
+		int32 Spent = 0;
+		for (const TPair<double, int32>& Each : SourceSpent)
+		{
+			Spent += Each.Value;
+		}
+		const int32 Allowed = FMath::Clamp(SourceRatePerSecond - Spent, 0, Count);
+		if (Allowed < Count)
+		{
+			UE_LOG(LogMindKore, Verbose, TEXT("Gas: a source over the budget (%d parcels a second for all), %d of %d refused"), SourceRatePerSecond, Count - Allowed, Count);
+		}
+		Count = Allowed;
+		if (Count > 0)
+		{
+			SourceSpent.Emplace(Now, Count);
+		}
+	}
+	else if (Count > SourceBurstMax)
+	{
+		UE_LOG(LogMindKore, Log, TEXT("Gas: a source's burst of %d over the budget (%d), cut"), Count, SourceBurstMax);
+		Count = SourceBurstMax;
+	}
+	if (Count <= 0)
+	{
+		return 0;
+	}
+	if (!Clouds.IsValidIndex(InOutCloud) || !Clouds[InOutCloud].IsAlive() || Clouds[InOutCloud].Serial != InOutSerial || Clouds[InOutCloud].Evict > 0.0f
+		|| Clouds[InOutCloud].Parcels.Num() + Clouds[InOutCloud].Incoming.Num() + Count > MaxParcels)
+	{
+		InOutCloud = CloudFor(Look, Where, -1.0f);
+		if (InOutCloud == INDEX_NONE)
+		{
+			return 0;
+		}
+		InOutSerial = Clouds[InOutCloud].Serial;
+	}
+	Emit(Clouds[InOutCloud], Recipe, Where, Direction, Carrier, Count);
+	return Count;
 }
 
 void UOSGasSubsystem::AddAirFlow(const FVector& Location, const FVector& Direction, float SpeedCm, float ReachCm, float Seconds)
@@ -1574,6 +1625,11 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				if (P.Age > 0.3f)
 				{
 					P.V *= FMath::Exp(-Dt / AirRestSeconds);
+				}
+				// Heavy matter settles (dust): its fall against the drag above.
+				if (P.Fall > 0.0f)
+				{
+					P.V += Down * (P.Fall * GScale * Dt);
 				}
 			}
 			// Its own drag, in a vacuum too (a hole's pop: 450 cm/s stopped within ~12 cm - without it a vacuum threw the
