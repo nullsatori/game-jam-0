@@ -155,6 +155,8 @@ private:
 		bool bMagazine = false;
 		/** A place with nothing for it: «ПУСТО», dim, not selectable (§8). */
 		bool bEmpty = false;
+		/** The laser's colour, a line under the laser while it is on the gun: a click takes the palette's next. */
+		bool bTint = false;
 	};
 
 	/** A place's box, laid out once per open: its rows (indices into Rows), where it is, its side of the gun. */

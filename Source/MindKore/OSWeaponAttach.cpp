@@ -275,7 +275,7 @@ TArray<FOSAttachment> OSMakeAttachments()
 	FOSAttachment Laser = Rail;
 	Laser.Id = TEXT("Laser");
 	Laser.Name = LOCTEXT("LaserName", "ЛЦУ");
-	Laser.Description = LOCTEXT("LaserText", "ТОЧКА ТУДА, КУДА СМОТРИШЬ");
+	Laser.Description = LOCTEXT("LaserText", "ТОЧКА ТУДА, КУДА ЛЕТИТ ПУЛЯ");
 	Laser.Fits = { TEXT("Pistol"), TEXT("Rmb93") };
 	Laser.Mesh = LaserMesh.Object;
 	Laser.SeatOffset = FTransform(FVector(0.0f, 0.0f, -0.7f));

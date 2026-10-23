@@ -23,9 +23,24 @@
 #include "OSLens.h"
 #include "StaticMeshResources.h"
 #include "HAL/IConsoleManager.h"
+#include "UObject/UObjectIterator.h"
 
 namespace
 {
+	FAutoConsoleCommandWithWorldAndArgs OSLaserTintCommand(TEXT("os.Laser.Tint"),
+		TEXT("os.Laser.Tint [N]: the laser's colour from its palette (0-5: red, green, blue, sodium, black light, IR); no N: the next one."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			for (TObjectIterator<UOSLaserSightComponent> It; It; ++It)
+			{
+				if (It->GetWorld() == World)
+				{
+					It->SetTint(Args.Num() > 0 ? FCString::Atoi(*Args[0]) : It->Tint + 1);
+					UE_LOG(LogMindKore, Log, TEXT("Laser tint %d: %s"), It->Tint, It->GetTint() ? *It->GetTint()->Name.ToString() : TEXT("-"));
+				}
+			}
+		}));
+
 	TAutoConsoleVariable<int32> CVarOSLaserMask(TEXT("os.Laser.Mask"), 0,
 		TEXT("1: show the laser's view of the gun on the HUD - the gun's mask over the beam in blue, the lens in green (yellow: no mask, the boxes' fallback)."));
 }
@@ -38,11 +53,53 @@ UOSLaserSightComponent::UOSLaserSightComponent()
 	// Asleep until a laser is on the gun in view (Wake).
 	PrimaryComponentTick.bStartWithTickEnabled = false;
 	DotMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/Materials/Weapons/M_OS_SightDot.M_OS_SightDot")));
+	// The palette: three diodes as they are, three of the project's own (owner 23.10). Each keeps to its hue - no white.
+	const auto Add = [this](const TCHAR* InName, const TCHAR* InAbout, const FLinearColor& InBeam, const FLinearColor& InDot, const FLinearColor& InHot, float InBeamScale)
+	{
+		FOSLaserTint& Each = Palette.AddDefaulted_GetRef();
+		Each.Name = FText::FromString(InName);
+		Each.Description = FText::FromString(InAbout);
+		Each.Beam = InBeam;
+		Each.Dot = InDot;
+		Each.Hot = InHot;
+		Each.BeamScale = InBeamScale;
+	};
+	Add(TEXT("КРАСНЫЙ 650 НМ"), TEXT("ШТАТНЫЙ ДИОД, ГЛУБОКИЙ КРАСНЫЙ"),
+		FLinearColor(1.0f, 0.09f, 0.03f), FLinearColor(1.0f, 0.045f, 0.02f), FLinearColor(1.0f, 0.3f, 0.18f), 1.0f);
+	Add(TEXT("ЗЕЛЕНЫЙ 520 НМ"), TEXT("ДИОД С НАКАЧКОЙ, ГЛАЗУ ВИДЕН ЯРЧЕ КРАСНОГО"),
+		FLinearColor(0.08f, 0.62f, 0.05f), FLinearColor(0.06f, 0.55f, 0.03f), FLinearColor(0.4f, 1.0f, 0.3f), 0.8f);
+	Add(TEXT("СИНИЙ 450 НМ"), TEXT("ХОЛОДНЫЙ СИНИЙ, ТОНЕТ В ТЕМНОТЕ"),
+		FLinearColor(0.07f, 0.18f, 1.0f), FLinearColor(0.05f, 0.12f, 1.0f), FLinearColor(0.35f, 0.5f, 1.0f), 1.2f);
+	Add(TEXT("НАТРИЙ 589 НМ"), TEXT("ЖЕЛТЫЙ СВЕТ ЦЕХОВЫХ ЛАМП"),
+		FLinearColor(1.0f, 0.42f, 0.04f), FLinearColor(1.0f, 0.34f, 0.02f), FLinearColor(1.0f, 0.62f, 0.22f), 0.9f);
+	Add(TEXT("ЧЕРНЫЙ СВЕТ 405 НМ"), TEXT("УЛЬТРАФИОЛЕТ: ЛУЧ ЕДВА ВИДЕН, ТОЧКА СВЕТИТСЯ НА ПОВЕРХНОСТИ"),
+		FLinearColor(0.3f, 0.04f, 1.0f), FLinearColor(0.3f, 1.0f, 0.55f), FLinearColor(0.6f, 1.0f, 0.8f), 0.45f);
+	Add(TEXT("ИК 850 НМ"), TEXT("НЕВИДИМ ГЛАЗУ, БОДИКАМ ЛОВИТ БЛЕДНО-СИРЕНЕВЫМ"),
+		FLinearColor(0.42f, 0.16f, 0.6f), FLinearColor(0.62f, 0.3f, 0.85f), FLinearColor(0.78f, 0.55f, 1.0f), 0.5f);
+}
+
+void UOSLaserSightComponent::SetTint(int32 Index)
+{
+	if (Palette.IsEmpty())
+	{
+		return;
+	}
+	Tint = (Index % Palette.Num() + Palette.Num()) % Palette.Num();
+	const FOSLaserTint& Each = Palette[Tint];
+	BeamColour = Each.Beam;
+	RedColour = Each.Dot;
+	HotColour = Each.Hot;
+	TintBeamScale = Each.BeamScale;
+	if (DotLight)
+	{
+		DotLight->SetLightColor(RedColour);
+	}
 }
 
 void UOSLaserSightComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	SetTint(Tint);
 	Guns = GetOwner()->FindComponentByClass<UOSWeaponsComponent>();
 	Camera = GetOwner()->FindComponentByClass<UCameraComponent>();
 	const auto Make = [this](const TCHAR* Name, const TCHAR* MeshPath)
@@ -764,7 +821,7 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 		// One texel wide, Wu-weighted across the rows (a hair's line steps softly as it moves), a dim sheath either
 		// side; its light falls from the lens to the dot and varies with the haze it passes through - noise fixed in the
 		// world, drifting slowly, which the beam sweeps across as the gun sways; the densest haze glints.
-		const float Base = ThreadLevel * ThreadBrightness;
+		const float Base = ThreadLevel * ThreadBrightness * TintBeamScale;
 		const float Half = BeamTexels * 0.5f;
 		const FVector Drift = FVector(0.3, 0.9, 0.2) * (HazeDriftCmPerSec * Now);
 		const auto HazeAt = [&](float T)
@@ -883,7 +940,7 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 			GlowTexels *= FleshGlowTimes;
 			GlowShare = FleshGlowShare * Throb;
 			SpeckleShare = 0.0f;
-			GlowColour = FLinearColor(0.75f, 0.02f, 0.01f);
+			GlowColour = RedColour * 0.75f; // the dot's own hue, darker under the skin
 		}
 		FVector2D AxisU;
 		FVector2D AxisV;

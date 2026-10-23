@@ -137,6 +137,7 @@
 
 | Команда | Аргументы | Что делает | Где |
 |---|---|---|---|
+| `os.Laser.Tint` | `[N]` | os.Laser.Tint [N]: the laser's colour from its palette (0-5: red, green, blue, sodium, black light, IR); no N: the next one. | `Source/MindKore/OSLaserSight.cpp` |
 | `os.Laser.Mask` | `0` / `1` | 1: on the HUD, the laser's view of the gun - the gun's mask over the beam in blue, the lens in green (yellow: no mask, the boxes' fallback). Console variable. | `Source/MindKore/OSLaserSight.cpp` |
 
 ## `os.Move`

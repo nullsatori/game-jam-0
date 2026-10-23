@@ -9,6 +9,7 @@
 #include "GameFramework/HUD.h"
 #include "Kismet/GameplayStatics.h"
 #include "MindKore.h"
+#include "OSLaserSight.h"
 #include "OSScope.h"
 #include "OSWeapons.h"
 #include "Sound/SoundBase.h"
@@ -349,6 +350,24 @@ void UOSAttachMenu::ReadRows()
 	}
 	// Place by place (the wheel walks the gun's places in order), the catalog's order inside a place.
 	Rows.StableSort([](const FRow& A, const FRow& B) { return A.Mount < B.Mount; });
+	// The laser on the gun: its colour as a line under it (owner 23.10: «выбор цвета лазера»).
+	const UOSLaserSightComponent* Laser = Guns->LaserSight;
+	const FOSLaserTint* Tint = Laser ? Laser->GetTint() : nullptr;
+	for (int32 Index = 0; Tint && Index < Rows.Num(); ++Index)
+	{
+		const FOSAttachment* Each = Guns->FindAttachment(Rows[Index].Id);
+		if (Rows[Index].bOn && Each && Each->bLaser)
+		{
+			FRow Row;
+			Row.Id = TEXT("LaserTint");
+			Row.Name = FText::Format(LOCTEXT("TintRow", "ЦВЕТ: {0}"), Tint->Name);
+			Row.Description = Tint->Description;
+			Row.Mount = Rows[Index].Mount;
+			Row.bTint = true;
+			Rows.Insert(Row, Index + 1);
+			break;
+		}
+	}
 	// The places nothing carried goes on, dim at the end (the RMB-93's top).
 	for (int32 Mount = 0; Mount < Weapon->Mounts.Num(); ++Mount)
 	{
@@ -371,6 +390,10 @@ FText UOSAttachMenu::Verb() const
 		return FText::GetEmpty();
 	}
 	const FRow& Row = Rows[Selected];
+	if (Row.bTint)
+	{
+		return LOCTEXT("NextTint", "СЛЕДУЮЩИЙ ЦВЕТ");
+	}
 	if (Row.bMagazine)
 	{
 		return Row.bOn ? LOCTEXT("StockBack", "ВЕРНУТЬ ШТАТНЫЙ") : LOCTEXT("Change", "СМЕНИТЬ");
@@ -385,6 +408,20 @@ bool UOSAttachMenu::ApplySelected()
 		return false;
 	}
 	const FRow& Row = Rows[Selected];
+	if (Row.bTint)
+	{
+		// The next colour at once (the diode's switch clicks); the line reads it again.
+		if (!Guns->LaserSight)
+		{
+			return false;
+		}
+		Guns->LaserSight->SetTint(Guns->LaserSight->Tint + 1);
+		if (const FOSAttachment* Laser = Guns->GetShownOn(EOSMountType::Rail); Laser && Laser->SwitchSound)
+		{
+			UGameplayStatics::PlaySound2D(this, Laser->SwitchSound, 0.35f, 1.3f);
+		}
+		return true;
+	}
 	const FOSAttachment* Attachment = Guns->FindAttachment(Row.Id);
 	if (Attachment && Attachment->bHasSwitch && !Row.bOn)
 	{
@@ -919,6 +956,16 @@ void UOSAttachMenu::DrawHud(AHUD& Hud, UCanvas& Canvas)
 				if (FMath::Frac(Now * 4.0) < 0.5)
 				{
 					Rect(bInk ? Ink : Light(0.9f), X + W - 9.0f * Cell, Top + 4.0f * Cell, 3.0f * Cell, 3.0f * Cell);
+				}
+			}
+			else if (Row.bTint)
+			{
+				// A swatch of the colour in use, where «НАДЕТ» goes.
+				const FOSLaserTint* Swatch = Guns->LaserSight ? Guns->LaserSight->GetTint() : nullptr;
+				if (Swatch)
+				{
+					Rect(bInk ? Ink : Light(0.5f), X + W - 13.0f * Cell, Top + 2.0f * Cell, 7.0f * Cell, 9.0f * Cell);
+					Rect(FLinearColor(Swatch->Dot.R, Swatch->Dot.G, Swatch->Dot.B, Fade), X + W - 12.0f * Cell, Top + 3.0f * Cell, 5.0f * Cell, 7.0f * Cell);
 				}
 			}
 			else if (Row.bOn)

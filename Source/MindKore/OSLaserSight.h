@@ -50,6 +50,35 @@ enum class EOSLaserSurface : uint8
 	Flesh,
 };
 
+/**
+ * One colour of the laser (owner 23.10: «выбор цвета лазера ... 3 цвета + 3 экспериментальных»): the beam's, the
+ * dot's (they part where the dot is not the beam's light - a fluorescence), the hot of the core and speckle, and the
+ * beam's brightness against the red's. Chosen in the attachment menu (the line under the laser) or os.Laser.Tint.
+ */
+USTRUCT(BlueprintType)
+struct FOSLaserTint
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Tint")
+	FText Name;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Tint")
+	FText Description;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Tint")
+	FLinearColor Beam = FLinearColor(1.0f, 0.09f, 0.03f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Tint")
+	FLinearColor Dot = FLinearColor(1.0f, 0.045f, 0.02f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Tint")
+	FLinearColor Hot = FLinearColor(1.0f, 0.3f, 0.18f);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Tint", meta = (ClampMin = "0.0"))
+	float BeamScale = 1.0f;
+};
+
 UCLASS(ClassGroup = (OS))
 class MINDKORE_API UOSLaserSightComponent : public UActorComponent
 {
@@ -243,6 +272,17 @@ public:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "OS|Laser")
 	TObjectPtr<UStaticMeshComponent> Thread = nullptr;
 
+	/** The palette (the constructor's six: three real diodes, three of the project's own) and the one in use. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Tint")
+	TArray<FOSLaserTint> Palette;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser|Tint", meta = (ClampMin = "0"))
+	int32 Tint = 0;
+
+	/** Takes the palette's Index (wrapped) into the colours the laser draws with. */
+	void SetTint(int32 Index);
+	const FOSLaserTint* GetTint() const { return Palette.IsValidIndex(Tint) ? &Palette[Tint] : nullptr; }
+
 	/** The laser is lit this frame, the dot on something, the thread seen (probes). */
 	bool IsLit() const { return bLit; }
 	bool HasDot() const { return bLit && bDotHit; }
@@ -318,6 +358,8 @@ private:
 	/** The gun's depth mask (DrawGunMask): the nearest 1/depth of the gun per texel over MaskRegion, 0 where none. */
 	FIntRect MaskRegion;
 	TArray<float> MaskNearInv;
+	/** The tint's beam brightness against the red's (SetTint). */
+	float TintBeamScale = 1.0f;
 	// The diode's drive.
 	float OnLevel = 0.0f;
 	float OnVelocity = 0.0f;
