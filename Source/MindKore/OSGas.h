@@ -135,6 +135,10 @@ struct FOSGasRecipe
 	/** Joins the cloud a source started this very frame (one shot's several streamers share one cloud). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
 	bool bJoinThisFrame = false;
+
+	/** Always a cloud of its own and the shot's (as a burst of 20 or more), whatever its count. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
+	bool bShotCloud = false;
 };
 
 /** One parcel of gas, box... cloud-origin frame (cm, world axes). */

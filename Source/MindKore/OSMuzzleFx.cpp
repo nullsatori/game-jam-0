@@ -488,17 +488,32 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 				Recipe.SpeedCm *= JetScale;
 			}
 			// A jet into a vacuum: a fan of streamers, as the holes' threads (owner 23.10: one jet read as a capsule) -
-			// 7 (a narrow muzzle 4) in a cone of 25 degrees round the bore, each a 3 degree thread with its own share.
+			// 7 in a cone of 25 degrees round the bore, each a 3 degree thread with its own share.
 			const FVector Where = Frame.TransformPosition(Vent.Location);
 			const FVector Axis = Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal());
+			if (Vent.bJet && !OSAirZoneAt(GetWorld(), Where) && Recipe.VacuumBurstCount > 0 && Vent.WidthCm < 3.0f)
+			{
+				// A narrow muzzle (the pistol) into a vacuum: a small quick breath in a 35 degree fan, faint and gone in
+				// under a second - no streamers (4 of them read as bright comets: owner 23.10 «у пистолета какие-то кометы»).
+				FOSGasRecipe Breath = Recipe;
+				Breath.VacuumBurstCount = Breath.BurstCount = 28;
+				Breath.ConeDeg = 35.0f;
+				Breath.Mass = 0.5f;
+				Breath.LifeSeconds = 0.9f;
+				Breath.bShotCloud = true;
+				Gas->AddSource(Breath, GunSmoke(), Where, Axis, Carrier);
+				continue;
+			}
 			if (Vent.bJet && !OSAirZoneAt(GetWorld(), Where) && Recipe.VacuumBurstCount > 0)
 			{
-				const int32 Streamers = Vent.WidthCm < 3.0f ? 4 : 7;
+				const int32 Streamers = 7;
 				for (int32 Index = 0; Index < Streamers; ++Index)
 				{
 					FOSGasRecipe Thread = Recipe;
-					// The first (along the bore) starts the shot's cloud (20 at least: a burst's own cloud), the rest join it.
-					Thread.VacuumBurstCount = FMath::Max(Index == 0 ? 20 : 6, FMath::RoundToInt(Recipe.VacuumBurstCount * FMath::FRandRange(0.6f, 1.4f) / Streamers));
+					// The first (along the bore) starts the shot's cloud, the rest join it; even shares (a first of 20 at least
+					// made the pistol's one bright comet).
+					Thread.VacuumBurstCount = FMath::Max(5, FMath::RoundToInt(Recipe.VacuumBurstCount * FMath::FRandRange(0.6f, 1.4f) / Streamers));
+					Thread.bShotCloud = Index == 0;
 					Thread.BurstCount = Thread.VacuumBurstCount;
 					Thread.ConeDeg = 3.0f;
 					Thread.bJoinThisFrame = Index > 0;

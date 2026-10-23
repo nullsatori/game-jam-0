@@ -623,7 +623,7 @@ int32 UOSGasSubsystem::AddSource(const FOSGasRecipe& Recipe, const FOSGasLook& L
 		// A cone with a tail, not a cloud (design v11): no vortex ring and its sideways throw (nothing to roll against in a
 		// vacuum); the speeds' spread lays the fast ahead and the slow by the muzzle.
 		Source.Recipe.RingCm = 0.0f;
-		Source.Recipe.ConeDeg = FMath::Min(Recipe.ConeDeg, 16.0f);
+		Source.Recipe.ConeDeg = FMath::Min(Recipe.ConeDeg, 40.0f);
 		// Half the speed: a plume of ~1.5 m that stays in view (at full speed the fast gas was 3-4 m off and thinned to
 		// nothing against the dark in a second).
 		Source.Recipe.SpeedCm *= 0.5f;
@@ -651,14 +651,15 @@ int32 UOSGasSubsystem::AddSource(const FOSGasRecipe& Recipe, const FOSGasLook& L
 		// At most 20 on the game thread (the rest from the next step on: no hitch).
 		const int32 Now = FMath::Clamp(FMath::RoundToInt(Source.BurstOwed * Frame), 1, 20);
 		Source.BurstOwed = FMath::Max(0.0f, Source.BurstOwed - Now);
-		Source.Cloud = CloudFor(Look, WorldWhere, Used.bJoinThisFrame ? 0.0f : Used.BurstCount >= 20 ? -1.0f : 0.3f);
+		const bool bShot = Used.bShotCloud || (Used.BurstCount >= 20 && !Used.bJoinThisFrame);
+		Source.Cloud = CloudFor(Look, WorldWhere, Used.bJoinThisFrame ? 0.0f : bShot ? -1.0f : 0.3f);
 		if (Source.Cloud != INDEX_NONE)
 		{
 			FCloud& Cloud = Clouds[Source.Cloud];
 			Source.CloudSerial = Cloud.Serial;
 			Emit(Cloud, Used, WorldWhere, WorldDirection, CarrierVelocity, Now);
 			Cloud.bStamp = true;
-			if (Used.BurstCount >= 20)
+			if (bShot)
 			{
 				ShotCloud = Source.Cloud;
 				ShotSerial = Cloud.Serial;
@@ -1850,9 +1851,10 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			// draws a streak of jet, not a ball (owner 23.10: «в невесомости дым вылетает как будто дробинками»).
 			const float Speed = P.V.Size();
 			const FVector3f Along = Speed > 1.0f ? P.V / Speed : FVector3f::ZeroVector;
-			// The streak along the velocity joins a streamer's parcels into a thread (a vacuum's jet is a fan of 3 degree
-			// streamers now, so it no longer merges them across into one cylinder: owner 23.10 «цилиндр или капсула»).
-			const float Long = FMath::Max(P.RadiusCm, Speed * 0.08f);
+			// The streak along the velocity joins a streamer's parcels into a thread; in a vacuum half of it (0.04 s) and
+			// 4 radii at most - a full streak of fast parcels drew bright comets (owner 23.10: «у пистолета какие-то
+			// кометы»), and merged across into a cylinder before the jet became a fan.
+			const float Long = Cloud.bAir ? FMath::Max(P.RadiusCm, Speed * 0.08f) : FMath::Clamp(Speed * 0.04f, P.RadiusCm, 4.0f * P.RadiusCm);
 			const float InvAcross2 = 1.0f / (P.RadiusCm * P.RadiusCm);
 			const float InvLong2 = 1.0f / (Long * Long);
 			// The ellipsoid's own bounds per axis (a streak along X is long in X only): its sphere's box made a fast
