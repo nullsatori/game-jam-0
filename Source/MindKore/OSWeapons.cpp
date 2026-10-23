@@ -564,6 +564,24 @@ FTransform UOSWeaponsComponent::GetMuzzleTransform() const
 	return FTransform(Bore, Location + Bore.GetAxisX() * (Device ? Device->MuzzleOffsetCm : 0.0f));
 }
 
+void UOSWeaponsComponent::GetShotLine(const FVector& Eye, const FVector& ViewDirection, FVector& OutStart, FVector& OutDirection) const
+{
+	OutStart = Eye;
+	OutDirection = ViewDirection;
+	if (!ViewModel || !ViewModel->GetStaticMesh() || !GetWeapon())
+	{
+		return;
+	}
+	const FTransform Muzzle = GetMuzzleTransform();
+	OutDirection = Muzzle.GetRotation().GetAxisX();
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(OSShotLine), /*bTraceComplex=*/false, GetOwner());
+	FHitResult Blocked;
+	if (!GetWorld()->LineTraceSingleByChannel(Blocked, Eye, Muzzle.GetLocation(), ECC_GameTraceChannel2, Params))
+	{
+		OutStart = Muzzle.GetLocation();
+	}
+}
+
 void UOSWeaponsComponent::SelectStep(int32 Step)
 {
 	// The next unlocked gun in the wheel's direction.
@@ -768,7 +786,7 @@ void UOSWeaponsComponent::Reload()
 		!bEmptyReload ? TEXT("") : ReloadFromSeconds > 0.0f ? TEXT(" (the slide release only)") : TEXT(" (empty: the slide released at the end)"));
 }
 
-bool UOSWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, FVector& OutRecoil)
+bool UOSWeaponsComponent::Fire(const FVector& Eye, const FVector& Direction, FVector& OutRecoil)
 {
 	OutRecoil = FVector::ZeroVector;
 	FOSWeapon* Weapon = GetWeapon() ? &Weapons[CurrentWeapon] : nullptr;
@@ -835,11 +853,15 @@ bool UOSWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, F
 	// The RMB-93: its open lid jerked by the kick, its shroud's holes puffing (OSWeaponLid.cpp).
 	bLidShot = Weapon->Lid.Mesh != nullptr;
 	PortSmokeShot(*Weapon);
+	// Out of the muzzle along the bore (the laser's dot is where this goes); the kick above stays along the view.
+	FVector Start;
+	FVector Bore;
+	GetShotLine(Eye, Direction, Start, Bore);
 	for (int32 Pellet = 0; Pellet < Weapon->Pellets; ++Pellet)
 	{
 		const FVector PelletDirection = Weapon->SpreadDeg > 0.0f
-			? FMath::VRandCone(Direction, FMath::DegreesToRadians(Weapon->SpreadDeg))
-			: Direction;
+			? FMath::VRandCone(Bore, FMath::DegreesToRadians(Weapon->SpreadDeg))
+			: Bore;
 		if (Weapon->ProjectileSpeed <= 0.0f)
 		{
 			TraceShot(*Weapon, Start, Start + PelletDirection * Weapon->RangeCm, PelletDirection);

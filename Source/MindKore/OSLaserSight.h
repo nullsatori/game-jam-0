@@ -15,16 +15,17 @@ class FCanvasTileItem;
 
 /**
  * The laser's light in the world (Docs/Attachments.md, «ЛЦУ»): while a laser sits on the gun in view, switched on
- * and latched (UOSWeaponsComponent::GetLaserLens), one trace a frame on the Shot channel from the eye along the
- * view within the gun's RangeCm - the rounds fly from the eye, so the dot is always true about the round - puts the
- * dot on the first thing in the way, a constant few pixels across, 0.5 cm off the surface; the thread runs from the
- * module's lens to it, seen only where there is something to scatter it: in air (the zones, polled every 0.2 s,
- * a 0.3 s fade) - and in the RMB-93's smoke once the smoke exists (stub). Off: hidden, no trace.
+ * and latched (UOSWeaponsComponent::GetLaserLens), one trace a frame on the Shot channel along the round's own line
+ * (UOSWeaponsComponent::GetShotLine: out of the muzzle along the bore) within the gun's RangeCm puts the dot where
+ * the round lands (owner 23.10: honest about the round), 0.5 cm off the surface; the beam runs from the module's
+ * lens to it, seen only where there is something to scatter it: in air (the zones, polled every 0.2 s, a 0.3 s
+ * fade) - and in the RMB-93's smoke once the smoke exists (stub). Off: hidden, no trace.
  *
- * Both are drawn on the HUD (DrawHud), not as meshes in the world (owner's playtest 22.10: «лазер гостит»):
- * the temporal upscaler smeared a few-pixel dot that moves with the view and flickers every frame. On the HUD
- * the dot is crisp pixels at the traced point - it is the first thing along the view, so nothing hides it - and
- * the thread a pixel line from the lens (the gun's first-person projection) to the dot. The meshes stay hidden.
+ * Both are drawn on the HUD (DrawHud), not as meshes in the world (owner's playtest 22.10: «лазер гостит»): the
+ * temporal upscaler smeared a few-pixel dot that moves with the view. The look is the PS1/PS2's light (owner 23.10:
+ * «ближе к psx-ps2 эстетике», not pixel art): smooth-shaded additive bands and discs, colour per corner - a hot
+ * core, a red body and a wide dim halo for the beam, haze sliding along it and dust motes; a white-hot dot in a red
+ * glow, a dim halo and a faint flat streak. What of the beam lies over the gun's outline is not drawn.
  */
 UCLASS(ClassGroup = (OS))
 class MINDKORE_API UOSLaserSightComponent : public UActorComponent
@@ -34,41 +35,43 @@ class MINDKORE_API UOSLaserSightComponent : public UActorComponent
 public:
 	UOSLaserSightComponent();
 
-	/** The dot's size, pixels of the view across (on 10 m about 2 px at 1280 x 720, owner: not fatter). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.5"))
-	float DotPixels = 2.0f;
-
 	/** Off the surface along its normal, cm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
 	float DotLiftCm = 0.5f;
 
-	/** The thread's thickness, cm, and its glow's share of the dot's. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.01"))
-	float ThreadCm = 0.15f;
+	/** The dot's light, pixels at 1080 lines (4 m off; a little smaller farther): the white core, the red glow, the halo, the streak's half length. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.5"))
+	float DotCorePixels = 2.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.5"))
+	float DotGlowPixels = 9.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.5"))
+	float DotHaloPixels = 30.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
+	float DotStreakPixels = 60.0f;
+
+	/** The beam's hot core, cm across in the world (fat by the lens, a hair far off), never under BeamMinPixels at 1080. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.01"))
+	float ThreadCm = 0.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.5"))
+	float BeamMinPixels = 1.5f;
+
+	/** The beam's light against the dot's, and its brightness by the lens. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
 	float ThreadShare = 0.25f;
-
-	/**
-	 * The HUD's pixel grid for the dot and the thread: this many lines of the screen (3 px a pixel at 1080), the
-	 * game's low resolution - stepped, posterised, dithered light rather than a thin anti-aliased line.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "90.0"))
-	float PixelLines = 360.0f;
-
-	/** The thread's light levels (posterised, ordered dither between them) and its brightness by the lens. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "2"))
-	int32 ThreadLevels = 4;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
 	float ThreadBrightness = 2.6f;
 
-	/** Dust caught in the beam: the share of its pixels that glint, and how fast the glints drift along it (pixels a second). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float DustShare = 0.035f;
+	/** Dust caught in the beam: how many motes, and how fast they drift along it (beam lengths a second). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0"))
+	int32 DustMotes = 6;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))
-	float DustDrift = 9.0f;
+	float DustDrift = 0.12f;
 
 	/** The dot's Glow (M_OS_SightDot's param), its grain (+-share a frame) and its drive's flutter with a rare drop. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Laser", meta = (ClampMin = "0.0"))

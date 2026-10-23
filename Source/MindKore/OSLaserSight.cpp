@@ -15,6 +15,7 @@
 #include "OSWeapons.h"
 #include "OSSuitProjector.h"
 #include "OSWeldProjector.h"
+#include "RenderUtils.h"
 
 UOSLaserSightComponent::UOSLaserSightComponent()
 {
@@ -106,25 +107,20 @@ void UOSLaserSightComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		return;
 	}
 	bLit = true;
-	// The dot: the first thing along the view within the gun's reach - where the round goes.
+	// The dot: the first thing on the round's line within the gun's reach - out of the muzzle along the bore, as
+	// UOSWeaponsComponent::Fire sends it (owner 23.10: the laser tells honestly where the round flies).
 	const USceneComponent* Eye = Guns->ViewModel->GetAttachParent();
-	const FVector From = Eye->GetComponentLocation();
-	const FVector Along = Eye->GetForwardVector();
+	FVector From;
+	FVector Along;
+	Guns->GetShotLine(Eye->GetComponentLocation(), Eye->GetForwardVector(), From, Along);
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(OSLaserSight), /*bTraceComplex=*/false, GetOwner());
 	FHitResult Hit;
 	++Traces;
 	bDotHit = GetWorld()->LineTraceSingleByChannel(Hit, From, From + Along * Weapon->RangeCm, ECC_GameTraceChannel2, Params);
 	DotAt = bDotHit ? FVector(Hit.ImpactPoint) + FVector(Hit.ImpactNormal) * DotLiftCm : From + Along * Weapon->RangeCm;
 	// The flutter of the diode's drive with a rare drop, and grain: a new draw every frame.
-	const float Drive = (FMath::FRand() < 0.03f ? 0.7f : 1.0f + FMath::FRandRange(-0.03f, 0.03f)) * (1.0f + FMath::FRandRange(-Grain, Grain));
-	if (bDotHit)
-	{
-		const float Distance = float(FVector::Dist(From, DotAt));
-		const float Across = UOSWeldProjectorComponent::ViewPixelAngle(Cast<APawn>(GetOwner())) * DotPixels * Distance;
-		// The engine plane is 100 cm across, its face up its Z: turned to the eye.
-		(void)Across; // the HUD draws it a constant few pixels across (DrawHud)
-		DotDrive = Drive;
-	}
+	DotDrive = (FMath::FRand() < 0.03f ? 0.7f : 1.0f + FMath::FRandRange(-0.03f, 0.03f)) * (1.0f + FMath::FRandRange(-Grain, Grain));
+	const float Drive = DotDrive;
 	// The thread: only where there is something to scatter it - air round the eye (polled), smoke later.
 	SinceAirPoll += DeltaTime;
 	if (SinceAirPoll >= AirPollSeconds)
@@ -140,9 +136,6 @@ void UOSLaserSightComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 
 namespace
 {
-	/** The 4 x 4 ordered dither (Bayer), 0..15. */
-	constexpr int32 OSBayer4[4][4] = { { 0, 8, 2, 10 }, { 12, 4, 14, 6 }, { 3, 11, 1, 9 }, { 15, 7, 13, 5 } };
-
 	/** The convex hull of the points, counter-clockwise on screen (Andrew's monotone chain). */
 	TArray<FVector2D> OSHull(TArray<FVector2D> Points)
 	{
@@ -225,27 +218,85 @@ namespace
 	}
 }
 
+namespace
+{
+	/** A colour's light times Level, opaque (the additive blend adds the colour as it is). */
+	FLinearColor OSLit(const FLinearColor& Colour, float Level)
+	{
+		return FLinearColor(Colour.R * Level, Colour.G * Level, Colour.B * Level, 1.0f);
+	}
+
+	/** One triangle of the HUD's light, untextured, colour per corner (Gouraud). */
+	void OSLightTri(TArray<FCanvasUVTri>& Tris, const FVector2D& P0, const FLinearColor& C0, const FVector2D& P1, const FLinearColor& C1,
+		const FVector2D& P2, const FLinearColor& C2)
+	{
+		FCanvasUVTri& Tri = Tris.AddDefaulted_GetRef();
+		Tri.V0_Pos = P0;
+		Tri.V0_Color = C0;
+		Tri.V1_Pos = P1;
+		Tri.V1_Color = C1;
+		Tri.V2_Pos = P2;
+		Tri.V2_Color = C2;
+		Tri.V0_UV = Tri.V1_UV = Tri.V2_UV = FVector2D::ZeroVector;
+	}
+
+	/** A soft band A -> B: its colour along the middle, nothing at its edges (half widths at either end). */
+	void OSSoftBand(TArray<FCanvasUVTri>& Tris, const FVector2D& A, const FVector2D& B, float HalfA, float HalfB, const FLinearColor& ColourA,
+		const FLinearColor& ColourB)
+	{
+		const FVector2D Way = B - A;
+		const FVector2D Side = FVector2D(-Way.Y, Way.X).GetSafeNormal();
+		if (Side.IsZero())
+		{
+			return;
+		}
+		const FLinearColor Dark(0.0f, 0.0f, 0.0f, 1.0f);
+		for (const float Sign : { 1.0f, -1.0f })
+		{
+			const FVector2D EdgeA = A + Side * (HalfA * Sign);
+			const FVector2D EdgeB = B + Side * (HalfB * Sign);
+			OSLightTri(Tris, EdgeA, Dark, A, ColourA, EdgeB, Dark);
+			OSLightTri(Tris, EdgeB, Dark, A, ColourA, B, ColourB);
+		}
+	}
+
+	/** A soft ellipse: its colour at the centre, nothing at the rim. */
+	void OSSoftDisc(TArray<FCanvasUVTri>& Tris, const FVector2D& Centre, float RadiusX, float RadiusY, const FLinearColor& Colour, int32 Sides = 18)
+	{
+		const FLinearColor Dark(0.0f, 0.0f, 0.0f, 1.0f);
+		for (int32 Side = 0; Side < Sides; ++Side)
+		{
+			const float A0 = UE_TWO_PI * Side / Sides;
+			const float A1 = UE_TWO_PI * (Side + 1) / Sides;
+			OSLightTri(Tris, Centre, Colour, Centre + FVector2D(FMath::Cos(A0) * RadiusX, FMath::Sin(A0) * RadiusY), Dark,
+				Centre + FVector2D(FMath::Cos(A1) * RadiusX, FMath::Sin(A1) * RadiusY), Dark);
+		}
+	}
+}
+
 void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas) const
 {
 	if (!bLit || !Camera)
 	{
 		return;
 	}
-	// Light adds (the beam and the dot glow over the dark, never darken it), on the game's coarse pixel grid.
-	const float Pixel = FMath::Max(1.0f, FMath::RoundToFloat(Canvas.ClipY / PixelLines));
-	const auto Emit = [&Canvas, Pixel](int32 GX, int32 GY, const FLinearColor& Colour, float Level)
-	{
-		if (Level <= 0.0f)
-		{
-			return;
-		}
-		FCanvasTileItem Tile(FVector2D(GX * Pixel, GY * Pixel), FVector2D(Pixel, Pixel), FLinearColor(Colour.R * Level, Colour.G * Level, Colour.B * Level, 1.0f));
-		Tile.BlendMode = SE_BLEND_Additive;
-		Canvas.DrawItem(Tile);
-	};
-	const FLinearColor Hot(1.0f, 0.78f, 0.72f);
-	const int64 DeviceTick = int64(GetWorld()->GetTimeSeconds() * OSProjectorClockHz);
+	// Light adds over the picture (never darkens it), smooth-shaded like the PS1/PS2's lights: soft bands and soft
+	// discs, colour per corner, no pixel grid (owner 23.10: «ближе к psx-ps2 эстетике», not pixel art).
+	const float Res = Canvas.ClipY / 1080.0f;
 	const double Now = GetWorld()->GetTimeSeconds();
+	const int64 DeviceTick = int64(Now * OSProjectorClockHz);
+	const FLinearColor Hot(1.0f, 0.82f, 0.74f);
+	const FLinearColor CoreTint = FMath::Lerp(RedColour, Hot, 0.45f);
+	TArray<FCanvasUVTri> Tris;
+	Tris.Reserve(512);
+	// A world size in pixels where a point is: the view's scale over its depth (the gun's own field of view for the lens).
+	const FTransform View = Camera->GetComponentTransform();
+	const auto PixelsPerCm = [&Canvas, &View, this](const FVector& World, bool bFirstPerson)
+	{
+		const float FieldOfView = bFirstPerson && Camera->bEnableFirstPersonFieldOfView ? Camera->FirstPersonFieldOfView : Camera->FieldOfView;
+		const float Scale = Canvas.ClipX * 0.5f / FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(FieldOfView, 5.0f, 170.0f) * 0.5f));
+		return Scale / FMath::Max(1.0f, float(View.InverseTransformPositionNoScale(World).X));
+	};
 
 	FVector2D Dot2D;
 	const bool bDot = bDotHit && OSProjectToHud(Camera, Canvas, DotAt, false, Dot2D);
@@ -263,102 +314,83 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas) const
 		{
 			Hidden0 = Hidden1 = 2.0;
 		}
-		// The beam in grid steps along its longer axis: one pixel a step, no gaps, no slant smoothing.
 		const FVector2D Way = Dot2D - Lens2D;
-		const int32 Steps = FMath::Clamp(FMath::CeilToInt32(float(FMath::Max(FMath::Abs(Way.X), FMath::Abs(Way.Y))) / Pixel), 1, 1200);
-		const bool bFlat = FMath::Abs(Way.X) >= FMath::Abs(Way.Y);
-		const double Exit = Hidden0 <= 0.0 ? Hidden1 : 0.0;
-		const int32 DustStep = FMath::FloorToInt32(float(Now) * DustDrift);
-		int32 LastX = MIN_int32;
-		int32 LastY = MIN_int32;
-		for (int32 Step = 0; Step < Steps; ++Step)
+		const float Length = float(Way.Size());
+		const double Exit = Hidden0 <= 0.0 ? FMath::Min(Hidden1, 1.0) : 0.0;
+		// The beam's real thickness on screen at either end: fat by the lens, a hair at the dot - never thinner than BeamMinPixels.
+		const float HalfLens = FMath::Clamp(ThreadCm * 0.5f * PixelsPerCm(LensAt, true), BeamMinPixels * 0.5f * Res, 7.0f * Res);
+		const float HalfDot = FMath::Clamp(ThreadCm * 0.5f * PixelsPerCm(DotAt, false), BeamMinPixels * 0.5f * Res, 7.0f * Res);
+		const float Base = ThreadLevel * ThreadBrightness;
+		// The light along the beam: brightest out of the gun, thinning toward the dot, coming up over a few pixels as it
+		// leaves the gun, and the haze it lights moving through it (two slow bands sliding toward the dot).
+		const auto LightAt = [&](double Share)
 		{
-			const double Share = double(Step) / double(Steps);
-			if (Share > Hidden0 && Share < Hidden1)
+			const float T = float(Share);
+			const float Emerge = FMath::Clamp(float(Share - Exit) * Length / (14.0f * Res), 0.0f, 1.0f);
+			const float Haze = 0.82f + 0.12f * FMath::Sin(38.0f * T - 5.0f * float(Now)) + 0.08f * FMath::Sin(91.0f * T - 9.0f * float(Now) + 1.7f);
+			return Base * Emerge * Haze * (0.28f + 0.72f * FMath::Pow(1.0f - T, 1.5f));
+		};
+		const auto DrawSpan = [&](double From, double To)
+		{
+			if (To <= From)
+			{
+				return;
+			}
+			const int32 Pieces = FMath::Clamp(FMath::CeilToInt32(float(To - From) * Length / (12.0f * Res)), 1, 48);
+			for (int32 Piece = 0; Piece < Pieces; ++Piece)
+			{
+				const double S0 = FMath::Lerp(From, To, double(Piece) / Pieces);
+				const double S1 = FMath::Lerp(From, To, double(Piece + 1) / Pieces);
+				const FVector2D A = Lens2D + Way * S0;
+				const FVector2D B = Lens2D + Way * S1;
+				const float W0 = FMath::Lerp(HalfLens, HalfDot, float(S0));
+				const float W1 = FMath::Lerp(HalfLens, HalfDot, float(S1));
+				const float L0 = LightAt(S0);
+				const float L1 = LightAt(S1);
+				// The halo wide and dim, the body, then the hot core: three soft bands make the glow's falloff.
+				OSSoftBand(Tris, A, B, W0 * 5.0f + 2.0f * Res, W1 * 5.0f + 2.0f * Res, OSLit(RedColour, 0.16f * L0), OSLit(RedColour, 0.16f * L1));
+				OSSoftBand(Tris, A, B, W0 * 2.2f + Res, W1 * 2.2f + Res, OSLit(RedColour, 0.5f * L0), OSLit(RedColour, 0.5f * L1));
+				OSSoftBand(Tris, A, B, W0, W1, OSLit(CoreTint, L0), OSLit(CoreTint, L1));
+			}
+		};
+		DrawSpan(0.0, FMath::Min(Hidden0, 1.0));
+		DrawSpan(FMath::Max(Hidden1, 0.0), 1.0);
+		// Where it leaves the gun the haze by the muzzle glows most.
+		if (Exit < 1.0)
+		{
+			const FVector2D Out = Lens2D + Way * Exit;
+			OSSoftDisc(Tris, Out, HalfLens * 6.0f + 4.0f * Res, HalfLens * 4.0f + 3.0f * Res, OSLit(RedColour, 0.35f * Base));
+		}
+		// Dust in the beam: motes catch the light and drift along it toward the dot, each its own speed and twinkle.
+		for (int32 Mote = 0; Mote < DustMotes; ++Mote)
+		{
+			const float Seed = OSProjectorHash(Mote, 9137);
+			const float Phase = FMath::Frac(Seed + float(Now) * DustDrift * (0.6f + 0.8f * OSProjectorHash(Mote, 271)));
+			if (Phase < Exit || (Phase > Hidden0 && Phase < Hidden1))
 			{
 				continue;
 			}
-			const FVector2D At = Lens2D + Way * Share;
-			const int32 GX = FMath::FloorToInt32(float(At.X / Pixel));
-			const int32 GY = FMath::FloorToInt32(float(At.Y / Pixel));
-			if (GX == LastX && GY == LastY)
-			{
-				continue;
-			}
-			LastX = GX;
-			LastY = GY;
-			// Bright out of the lens, thinning toward the dot; it comes up over a few pixels where it leaves the gun.
-			const float Along = float(Share);
-			const float Emerge = FMath::Clamp(float((Share - Exit) * Steps) / 6.0f, 0.0f, 1.0f);
-			const float Light = ThreadLevel * ThreadBrightness * Emerge * (0.3f + 0.7f * FMath::Pow(1.0f - Along, 1.6f));
-			// Posterised into ThreadLevels with the ordered dither between: steps of light, as the low-res screen has.
-			const float Scaled = FMath::Clamp(Light, 0.0f, 1.0f) * ThreadLevels;
-			const int32 Base = FMath::FloorToInt32(Scaled);
-			const float Threshold = (OSBayer4[GY & 3][GX & 3] + 0.5f) / 16.0f;
-			const int32 Level = FMath::Min(Base + (Scaled - Base > Threshold ? 1 : 0), ThreadLevels);
-			if (Level <= 0)
-			{
-				continue;
-			}
-			const float Value = float(Level) / ThreadLevels;
-			Emit(GX, GY, Level == ThreadLevels ? FMath::Lerp(RedColour, Hot, 0.35f) : RedColour, Value);
-			// The halo either side, near the lens only, on a checker (half the pixels): the beam's soft edge.
-			if (Along < 0.5f && ((GX + GY) & 1) == 0)
-			{
-				const float Side = Value * 0.35f * (1.0f - Along * 2.0f);
-				Emit(bFlat ? GX : GX - 1, bFlat ? GY - 1 : GY, RedColour, Side);
-				Emit(bFlat ? GX : GX + 1, bFlat ? GY + 1 : GY, RedColour, Side);
-			}
-			// Dust in the beam: a few pixels glint and drift along it toward the dot.
-			if (OSProjectorHash(Step - DustStep, 9137) < DustShare)
-			{
-				Emit(GX, GY, Hot, FMath::Min(1.0f, 0.5f + ThreadLevel * ThreadBrightness) * Emerge);
-			}
+			const float Twinkle = FMath::Sin(UE_PI * Phase) * (0.6f + 0.4f * FMath::Sin(float(Now) * (7.0f + 9.0f * Seed)));
+			const float Half = FMath::Lerp(HalfLens, HalfDot, Phase) * 1.6f + 1.2f * Res;
+			OSSoftDisc(Tris, Lens2D + Way * Phase, Half, Half, OSLit(Hot, FMath::Clamp(Base * 1.5f, 0.0f, 1.0f) * FMath::Max(0.0f, Twinkle)), 8);
 		}
 	}
 	if (bDot)
 	{
-		// The dot as a sprite of the grid: a white-hot centre, a red cross, a dithered rim; the outer cross twinkles on
-		// the device's ticks, the drive's flutter scales it all.
-		const int32 CX = FMath::FloorToInt32(float(Dot2D.X / Pixel));
-		const int32 CY = FMath::FloorToInt32(float(Dot2D.Y / Pixel));
-		const float Drive = FMath::Clamp(DotDrive, 0.0f, 1.2f) * (0.92f + 0.08f * OSProjectorHash(DeviceTick, 4421));
-		for (int32 DY = -3; DY <= 3; ++DY)
-		{
-			for (int32 DX = -3; DX <= 3; ++DX)
-			{
-				const int32 Manhattan = FMath::Abs(DX) + FMath::Abs(DY);
-				const int32 Chebyshev = FMath::Max(FMath::Abs(DX), FMath::Abs(DY));
-				float Level = 0.0f;
-				FLinearColor Colour = RedColour;
-				if (Manhattan == 0)
-				{
-					Level = 1.0f;
-					Colour = Hot;
-				}
-				else if (Manhattan == 1)
-				{
-					Level = 0.95f;
-					Colour = FMath::Lerp(RedColour, Hot, 0.25f);
-				}
-				else if (Chebyshev == 1)
-				{
-					Level = 0.55f;
-				}
-				else if (Manhattan == 2)
-				{
-					Level = 0.4f;
-				}
-				else if (Manhattan == 3 && Chebyshev == 2)
-				{
-					Level = ((CX + DX + CY + DY) & 1) == 0 ? 0.22f : 0.0f;
-				}
-				else if (Manhattan == 3 && Chebyshev == 3)
-				{
-					Level = OSProjectorHash(DeviceTick, 811) < 0.6f ? 0.14f : 0.05f;
-				}
-				Emit(CX + DX, CY + DY, Colour, Level * Drive);
-			}
-		}
+		// The dot: a white-hot centre, a red glow, a wide dim halo and a faint flat streak across (the lens it is seen
+		// through); a little smaller far off, all of it on the diode's flutter and the device's ticks.
+		const float Far = FMath::Clamp(FMath::Sqrt(400.0f / FMath::Max(1.0f, float(FVector::Dist(View.GetLocation(), DotAt)))), 0.55f, 1.25f);
+		const float Size = Res * Far;
+		const float Drive = FMath::Clamp(DotDrive, 0.0f, 1.2f) * (0.93f + 0.07f * OSProjectorHash(DeviceTick, 4421));
+		OSSoftDisc(Tris, Dot2D, DotHaloPixels * Size, DotHaloPixels * Size, OSLit(RedColour, 0.22f * Drive), 24);
+		OSSoftDisc(Tris, Dot2D, DotStreakPixels * Size, 1.6f * Size + 0.8f, OSLit(RedColour, 0.3f * Drive), 16);
+		OSSoftDisc(Tris, Dot2D, DotGlowPixels * Size, DotGlowPixels * Size, OSLit(RedColour, 0.85f * Drive), 20);
+		OSSoftDisc(Tris, Dot2D, DotCorePixels * Size + 0.5f, DotCorePixels * Size + 0.5f, OSLit(Hot, Drive), 12);
+	}
+	if (Tris.Num() > 0)
+	{
+		FCanvasTriangleItem Light(Tris, GWhiteTexture);
+		Light.BlendMode = SE_BLEND_Additive;
+		Canvas.DrawItem(Light);
 	}
 }

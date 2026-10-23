@@ -838,7 +838,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapons|Tracer", meta = (ClampMin = "0.1"))
 	float TracerThicknessCm = 3.0f;
 
-	/** Rounds fly from the eye; their tracers start at the muzzle and join that path over this distance. */
+	/** Rounds fly from the muzzle (GetShotLine); from the eye when it was blocked - then their tracers start at the muzzle and join that path over this distance. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Weapons|Tracer", meta = (ClampMin = "1.0"))
 	float TracerConvergeCm = 600.0f;
 
@@ -934,10 +934,19 @@ public:
 	 * The muzzle of the gun in view, world space, as it is drawn this frame (kick
 	 * included): X out of the bore, along the gun's own line. ViewModel's Muzzle
 	 * socket (every gun has one); without a gun in view, the owner's location and
-	 * view. For flash and smoke; rounds fly from the eye, not from here.
+	 * view. Flash, smoke and the rounds (GetShotLine) leave from here.
 	 */
 	UFUNCTION(BlueprintPure, Category = "OS|Weapons")
 	FTransform GetMuzzleTransform() const;
+
+	/**
+	 * Where a round leaves and where it goes (owner 23.10: the laser shows where the round flies, honestly): from
+	 * the muzzle along the bore as the gun is posed now - its sway, kick and seat included. When something stands
+	 * between the eye and the muzzle (the muzzle in a wall) the round leaves from the eye along the bore, so a gun
+	 * never fires through what its barrel is stuck in. Without a gun in view: the eye along ViewDirection.
+	 * One short trace (eye to muzzle) on the Shot channel.
+	 */
+	void GetShotLine(const FVector& Eye, const FVector& ViewDirection, FVector& OutStart, FVector& OutDirection) const;
 
 	/** Rounds in flight now. */
 	int32 GetRoundsInFlight() const { return Rounds.Num(); }
@@ -947,11 +956,12 @@ public:
 	TObjectPtr<UMaterialInterface> DefaultImpactDecal = nullptr;
 
 	/**
-	 * Fire the current gun from Start along Direction (the pawn's view). OutRecoil
-	 * is the kick on the shooter, kg cm/s, for the pawn to apply. False when it
-	 * cannot fire now (nothing unlocked, interval, reload, empty or the slide locked; neither starts a reload: R does).
+	 * Fire the current gun; Eye and Direction are the pawn's view. The rounds leave the muzzle along the bore
+	 * (GetShotLine), the kick goes along the view. OutRecoil is the kick on the shooter, kg cm/s, for the pawn
+	 * to apply. False when it cannot fire now (nothing unlocked, interval, reload, empty or the slide locked;
+	 * neither starts a reload: R does).
 	 */
-	bool Fire(const FVector& Start, const FVector& Direction, FVector& OutRecoil);
+	bool Fire(const FVector& Eye, const FVector& Direction, FVector& OutRecoil);
 
 	/** The gun the hands hold or take next (a switch, when one is in hand). Not the hands: AOSZeroGPawn::PressSlot. */
 	UFUNCTION(BlueprintCallable, Category = "OS|Weapons")

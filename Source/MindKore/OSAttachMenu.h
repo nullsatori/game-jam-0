@@ -87,9 +87,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Menu")
 	float LayoutLatestSeconds = 0.45f;
 
-	/** The cursor's pixels per mouse count at 1080 lines. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Menu")
-	float CursorGain = 1.2f;
+	/**
+	 * The cursor's speed against the view's (owner 23.10: «нужно сохранять основную сенсу»): 1 - a mouse move takes
+	 * the cursor as far on screen as the same move would turn the view (the look sensitivity, at the view's centre).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Menu", meta = (ClampMin = "0.05"))
+	float CursorGain = 1.0f;
 
 	/** After the close the gun fires once its pose is back near rest and not before this (Docs/Vision/Attachments.md §2). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Menu")
@@ -107,8 +110,8 @@ public:
 	void ApplyNow();
 	/** The wheel: a line up (-1) or down (+1), round, at once. */
 	void Step(int32 Direction);
-	/** The mouse while the menu is up: the cursor moves, the view does not (counts, X right, Y up). */
-	void MoveCursor(const FVector2D& Delta);
+	/** The mouse while the menu is up: the cursor moves, the view does not (degrees the view would turn, X right, Y up). */
+	void MoveCursor(const FVector2D& Degrees);
 	/** Dark at once, nothing applied (a slot key, a tool, a grab, a tap of Tab). */
 	void Kill();
 

@@ -235,16 +235,19 @@ void UOSAttachMenu::Step(int32 Direction)
 	Select(Next);
 }
 
-void UOSAttachMenu::MoveCursor(const FVector2D& Delta)
+void UOSAttachMenu::MoveCursor(const FVector2D& Degrees)
 {
 	if (!TakesMouse())
 	{
 		return;
 	}
-	const double Scale = CursorGain * LastClip.Y / 1080.0;
-	Cursor.X = FMath::Clamp(Cursor.X + Delta.X * Scale, 0.0, LastClip.X);
-	Cursor.Y = FMath::Clamp(Cursor.Y - Delta.Y * Scale, 0.0, LastClip.Y);
-	if (!Delta.IsNearlyZero())
+	// The view's pixels per degree at its centre: a turn of the view and a move of the cursor read the same.
+	const float FieldOfView = Camera ? FMath::Clamp(Camera->FieldOfView, 5.0f, 170.0f) : 90.0f;
+	const double PerDegree = LastClip.X * 0.5 / FMath::Tan(FMath::DegreesToRadians(FieldOfView * 0.5f)) * (UE_DOUBLE_PI / 180.0);
+	const double Scale = CursorGain * PerDegree;
+	Cursor.X = FMath::Clamp(Cursor.X + Degrees.X * Scale, 0.0, LastClip.X);
+	Cursor.Y = FMath::Clamp(Cursor.Y - Degrees.Y * Scale, 0.0, LastClip.Y);
+	if (!Degrees.IsNearlyZero())
 	{
 		bCursorMoved = true;
 		bWheelChose = false;

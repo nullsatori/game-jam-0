@@ -262,10 +262,10 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 	const FVector Bore = Muzzle.GetRotation().GetAxisX();
 	if (CVarVolumetricSmoke.GetValueOnGameThread() != 0 && CloudMaterial.LoadSynchronous())
 	{
-		// The round leaves from the eye along the view: through every older cloud in its
-		// way it bores a tunnel and sheds a vortex ring; a shotgun blast out of the muzzle
-		// shoves the older clouds ahead of it on.
-		AddWake(View->GetComponentLocation(), View->GetForwardVector(), Gun.TunnelCm, 90.0f, nullptr);
+		// The round leaves the muzzle along the bore (UOSWeaponsComponent::GetShotLine): through
+		// every older cloud in its way it bores a tunnel and sheds a vortex ring; a shotgun blast
+		// out of the muzzle shoves the older clouds ahead of it on.
+		AddWake(Muzzle.GetLocation(), Bore, Gun.TunnelCm, 90.0f, nullptr);
 		if (Gun.ShoveCm > 0.0f)
 		{
 			for (FCloud& Cloud : Clouds)

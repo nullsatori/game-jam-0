@@ -355,14 +355,16 @@ void AOSZeroGPawn::PawnClientRestart()
 
 void AOSZeroGPawn::Look(const FInputActionValue& Value)
 {
-	// The attachment menu up: the mouse moves its cursor, the view holds still (playtest 23.10: point and click).
-	if (GetHands() == EOSHands::Gun && Guns->AttachMenu && Guns->AttachMenu->TakesMouse())
-	{
-		Guns->AttachMenu->MoveCursor(Value.Get<FVector2D>());
-		return;
-	}
 	// Slower through the scope, as much as it magnifies (UOSScopeComponent::GetLookScale).
 	const FVector2D Axis = Value.Get<FVector2D>() * LookSensitivity * (Guns->Scope ? Guns->Scope->GetLookScale() : 1.0f);
+	// The attachment menu up: the mouse moves its cursor, the view holds still (playtest 23.10: point and click) - as
+	// fast as the view would turn (owner 23.10: the main sensitivity). The controller turns the view by the engine's
+	// legacy input scale, 2.5 degrees a unit (the project sets none of its own).
+	if (GetHands() == EOSHands::Gun && Guns->AttachMenu && Guns->AttachMenu->TakesMouse())
+	{
+		Guns->AttachMenu->MoveCursor(Axis * 2.5f);
+		return;
+	}
 	AddControllerYawInput(Axis.X);
 	AddControllerPitchInput(-Axis.Y);
 }
