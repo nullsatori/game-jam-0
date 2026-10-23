@@ -426,7 +426,7 @@ namespace
 			}
 			R.VacuumBurstCount = FMath::Clamp(FMath::RoundToInt(Vent.Rate * 230.0f), 40, 160);
 			R.VacuumBurstSeconds = 0.15f;
-			R.VacuumSpeedMin = 0.4f;
+			R.VacuumSpeedMin = 0.3f;
 			R.VacuumRadiusMinCm = 4.0f;
 			R.VacuumRadiusMaxCm = 6.0f;
 			R.Mass = 1.0f;

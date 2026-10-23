@@ -620,6 +620,10 @@ int32 UOSGasSubsystem::AddSource(const FOSGasRecipe& Recipe, const FOSGasLook& L
 		Source.Recipe.SpeedMin = Recipe.VacuumSpeedMin;
 		Source.Recipe.RadiusMinCm = Recipe.VacuumRadiusMinCm;
 		Source.Recipe.RadiusMaxCm = Recipe.VacuumRadiusMaxCm;
+		// A cone with a tail, not a cloud (design v11): no vortex ring and its sideways throw (nothing to roll against in a
+		// vacuum), a cone of 7 degrees at most; the speeds' spread lays the fast ahead and the slow by the muzzle.
+		Source.Recipe.RingCm = 0.0f;
+		Source.Recipe.ConeDeg = FMath::Min(Recipe.ConeDeg, 7.0f);
 	}
 	const FOSGasRecipe& Used = Source.Recipe;
 	Source.Look = Look;
@@ -1485,11 +1489,12 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				{
 					P.V *= FMath::Exp(-Dt / AirRestSeconds);
 				}
-				// Its own drag (a hole's pop: 450 cm/s stopped within ~8 cm).
-				if (P.DragSeconds > 0.0f)
-				{
-					P.V *= FMath::Exp(-Dt / P.DragSeconds);
-				}
+			}
+			// Its own drag, in a vacuum too (a hole's pop: 450 cm/s stopped within ~12 cm - without it a vacuum threw the
+			// 16 holes' puffs across the view as blobs).
+			if (P.DragSeconds > 0.0f)
+			{
+				P.V *= FMath::Exp(-Dt / P.DragSeconds);
 			}
 			const float Speed = P.V.Size();
 			P.P += P.V * Dt;
@@ -1575,7 +1580,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			}
 		}
 	}
-	// Vacuum: a parcel grows to at least half the way to its second nearest neighbour (25 cm at most) - the cone stays
+	// Vacuum: a parcel grows to at least 0.7 of the way to its second nearest neighbour (15 cm at most) - the cone stays
 	// one body as the parcels fly apart, its edges not cut away.
 	if (!Cloud.bAir && Parcels.Num() > 2)
 	{
@@ -1600,7 +1605,9 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					}
 				}
 			}
-			Need[I] = FMath::Min(1.2f * FMath::Sqrt(Second), 30.0f);
+			// 0.7 of the way to the second nearest, 15 cm at most: the cone stays one body without swelling into a ball
+			// (1.2 and 30 cm made a round cloud in a second).
+			Need[I] = FMath::Min(0.7f * FMath::Sqrt(Second), 15.0f);
 		});
 		for (int32 I = 0; I < Parcels.Num(); ++I)
 		{
