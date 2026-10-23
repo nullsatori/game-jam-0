@@ -359,6 +359,9 @@ def _volume(m, node, custom, data, scalar, colour, mul):
 # ragged; a negative radius a body) skip their stretch of the ray. Colours are display colours (after the tonemapper:
 # no exposure, no bloom on the gas).
 GAS_POST_HLSL = """
+// v11 stage 3h: every cloud (10), each from two atlases (the current and the one before, the halves of its texture,
+// each in its own box) blended by the step's phase - the gas moves smoothly between its steps; tunnels soft-edged
+// (all 32, only for clouds born before them); the eye fades the gas in from EyeClear/2 to 3/2 x EyeClear, no cut.
 float3 toPix = W - Cam;
 float sceneDist = length(toPix);
 float3 dirP = toPix / max(sceneDist, 1e-3);
@@ -367,113 +370,140 @@ float2 px = Parameters.SvPosition.xy;
 float2 bc = floor(px / B) * B + 0.5 * B;
 float3 dir = normalize(dirP + ddx(dirP) * (bc.x - px.x) + ddy(dirP) * (bc.y - px.y));
 float jit = frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453);
-float2 holes[8];
+// The tunnels this ray crosses: (t of the closest approach, its distance, sin of the angle, radius), the stretch
+// inside the caps, the birth.
+float4 hq[16];
+float2 hc[16];
+float hb[16];
 int nh = 0;
 int nt = (int)(TN + 0.5);
-[loop] for (int k = 0; k < nt && nh < 8; k++)
+[loop] for (int k = 0; k < nt && nh < 16; k++)
 {
     float4 ta = Tun.Load(int3(k, 0, 0));
     float4 tb = Tun.Load(int3(k, 1, 0));
-    float r = abs(ta.w) * (ta.w > 0 ? 1.0 - 0.5 * tb.w : 1.0);
+    float birth = Tun.Load(int3(k, 2, 0)).x;
+    float r = ta.w * (1.0 - 0.5 * tb.w);
     if (r < 0.3) continue;
-    // The ray against the tunnel's cylinder (start ta, end tb), clipped to its ends; a body (negative radius) a sphere.
     float3 u = tb.xyz - ta.xyz;
     float L = length(u);
+    if (L < 1e-3) continue;
+    float3 ax = u / L;
     float3 m = Cam - ta.xyz;
-    float2 iv = float2(1e9, -1e9);
-    if (ta.w < 0 || L < 1e-3)
+    float da = dot(dir, ax), ma = dot(m, ax);
+    float3 dp = dir - ax * da, mp = m - ax * ma;
+    float A = dot(dp, dp);
+    float tc = A > 1e-6 ? -dot(dp, mp) / A : 0.0;
+    float dmin = length(mp + dp * tc);
+    if (dmin >= r) continue;
+    float2 caps = float2(-1e9, 1e9);
+    if (abs(da) > 1e-6)
     {
-        float bq = dot(m, dir);
-        float cq = dot(m, m) - r * r;
-        float disc = bq * bq - cq;
-        if (disc > 0) { float sq = sqrt(disc); iv = float2(-bq - sq, -bq + sq); }
+        float c0 = (0.0 - ma) / da, c1 = (L - ma) / da;
+        caps = float2(min(c0, c1), max(c0, c1));
     }
-    else
-    {
-        float3 ax = u / L;
-        float da = dot(dir, ax), ma = dot(m, ax);
-        float3 dp = dir - ax * da, mp = m - ax * ma;
-        float A = dot(dp, dp), Bq = dot(dp, mp), Cq = dot(mp, mp) - r * r;
-        float2 side = float2(-1e9, 1e9);
-        if (A > 1e-6)
-        {
-            float disc = Bq * Bq - A * Cq;
-            side = disc > 0 ? float2((-Bq - sqrt(disc)) / A, (-Bq + sqrt(disc)) / A) : float2(1e9, -1e9);
-        }
-        else if (Cq > 0)
-        {
-            side = float2(1e9, -1e9);
-        }
-        float2 caps = float2(-1e9, 1e9);
-        if (abs(da) > 1e-6)
-        {
-            float c0 = (0.0 - ma) / da, c1 = (L - ma) / da;
-            caps = float2(min(c0, c1), max(c0, c1));
-        }
-        else if (ma < 0 || ma > L)
-        {
-            caps = float2(1e9, -1e9);
-        }
-        iv = float2(max(side.x, caps.x), min(side.y, caps.y));
-    }
-    if (iv.y > iv.x && iv.y > 0)
-    {
-        holes[nh] = iv;
-        nh++;
-    }
+    else if (ma < 0 || ma > L) continue;
+    hq[nh] = float4(tc, dmin, sqrt(A), r);
+    hc[nh] = caps;
+    hb[nh] = birth;
+    nh++;
 }
 float T = 1.0;
 float3 acc = 0;
 int nc = (int)(CC + 0.5);
+float3 inv = 1.0 / dir;
 [loop] for (int c = 0; c < nc; c++)
 {
     float4 d0 = Data.Load(int3(c, 0, 0));
     float4 d1 = Data.Load(int3(c, 1, 0));
+    float4 d2 = Data.Load(int3(c, 2, 0));
+    float4 d3 = Data.Load(int3(c, 3, 0));
+    float4 d4 = Data.Load(int3(c, 4, 0));
+    float4 d7 = Data.Load(int3(c, 7, 0));
+    float cellP = Data.Load(int3(c, 8, 0)).x;
     float3 C = d0.xyz;
     float H = d0.w;
     float n = d1.x, cell = d1.y, gain = d1.z, ext = d1.w;
+    float phase = d2.w;
+    float cloudBirth = d3.w;
+    float curHalf = d4.w;
+    float3 CP = d7.xyz;
+    float HP = d7.w;
     if (gain <= 0.0 || H <= 0.0) continue;
-    float3 key = Data.Load(int3(c, 2, 0)).rgb;
-    float3 base = Data.Load(int3(c, 3, 0)).rgb;
-    float3 warm = Data.Load(int3(c, 4, 0)).rgb;
+    float3 key = d2.rgb;
+    float3 base = d3.rgb;
+    float3 warm = d4.rgb;
     float3 top = Data.Load(int3(c, 5, 0)).rgb;
     float3 bot = Data.Load(int3(c, 6, 0)).rgb;
+    // Both boxes: the march over their union.
     float3 o = Cam - C;
-    float3 inv = 1.0 / dir;
     float3 t0 = (-H - o) * inv, t1 = (H - o) * inv;
     float3 tn = min(t0, t1), tf = max(t0, t1);
-    float a = max(max(max(tn.x, tn.y), tn.z), EyeClear);
-    float b = min(min(min(tf.x, tf.y), tf.z), sceneDist);
+    float aC = max(max(tn.x, tn.y), tn.z), bC = min(min(tf.x, tf.y), tf.z);
+    float3 oP = Cam - CP;
+    float3 p0 = (-HP - oP) * inv, p1 = (HP - oP) * inv;
+    float3 pn = min(p0, p1), pf = max(p0, p1);
+    float aP = max(max(pn.x, pn.y), pn.z), bP = min(min(pf.x, pf.y), pf.z);
+    float a = max(min(bC > aC ? aC : 1e9, bP > aP ? aP : 1e9), EyeClear * 0.5);
+    float b = min(max(bC > aC ? bC : -1e9, bP > aP ? bP : -1e9), sceneDist);
     if (b <= a) continue;
-    float stepCm = max(cell, 1.5);
-    int ns = min((int)((b - a) / stepCm) + 1, 128);
-    float2 atlas = float2(8.0 * n, ceil(n / 8.0) * n);
+    float stepCm = max(min(cell, cellP), 1.5);
+    int ns = min((int)((b - a) / stepCm) + 1, 160);
+    float rows = ceil(n / 8.0) * n;
+    float2 atlas = float2(8.0 * n, 2.0 * rows);
+    float vC0 = curHalf * rows, vP0 = (1.0 - curHalf) * rows;
     [loop] for (int s = 0; s < ns; s++)
     {
         float t = a + (s + jit) * stepCm;
         if (t > b) break;
-        bool hole = false;
-        for (int q = 0; q < nh; q++) { hole = hole || (t > holes[q].x && t < holes[q].y); }
-        if (hole) continue;
-        float3 p = Cam + dir * t - C;
-        float3 g = clamp((p + H) / cell - 0.5, 0.0, n - 1.001);
-        float z0 = floor(g.z);
-        float z1 = min(z0 + 1.0, n - 1.0);
-        float2 xy = clamp(g.xy + 0.5, 0.5, n - 0.5);
-        float2 uv0 = (float2(fmod(z0, 8.0) * n, floor(z0 / 8.0) * n) + xy) / atlas;
-        float2 uv1 = (float2(fmod(z1, 8.0) * n, floor(z1 / 8.0) * n) + xy) / atlas;
-        float4 s0, s1;
-        if (c == 0) { s0 = G0.SampleLevel(G0Sampler, uv0, 0); s1 = G0.SampleLevel(G0Sampler, uv1, 0); }
-        else if (c == 1) { s0 = G1.SampleLevel(G1Sampler, uv0, 0); s1 = G1.SampleLevel(G1Sampler, uv1, 0); }
-        else if (c == 2) { s0 = G2.SampleLevel(G2Sampler, uv0, 0); s1 = G2.SampleLevel(G2Sampler, uv1, 0); }
-        else if (c == 3) { s0 = G3.SampleLevel(G3Sampler, uv0, 0); s1 = G3.SampleLevel(G3Sampler, uv1, 0); }
-        else if (c == 4) { s0 = G4.SampleLevel(G4Sampler, uv0, 0); s1 = G4.SampleLevel(G4Sampler, uv1, 0); }
-        else { s0 = G5.SampleLevel(G5Sampler, uv0, 0); s1 = G5.SampleLevel(G5Sampler, uv1, 0); }
-        float4 v = lerp(s0, s1, g.z - z0);
-        float dens = v.r * gain;
+        // Soft tunnels: the density scaled down within 0.6 r of a tunnel's axis, 0 on it.
+        float keep = 1.0;
+        for (int q = 0; q < nh; q++)
+        {
+            if (cloudBirth < hb[q] && t > hc[q].x && t < hc[q].y)
+            {
+                float dd = sqrt(hq[q].y * hq[q].y + (t - hq[q].x) * (t - hq[q].x) * hq[q].z * hq[q].z);
+                keep *= smoothstep(0.6 * hq[q].w, hq[q].w, dd);
+            }
+        }
+        if (keep < 0.01) continue;
+        float3 pw = Cam + dir * t;
+        float4 vC = 0, vP = 0;
+        float3 p = pw - C;
+        bool inC = all(abs(p) < H);
+        float3 pp = pw - CP;
+        bool inP = all(abs(pp) < HP);
+        float2 uA0 = 0, uA1 = 0, uB0 = 0, uB1 = 0;
+        float fA = 0, fB = 0;
+        if (inC)
+        {
+            float3 g = clamp((p + H) / cell - 0.5, 0.0, n - 1.001);
+            float z0 = floor(g.z);
+            float z1 = min(z0 + 1.0, n - 1.0);
+            float2 xy = clamp(g.xy + 0.5, 0.5, n - 0.5);
+            uA0 = (float2(fmod(z0, 8.0) * n, floor(z0 / 8.0) * n + vC0) + xy) / atlas;
+            uA1 = (float2(fmod(z1, 8.0) * n, floor(z1 / 8.0) * n + vC0) + xy) / atlas;
+            fA = g.z - z0;
+        }
+        if (inP)
+        {
+            float3 g = clamp((pp + HP) / cellP - 0.5, 0.0, n - 1.001);
+            float z0 = floor(g.z);
+            float z1 = min(z0 + 1.0, n - 1.0);
+            float2 xy = clamp(g.xy + 0.5, 0.5, n - 0.5);
+            uB0 = (float2(fmod(z0, 8.0) * n, floor(z0 / 8.0) * n + vP0) + xy) / atlas;
+            uB1 = (float2(fmod(z1, 8.0) * n, floor(z1 / 8.0) * n + vP0) + xy) / atlas;
+            fB = g.z - z0;
+        }
+        float4 sA0 = 0, sA1 = 0, sB0 = 0, sB1 = 0;
+        GAS_SAMPLE
+        if (inC) vC = lerp(sA0, sA1, fA);
+        if (inP) vP = lerp(sB0, sB1, fB);
+        float4 v = lerp(vP, vC, phase);
+        float near = smoothstep(EyeClear * 0.5, EyeClear * 1.5, t);
+        float dens = v.r * gain * keep * near;
         if (dens < 0.01) continue;
         float aStep = 1.0 - exp(-ext * dens * stepCm);
-        float3 amb = lerp(bot, top, saturate(0.5 + 0.5 * p.z / H));
+        float3 amb = lerp(bot, top, saturate(0.5 + 0.5 * (pw.z - C.z) / H));
         float3 col = base * 1.5 * (amb * (0.35 + 0.65 * v.a) + key * v.b) + warm * v.g * v.g;
         acc += T * aStep * col;
         T *= 1.0 - aStep;
@@ -481,12 +511,16 @@ int nc = (int)(CC + 0.5);
     }
 }
 float alpha = 1.0 - T;
-float hb = frac(sin(dot(floor(px / B), float2(41.3, 289.1))) * 43758.5453);
+float hn = frac(sin(dot(floor(px / B), float2(41.3, 289.1))) * 43758.5453);
 // The faint tail off (no snow of lone blocks), the threshold's spread halved: stable bands, few stray blocks.
-float aq = alpha < 0.12 ? 0.0 : floor(alpha * 4.0 + 0.25 + 0.5 * hb) / 4.0;
+float aq = alpha < 0.12 ? 0.0 : floor(alpha * 4.0 + 0.25 + 0.5 * hn) / 4.0;
+if (DebugAlpha > 0.5) return float4(alpha, alpha, alpha, 1);
 float3 smoke = alpha > 1e-3 ? acc / alpha : float3(0, 0, 0);
 return float4(lerp(Col.rgb, smoke, aq), 1);
 """
+_SAMPLE_ONE = "if (c == %d) { if (inC) { sA0 = G%d.SampleLevel(G%dSampler, uA0, 0); sA1 = G%d.SampleLevel(G%dSampler, uA1, 0); } if (inP) { sB0 = G%d.SampleLevel(G%dSampler, uB0, 0); sB1 = G%d.SampleLevel(G%dSampler, uB1, 0); } }"
+GAS_POST_HLSL = GAS_POST_HLSL.replace("GAS_SAMPLE", "\n        ".join(
+    ("" if i == 0 else "else ") + _SAMPLE_ONE % ((i,) * 9) for i in range(10)))
 
 
 def _gas_post():
@@ -522,9 +556,13 @@ def _gas_post():
         "TN": node(unreal.MaterialExpressionScalarParameter, parameter_name="TunnelCount", default_value=0.0),
         "BlockPx": node(unreal.MaterialExpressionScalarParameter, parameter_name="BlockPx", default_value=4.0),
         "EyeClear": node(unreal.MaterialExpressionScalarParameter, parameter_name="EyeClear", default_value=20.0),
+        "DebugAlpha": node(unreal.MaterialExpressionScalarParameter, parameter_name="DebugAlpha", default_value=0.0),
     }
-    for i in range(6):
-        inputs["G%d" % i] = tex("Grid%d" % i)
+    # Ten grids (every cloud is drawn), on the shared clamp sampler (ten own samplers would pass the limit of 16).
+    for i in range(10):
+        g = tex("Grid%d" % i)
+        g.set_editor_property("sampler_source", unreal.SamplerSourceMode.SSM_CLAMP_WORLD_GROUP_SETTINGS)
+        inputs["G%d" % i] = g
     n = node(unreal.MaterialExpressionCustom, code=GAS_POST_HLSL, description="GasPost",
              output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT4, inputs=[_input(k) for k in inputs])
     for k, src in inputs.items():

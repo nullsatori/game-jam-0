@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "OSSmokeSim.h"
@@ -127,6 +127,10 @@ struct FOSGasRecipe
 	/** Its own air drag's time constant in air, s (0: none) - a hole's pop stops within a few cm. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.0"))
 	float DragSeconds = 0.0f;
+
+	/** Seen at full weight from its first step (the muzzle's blast); otherwise a parcel fades in over 0.12 s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
+	bool bInstant = false;
 };
 
 /** One parcel of gas, box... cloud-origin frame (cm, world axes). */
@@ -147,6 +151,7 @@ struct FOSGasParcel
 	float Cling = 0.0f;
 	float MaxRadiusCm = 14.0f;
 	float DragSeconds = 0.0f;
+	bool bInstant = false;
 	uint32 Seed = 0;
 };
 
@@ -212,12 +217,13 @@ public:
 	UPROPERTY()
 	TSoftObjectPtr<UMaterialInterface> PostMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/FX/M_OS_GasPost.M_OS_GasPost")));
 
-	/** Clouds the post-process draws at once (the nearest to the eye). */
-	static constexpr int32 MaxDrawn = 6;
-
 	static constexpr int32 MaxClouds = 10;
-	/** A cloud's parcels: the Рысь's shot is 160 from the muzzle and 64 from its 16 shroud holes, the seep on top. */
-	static constexpr int32 MaxParcels = 260;
+	/** Clouds the post-process draws: all of them (a set picked by distance swapped clouds in and out whole). */
+	static constexpr int32 MaxDrawn = MaxClouds;
+	/** A cloud's parcels: the Рысь's shot is 160 from the muzzle, 80 from its 16 shroud holes, its thread and seep. */
+	static constexpr int32 MaxParcels = 300;
+	/** GasData's rows a cloud (Scripts/os_muzzle_fx.py, GAS_POST_HLSL). */
+	static constexpr int32 DataRows = 9;
 	/** The velocity grid (air): 20 cells of 6 cm; the render grid: 48 of 2 cm (3 cm in a vacuum), same centre. */
 	static constexpr int32 VelocityCells = 20;
 	static constexpr float VelocityCellCm = 6.0f;
@@ -230,6 +236,8 @@ private:
 		enum class EKind : uint8 { Carve, Burst } Kind;
 		FVector A, B;
 		float RadiusCm, SpeedCm;
+		/** Applied over this many steps (0.1 s; set at its first step): the mass goes in a ramp, the push over 3. */
+		int32 StepsTotal = 0, StepsLeft = 0;
 	};
 
 	struct FCloud
@@ -242,6 +250,22 @@ private:
 		FVector3f PackedCentre = FVector3f::ZeroVector;
 		float RenderCellCm = 2.0f;
 		float PackedCellCm = 2.0f;
+		/**
+		 * The two atlases drawn, blended by the phase between their times (the gas's own clock, SimTime): the current
+		 * (DrawnCentre, RenderCellCm, CurTime) and the one before (PrevCentre, PrevCellCm, PrevTime). Each half of the
+		 * texture holds one; CurHalf is the current's. ShowTime is the moment shown, a step behind, never backward.
+		 */
+		FVector3f PrevCentre = FVector3f::ZeroVector;
+		float PrevCellCm = 2.0f;
+		float CurTime = 0.0f, PrevTime = 0.0f, ShowTime = 0.0f, PackedTime = 0.0f, SimTime = 0.0f, StepDt = 1.0f / 60.0f;
+		int32 CurHalf = 0;
+		/** The atlas being packed is a burst's stamp: shown at once (both halves). */
+		bool bStampAtlas = false;
+		/** The box: when the gas began to fill less than 60% of it (SimTime, negative: it fills), the last re-box. */
+		float LooseSince = -1.0f, LastRebox = -1.0f;
+		/** This cloud's life (a slot is reused: the serial tells them apart) and its birth (world s: tunnels older cut it). */
+		uint32 Serial = 0;
+		float BirthWorld = 0.0f;
 		TArray<FOSGasParcel> Parcels;
 		/** Parcels let out while a step was in flight: joined at the next launch. */
 		TArray<FOSGasParcel> Incoming;
@@ -277,6 +301,9 @@ private:
 		/** An atlas has been uploaded (the post-process may draw it). */
 		bool bDrawable = false;
 		int32 TunnelCount = 0;
+		/** Facts for the log at its end: re-boxes (the largest move, the cells seen), carves and blows it took. */
+		int32 Reboxes = 0, Carves = 0, Blows = 0;
+		float MaxReboxCm = 0.0f, MinCellCm = 1e9f, MaxCellCm = 0.0f;
 		mutable UE::Tasks::FTask Pending;
 		bool IsBusy() const { return Pending.IsValid() && !Pending.IsCompleted(); }
 		bool IsAlive() const { return Age >= 0.0f; }
@@ -296,6 +323,7 @@ private:
 		float Rate = 0.0f;
 		float Carry = 0.0f;
 		int32 Cloud = INDEX_NONE;
+		uint32 CloudSerial = 0;
 	};
 
 	struct FTunnel
@@ -304,6 +332,8 @@ private:
 		float RadiusCm = 3.0f;
 		float Age = 0.0f;
 		bool bVacuum = false;
+		/** World time it was cut (it cuts only clouds born before it). */
+		float Birth = 0.0f;
 	};
 
 	struct FAirFlow
@@ -317,6 +347,10 @@ private:
 	TArray<FTunnel> Tunnels;
 	TArray<FAirFlow> AirFlows;
 	int32 NextSourceId = 1;
+	uint32 NextSerial = 1;
+	/** The last shot's cloud (a seep or a case joins only it) and the barrel's own small cloud (its thread), by serial. */
+	int32 ShotCloud = INDEX_NONE, SmallCloud = INDEX_NONE;
+	uint32 ShotSerial = 0, SmallSerial = 0;
 	TMap<TObjectKey<UPrimitiveComponent>, FVector> LastMoverAt;
 	TArray<TWeakObjectPtr<ULightComponent>> KeyLights;
 	float KeyLightsAge = 1e6f;
@@ -330,6 +364,11 @@ private:
 	UPROPERTY()
 	TObjectPtr<UTexture2D> TunnelTexture = nullptr;
 	TArray<TObjectPtr<UTexture2D>> BoundGrids;
+	/** The drawn set (slots) last frame and how often it changed (the log, os.Gas.WalkProbe). */
+	TArray<int32> LastDrawnSet;
+public:
+	int32 DrawnSetChanges = 0;
+private:
 	/** The post-process's parameters for this frame: the nearest clouds, the tunnels and bodies, the block size. */
 	void UpdatePost();
 	/** The room's light from above and below for the gas (display colours): by the map, the vacuum's starry dark. */
@@ -337,8 +376,10 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<UObject>> Keep;
 
-	/** A cloud of Look near Where (world) with room, or a new one. */
-	/** A cloud of Look near Where no older than JoinAge (negative: always a new one), or a new one. */
+	/**
+	 * A cloud of Look near Where no older than JoinAge (negative: always a new one), or a new one in a free slot; with
+	 * none free, the youngest of the look within 1.5 m, else INDEX_NONE (a slot is never taken from a living cloud).
+	 */
 	int32 CloudFor(const FOSGasLook& Look, const FVector& Where, float JoinAge = 1e9f);
 	void Emit(FCloud& Cloud, const FOSGasRecipe& Recipe, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count);
 	void TickSources(float DeltaTime);
@@ -350,7 +391,7 @@ private:
 	void WaitAll() const;
 
 	/** The step off the game thread: commands, the velocity grid (air), the parcels' motion, the splat and the atlas. */
-	static void StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArray<FTunnel>& TunnelsNow);
+	static void StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArray<FAirFlow>& FlowsNow);
 	static void Splat(FCloud& Cloud);
 
 	/** os.Fx.SmokeCost. */

@@ -142,9 +142,9 @@ FOSWeapon OSMakeRmb93(const FOSWeapon& PumpShotgun)
 	// оружие») - and seeps while the barrel is hot.
 	FOSPortSmoke& Smoke = Gun.PortSmoke;
 	Smoke.BoreZCm = 0.75f;
-	// Seeps thin and not for long (v6, owner: «слишком долго льется из ствола»): 12 a second per unit of heat, cooling
+	// Seeps thin and not for long (v6, owner: «слишком долго льется из ствола»): 20 a second per unit of heat, cooling
 	// with 2 s (after three shots ~5 s of a thinning seep, not ~12 s of a stream).
-	Smoke.SeepPerSecond = 12.0f;
+	Smoke.SeepPerSecond = 20.0f;
 	Smoke.HeatSeconds = 2.0f;
 	Smoke.StartCm = 1.7f;
 	Smoke.EndCm = 10.0f;
