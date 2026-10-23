@@ -116,6 +116,38 @@ bool AOSWeaponPickup::Give(AActor* Hand)
 	return true;
 }
 
+AOSAttachmentPickup::AOSAttachmentPickup()
+{
+	ActionLabel = LOCTEXT("TakeAttachment", "Взять обвес");
+}
+
+FText AOSAttachmentPickup::RefusalFor(const AActor* Hand) const
+{
+	const UOSWeaponsComponent* Guns = Hand->FindComponentByClass<UOSWeaponsComponent>();
+	if (!Guns)
+	{
+		return LOCTEXT("NeedSuitHandsAttach", "нечем взять");
+	}
+	if (!Guns->FindAttachment(AttachmentId))
+	{
+		return LOCTEXT("UnknownAttachment", "не наш обвес");
+	}
+	return Guns->HasAttachment(AttachmentId) ? LOCTEXT("HaveAttachment", "уже есть") : FText::GetEmpty();
+}
+
+bool AOSAttachmentPickup::Give(AActor* Hand)
+{
+	UOSWeaponsComponent* Guns = Hand->FindComponentByClass<UOSWeaponsComponent>();
+	const FOSAttachment* Attachment = Guns ? Guns->FindAttachment(AttachmentId) : nullptr;
+	if (!Attachment || Guns->HasAttachment(AttachmentId))
+	{
+		return false;
+	}
+	// First the word, then the give: «— в сумке, Tab» (GiveAttachment, when no place in hand is free) lands last.
+	OSToast(this, FText::Format(LOCTEXT("AttachmentTaken", "Получено: {0}"), Attachment->Name));
+	return Guns->GiveAttachment(AttachmentId);
+}
+
 AOSToolPickup::AOSToolPickup()
 {
 	ActionLabel = LOCTEXT("TakeTool", "Взять инструмент");

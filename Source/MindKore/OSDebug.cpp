@@ -1246,6 +1246,28 @@ FString UOSDebugSubsystem::ExportJson() const
 	Root->SetObjectField(TEXT("system"), SystemJson);
 	Root->SetObjectField(TEXT("world"), WorldJson);
 	Root->SetObjectField(TEXT("params"), Params);
+	// The gear (Docs/DebugMenu.md, «Снаряжение»): only once a command changed it this session - a preset made for
+	// the sliders never takes the guns away.
+	const APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
+	const UOSWeaponsComponent* Guns = Controller && Controller->GetPawn() ? Controller->GetPawn()->FindComponentByClass<UOSWeaponsComponent>() : nullptr;
+	if (bGearChanged && Guns)
+	{
+		TArray<FString> GunIds, AttachmentIds;
+		OSReadGear(*Guns, GunIds, AttachmentIds);
+		const TSharedRef<FJsonObject> Gear = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> GunValues, AttachmentValues;
+		for (const FString& Id : GunIds)
+		{
+			GunValues.Add(MakeShared<FJsonValueString>(Id));
+		}
+		for (const FString& Id : AttachmentIds)
+		{
+			AttachmentValues.Add(MakeShared<FJsonValueString>(Id));
+		}
+		Gear->SetArrayField(TEXT("guns"), GunValues);
+		Gear->SetArrayField(TEXT("attachments"), AttachmentValues);
+		Root->SetObjectField(TEXT("gear"), Gear);
+	}
 	return OSDebugToJson(Root);
 }
 
@@ -1348,6 +1370,27 @@ FOSDebugImport UOSDebugSubsystem::ImportJson(const FString& Json, bool bReplace)
 		GetValue(Pair.Key, After);
 		Step.Add({ Pair.Key, Before, Values.Contains(Pair.Key) ? Values[Pair.Key] : After });
 		++Result.Applied;
+	}
+	// The gear: guns by Id, attachments "Id" (pouch) or "Id@GunId" (on that gun). Not an undo step.
+	const TSharedPtr<FJsonObject>* Gear = nullptr;
+	if (Root->TryGetObjectField(TEXT("gear"), Gear))
+	{
+		const UWorld* World = GetGameWorld();
+		const APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
+		UOSWeaponsComponent* Guns = Controller && Controller->GetPawn() ? Controller->GetPawn()->FindComponentByClass<UOSWeaponsComponent>() : nullptr;
+		if (Guns)
+		{
+			TArray<FString> GunIds, AttachmentIds;
+			(*Gear)->TryGetStringArrayField(TEXT("guns"), GunIds);
+			(*Gear)->TryGetStringArrayField(TEXT("attachments"), AttachmentIds);
+			OSApplyGear(*Guns, GunIds, AttachmentIds);
+			bGearChanged = true;
+			++Result.Applied;
+		}
+		else
+		{
+			Result.Skipped.Add(TEXT("gear: у игрока нет оружия"));
+		}
 	}
 	FString Name;
 	if (Root->TryGetStringField(TEXT("name"), Name))

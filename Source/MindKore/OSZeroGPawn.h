@@ -17,6 +17,7 @@ class UInputMappingContext;
 class UOSHullToolsComponent;
 class UOSOxygenComponent;
 class UOSWeldProjectorComponent;
+class UOSSuitProjectorComponent;
 class UOSWeaponsComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
@@ -115,6 +116,10 @@ enum class EOSHandAction : uint8
 	ToolSecondary,
 	/** The wheel with the strap: reel the last line. */
 	Reel,
+	/** LMB with the attachment menu up: apply, as letting Tab go (Docs/Attachments.md). */
+	MenuApply,
+	/** The wheel with the attachment menu up: the next row. */
+	MenuSelect,
 };
 
 /** What a movement mode allows (AOSZeroGPawn::Allows). */
@@ -229,6 +234,10 @@ public:
 	/** The suit's projector under the lens: lays the weld frame of a breach in view onto the hull as red laser light. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "OS")
 	TObjectPtr<UOSWeldProjectorComponent> WeldProjector = nullptr;
+
+	/** The same projector as a device of the suit (its own lasers in its own frame): the attachment menu draws with it (Docs/Attachments.md). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "OS")
+	TObjectPtr<UOSSuitProjectorComponent> SuitProjector = nullptr;
 
 	// --- view ---------------------------------------------------------------
 
@@ -452,6 +461,16 @@ public:
 	/** Mouse look scale before the scope's own (owner 19.10: 0.7 of the engine's raw rate). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|ZeroG|Input", meta = (ClampMin = "0.0"))
 	float LookSensitivity = 0.7f;
+
+	/** Tab let go sooner than this (real seconds) is a tap - the attachment's switch; held longer, the menu (Docs/Attachments.md). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|ZeroG|Input", meta = (ClampMin = "0.05"))
+	float MenuTapSeconds = 0.25f;
+
+	/** Tab down / up (the input bindings and the probes). */
+	void MenuPressed();
+	void MenuReleased();
+	/** Tab held: opens the attachment menu once the hold passes MenuTapSeconds (from Tick). */
+	void UpdateMenuHold();
 
 	// --- thrusters and stabiliser ------------------------------------------------
 
@@ -788,6 +807,14 @@ private:
 	void Thrust(const FInputActionValue& Value);
 	void Lift(const FInputActionValue& Value);
 	void PushPressed();
+	/**
+	 * How long Tab has been down, s of undilated frame time (FApp::GetDeltaTime: the same at any frame rate and in
+	 * bullet time); < 0: up. A tap is shorter than MenuTapSeconds; the menu opens only once Tab is held past it
+	 * (owner 23.10: the laser's switch must not flash the menu).
+	 */
+	float MenuHeldSeconds = -1.0f;
+	/** Tab is down and the menu not asked for yet (Tick asks once MenuHeldSeconds passes MenuTapSeconds). */
+	bool bMenuPending = false;
 	/** Stored: Gun, Tool or Held (GetHands reads a Gun with none unlocked as Empty). */
 	EOSHands Hands = EOSHands::Gun;
 	/** What the hands go back to when a held body is let go: Gun or Tool. */

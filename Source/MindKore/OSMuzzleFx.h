@@ -335,16 +335,19 @@ public:
 	/**
 	 * A shot of gun Weapon from Muzzle (world; X along the bore, Y out of the gun's side),
 	 * the owner still at its velocity before the kick. The flash rides GunMesh (the gun in
-	 * view) through its kick; null: it stays put in the camera's space.
+	 * view) through its kick; null: it stays put in the camera's space. FlashScale and SmokeScale: a muzzle
+	 * device's share of the flash (lobes' reach, size and light, sparks) and of the card smoke (puffs and their
+	 * opacity) - the suppressor's (FOSAttachment, Docs/Attachments.md); the volumetric cloud is not scaled yet.
 	 */
-	void Shot(int32 Weapon, const FTransform& Muzzle, const USceneComponent* GunMesh);
+	void Shot(int32 Weapon, const FTransform& Muzzle, const USceneComponent* GunMesh, float FlashScale = 1.0f, float SmokeScale = 1.0f);
 
 	/**
 	 * The gas of a shot out of Def's vents (FOSGasVent, Docs/RecoilWeapons-Fx.md «Газовые отверстия»): jets into the
 	 * shot's grid, streams of wisps over their Seconds. Muzzle is the muzzle's world frame at the shot, Action the part
-	 * the Action-space vents ride. UOSWeaponsComponent::Fire calls this right after Shot.
+	 * the Action-space vents ride. JetScale scales the Muzzle-space vents' Rate and SpeedCm (a suppressor's
+	 * FOSAttachment::MuzzleJetScale). UOSWeaponsComponent::Fire calls this right after Shot.
 	 */
-	void Vents(const FOSWeapon& Def, const FTransform& Muzzle, const USceneComponent* Action);
+	void Vents(const FOSWeapon& Def, const FTransform& Muzzle, const USceneComponent* Action, float JetScale = 1.0f);
 
 	/**
 	 * Count seeping wisps out of Def's bSeep vents (picked at random), born up to AgeSpread s ago (a seep spread over

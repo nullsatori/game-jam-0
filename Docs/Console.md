@@ -1,0 +1,239 @@
+# Консольные команды
+
+Каталог собран скриптом `Scripts/os_console_catalog.py` из регистраций в
+`Source/` (`FAutoConsoleCommand*`, `TAutoConsoleVariable`,
+`IConsoleManager::Get().RegisterConsole*` и обёрток над ними). Руками не
+править: изменил команду или её строку помощи — перезапусти скрипт;
+`python Scripts/os_console_catalog.py --check` падает, если каталог отстал
+от кода ([Probes](Probes.md#каталог-команд)). Аргументы — начало строки
+помощи после имени (до двоеточия), если она так начинается. «не в Shipping»
+— регистрация под `#if !UE_BUILD_SHIPPING`.
+
+Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
+
+Всего: 100 команд, 8 переменных.
+
+## `os.Attach`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Attach.Cost` | — | os.Attach.Cost: what the laser (its tick: a trace, the dot and the thread) and the clear magazine's rebuilds cost since the last call, then start over. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Attach.Give` | `<Id\|all> [bag]` | os.Attach.Give <Id\|all> [bag]: into the pouch; onto the gun in hand when a free place fits (bag: the pouch only). *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Attach.List` | — | os.Attach.List: the guns, their places, what is on them, the pouch. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Attach.Mount` | `<Id> [slot\|gun Id]` | os.Attach.Mount <Id> [slot\|gun Id]: onto the gun at once, no motion (default the gun in hand); given first if not carried. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Attach.Probe` | — | os.Attach.Probe: the attachment menu, seating, the laser, the torch, the suppressor, the RMB-93 swap and the 20-round magazine, step by step (Lvl_OS_TestRoom, -nullrhi); PASS/FAIL per line. *не в Shipping* | `Source/MindKore/OSAttachProbe.cpp` |
+| `os.Attach.Stills` | `[X Y Z Pitch Yaw Roll]` | os.Attach.Stills [X Y Z Pitch Yaw Roll]: HighResShot frames of the attachment menu, the laser rolling on, its dot on a wall, the gun's side with the suppressor and the clear magazine at 20 / 7 / 0 rounds; os.Attach.Cost over 3 s of the laser (Lvl_OS_TestRoom, real RHI). Six numbers try a pistol menu pose (OffsetCm, Turn) for the run. *не в Shipping* | `Source/MindKore/OSAttachProbe.cpp` |
+| `os.Attach.Take` | `<Id\|all>` | os.Attach.Take <Id\|all>: off the gun at once and out of the pouch. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Attach.Unmount` | `<Id\|all>` | os.Attach.Unmount <Id\|all>: off its gun at once, into the pouch. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+
+## `os.Audio`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Audio.LimiterProbe` | `[Gain]` | os.Audio.LimiterProbe [Gain]: log the master submix's effect chain and record the master output under a pistol burst and three SV-98 shots. | `Source/MindKore/OSAudioProbe.cpp` |
+
+## `os.Debug`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Debug.Export` | `[name]` | os.Debug.Export [name]: the config to Saved/OSDebug/Presets/<name>.json and the clipboard. | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.FixedStep` | `<Hz\|0>` | os.Debug.FixedStep <Hz\|0>: fixed simulation step (FApp), 0 = off. | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Fps` | `<N\|0>` | os.Debug.Fps <N\|0>: frame-rate cap (UGameUserSettings + t.MaxFPS), 0 = none. | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Get` | `<key>` | os.Debug.Get <key>: a parameter's value, and its original if changed. | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Gravity` | `<scale>` | os.Debug.Gravity <scale>: every zone's gravity times this (0 = zero-G everywhere). | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Group` | — | Debug menu: open the groups of the current tab whose name has this text; 'all' opens them all, 'none' folds every group (remembered in Saved/OSDebug/OpenGroups.txt). | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Hitch` | `<ms> <s>` | os.Debug.Hitch <ms> <s>: a frame of <ms> every <s> seconds of real time (0 ms = off). | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Import` | `<file\|clipboard>` | os.Debug.Import <file\|clipboard>: replace the config; unknown keys are skipped and listed. | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Menu` | — | Debug menu (F6): toggle; or open on a tab (Главное, Система, Мир, Игрок, Оружие, Враги, Пресеты; Закреплено = Главное), 'pin' (Shift+F6), 'close'. | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Pause` | `[0\|1\|step]` | os.Debug.Pause [0\|1\|step]: pause, resume, or one frame while paused. | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Preset` | `<name>` | os.Debug.Preset <name>: apply a preset (asset or Saved JSON) instead of the current config. | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Probe` | — | Debug menu checks (headless, without -UseFixedTimeStep): set/get/reset/undo, export-reset-import, skipped keys, default pins, class defaults untouched, the gravity multiplier on the pawn and a body (Lvl_OS_Ship), the fixed step, the FPS cap. Ends with 'Debug probe: done'. | `Source/MindKore/OSDebugProbe.cpp` |
+| `os.Debug.Redo` | — | Debug menu: redo (Ctrl+Y). | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Reset` | `[key\|owner\|all]` | os.Debug.Reset [key\|owner\|all]: back to the originals (default all). | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.SaveAsset` | `[name]` | os.Debug.SaveAsset [name]: the config into /Game/OS/Debug/Presets/DA_Test_<name> (editor builds only). | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Search` | — | Debug menu: put this text into the search (empty: clear); 'changed' toggles «только изменённые». | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Set` | `<key> <value>` | os.Debug.Set <key> <value>: a parameter, as UE property text (Pawn.ArmLengthCm 72, Weapon[Дробовик].RecoilImpulse 20000). | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Shots` | — | Debug menu frames (real RHI): the landing view, a tab with folded groups, one open group with a changed and a pinned row, a search, an import's skipped list, the pinned overlay; Saved/Screenshots. | `Source/MindKore/OSDebugProbe.cpp` |
+| `os.Debug.TimeScale` | `<0.1..2>` | os.Debug.TimeScale <0.1..2>: game speed. | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.Undo` | — | Debug menu: undo the last change (Ctrl+Z). | `Source/MindKore/OSDebug.cpp` |
+| `os.Debug.VSync` | `0\|1` | os.Debug.VSync 0\|1 | `Source/MindKore/OSDebug.cpp` |
+
+## `os.Flyer`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Flyer.BiteShot` | — | Rendered stills of a flyer bite: the visor blood at +0.2, +1.2, +2.5 s (Shot; needs a real RHI). | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.Clip` | `[Seconds] [Ffmpeg] [shotgun] [stat] [roost\|wall]` | os.Flyer.Clip [Seconds] [Ffmpeg] [shotgun] [stat] [roost\|wall]: a recorded take (video and sound) of a fly-by attack - or the roost waking and hunting, or the flesh wall's pain call and the flock coming - the voices in the log; Saved/Clips (needs a real RHI and a window). | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.CorpseShot` | — | A rendered still of a flyer killed over the planetoid, lying where it fell (Shot; needs a real RHI). | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.Cost` | `[Seconds]` | os.Flyer.Cost [Seconds]: the flyers' tick cost on the game thread (clinging and the rest), per frame and per tick. | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.EncounterProbe` | — | os.Flyer.EncounterProbe: the airlock to the linked flesh wall with shots into space (unheard), the shotgun into the wall (the pain call), back to the airlock (where the flock meets the player), a shot in the planetoid's air (heard). | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.LogFlaps` (переменная) | значение (умолч. `false`) | Log every audible wing beat of every flyer (os.Flyer.Probe turns it on). | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.MixCheck` | `[DistanceCm] [noatt] [shotgun]` | os.Flyer.MixCheck [DistanceCm] [noatt] [shotgun]: record the player's shot and, apart, a round (or a blast's pellets) into a flyer held that far ahead (Saved/Clips/FlyerMixCheck.wav; needs sound). | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.Portraits` | `[Count] [Habitat]` | os.Flyer.Portraits [Count] [Habitat]: side stills of clinging flyers (the roost pose; Shot; needs a real RHI). | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.Probe` | `[all] [Habitat]` | os.Flyer.Probe [all] [Habitat]: one flyer of the first (or the named) habitat - wander, hearing (vacuum, air), the ladder (curious dart, aim: stalking, aim: hunting and the cascade), dive tokens, bites, a stagger, flight, calming down, the player hides and leaves (de-aggro), shot dead, the corpse. 'all' lets its flockmates fly too. | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.Rays` | `x y z` | os.Flyer.Rays x y z: 98 rays and 40 cm sweeps out of a point - what they hit how far (finding a way in). | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.RoostProbe` | `[Habitat] [airlock\|cabin]` | os.Flyer.RoostProbe [Habitat] [airlock\|cabin]: the first EVA - the roost at rest and its cost, the unarmed way from the airlock to the roost and on to the pistol (no bite; a bump at the roost), the pistol, a shot into space, a round into the roost's hull: the cascade; then the player hides 120 s (where the fight left him, inside the airlock, or in the cabin nearest the roost): no new cascade. | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.Shots` | — | Rendered stills riding along a flyer (ahead above, below, behind above, wider) and over its flock (Shot; needs a real RHI). | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.Views` | `<file> [blind]` | os.Flyer.Views <file> [blind]: stills from listed views (name x y z tx ty tz [seconds]; Shot; needs a real RHI); blind: no flyer notices the player. | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.WakeStrip` | `[x y z tx ty tz]` | os.Flyer.WakeStrip [x y z tx ty tz]: frames every 0.25 s of the roost waking in its cascade after a round into its hull (Shot; needs a real RHI). | `Source/MindKore/OSFlyer.cpp` |
+| `os.Flyer.WallShots` | — | Stills of the encounter: the linked flesh wall blasted (the scream and the vent), then the flock gathering and coming (Shot; needs a real RHI). | `Source/MindKore/OSFlyer.cpp` |
+
+## `os.Fx`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Fx.ClearSmoke` | — | Remove every muzzle smoke cloud of the player (stills). | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Fx.VolumetricSmoke` (переменная) | значение (умолч. `1`) | 1: muzzle smoke as volumetric voxel clouds (heterogeneous volumes); 0: card puffs. Both live in the world. | `Source/MindKore/OSMuzzleFx.cpp` |
+
+## `os.Gravity`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Gravity.Cost` | — | Log what the zones' pull on loose bodies (OSPullBodies) cost per frame since the last call, then start over. | `Source/MindKore/OSGravity.cpp` |
+| `os.Gravity.Probe` | — | Loose bodies in the gravity zones of Lvl_OS_Ship: casing, opt-out, throws against their prediction, a corpse that sleeps, the cost. | `Source/MindKore/OSGravity.cpp` |
+| `os.Gravity.Stills` | — | Rendered stills of a throw in the cabin: aiming with the predicted arc, in flight, landed (Shot; needs a real RHI). | `Source/MindKore/OSGravity.cpp` |
+
+## `os.Guns`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Guns.Give` | `<slot\|Id\|name\|all>` | os.Guns.Give <slot\|Id\|name\|all>: open a gun (1..3, Pistol, Shotgun, Rmb93 - swaps it into 2 -, Sniper). *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Guns.RmbProbe` | — | The RMB rule step by step: aim with a gun out, grab (unarmed) with a loose body in reach, the hands when unarmed, a gun drawn while holding (Lvl_OS_ZeroG). | `Source/MindKore/OSScope.cpp` |
+| `os.Guns.Swap` | `<slot> <Rmb93\|Slot>` | os.Guns.Swap <slot> <Rmb93\|Slot>: another gun into the slot, as the RMB-93 pickup does (2 Rmb93; Slot: the slot's own back). *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+| `os.Guns.Take` | `<slot\|Id\|name\|all>` | os.Guns.Take <slot\|Id\|name\|all>: close a gun - put away if in hand; its rounds and attachments stay with it. *не в Shipping* | `Source/MindKore/OSWeaponAttach.cpp` |
+
+## `os.Hands`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Hands.Probe` | — | Lvl_OS_Ship: a hull tool taken mid-reload abandons it (no magazine, no rounds); a tool in hand has no gun (GetWeapon, the HUD's RMB line); then every hands key (LMB, RMB, MMB, wheel, R, 1, 2, the tool keys) injected through its input action with each thing in hand (gun, strap, a held body, nothing) in Walk, Hang, Ladder and Float, against the README controls table (PASS/FAIL each). | `Source/MindKore/OSHandsProbe.cpp` |
+
+## `os.Hang`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Hang.Probe` | — | The arm: on Lvl_OS_ZeroG a block edge caught in passing, a pumped swing let go, the same with a pull mid-swing, a kick while holding, a heavy body grabbed in passing; on Lvl_OS_Ship hanging under the cabin ceiling. Logs positions, velocities and the arm length over time; "shots" adds HighResShot frames of the catch / the hang (needs a real RHI). | `Source/MindKore/OSHangProbe.cpp` |
+
+## `os.Head`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Head.Probe` | — | The head against geometry (review #44) and the hold at rest: on Lvl_OS_TestRoom / Lvl_OS_Ship hold on to the ceiling and pull up with Space and W, swing (the camera's clearance every tick), walk under a spawned low slab; on Lvl_OS_Ship also hold on to a cabin wall, each door's leaf (both faces, closed and open) and the planetoid (flat and a slope) and rest (speed, contacts, shakes, reversals). PASS/FAIL each. "shots": the pull-up only, with HighResShot frames. Run at -UseFixedTimeStep -FPS=60. | `Source/MindKore/OSHeadProbe.cpp` |
+
+## `os.Hull`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Hull.Probe` | `[Index]` | os.Hull.Probe [Index]: hull repair logic on one breach - strap, junk, weld, tack, seal, cut, cling, death and the revival in the cabin (what it keeps and drops). | `Source/MindKore/OSShip.cpp` |
+| `os.Hull.Stills` | `[Index]` | os.Hull.Stills [Index]: rendered stills of the suit projector weld frame on one breach - strapped with a gap, junk inside, tacked, half welded, sealed - from 2 m and 8 m, then ProfileGPU lit and dark (HighResShot; real RHI). | `Source/MindKore/OSShip.cpp` |
+
+## `os.Ladder`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Ladder.Probe` | — | The first ladder: grab, climb by the view, S, dead zone, strafe, over the top, down to the floor, jump off, strafe off; logs position and speed. 'shots': stills (needs a real RHI); 'trace': a line every frame (mode, ground, CanEnter, contacts). | `Source/MindKore/OSLadder.cpp` |
+
+## `os.Laser`
+
+| Команда | Аргументы | Что делает | Где |
+|---|---|---|---|
+| `os.Laser.Tint` | `[N]` | os.Laser.Tint [N]: the laser's colour from its palette (0-5: red, green, blue, sodium, black light, IR); no N: the next one. | `Source/MindKore/OSLaserSight.cpp` |
+| `os.Laser.Mask` | `0` / `1` | 1: on the HUD, the laser's view of the gun - the gun's mask over the beam in blue, the lens in green (yellow: no mask, the boxes' fallback). Console variable. | `Source/MindKore/OSLaserSight.cpp` |
+
+## `os.Move`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Move.Probe` | — | Lvl_OS_Ship: the shotgun and the SV-98 fired at the feet lift the walker, the grapple lifts it off the floor, an 800 kg body held slows the walk, holding a wall with the feet on the floor swings freely, and a view kick right after entering gravity from a rolled zero-G view does not drift (PASS/FAIL each, with the frame time). | `Source/MindKore/OSMoveProbe.cpp` |
+
+## `os.Nixie`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Nixie.Probe` | — | Per-instance Nixie MID, digit/OFF, binding and lifetime checks in PIE or -game (NullRHI supported). Optional material object path; default MI_OS_Nixie_RMB93. Does not change shared assets. *не в Shipping* | `Source/MindKore/OSNixieCounter.cpp` |
+| `os.Nixie.WeaponProbe` | — | Runtime pickup -> production RMB93 in hands -> actual fire/reload -> switch/holster/replacement -> restore inventory. Takes ~5s; use PIE/-game in Lvl_OS_TestRoom or ZeroG; NullRHI supported. No assets saved. *не в Shipping* | `Source/MindKore/OSNixieWeaponProbe.cpp` |
+
+## `os.Rmb93`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Rmb93.Cost` | — | Log what the RMB-93's lid and shroud smoke (UpdateLid + UpdatePortSmoke) cost per frame with it in view since the last call, then start over. *не в Shipping* | `Source/MindKore/OSWeaponLid.cpp` |
+| `os.Rmb93.Probe` | — | The RMB-93 through its handling on world time: shot, hull, shroud puff, reload with the lid, a broken-off reload, the lid in zero-G and gravity, a lid-only reload, a still. ~20 s; Lvl_OS_TestRoom or Lvl_OS_ZeroG, NullRHI fine; ends "Rmb93 probe: done". *не в Shipping* | `Source/MindKore/OSRmb93.cpp` |
+
+## `os.Scope`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Scope.AimFrames` | — | Every gun's raise, a shot aimed and the lowering every 33 ms of game time (time at a tenth), os.Scope.Trace on (HighResShot; needs a real RHI). | `Source/MindKore/OSScope.cpp` |
+| `os.Scope.AimStills` | `<gun> <eye` | os.Scope.AimStills <gun> <eye:fov> ...: a settled aimed still for each eye distance / gun field of view (HighResShot; needs a real RHI). | `Source/MindKore/OSScope.cpp` |
+| `os.Scope.Shots` | — | Stills of the SV-98's scope at a living wall ~20 m away: hip, raising, aimed (centre, edge), a shot through the bolt cycle, hip again, the pistol sight dots; GPU/frame time at the hip and aimed (HighResShot; needs a real RHI). | `Source/MindKore/OSScope.cpp` |
+| `os.Scope.SwitchStills` | `[Gun] [To]` | os.Scope.SwitchStills [Gun] [To]: aimed with Gun (2), then To (0) selected with the aim held - stills and a per-tick log of the aim and the gun's field of view (HighResShot; needs a real RHI). | `Source/MindKore/OSScope.cpp` |
+| `os.Scope.Trace` (переменная) | значение (умолч. `0`) | Log the scope's aim springs every tick (Scope trace: t, place, turn, alpha) - for plotting the curves. | `Source/MindKore/OSScope.cpp` |
+
+## `os.Ship`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Ship.Caves` | `[Crater] [Plug]` | os.Ship.Caves [Crater] [Plug]: shotgun a crater membrane and drop through; walk at a cave plug, then shoot it and walk through. | `Source/MindKore/OSShip.cpp` |
+| `os.Ship.CaveShots` | — | Rendered stills of the planetoid: from afar, on the relief, a crater membrane before/after the shotgun, a cave plug (HighResShot; real RHI). | `Source/MindKore/OSShip.cpp` |
+| `os.Ship.JetExit` | — | On the planetoid: jump, then Space in the air - the jet leap that leaves its gravity; logs the state. | `Source/MindKore/OSShip.cpp` |
+| `os.Ship.Land` | `[Pitch] [Roll] [Speed]` | os.Ship.Land [Pitch] [Roll] [Speed]: fall onto the planetoid from a free, rolled view and log the landing every ~33 ms. | `Source/MindKore/OSShip.cpp` |
+| `os.Ship.Lap` | — | Walk the player straight ahead around the planetoid for 35 s, logging angle, up vectors and view roll. | `Source/MindKore/OSShip.cpp` |
+| `os.Ship.PlanetShots` | — | Two HighResShot stills standing on the planetoid, top and side (needs a real RHI). | `Source/MindKore/OSShip.cpp` |
+| `os.Ship.Probe` | — | Ship: standing, walking and jumping in the cabin, the suit and the airlock, zero-G outside, the planetoid; a plate; every part in, the lever. | `Source/MindKore/OSShip.cpp` |
+| `os.Ship.Shots` | — | Rendered stills of Lvl_OS_Ship from six viewpoints (HighResShot; needs a real RHI). | `Source/MindKore/OSShip.cpp` |
+| `os.Ship.Where` | — | Logs location and speed of every actor with the given tag (default Junk.Foreign). | `Source/MindKore/OSShip.cpp` |
+
+## `os.Sync`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Sync.Probe` | `[Shots] [Ffmpeg]` | os.Sync.Probe [Shots] [Ffmpeg]: single shots per gun, recorded (video, master submix, per-frame gun pose, mixed onsets) for the shot/sound sync check. | `Source/MindKore/OSSyncProbe.cpp` |
+
+## `os.Wall`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Wall.BlastFrames` | `[DistanceCm]` | os.Wall.BlastFrames [DistanceCm]: a shotgun blast into the probe wall from 10 m, a still every frame for 0.5 s (HighResShot; real RHI, -UseFixedTimeStep -FPS=60). | `Source/MindKore/OSLivingWall.cpp` |
+| `os.Wall.HitLag` | — | Fire to the living wall's wound for each gun at 5 / 10 / 20 m: first and last round landing, the wound (world ms; use -UseFixedTimeStep -FPS=N). | `Source/MindKore/OSLivingWall.cpp` |
+| `os.Wall.Probe` | `[Name]` | os.Wall.Probe [Name]: pistol and shotgun at a living wall - torn cells, the passable window, close times, the pawn flown through. | `Source/MindKore/OSLivingWall.cpp` |
+| `os.Wall.Seal` | — | Sweep the pawn sphere and a 15 cm sphere through a grid over every whole living wall (round ones: and around their edge); logs any pass. | `Source/MindKore/OSLivingWall.cpp` |
+| `os.Wall.Shots` | `[Name\|Tag]` | os.Wall.Shots [Name\|Tag]: rendered stills of a living wall: whole, right after a shotgun blast, closing, a second blast (HighResShot; needs a real RHI). | `Source/MindKore/OSLivingWall.cpp` |
+
+## `os.Weapons`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Weapons.AirTake` | `[B\|sync]` | os.Weapons.AirTake [B\|sync]: on Lvl_OS_Ship, the guns' medium from the cabin through the airlock (PASS / FAIL), then the same sequence in the cabin and outside recorded (Saved/Clips/AirTake_<A\|B>.wav). B: the flyers' room. sync: 16 pistol shots, cabin and outside in turn (AirTake_sync.wav). | `Source/MindKore/OSAirTake.cpp` |
+| `os.Weapons.Cycles` | — | The guns' moving parts frame by frame (os.Weapons.PoseAt), a live shot each and the fire gate (HighResShot; needs a real RHI). | `Source/MindKore/OSWeapons.cpp` |
+| `os.Weapons.DrawPoseAt` (переменная) | значение (умолч. `-1.0f`) | Hold the gun in view this many seconds into its draw; < 0: live. | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.Frames` | — | Every gun's cycle and reload as stills every 33 ms (os.Weapons.PoseAt / ReloadPoseAt; HighResShot, needs a real RHI). | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.Fx` | — | First-person stills of each gun's muzzle flash frame by frame (60 fps frames 0-12 at time dilation 0.01), its smoke over 3 s and two more bursts (HighResShot; needs a real RHI). 'space': look away from the wall. | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Weapons.MagFrames` | — | The USP's and the SV-98's magazine drop and insert in first person at 60 fps (HighResShot; needs a real RHI). | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.MagTrace` | — | Log the magazines' pose on the gun every 1/60 s through the reload. | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.PoseAt` (переменная) | значение (умолч. `-1.0f`) | Hold the gun in view (kick and moving part) this many seconds after its last shot; < 0: live. | `Source/MindKore/OSWeapons.cpp` |
+| `os.Weapons.PoseTrace` | — | Log the guns' pose springs and part curves every 10 ms through a cycle and a reload. | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.ReloadPoseAt` (переменная) | значение (умолч. `-1.0f`) | Hold the gun in view this many seconds into a reload (a round-by-round gun loads two rounds); < 0: live. | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.Reloads` | — | The reloads frame by frame (os.Weapons.ReloadPoseAt), spent cases and dropped magazines live (HighResShot; needs a real RHI). | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.Shots` | — | First-person stills of the pistol and the shotgun, then the SV-98 at rest: at rest, +0.05 s after a shot, then +0.12 s (pistol) / +0.45 s (shotgun, the hole) (HighResShot; needs a real RHI). | `Source/MindKore/OSWeapons.cpp` |
+| `os.Weapons.SlideFrames` | — | The USP's slide locking open on the last round and released in the empty reload, stills every 33 ms (HighResShot; needs a real RHI). | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.SlideProbe` | — | The USP's slide stop live: locked open on the last round, a dead trigger, switches, the empty reload's release, the tactical reload unchanged (PASS / FAIL). | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.SlideTake` | — | The USP's slide stop recorded for listening: the last shot, the empty reload with the release, the release only (Saved/Clips/SlideTake.wav and .csv). | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.Smoke` | — | Stills of the smoke's moments in play on Lvl_OS_Range (run with -UseFixedTimeStep -FPS=60): on foot, holding on, a pistol burst, an SV-98 shot drifting off and back (or only those named: foot, cling, burst, sv98). 'budget': three shotgun clouds on the os.Weapons.Fx stand, then ProfileGPU. | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Weapons.StowPoseAt` (переменная) | значение (умолч. `-1.0f`) | Hold the gun in view this many seconds into its put-away; < 0: live. | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.SwitchFrames` | — | Every gun put away and drawn, stills every 33 ms (os.Weapons.StowPoseAt / DrawPoseAt; HighResShot, needs a real RHI). | `Source/MindKore/OSWeaponParts.cpp` |
+| `os.Weapons.SwitchProbe` | — | Live switching with quick changes of mind and a holster/draw, logged every frame with the largest pose jump. | `Source/MindKore/OSWeaponParts.cpp` |
+
+## `os.Weld`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.Weld.Curves` | — | The weld projector's appear curves (each group's flight, the signs typed) every 10 ms to Saved/Logs/WeldCurves.csv. *не в Shipping* | `Source/MindKore/OSWeldProjector.cpp` |
+
+## `os.ZeroG`
+
+| Команда | Аргументы | Что делает | Файл |
+|---|---|---|---|
+| `os.ZeroG.Grapple` | — | Zero-G pawn: hook a fixed block, then a light loose prop (logging both ends after 1 s), then a 45 deg roll input. | `Source/MindKore/OSZeroGPawn.cpp` |
+| `os.ZeroG.Probe` | — | Zero-G pawn: push off what is in view, then shoot; logs the pawn velocity around each. | `Source/MindKore/OSZeroGPawn.cpp` |
+| `os.ZeroG.Trace` (переменная) | значение (умолч. `0`) | 1: the player's pawn logs a line every tick (mode, body, velocity, eye, arm, contacts and shakes so far) and every body hit. | `Source/MindKore/OSZeroGPawn.cpp` |

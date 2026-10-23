@@ -49,6 +49,7 @@ main `f78a949`.
 | T6 | **Startup ошибки экспериментальных Toolsets в UE 5.8 при `-game -nullrhi`:** Python не находит `ToolsetDefinition` / `AgentSkill`; GameFeatures сообщает об отсутствующем правиле `GameFeatureData` в Asset Manager. Влияние на эти инструменты не исследовано, Engine-плагины не менялись | запуск `os.Nixie.Probe`, 21.10; сама проба — 24 PASS, 0 FAIL; [Nixie](Docs/Nixie.md) |
 | T7 | **Исходники арта Рыси и табло только на ПК владельца:** `ArtSource/` в `.gitignore` — скрипты Blender, HLSL и сборщик табло, `.blend`, FBX, PNG; без этой папки модель, текстуры и материал табло не пересобрать, бэкапа нет | [RMB93-Art](Docs/RMB93-Art.md#что-в-git-а-что-нет), 22.10 |
 | T8 | **Текстуры Body Рыси 4096²** (BC / N / ORM, ~25 МБ в LFS) — против правила «не больше 2K». Можно ограничить Max Texture Size 2048 при импорте; вид в ADS после этого не проверен | [RMB93-Art](Docs/RMB93-Art.md), [Development](Docs/Development.md) «Git LFS», 22.10 |
+| T9 | **Обвесы без проверок фазы 4 отладочного меню:** `os.Debug.Probe` не нажимает кнопки «Снаряжения» и не сверяет их с `os.Attach.List`, `gear` не проверен экспортом-импортом (Vision §11). Наземная пешка (`AOSCharacter`) без Tab и прибора | [Attachments](Docs/Attachments.md#отличия-от-замысла), 22.10 |
 
 ## Не проверено вживую
 
@@ -75,6 +76,10 @@ main `f78a949`.
   не записана ([RecoilWeapons-Sound — В воздухе](Docs/RecoilWeapons-Sound.md#в-воздухе-2010-ветка-jam-air-sound)).
 - **Табло Nixie v5** (21.10): HLSL, сборщик и компонент записаны, материал в UE не пересобран, `os.Nixie.Probe` и кадры v5 не сняты ([Nixie](Docs/Nixie.md#проверка)).
 - **Подбор Рыси в `Lvl_OS_TestRoom`** (21.10): `os.Nixie.WeaponProbe` — 19 PASS, 0 FAIL на 30 / 60 / 144 FPS (NullRHI). Вид пикапа на стенде, держание, прицел и счётчик Рыси с настоящим рендером никто не видел.
+
+- **Обвесы** (22.10, этап 1, [Attachments](Docs/Attachments.md#ждёт-пк)): весь C++ написан в облаке без UE —
+  не собран, `os.Attach.Probe` и `os.Hands.Probe` с ним не прогонялись, кадров нет; рамка сварки после общего
+  прибора не проверена `os.Hull.Stills`. Нет `M_OS_Projection` — меню только строкой HUD.
 
 ## Бэклог ревью 19.10
 
