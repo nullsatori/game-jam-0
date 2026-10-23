@@ -344,9 +344,10 @@ public:
 	/**
 	 * The gas of a shot out of Def's vents (FOSGasVent, Docs/RecoilWeapons-Fx.md «Газовые отверстия»): jets into the
 	 * shot's grid, streams of wisps over their Seconds. Muzzle is the muzzle's world frame at the shot, Action the part
-	 * the Action-space vents ride. UOSWeaponsComponent::Fire calls this right after Shot.
+	 * the Action-space vents ride. JetScale scales the Muzzle-space vents' Rate and SpeedCm (a suppressor's
+	 * FOSAttachment::MuzzleJetScale). UOSWeaponsComponent::Fire calls this right after Shot.
 	 */
-	void Vents(const FOSWeapon& Def, const FTransform& Muzzle, const USceneComponent* Action);
+	void Vents(const FOSWeapon& Def, const FTransform& Muzzle, const USceneComponent* Action, float JetScale = 1.0f);
 
 	/**
 	 * Count seeping wisps out of Def's bSeep vents (picked at random), born up to AgeSpread s ago (a seep spread over

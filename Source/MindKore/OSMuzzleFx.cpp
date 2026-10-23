@@ -338,7 +338,7 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 	}
 }
 
-void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle, const USceneComponent* Action)
+void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle, const USceneComponent* Action, float JetScale)
 {
 	if (!Smoke)
 	{
@@ -354,8 +354,14 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 		}
 	}
 	bool bStamped = false;
-	for (const FOSGasVent& Vent : Def.GasVents)
+	for (FOSGasVent Vent : Def.GasVents)
 	{
+		// A muzzle device (a suppressor) throttles what leaves the muzzle; the gun's own ports blow as ever.
+		if (Vent.Space == EOSVentSpace::Muzzle)
+		{
+			Vent.Rate *= JetScale;
+			Vent.SpeedCm *= JetScale;
+		}
 		if (Vent.bJet)
 		{
 			if (Cloud)

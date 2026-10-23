@@ -257,6 +257,10 @@ struct FOSAttachment
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Effect", meta = (ClampMin = "0.0"))
 	float MuzzleSmokeScale = 1.0f;
 
+	/** The muzzle vents' gas jet (UOSMuzzleFxComponent::Vents): its rate and speed. A suppressor lets it out slow and weak. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Effect", meta = (ClampMin = "0.0"))
+	float MuzzleJetScale = 1.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Attach|Effect")
 	float MuzzleOffsetCm = 0.0f;
 

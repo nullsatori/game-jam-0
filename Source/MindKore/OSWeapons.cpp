@@ -957,7 +957,7 @@ bool UOSWeaponsComponent::Fire(const FVector& Eye, const FVector& Direction, FVe
 		const FOSAttachment* Device = GetActiveOn(CurrentWeapon, EOSMountType::Muzzle);
 		Fx->Shot(CurrentWeapon, MuzzleTransform, ViewModel, Device ? Device->MuzzleFlashScale : 1.0f, Device ? Device->MuzzleSmokeScale : 1.0f);
 		// The gas out of every vent of the gun (the muzzle's jet, a brake's ports, a shroud's holes).
-		Fx->Vents(*Weapon, MuzzleTransform, ActionInView);
+		Fx->Vents(*Weapon, MuzzleTransform, ActionInView, Device ? Device->MuzzleJetScale : 1.0f);
 	}
 	// The RMB-93: its open lid jerked by the kick, its shroud's holes puffing (OSWeaponLid.cpp).
 	bLidShot = Weapon->Lid.Mesh != nullptr;

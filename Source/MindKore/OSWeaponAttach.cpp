@@ -313,6 +313,7 @@ TArray<FOSAttachment> OSMakeAttachments()
 	Suppressor.ShotVolume = 0.25f;
 	Suppressor.MuzzleFlashScale = 0.3f;
 	Suppressor.MuzzleSmokeScale = 1.5f;
+	Suppressor.MuzzleJetScale = 0.4f; // the gas seeps out of the can, no blast
 	Suppressor.MuzzleOffsetCm = 12.0f;
 
 	// Магазин 20 (owner 22.10 14:16, 14:19): the stock magazine 3 cm longer down the well (SM_OS_USP_MagLong); clear, the rounds inside.
