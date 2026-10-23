@@ -165,7 +165,7 @@ private:
 					Body(X, Y, Z, Index(X, Y, Z));
 				}
 			}
-		});
+		}, EParallelForFlags::BackgroundPriority);
 	}
 	bool IsSolid(int32 X, int32 Y, int32 Z) const { return Solid[Index(X, Y, Z)] != 0; }
 	void Advect(float Dt);

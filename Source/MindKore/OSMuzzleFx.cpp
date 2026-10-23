@@ -359,17 +359,18 @@ namespace
 		if (Vent.bJet)
 		{
 			// The muzzle: 60-90 parcels over 0.1 s (by the vent's Rate), a vortex ring round a forward jet.
-			R.BurstCount = FMath::Clamp(FMath::RoundToInt(Vent.Rate * 110.0f), 20, 90);
+			R.BurstCount = FMath::Clamp(FMath::RoundToInt(Vent.Rate * 230.0f), 40, 160);
 			R.BurstSeconds = 0.1f;
 			R.RingCm = Vent.Direction.X > 0.9f ? 10.0f : 0.0f;
 			R.RingTurnsPerSecond = 2.0f;
-			R.RadiusMinCm = 3.0f;
-			R.RadiusMaxCm = 5.0f;
-			R.VacuumBurstCount = FMath::Clamp(FMath::RoundToInt(Vent.Rate * 160.0f), 30, 120);
+			// More, smaller parcels (owner 23.10: «набор шаров»): 160 at most, 2-4 cm in air, 4-6 in a vacuum.
+			R.RadiusMinCm = 2.0f;
+			R.RadiusMaxCm = 4.0f;
+			R.VacuumBurstCount = FMath::Clamp(FMath::RoundToInt(Vent.Rate * 230.0f), 40, 160);
 			R.VacuumBurstSeconds = 0.15f;
 			R.VacuumSpeedMin = 0.4f;
-			R.VacuumRadiusMinCm = 6.0f;
-			R.VacuumRadiusMaxCm = 8.0f;
+			R.VacuumRadiusMinCm = 4.0f;
+			R.VacuumRadiusMaxCm = 6.0f;
 			R.Mass = 1.0f;
 			R.Heat = 1.0f;
 			R.LifeSeconds = 6.0f;

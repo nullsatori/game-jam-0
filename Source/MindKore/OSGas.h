@@ -195,7 +195,7 @@ public:
 	TSoftObjectPtr<UMaterialInterface> CloudMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/FX/M_OS_MuzzleSmokeVolume.M_OS_MuzzleSmokeVolume")));
 
 	static constexpr int32 MaxClouds = 8;
-	static constexpr int32 MaxParcels = 160;
+	static constexpr int32 MaxParcels = 220;
 	/** The velocity grid (air): 20 cells of 6 cm; the render grid: 48 of 2 cm (3 cm in a vacuum), same centre. */
 	static constexpr int32 VelocityCells = 20;
 	static constexpr float VelocityCellCm = 6.0f;
@@ -239,6 +239,8 @@ private:
 		bool bHasGas = false;
 		/** A burst began this frame: its first parcels are splatted on the game thread and drawn on the shot's frame. */
 		bool bStamp = false;
+		/** The view's transmittance through the box's centre along X in the last atlas (os.Fx.SmokeCost calibration). */
+		float CentreT = 1.0f;
 		FVector3f KeyDir = FVector3f::UpVector;
 		FLinearColor KeyColour = FLinearColor::White;
 		TObjectPtr<UHeterogeneousVolumeComponent> Volume = nullptr;
@@ -296,7 +298,8 @@ private:
 	TArray<TObjectPtr<UObject>> Keep;
 
 	/** A cloud of Look near Where (world) with room, or a new one. */
-	int32 CloudFor(const FOSGasLook& Look, const FVector& Where);
+	/** A cloud of Look near Where no older than JoinAge (negative: always a new one), or a new one. */
+	int32 CloudFor(const FOSGasLook& Look, const FVector& Where, float JoinAge = 1e9f);
 	void Emit(FCloud& Cloud, const FOSGasRecipe& Recipe, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count);
 	void TickSources(float DeltaTime);
 	void TickCloud(FCloud& Cloud, float DeltaTime);
