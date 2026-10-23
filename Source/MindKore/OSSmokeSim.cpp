@@ -443,7 +443,18 @@ void FOSSmokeSim::Step(float Dt, float Age, const FOSSmokeParams& K)
 		const float Reach = M.RadiusCm + CellCm;
 		ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
 		{
-			const float D = FVector3f::Dist(CellCentre(X, Y, Z), M.Centre);
+			float D;
+			if (M.Extent.IsZero())
+			{
+				D = FVector3f::Dist(CellCentre(X, Y, Z), M.Centre);
+			}
+			else
+			{
+				// The box's distance outside it (0 inside), as a sphere of radius 0 would see it.
+				const FVector3f P = M.Rotation.UnrotateVector(CellCentre(X, Y, Z) - M.Centre);
+				const FVector3f Q(FMath::Max(FMath::Abs(P.X) - M.Extent.X, 0.0f), FMath::Max(FMath::Abs(P.Y) - M.Extent.Y, 0.0f), FMath::Max(FMath::Abs(P.Z) - M.Extent.Z, 0.0f));
+				D = Q.IsZero() ? -1.0f : Q.Size() + M.RadiusCm;
+			}
 			if (D < M.RadiusCm)
 			{
 				Ux[I] = M.Velocity.X;

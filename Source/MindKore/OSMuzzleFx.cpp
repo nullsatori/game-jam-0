@@ -948,6 +948,10 @@ void UOSMuzzleFxComponent::UpdateTunnels(FCloud& Cloud, float Half)
 		{
 			break;
 		}
+		if (!M.Extent.IsZero())
+		{
+			continue;
+		}
 		Rows[Count] = FLinearColor(M.Centre.X, M.Centre.Y, M.Centre.Z, -M.RadiusCm);
 		Rows[MaxTunnels + Count] = FLinearColor(M.Centre.X, M.Centre.Y, M.Centre.Z, 0.0f);
 		++Count;
@@ -992,10 +996,10 @@ void UOSMuzzleFxComponent::FindMovers(FCloud& Cloud, float Half, float DeltaTime
 	for (const FOverlapResult& Hit : Hits)
 	{
 		UPrimitiveComponent* Body = Hit.GetComponent();
-		// The bounds' sphere (not the mesh): a barrel, a crate, a capsule. Big things (walls, doors' frames) stay out:
-		// the world's solids are the planes traced at the shot.
+		// The bounds' sphere (not the mesh): a barrel, a crate, a capsule. Big things count only while they move (a
+		// door's leaf, a gate's panel) - walls and frames stay out: the world's solids are the planes traced at the shot.
 		const float Radius = Body ? Body->Bounds.SphereRadius : 0.0f;
-		if (!Body || Radius > 90.0f || Radius < 1.0f || Cloud.Movers.Num() >= 8)
+		if (!Body || Radius < 1.0f || Radius > 400.0f || Cloud.Movers.Num() >= 8)
 		{
 			continue;
 		}
@@ -1011,6 +1015,25 @@ void UOSMuzzleFxComponent::FindMovers(FCloud& Cloud, float Half, float DeltaTime
 			: Last && DeltaTime > 0.0f ? (At - *Last) / DeltaTime : FVector::ZeroVector;
 		LastMoverAt.Add(Key, At);
 		Seen.Add(Key);
+		const bool bBig = Radius > 90.0f;
+		if (bBig && Velocity.SizeSquared() < 25.0f && !Body->IsSimulatingPhysics())
+		{
+			continue;
+		}
+		if (bBig)
+		{
+			// Its own box, turned with it (the grid only: an opaque door hides the smoke behind it anyway).
+			const FBoxSphereBounds Local = Body->CalcBounds(FTransform::Identity);
+			const FTransform Frame = Body->GetComponentTransform();
+			FOSSmokeSim::FMover& Box = Cloud.Movers.AddDefaulted_GetRef();
+			Box.Centre = FVector3f(Cloud.Basis.UnrotateVector(Frame.TransformPosition(Local.Origin) - Cloud.Centre));
+			Box.RadiusCm = 0.0f;
+			Box.Velocity = FVector3f(Cloud.Basis.UnrotateVector(Velocity.GetClampedToMaxSize(1500.0f)));
+			Box.Extent = FVector3f(Local.BoxExtent * Frame.GetScale3D().GetAbs());
+			Box.Rotation = FQuat4f(Cloud.Basis.Inverse() * Frame.GetRotation());
+			Cloud.Awake = WakeSeconds;
+			continue;
+		}
 		// A sphere round a long body is too fat; the box's middle extent is closer to its girth.
 		const FVector E = Body->Bounds.BoxExtent;
 		const float Girth = FMath::Min(Radius, FMath::Max3(FMath::Min(E.X, E.Y), FMath::Min(E.Y, E.Z), FMath::Min(E.X, E.Z)));
@@ -1022,6 +1045,25 @@ void UOSMuzzleFxComponent::FindMovers(FCloud& Cloud, float Half, float DeltaTime
 			Cloud.Awake = WakeSeconds;
 		}
 	}
+}
+
+void UOSMuzzleFxComponent::Burst(const FVector& Location, const FVector& Normal, float RadiusCm, float SpeedCm)
+{
+	if (GetCloudCount() == 0 || RadiusCm <= 0.0f)
+	{
+		return;
+	}
+	// A vacuum: no air holds the gas back, the same blow throws it half again as fast.
+	const float Speed = SpeedCm * (OSAirZoneAt(GetWorld(), Location) ? 1.0f : 1.5f);
+	const FVector Out = Normal.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+	// A short thick push along the normal from just behind the point: out of the line every way, along it outward;
+	// 0.4 of the gas at the centre blown away.
+	Blast(Location - Out * RadiusCm * 0.5f, Out, RadiusCm, Speed * (Normal.IsNearlyZero() ? 0.0f : 0.6f), Speed, 0.4f, nullptr, RadiusCm);
+}
+
+void UOSMuzzleFxComponent::AddAirFlow(const FVector& Location, const FVector& Direction, float SpeedCm, float ReachCm, float Seconds)
+{
+	AirFlows.Add({ Location, Direction.GetSafeNormal(), SpeedCm, ReachCm, Seconds });
 }
 
 void UOSMuzzleFxComponent::CarveRay(const FVector& Start, const FVector& End, float RadiusCm)
@@ -1389,6 +1431,31 @@ void UOSMuzzleFxComponent::TickClouds(float DeltaTime)
 #endif
 		// The volume box: Cells units a side, each a cell (grown with a frozen vacuum cloud).
 		Cloud.Volume->SetWorldTransform(FTransform(Cloud.Basis, Cloud.Centre, FVector(G.CellCm * Cloud.Scale)));
+	}
+	// Air leaving through a hole: each cloud in reach drifts toward it (the whole box: Carried), faster the closer,
+	// and the gas at the hole is blown out along the flow.
+	for (int32 Index = AirFlows.Num() - 1; Index >= 0; --Index)
+	{
+		FAirFlow& Flow = AirFlows[Index];
+		Flow.Seconds -= DeltaTime;
+		if (Flow.Seconds <= 0.0f)
+		{
+			AirFlows.RemoveAt(Index);
+			continue;
+		}
+		for (FCloud& Cloud : Clouds)
+		{
+			const FVector ToHole = Flow.Location - Cloud.Centre;
+			const float Distance = ToHole.Size();
+			if (Cloud.Age < 0.0f || Distance > Flow.ReachCm)
+			{
+				continue;
+			}
+			const float Pull = Flow.SpeedCm * FMath::Square(1.0f - Distance / Flow.ReachCm);
+			Cloud.Carried += (ToHole / FMath::Max(Distance, 1.0f) * Pull - Cloud.Carried) * (1.0f - FMath::Exp(-DeltaTime / 0.3f));
+			Cloud.Awake = WakeSeconds;
+		}
+		Blast(Flow.Location - Flow.Direction * 30.0f, Flow.Direction, 40.0f, Flow.SpeedCm, 0.0f, 0.0f, nullptr, 200.0f);
 	}
 	// Bodies not seen in any cloud this frame start afresh next time (no stale velocity).
 	for (auto It = LastMoverAt.CreateIterator(); It; ++It)

@@ -311,6 +311,20 @@ public:
 
 	int32 GetTunnelCount() const { return Tunnels.Num(); }
 
+	/**
+	 * A radial blow at Location (an impact, a blast): the gas within RadiusCm thrown out of it at up to SpeedCm cm/s
+	 * (half again in a vacuum, where no air holds it back), a share of it at the centre blown away. Normal leans it
+	 * (an impact throws back out of the surface; zero: every way).
+	 */
+	void Burst(const FVector& Location, const FVector& Normal, float RadiusCm, float SpeedCm);
+
+	/**
+	 * Air leaving through a hole (an open airlock, a breach) for Seconds: clouds within ReachCm are drawn toward
+	 * Location, faster the closer, and blown out along Direction past it. Nothing in the game decompresses yet
+	 * (23.10): this is the hook for it.
+	 */
+	void AddAirFlow(const FVector& Location, const FVector& Direction, float SpeedCm, float ReachCm, float Seconds);
+
 	/** The youngest cloud at least MinAge old: its box centre and half side (tests). */
 	bool GetYoungestCloud(float MinAge, FVector& OutCentre, float& OutHalf) const;
 
@@ -575,6 +589,12 @@ private:
 		bool bVacuum = false;
 	};
 	TArray<FTunnel> Tunnels;
+	struct FAirFlow
+	{
+		FVector Location, Direction;
+		float SpeedCm, ReachCm, Seconds;
+	};
+	TArray<FAirFlow> AirFlows;
 	/** Where each body seen in a cloud was last frame: its velocity, whatever moves it (physics, a hand, a door). */
 	TMap<TObjectKey<UPrimitiveComponent>, FVector> LastMoverAt;
 	/** The bodies in a cloud's box now (one overlap query): its Movers. */

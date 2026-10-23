@@ -114,6 +114,9 @@ struct FOSSmokeSim
 		FVector3f Centre;
 		float RadiusCm;
 		FVector3f Velocity;
+		/** Non-zero: an oriented box of these half extents (cm) turned by Rotation (box frame) instead of the sphere. */
+		FVector3f Extent = FVector3f::ZeroVector;
+		FQuat4f Rotation = FQuat4f::Identity;
 	};
 	TArray<FMover> Movers;
 	/** One step; Age (s since the shot) times the blast's swell. */
