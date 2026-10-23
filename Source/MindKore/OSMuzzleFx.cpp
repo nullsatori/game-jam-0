@@ -363,8 +363,13 @@ namespace
 			R.BurstSeconds = 0.1f;
 			R.RingCm = Vent.Direction.X > 0.9f ? 10.0f : 0.0f;
 			R.RingTurnsPerSecond = 2.0f;
-			R.RadiusMinCm = 4.0f;
-			R.RadiusMaxCm = 7.0f;
+			R.RadiusMinCm = 3.0f;
+			R.RadiusMaxCm = 5.0f;
+			R.VacuumBurstCount = FMath::Clamp(FMath::RoundToInt(Vent.Rate * 160.0f), 30, 120);
+			R.VacuumBurstSeconds = 0.15f;
+			R.VacuumSpeedMin = 0.4f;
+			R.VacuumRadiusMinCm = 6.0f;
+			R.VacuumRadiusMaxCm = 8.0f;
 			R.Mass = 1.0f;
 			R.Heat = 1.0f;
 			R.LifeSeconds = 6.0f;
@@ -694,6 +699,12 @@ void UOSMuzzleFxComponent::DumpClouds(const FString& Name) const
 			FFileHelper::SaveArrayToFile(Bytes, *FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("SmokeDump"), FString::Printf(TEXT("%s_%d_n%d.raw"), *Name, Slot, Cloud.Sim->N)));
 		}
 	}
+}
+
+int32 UOSMuzzleFxComponent::GetTunnelCount() const
+{
+	const UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this);
+	return Tunnels.Num() + (Gas ? Gas->GetTunnelCount() : 0);
 }
 
 int32 UOSMuzzleFxComponent::GetCloudCount() const

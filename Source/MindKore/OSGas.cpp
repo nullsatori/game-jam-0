@@ -41,8 +41,10 @@ namespace
 	constexpr float NoiseCut = 0.2f;
 	constexpr float NoiseGain = 1.8f;
 	constexpr float DensityGain = 6.0f;
-	constexpr float KeyShadow = 0.04f;
-	constexpr float AmbientOcclusion = 0.15f;
+	constexpr float KeyShadow = 0.1f;
+	/** The key light's shadow through the render grid (relief), per unit of drawn density along the way. */
+	constexpr float GridKeyShadow = 0.6f;
+	constexpr float AmbientOcclusion = 0.225f;
 	constexpr float KeyStrength = 0.014f;
 	constexpr float KeyMax = 3.0f;
 	constexpr float EyeClearCm = 30.0f;
@@ -113,6 +115,22 @@ void UOSGasSubsystem::Deinitialize()
 {
 	WaitAll();
 	Super::Deinitialize();
+}
+
+void UOSGasSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+	// The pool: every cloud's volume, material, textures and grid made now, not on the first shot (a 30 ms frame).
+	Clouds.SetNum(MaxClouds);
+	for (FCloud& Cloud : Clouds)
+	{
+		EnsureRender(Cloud);
+		if (!Cloud.Grid)
+		{
+			Cloud.Grid = MakeUnique<FOSSmokeSim>();
+			Cloud.Grid->Reset(VelocityCells, VelocityCellCm, true, FVector3f(0.0f, 0.0f, -1.0f));
+		}
+	}
 }
 
 void UOSGasSubsystem::WaitAll() const
@@ -198,9 +216,9 @@ FString UOSGasSubsystem::DescribeClouds() const
 			Speed += P.V.Size() * P.Mass;
 			Heat = FMath::Max(Heat, P.Heat);
 		}
-		Line += FString::Printf(TEXT(" [gas age %.2f %s, %d parcels, mass %.1f, mean |V| %.0f cm/s, heat %.2f, centre %s, cell %.0f cm]"),
+		Line += FString::Printf(TEXT(" [gas age %.2f %s, %d parcels, mass %.1f, mean |V| %.0f cm/s, heat %.2f, centre %s, cell %.0f cm, %d drawn tunnel(s)/body(s)]"),
 			Cloud.Age, Cloud.bAir ? TEXT("air") : TEXT("vacuum"), Cloud.Parcels.Num(), Mass, Speed / FMath::Max(Mass, 0.01f), Heat,
-			*(Cloud.Origin + FVector(Cloud.DrawnCentre)).ToCompactString(), Cloud.PackedCellCm);
+			*(Cloud.Origin + FVector(Cloud.DrawnCentre)).ToCompactString(), Cloud.PackedCellCm, Cloud.TunnelCount);
 	}
 	return Line;
 }
@@ -331,6 +349,12 @@ void UOSGasSubsystem::Emit(FCloud& Cloud, const FOSGasRecipe& R, const FVector& 
 			const FVector3f Off = Out * FMath::Cos(Phi) + Axis * FMath::Sin(Phi);
 			const FVector3f Turn = -Out * FMath::Sin(Phi) + Axis * FMath::Cos(Phi);
 			P.P += Out * Ring * 0.5f + Off * Core;
+			// The rear half 30% slower than the front: the speed gradient that rolls the ring over into a mushroom.
+			if (FMath::Sin(Phi) < 0.0f)
+			{
+				P.Throw *= 0.7f;
+				P.V = P.Carrier + P.Throw;
+			}
 			P.V += Turn * (UE_TWO_PI * Core * R.RingTurnsPerSecond * 4.0f) + Out * Speed * 0.12f;
 		}
 		P.Birth = P.P;
@@ -349,14 +373,35 @@ int32 UOSGasSubsystem::AddSource(const FOSGasRecipe& Recipe, const FOSGasLook& L
 	FSource& Source = Sources.AddDefaulted_GetRef();
 	Source.Id = NextSourceId++;
 	Source.Recipe = Recipe;
+	// In a vacuum the recipe's vacuum release: longer, even, bigger parcels.
+	if (Recipe.VacuumBurstCount > 0 && OSAirZoneAt(GetWorld(), Where) == nullptr)
+	{
+		Source.Recipe.BurstCount = Recipe.VacuumBurstCount;
+		Source.Recipe.BurstSeconds = Recipe.VacuumBurstSeconds;
+		Source.Recipe.SpeedMin = Recipe.VacuumSpeedMin;
+		Source.Recipe.RadiusMinCm = Recipe.VacuumRadiusMinCm;
+		Source.Recipe.RadiusMaxCm = Recipe.VacuumRadiusMaxCm;
+	}
+	const FOSGasRecipe& Used = Source.Recipe;
 	Source.Look = Look;
 	Source.Where = Where;
 	Source.Direction = Direction;
 	Source.Carrier = CarrierVelocity;
 	Source.Attach = Attach;
 	Source.bAttached = Attach != nullptr;
-	Source.BurstOwed = float(Recipe.BurstCount);
-	Source.BurstLeft = Recipe.BurstCount > 0 ? FMath::Max(Recipe.BurstSeconds, 1e-3f) : 0.0f;
+	Source.BurstOwed = float(Used.BurstCount);
+	Source.BurstLeft = Used.BurstCount > 0 ? FMath::Max(Used.BurstSeconds, 1e-3f) : 0.0f;
+	if (Used.BurstCount > 0)
+	{
+		// The first frame's share now, stamped into the atlas on the game thread this frame (TickCloud).
+		const float Frame = FMath::Min(GetWorld()->GetDeltaSeconds() / Source.BurstLeft, 1.0f);
+		const int32 Now = FMath::Max(1, FMath::RoundToInt(Source.BurstOwed * Frame));
+		Source.BurstOwed = FMath::Max(0.0f, Source.BurstOwed - Now);
+		Source.Cloud = CloudFor(Look, Where);
+		FCloud& Cloud = Clouds[Source.Cloud];
+		Emit(Cloud, Used, Where, Direction, CarrierVelocity, Now);
+		Cloud.bStamp = true;
+	}
 	return Source.Id;
 }
 
@@ -581,6 +626,14 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 			Cloud.Volume->SetVisibility(false);
 		}
 		return;
+	}
+	// A burst's first parcels: splatted here, on the game thread, so the shot is seen on its own frame.
+	if (!bBusy && Cloud.bStamp)
+	{
+		Cloud.bStamp = false;
+		Cloud.Parcels.Append(MoveTemp(Cloud.Incoming));
+		Cloud.Incoming.Reset();
+		Splat(Cloud);
 	}
 	// The last step's atlas: the box moves with it.
 	if (!bBusy && Cloud.bPendingAtlas)
@@ -825,8 +878,11 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				const FVector3f C = (P.P - GridCentre) / VelocityCellCm + FVector3f(0.5f * N - 0.5f);
 				const FVector3f New(G.Sample(G.Ux, C), G.Sample(G.Uy, C), G.Sample(G.Uz, C));
 				const FVector3f Old(G.Sample(OldX, C), G.Sample(OldY, C), G.Sample(OldZ, C));
-				P.V = (P.V + New - Old) * Flip + New * (1.0f - Flip);
-				const float Hold = 1.0f - FMath::Exp(-Dt * FMath::Min(DragPerCm2 * P.RadiusCm * P.RadiusCm, MaxDrag));
+				// The ring keeps its spin its first 0.3 s: all FLIP, no drag.
+				const bool bYoung = P.Age < 0.3f;
+				const float Share = bYoung ? 1.0f : Flip;
+				P.V = (P.V + New - Old) * Share + New * (1.0f - Share);
+				const float Hold = bYoung ? 0.0f : 1.0f - FMath::Exp(-Dt * FMath::Min(DragPerCm2 * P.RadiusCm * P.RadiusCm, MaxDrag));
 				P.V += (New - P.V) * Hold;
 			}
 		}
@@ -904,7 +960,38 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			}
 		}
 	}
-	// No buoyancy in a vacuum, and none in air without gravity either (the grid's lift scales with |g|).
+	// Vacuum: a parcel grows to at least half the way to its second nearest neighbour (25 cm at most) - the cone stays
+	// one body as the parcels fly apart, its edges not cut away.
+	if (!Cloud.bAir && Parcels.Num() > 2)
+	{
+		TArray<float> Need;
+		Need.SetNumUninitialized(Parcels.Num());
+		ParallelFor(Parcels.Num(), [&](int32 I)
+		{
+			float First = 1e12f, Second = 1e12f;
+			for (int32 J = 0; J < Parcels.Num(); ++J)
+			{
+				if (J != I)
+				{
+					const float D2 = FVector3f::DistSquared(Parcels[I].P, Parcels[J].P);
+					if (D2 < First)
+					{
+						Second = First;
+						First = D2;
+					}
+					else if (D2 < Second)
+					{
+						Second = D2;
+					}
+				}
+			}
+			Need[I] = FMath::Min(FMath::Sqrt(Second), 30.0f);
+		});
+		for (int32 I = 0; I < Parcels.Num(); ++I)
+		{
+			Parcels[I].RadiusCm = FMath::Max(Parcels[I].RadiusCm, Need[I]);
+		}
+	}
 	(void)Down;
 	Splat(Cloud);
 }
@@ -967,7 +1054,17 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		}
 		Light[I] = FMath::Exp(-KeyShadow * Sum);
 	});
-	// The splat, slice by slice: a smooth kernel times a noise read where the parcel was born (it flows with it).
+	// The noise flows with the gas: read at the point less the cloud's mean travel (its parcels' P - Birth).
+	FVector3f Travel = FVector3f::ZeroVector;
+	for (const FOSGasParcel& P : Parcels)
+	{
+		Travel += (P.P - P.Birth) * P.Mass;
+	}
+	Travel /= FMath::Max(Mass, 1e-3f);
+	const float Cut = Cloud.bAir ? NoiseCut + 0.1f : 0.15f;
+	const float Scale = Cloud.bAir ? NoiseCm : 12.0f;
+	const uint32 CloudSeed = Cloud.Seed;
+	// The splat, slice by slice: the parcels' smooth kernels only (the noise comes once per cell below).
 	const int32 Cells = N * N * N;
 	TArray<float> D, H, L, W;
 	D.SetNumZeroed(Cells);
@@ -975,14 +1072,39 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	L.SetNumZeroed(Cells);
 	W.SetNumZeroed(Cells);
 	const float Fade = 1.0f;
-	ParallelFor(N, [&](int32 Z)
+	// Only the cells round the gas (its parcels' reach, 3 cells more for the blur and the shadows): every pass below.
+	FIntVector Lo(N - 1), Hi(0);
+	for (const FOSGasParcel& P : Parcels)
 	{
+		const float Reach = FMath::Max(P.RadiusCm, P.V.Size() * 0.08f);
+		for (int32 Axis = 0; Axis < 3; ++Axis)
+		{
+			Lo[Axis] = FMath::Min(Lo[Axis], FMath::Max(0, FMath::FloorToInt((P.P[Axis] - Reach - Centre[Axis] + Half) / Cell) - 3));
+			Hi[Axis] = FMath::Max(Hi[Axis], FMath::Min(N - 1, FMath::FloorToInt((P.P[Axis] + Reach - Centre[Axis] + Half) / Cell) + 3));
+		}
+	}
+	if (Parcels.IsEmpty() || Hi.X < Lo.X || Hi.Y < Lo.Y || Hi.Z < Lo.Z)
+	{
+		Lo = FIntVector(0);
+		Hi = FIntVector(-1);
+	}
+	const int32 Slices = FMath::Max(0, Hi.Z - Lo.Z + 1);
+	ParallelFor(Slices, [&](int32 K)
+	{
+		const int32 Z = Lo.Z + K;
 		const float CZ = Centre.Z + (Z + 0.5f - 0.5f * N) * Cell;
 		for (int32 Index = 0; Index < Parcels.Num(); ++Index)
 		{
 			const FOSGasParcel& P = Parcels[Index];
-			const float R = P.RadiusCm;
-			if (FMath::Abs(P.P.Z - CZ) >= R)
+			// An ellipsoid: semi-axis max(radius, |v| x 0.08 s) along the velocity, the radius across - a fast parcel
+			// draws a streak of jet, not a ball (owner 23.10: «в невесомости дым вылетает как будто дробинками»).
+			const float Speed = P.V.Size();
+			const FVector3f Along = Speed > 1.0f ? P.V / Speed : FVector3f::ZeroVector;
+			const float Long = FMath::Max(P.RadiusCm, Speed * 0.08f);
+			const float R = Long;
+			const float InvAcross2 = 1.0f / (P.RadiusCm * P.RadiusCm);
+			const float InvLong2 = 1.0f / (Long * Long);
+			if (FMath::Abs(P.P.Z - CZ) >= R || P.Mass < 0.05f)
 			{
 				continue;
 			}
@@ -992,30 +1114,25 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			const int32 X1 = FMath::Min(N - 1, FMath::FloorToInt((P.P.X + R - Centre.X + Half) / Cell));
 			const int32 Y0 = FMath::Max(0, FMath::FloorToInt((P.P.Y - R - Centre.Y + Half) / Cell));
 			const int32 Y1 = FMath::Min(N - 1, FMath::FloorToInt((P.P.Y + R - Centre.Y + Half) / Cell));
-			const float InvR2 = 1.0f / (R * R);
-			const uint32 Seed = P.Seed;
-			const FVector3f Offset(float(Seed & 0xFF), float((Seed >> 8) & 0xFF), float((Seed >> 16) & 0xFF));
+
 			for (int32 Y = Y0; Y <= Y1; ++Y)
 			{
 				const float CY = Centre.Y + (Y + 0.5f - 0.5f * N) * Cell;
 				for (int32 X = X0; X <= X1; ++X)
 				{
 					const FVector3f At(Centre.X + (X + 0.5f - 0.5f * N) * Cell, CY, CZ);
-					const float Q = FVector3f::DistSquared(At, P.P) * InvR2;
+					const FVector3f Off = At - P.P;
+					const float A = Off | Along;
+					const float Q = A * A * InvLong2 + (Off.SizeSquared() - A * A) * InvAcross2;
 					if (Q >= 1.0f)
 					{
 						continue;
 					}
-					const float Kernel = FMath::Cube(1.0f - Q);
-					const FVector3f NP = (At - P.P + P.Birth - P.Birth) / NoiseCm;
-					// Read where the parcel's own matter sits: the point less the parcel's travel (flows with it).
-					const FVector3f Flow = (At - (P.P - P.Birth)) / NoiseCm + Offset;
-					const float Noise = Noise3(Flow, Seed) * 0.67f + Noise3(Flow * 2.0f, Seed ^ 0x51ED270Bu) * 0.33f;
-					(void)NP;
-					const float Rag = FMath::Clamp((Noise - NoiseCut) * NoiseGain, 0.0f, 1.0f);
+					// Soft (squared): neighbours blend into one body instead of reading as balls.
+					const float Kernel = FMath::Square(1.0f - Q);
 					const int32 I = (Z * N + Y) * N + X;
 					const float KM = Kernel * M;
-					D[I] += KM * Rag;
+					D[I] += KM;
 					H[I] += KM * P.Heat;
 					L[I] += KM * Light[Index];
 					W[I] += KM;
@@ -1023,24 +1140,102 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			}
 		}
 	});
+	// The rags: one two-octave noise per cell with gas, torn by a threshold (was one per parcel per cell: 4x the budget).
+	ParallelFor(Slices, [&](int32 K)
+	{
+		const int32 Z = Lo.Z + K;
+		for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
+		{
+			for (int32 X = Lo.X; X <= Hi.X; ++X)
+			{
+				const int32 I = (Z * N + Y) * N + X;
+				if (D[I] <= 1e-4f)
+				{
+					continue;
+				}
+				const FVector3f At(Centre.X + (X + 0.5f - 0.5f * N) * Cell, Centre.Y + (Y + 0.5f - 0.5f * N) * Cell, Centre.Z + (Z + 0.5f - 0.5f * N) * Cell);
+				const FVector3f Flow = (At - Travel) / Scale;
+				const float Noise = Noise3(Flow, CloudSeed) * 0.67f + Noise3(Flow * 2.0f, CloudSeed ^ 0x51ED270Bu) * 0.33f;
+				D[I] *= FMath::Clamp((Noise - Cut) * NoiseGain, 0.0f, 1.0f);
+			}
+		}
+	});
+	// A soft sharpen: the density less 0.4 of its blur (5 cells a side) - the low cushion goes, the lumps stay.
+	{
+		TArray<float> T0, T1;
+		T0.SetNumZeroed(Cells);
+		T1.SetNumZeroed(Cells);
+		const auto Box = [N, Lo, Hi, Slices](const TArray<float>& From, TArray<float>& To, int32 AX, int32 AY, int32 AZ)
+		{
+			ParallelFor(Slices, [&](int32 KZ)
+			{
+				const int32 Z = Lo.Z + KZ;
+				for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
+				{
+					for (int32 X = Lo.X; X <= Hi.X; ++X)
+					{
+						float Sum = 0.0f;
+						for (int32 K = -2; K <= 2; ++K)
+						{
+							const int32 QX = FMath::Clamp(X + AX * K, 0, N - 1), QY = FMath::Clamp(Y + AY * K, 0, N - 1), QZ = FMath::Clamp(Z + AZ * K, 0, N - 1);
+							Sum += From[(QZ * N + QY) * N + QX];
+						}
+						To[(Z * N + Y) * N + X] = Sum * 0.2f;
+					}
+				}
+			});
+		};
+		Box(D, T0, 1, 0, 0);
+		Box(T0, T1, 0, 1, 0);
+		Box(T1, T0, 0, 0, 1);
+		for (int32 Z = Lo.Z; Z <= Hi.Z; ++Z)
+		{
+			for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
+			{
+				for (int32 X = Lo.X; X <= Hi.X; ++X)
+				{
+					const int32 I = (Z * N + Y) * N + X;
+					D[I] = FMath::Max(0.0f, D[I] - 0.4f * T0[I]) / 0.6f;
+				}
+			}
+		}
+	}
 	// The atlas: R density, G heat, B the key light, A the ambient's shadow (the gas around, 2 cells each way).
 	const FIntPoint Size = FOSSmokeSim::AtlasSize(N);
 	Cloud.Atlas.SetNumZeroed(Size.X * Size.Y);
 	const auto Byte = [](float V) { return uint8(FMath::Clamp(FMath::RoundToInt(V * 255.0f), 0, 255)); };
 	const auto At = [&D, N](int32 X, int32 Y, int32 Z) { return D[(FMath::Clamp(Z, 0, N - 1) * N + FMath::Clamp(Y, 0, N - 1)) * N + FMath::Clamp(X, 0, N - 1)]; };
 	bool bAny = false;
-	ParallelFor(N, [&](int32 Z)
+	constexpr int32 KeySteps = 6;
+	const float KeyAt[KeySteps] = { 1.0f, 2.0f, 4.0f, 6.0f, 9.0f, 12.0f };
+	const float KeyWeights[KeySteps] = { 1.0f, 1.0f, 1.5f, 1.5f, 2.0f, 2.5f };
+	FIntVector KeyCells[KeySteps];
+	for (int32 S = 0; S < KeySteps; ++S)
 	{
+		const FVector3f U = Cloud.KeyDir * KeyAt[S];
+		KeyCells[S] = FIntVector(FMath::RoundToInt(U.X), FMath::RoundToInt(U.Y), FMath::RoundToInt(U.Z));
+	}
+	ParallelFor(Slices, [&](int32 K)
+	{
+		const int32 Z = Lo.Z + K;
 		const int32 OX = (Z % 8) * N, OY = (Z / 8) * N;
-		for (int32 Y = 0; Y < N; ++Y)
+		for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
 		{
-			for (int32 X = 0; X < N; ++X)
+			for (int32 X = Lo.X; X <= Hi.X; ++X)
 			{
 				const int32 I = (Z * N + Y) * N + X;
 				const float Dens = FMath::Min(D[I] * DensityGain, 1.0f);
 				const float Around = At(X + 2, Y, Z) + At(X - 2, Y, Z) + At(X, Y + 2, Z) + At(X, Y - 2, Z) + At(X, Y, Z + 2) + At(X, Y, Z - 2);
 				const float Heat = W[I] > 1e-4f ? H[I] / W[I] : 0.0f;
-				const float Lit = W[I] > 1e-4f ? L[I] / W[I] : 1.0f;
+				// The key light's shadow through the drawn gas itself (1-12 cells toward it, as the old grid's Pack): a
+				// lit flank and a dark belly - the relief (owner 23.10: «недостаточно рельефным»). The parcels' own
+				// light (L / W) shades it further.
+				float Toward = 0.0f;
+				for (int32 S = 0; S < KeySteps; ++S)
+				{
+					Toward += At(X + KeyCells[S].X, Y + KeyCells[S].Y, Z + KeyCells[S].Z) * KeyWeights[S];
+				}
+				const float Lit = FMath::Exp(-GridKeyShadow * Toward) * (W[I] > 1e-4f ? L[I] / W[I] : 1.0f);
 				Cloud.Atlas[(OY + Y) * Size.X + OX + X] = FColor(Byte(Dens), Byte(Heat * FMath::Min(W[I] * 2.0f, 1.0f)), Byte(Lit), Byte(FMath::Exp(-AmbientOcclusion * FMath::Min(Around * DensityGain, 6.0f))));
 			}
 		}

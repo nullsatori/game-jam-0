@@ -93,6 +93,25 @@ struct FOSGasRecipe
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float Heat = 1.0f;
 
+	/**
+	 * Let out in a vacuum instead (0: as in air): a longer, even release so the cone's tail is solid from the muzzle to its
+	 * front (owner 23.10: «дробинками»), the speeds' spread and the parcels' starting radius.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0"))
+	int32 VacuumBurstCount = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.0"))
+	float VacuumBurstSeconds = 0.15f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float VacuumSpeedMin = 0.4f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.1"))
+	float VacuumRadiusMinCm = 6.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.1"))
+	float VacuumRadiusMaxCm = 8.0f;
+
 	/** For this long a parcel keeps the carrier's velocity plus its own small throw (a shroud's wisps hug the gun), s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.0"))
 	float ClingSeconds = 0.0f;
@@ -135,6 +154,7 @@ public:
 	static UOSGasSubsystem* Get(const UObject* WorldContext);
 
 	virtual void Deinitialize() override;
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Tick(float DeltaTime) override;
 	virtual TStatId GetStatId() const override;
 	virtual bool DoesSupportWorldType(const EWorldType::Type WorldType) const override;
@@ -217,6 +237,8 @@ private:
 		TArray<FColor> Atlas;
 		bool bPendingAtlas = false;
 		bool bHasGas = false;
+		/** A burst began this frame: its first parcels are splatted on the game thread and drawn on the shot's frame. */
+		bool bStamp = false;
 		FVector3f KeyDir = FVector3f::UpVector;
 		FLinearColor KeyColour = FLinearColor::White;
 		TObjectPtr<UHeterogeneousVolumeComponent> Volume = nullptr;
