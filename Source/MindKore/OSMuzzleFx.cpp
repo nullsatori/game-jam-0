@@ -2538,16 +2538,28 @@ namespace
 				const float T = float(World->GetTimeSeconds() - Start);
 				const FVector Ahead = FRotator(0.0f, Look.Yaw, 0.0f).Vector();
 				const FVector Side = FVector::CrossProduct(FVector::UpVector, Ahead);
-				// The walk: 0-0.6 s ahead at 3 m/s with a shot at 0.3 s, then still to 1.8 s, 1.8-2.3 s 1 m back, 2.3-2.8 s turn
-				// 90 degrees, 2.8-4.0 s an arc of 3 m, 4.0-4.8 s 2 m back.
+				// The walk (the owner's 23.10 video): 0-0.6 s ahead at 3 m/s, a shot 25 degrees down at 0.3 s, still to 1.2 s,
+				// then a half circle of 1.5 m round the gas at 4.4 m/s looking at it (through its edge), then still to 8 s.
 				FVector Velocity = FVector::ZeroVector;
 				FRotator View = Look;
+				View.Pitch = -25.0f;
 				if (T <= 0.6f) { Velocity = Ahead * 300.0f; }
 				if (T >= 0.3f && !*Fired) { *Fired = true; Pawn->Fire(); }
-				if (T > 1.8f && T <= 2.3f) { Velocity = -Ahead * 200.0f; }
-				if (T > 2.3f) { View.Yaw += 90.0f * FMath::Clamp((T - 2.3f) / 0.5f, 0.0f, 1.0f); }
-				if (T > 2.8f && T <= 4.0f) { const float A = (T - 2.8f) / 1.2f * UE_HALF_PI; Velocity = (Ahead * FMath::Cos(A) + Side * FMath::Sin(A)) * 250.0f; }
-				if (T > 4.0f && T <= 4.8f) { Velocity = -Side * 250.0f; }
+				if (T > 1.2f && T <= 1.2f + UE_PI * 150.0f / 440.0f && !First->IsZero())
+				{
+					const FVector P = Pawn->Body->GetComponentLocation();
+					FVector Off = P - *First;
+					Off.Z = 0.0;
+					const FVector Out = Off.GetSafeNormal();
+					const FVector Tangent = FVector::CrossProduct(FVector::UpVector, Out);
+					Velocity = Tangent * 440.0f + Out * (150.0f - Off.Size()) * 4.0f;
+					View = (-Out).Rotation();
+					View.Pitch = -15.0f;
+				}
+				else if (T > 1.2f)
+				{
+					View = Controller->GetControlRotation();
+				}
 				const FVector Now = Pawn->Body->GetPhysicsLinearVelocity();
 				Pawn->Body->SetPhysicsLinearVelocity(FVector(Velocity.X, Velocity.Y, Now.Z));
 				Controller->SetControlRotation(View);
@@ -2557,15 +2569,20 @@ namespace
 					*Logged = Tick;
 					FVector Centroid, Box;
 					int32 Parcels = 0, Behind = 0;
-					if (Gas->ProbeYoungest(Centroid, Parcels, Behind, Box))
+					float Spread = 0.0f, Half = 0.0f, GridCell = 0.0f;
+					if (Tick == 2 || Tick == 3 || Tick == 4 || Tick == 8)
+					{
+						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s,%s; %s"), T, *Gas->DescribeClouds(), *Gas->TakeCostLine());
+					}
+					if (Gas->ProbeYoungest(Centroid, Parcels, Behind, Box, Spread, Half, GridCell))
 					{
 						if (First->IsZero())
 						{
 							*First = Centroid;
 						}
 						const FVector P = Pawn->Body->GetComponentLocation();
-						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s, centroid %s (%.0f cm from the first), box %s, %d parcels, %d behind a plane, pawn %s at %.0f cm, |v| %.0f"),
-							T, *Centroid.ToCompactString(), FVector::Dist(Centroid, *First), *Box.ToCompactString(), Parcels, Behind, *P.ToCompactString(),
+						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s, centroid %s (%.0f cm from the first), box %s half %.0f cm, grid cell %.0f cm, spread %.0f cm, %d parcels, %d behind a plane, pawn %s at %.0f cm, |v| %.0f"),
+							T, *Centroid.ToCompactString(), FVector::Dist(Centroid, *First), *Box.ToCompactString(), Half, GridCell, Spread, Parcels, Behind, *P.ToCompactString(),
 							FVector::Dist(P, Centroid), Pawn->Body->GetPhysicsLinearVelocity().Size());
 					}
 					else
@@ -2573,14 +2590,14 @@ namespace
 						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s, no cloud"), T);
 					}
 				}
-				static const float ShotAt[] = { 0.4f, 1.6f, 2.35f, 2.85f };
-				static const TCHAR* ShotName[] = { TEXT("0_shot"), TEXT("1_stopped_1s"), TEXT("2_stepped_back"), TEXT("3_turned") };
+				static const float ShotAt[] = { 0.4f, 1.5f, 2.0f, 3.0f };
+				static const TCHAR* ShotName[] = { TEXT("0_shot"), TEXT("1_stopped_1s"), TEXT("2_mid_arc"), TEXT("3_after_arc") };
 				if (*Shots < 4 && T >= ShotAt[*Shots])
 				{
 					Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=OSWalk_%s"), ShotName[*Shots]));
 					++*Shots;
 				}
-				if (T > 5.0f)
+				if (T > 8.0f)
 				{
 					World->GetTimerManager().ClearTimer(*Handle);
 					UE_LOG(LogMindKore, Log, TEXT("Walk probe: done"));

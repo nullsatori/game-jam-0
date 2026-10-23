@@ -193,7 +193,7 @@ public:
 	 * The cloud with most parcels (os.Gas.WalkProbe): its parcels' mass centroid (world), their count, how many are behind one of
 	 * its wall/floor planes, its drawn box's centre (world). Waits for the steps in flight.
 	 */
-	bool ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int32& OutBehind, FVector& OutBox) const;
+	bool ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int32& OutBehind, FVector& OutBox, float& OutSpread, float& OutHalf, float& OutGridCell) const;
 	/** os.Gas.Debug 1: the clouds' boxes, parcels, bodies, tunnels, planes and sources drawn in the world. */
 	void DrawDebug() const;
 

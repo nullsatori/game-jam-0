@@ -61,11 +61,13 @@ namespace
 	constexpr float KeyStrength = 0.014f;
 	constexpr float KeyMax = 3.0f;
 	constexpr float EyeClearCm = 30.0f;
-	constexpr float EvictSeconds = 0.5f;
+	constexpr float EvictSeconds = 1.0f;
 	/** In air: the gun's inherited velocity's time constant; old gas's relaxing to the still room; a body's push share. */
 	constexpr float CarrierSeconds = 0.2f;
 	constexpr float AirRestSeconds = 0.7f;
 	constexpr float BodyShare = 0.5f;
+	/** The share of a moving body's speed its wake gives the gas it parts. */
+	constexpr float WakeShare = 0.2f;
 
 	TAutoConsoleVariable<int32> CVarGasCards(
 		TEXT("os.Gas.Cards"), 0,
@@ -265,7 +267,7 @@ FString UOSGasSubsystem::DescribeClouds() const
 	return Line;
 }
 
-bool UOSGasSubsystem::ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int32& OutBehind, FVector& OutBox) const
+bool UOSGasSubsystem::ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int32& OutBehind, FVector& OutBox, float& OutSpread, float& OutHalf, float& OutGridCell) const
 {
 	WaitAll();
 	const FCloud* Best = nullptr;
@@ -298,6 +300,14 @@ bool UOSGasSubsystem::ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int
 		}
 	}
 	OutCentroid = Mass > 0.0 ? Sum / Mass : Best->Origin;
+	double Far = 0.0;
+	for (const FOSGasParcel& P : Best->Parcels)
+	{
+		Far += FVector::Dist(Best->Origin + FVector(P.P), OutCentroid) * P.Mass;
+	}
+	OutSpread = Mass > 0.0 ? float(Far / Mass) : 0.0f;
+	OutHalf = 0.5f * RenderCells * Best->RenderCellCm;
+	OutGridCell = Best->Grid ? Best->Grid->CellCm : 0.0f;
 	OutParcels = Best->Parcels.Num();
 	OutBox = Best->Origin + FVector(Best->DrawnCentre);
 	return true;
@@ -807,6 +817,8 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 			Cloud.Pending.Wait();
 			Cloud.Pending = UE::Tasks::FTask();
 		}
+		UE_LOG(LogMindKore, Log, TEXT("Gas: a cloud ends at %.2f s (%s), %d parcels"), Cloud.Age,
+			bEvicted ? TEXT("evicted") : bEmpty ? TEXT("empty") : TEXT("its life"), Cloud.Parcels.Num());
 		Cloud.Age = -1.0f;
 		Cloud.Parcels.Reset();
 		Cloud.Incoming.Reset();
@@ -937,8 +949,11 @@ void UOSGasSubsystem::UpdatePost()
 		const FCloud& Cloud = *Drawn[Index];
 		const FVector Centre = Cloud.Origin + FVector(Cloud.DrawnCentre);
 		const float Half = 0.5f * RenderCells * Cloud.RenderCellCm;
-		const float LifeFade = 1.0f - FMath::SmoothStep(0.6f * Cloud.Look.LifeSeconds, Cloud.Look.LifeSeconds, Cloud.Age);
-		const float EvictFade = Cloud.Evict > 0.0f ? Cloud.Evict / EvictSeconds : 1.0f;
+		// The cloud melts from 0.3 of its life: the density's gain as the cube of the fade, so a thick cloud's opacity
+		// (1 - exp(-density)) falls about evenly instead of holding to the last half second and going at once (owner
+		// 23.10: the veil went in 0.2 s).
+		const float LifeFade = FMath::Cube(1.0f - FMath::SmoothStep(0.3f * Cloud.Look.LifeSeconds, Cloud.Look.LifeSeconds, Cloud.Age));
+		const float EvictFade = Cloud.Evict > 0.0f ? FMath::Cube(Cloud.Evict / EvictSeconds) : 1.0f;
 		// The key light in display terms (the post-process is after the tonemapper): a soft knee, never blown white.
 		const FLinearColor K = Cloud.KeyColour;
 		const FLinearColor Key(1.0f - FMath::Exp(-K.R * 0.8f), 1.0f - FMath::Exp(-K.G * 0.8f), 1.0f - FMath::Exp(-K.B * 0.8f));
@@ -1117,7 +1132,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				Lo3 = Lo3.ComponentMin(P.P);
 				Hi3 = Hi3.ComponentMax(P.P);
 			}
-			G.CellCm = FMath::Clamp((Hi3 - Lo3).GetMax() / (VelocityCells - 2), VelocityCellCm, 40.0f);
+			G.CellCm = FMath::Clamp((Hi3 - Lo3).GetMax() / (VelocityCells - 2), VelocityCellCm, Cloud.bAir ? 12.0f : 40.0f);
 		}
 		const float GridCell = G.CellCm;
 		{
@@ -1254,12 +1269,28 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					const float D = Off.Size();
 					if (D < Reach)
 					{
-						const FVector3f Out = Off.GetSafeNormal(UE_SMALL_NUMBER, FVector3f::UpVector);
-						P.P += Out * (Reach - D) * 0.6f;
-						const float Push = BodyShare * (M.Velocity | Out) - (P.V | Out);
-						if (Push > 0.0f)
+						// A moving body: out sideways of its motion, so the gas slides round it and stays behind (pushed
+						// out along the motion it rode ahead of the body every step). A still one: straight out.
+						const float BodySpeed = M.Velocity.Size();
+						FVector3f Out = Off.GetSafeNormal(UE_SMALL_NUMBER, FVector3f::UpVector);
+						if (BodySpeed > 20.0f)
 						{
-							P.V += Out * Push;
+							const FVector3f Along = M.Velocity / BodySpeed;
+							FVector3f Side = Off - Along * (Off | Along);
+							if (Side.SizeSquared() < 1.0f)
+							{
+								Side = Along.Cross(FVector3f::UpVector);
+								Side = Side.SizeSquared() < 1e-3f ? FVector3f::ForwardVector : Side;
+							}
+							Out = Side.GetSafeNormal();
+							const float Wide = FMath::Sqrt(FMath::Max(Reach * Reach - FMath::Square(Off | Along), 0.0f));
+							P.P += Out * FMath::Max(Wide - (Off - Along * (Off | Along)).Size(), 0.0f) * 0.6f;
+							// The wake: a little of the body's speed, and out to the side as it parts.
+							P.V += (M.Velocity * WakeShare - P.V) * 0.3f + Out * FMath::Min(BodySpeed * 0.15f, 40.0f);
+						}
+						else
+						{
+							P.P += Out * (Reach - D) * 0.6f;
 						}
 					}
 				}
@@ -1364,10 +1395,14 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	Spread /= FMath::Max(Mass, 1e-3f);
 	// The box: the frame round every parcel with its reach, 10% more; it grows and shrinks with the gas, never jumps
 	// (owner 23.10: «респавнится у оружия», «кубом обрезается»). Its cell: the size over 48, 2 to 8 cm.
-	(void)Spread;
+	const float FarCm = FMath::Max(3.0f * Spread, 40.0f);
 	FVector3f BoxLo(1e9f), BoxHi(-1e9f);
 	for (const FOSGasParcel& P : Parcels)
 	{
+		if (FVector3f::Dist(P.P, Centre) > FarCm)
+		{
+			continue;
+		}
 		const float Reach = FMath::Max(P.RadiusCm, P.V.Size() * 0.08f);
 		BoxLo = BoxLo.ComponentMin(P.P - FVector3f(Reach));
 		BoxHi = BoxHi.ComponentMax(P.P + FVector3f(Reach));
@@ -1669,7 +1704,9 @@ void UOSGasSubsystem::FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey
 	{
 		UPrimitiveComponent* Body = Hit.GetComponent();
 		const float Radius = Body ? Body->Bounds.SphereRadius : 0.0f;
-		if (!Body || Radius < 1.0f || Radius > 400.0f || Cloud.NextMovers.Num() >= 8)
+		// Not a spent case or a shard (under 6 cm): a case ejected through the fresh jet stirred it wider the higher the
+		// frame rate (os.Gas.WalkProbe at 240 FPS: spread 35 cm against 21 at 60).
+		if (!Body || Radius < 6.0f || Radius > 400.0f || Cloud.NextMovers.Num() >= 8)
 		{
 			continue;
 		}
@@ -1693,7 +1730,7 @@ void UOSGasSubsystem::FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey
 			FOSSmokeSim::FMover& M = Cloud.NextMovers.AddDefaulted_GetRef();
 			M.Centre = FVector3f(At - Cloud.Origin);
 			M.RadiusCm = FMath::Clamp(CapsuleRadius, 15.0f, 45.0f);
-			M.Velocity = FVector3f(Velocity.GetClampedToMaxSize(1500.0f));
+			M.Velocity = FVector3f(Velocity.GetClampedToMaxSize(1500.0f)) * 0.25f;
 			continue;
 		}
 		const bool bBig = Radius > 90.0f;
