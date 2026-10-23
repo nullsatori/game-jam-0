@@ -962,8 +962,8 @@ void UOSLaserSightComponent::DrawHud(AHUD& Hud, UCanvas& Canvas)
 		const float Drive = FMath::Clamp(DotDrive, 0.0f, 1.2f);
 		// The disc's metric: u, v along the axes; the core falls off past the rim, the glow wider.
 		const double Det = AxisU.X * AxisV.Y - AxisU.Y * AxisV.X;
-		const float Reach = float(FMath::Max(AxisU.Size(), AxisV.Size())) + 3.0f * GlowTexels;
-		const int32 Span = FMath::Clamp(FMath::CeilToInt32(Reach), 1, 24);
+		const float DotReach = float(FMath::Max(AxisU.Size(), AxisV.Size())) + 3.0f * GlowTexels;
+		const int32 Span = FMath::Clamp(FMath::CeilToInt32(DotReach), 1, 24);
 		const int32 CX = FMath::FloorToInt32(float(Centre.X));
 		const int32 CY = FMath::FloorToInt32(float(Centre.Y));
 		for (int32 Y = CY - Span; Y <= CY + Span; ++Y)
