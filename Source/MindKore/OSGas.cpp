@@ -63,7 +63,7 @@ namespace
 	constexpr float EyeClearCm = 30.0f;
 	constexpr float EvictSeconds = 1.0f;
 	/** In air: the gun's inherited velocity's time constant; old gas's relaxing to the still room; a body's push share. */
-	constexpr float CarrierSeconds = 0.2f;
+	constexpr float CarrierSeconds = 0.08f;
 	constexpr float AirRestSeconds = 0.7f;
 	constexpr float BodyShare = 0.5f;
 	/** The share of a moving body's speed its wake gives the gas it parts. */
@@ -267,7 +267,7 @@ FString UOSGasSubsystem::DescribeClouds() const
 	return Line;
 }
 
-bool UOSGasSubsystem::ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int32& OutBehind, FVector& OutBox, float& OutSpread, float& OutHalf, float& OutGridCell) const
+bool UOSGasSubsystem::ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int32& OutBehind, FVector& OutBox, float& OutSpread, float& OutHalf, float& OutGridCell, float& OutOldSpeed) const
 {
 	WaitAll();
 	const FCloud* Best = nullptr;
@@ -307,6 +307,23 @@ bool UOSGasSubsystem::ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int
 	}
 	OutSpread = Mass > 0.0 ? float(Far / Mass) : 0.0f;
 	OutHalf = 0.5f * RenderCells * Best->RenderCellCm;
+	// Old gas (over 0.5 s) away from bodies (over 40 cm): its mean speed.
+	double OldSum = 0.0;
+	int32 OldCount = 0;
+	for (const FOSGasParcel& P : Best->Parcels)
+	{
+		bool bNear = false;
+		for (const FOSSmokeSim::FMover& M : Best->NextMovers)
+		{
+			bNear = bNear || FVector3f::Dist(P.P, M.Centre) < M.RadiusCm + 40.0f;
+		}
+		if (P.Age > 0.5f && !bNear)
+		{
+			OldSum += P.V.Size();
+			++OldCount;
+		}
+	}
+	OutOldSpeed = OldCount ? float(OldSum / OldCount) : 0.0f;
 	OutGridCell = Best->Grid ? Best->Grid->CellCm : 0.0f;
 	OutParcels = Best->Parcels.Num();
 	OutBox = Best->Origin + FVector(Best->DrawnCentre);
@@ -460,6 +477,7 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	}
 	Cloud.Grid->Reset(VelocityCells, VelocityCellCm, Cloud.bAir, FVector3f(Cloud.Gravity.GetSafeNormal()));
 	// The floor and the walls round the birth: planes the gas slides on (Visibility; a few traces, once).
+	Cloud.bGridAnchored = false;
 	Cloud.Planes.Reset();
 	Cloud.PlaneBoxes.Reset();
 	// 16 ways round, up and down, 4 m; static and dynamic geometry (a window's glass does not block Visibility), no
@@ -869,9 +887,10 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 	Cloud.StepCarry += DeltaTime;
 	if (!bBusy)
 	{
-		// 60 Hz to 0.5 s, 30 Hz to 1 s, 15 Hz to 3 s, 10 Hz after (old gas moves slowly).
+		// 60 Hz to 0.5 s, 30 Hz after.
 		const float Since = Cloud.Age - Cloud.StepCarry;
-		const float Dt = Since < FastSeconds ? FastStep : Since < 1.0f ? SlowStep : Since < 3.0f ? 1.0f / 15.0f : 0.1f;
+		// 30 Hz at least: at 15 and 10 Hz the gas moved in visible jumps (owner 23.10: «рывками»).
+		const float Dt = Since < FastSeconds ? FastStep : SlowStep;
 		const int32 Steps = FMath::Min(FMath::FloorToInt(Cloud.StepCarry / Dt + 1e-3f), 4);
 		if (Steps > 0)
 		{
@@ -1140,7 +1159,9 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				Lo3 = Lo3.ComponentMin(P.P);
 				Hi3 = Hi3.ComponentMax(P.P);
 			}
-			G.CellCm = FMath::Clamp((Hi3 - Lo3).GetMax() / (VelocityCells - 2), VelocityCellCm, Cloud.bAir ? 12.0f : 40.0f);
+			// In air a fixed 12 cm cell (a cell changing with the spread resampled the flow every step); in a vacuum it
+			// follows the cone's length.
+			G.CellCm = Cloud.bAir ? 12.0f : FMath::Clamp((Hi3 - Lo3).GetMax() / (VelocityCells - 2), VelocityCellCm, 40.0f);
 		}
 		const float GridCell = G.CellCm;
 		{
@@ -1152,6 +1173,13 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				Mass += P.Mass;
 			}
 			GridCentre = SnapTo(GridCentre / FMath::Max(Mass, 1e-3f), GridCell);
+			// Anchored: the grid moves only when the gas's mass centre leaves 3 cells round it, by whole cells.
+			if (Cloud.bAir && Cloud.bGridAnchored && (GridCentre - Cloud.GridAnchor).GetAbsMax() <= 3.0f * GridCell)
+			{
+				GridCentre = Cloud.GridAnchor;
+			}
+			Cloud.GridAnchor = GridCentre;
+			Cloud.bGridAnchored = true;
 			const FVector3f GridWorld = Origin + GridCentre;
 			G.Planes.Reset();
 			const FBox GridBox = FBox::BuildAABB(FVector(GridWorld), FVector(0.5f * N * GridCell));
@@ -1229,7 +1257,16 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				// The ring keeps its spin its first 0.3 s: all FLIP, no drag.
 				const bool bYoung = P.Age < 0.3f;
 				const float Share = bYoung ? 1.0f : Flip;
-				P.V = (P.V + New - Old) * Share + New * (1.0f - Share);
+				if (Cloud.bAir && P.Age > 0.5f)
+				{
+					// Old gas in air takes a little of the flow (PIC, 15% a step), not the young jet's changes (FLIP
+					// handed the jet's push to all of it: the whole cloud went in one piece, «магнитит»).
+					P.V += (New - P.V) * 0.15f;
+				}
+				else
+				{
+					P.V = (P.V + New - Old) * Share + New * (1.0f - Share);
+				}
 				// One drag in air: the grid's (tau 0.6 s); none of the parcel's own (it stopped the ring dead, «тормозит»).
 				const float Hold = 0.0f;
 				P.V += (New - P.V) * Hold;
@@ -1419,9 +1456,23 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	{
 		BoxLo = BoxHi = Centre;
 	}
-	const float Cell = FMath::Clamp((BoxHi - BoxLo).GetMax() * 1.1f / N, 2.0f, 8.0f);
+	float Cell = FMath::Clamp((BoxHi - BoxLo).GetMax() * 1.1f / N, 2.0f, 8.0f);
 	const FVector3f MassCentre = Centre;
 	Centre = SnapTo((BoxLo + BoxHi) * 0.5f, 0.5f);
+	// Hysteresis: the last box stays while the gas fits it and its cell is within -20%/+25% of the new one - every
+	// re-box resamples the gas onto other cells, and a re-box each step made the cloud swell in jumps (owner 23.10:
+	// «скачками расширяется»).
+	{
+		const float OldCell = Cloud.PackedCellCm;
+		const FVector3f OldCentre = Cloud.PackedCentre;
+		const float OldHalf = 0.5f * N * OldCell;
+		const bool bFits = (BoxLo - (OldCentre - FVector3f(OldHalf))).GetMin() >= 0.0f && ((OldCentre + FVector3f(OldHalf)) - BoxHi).GetMin() >= 0.0f;
+		if (Cloud.bHasGas && bFits && OldCell >= 0.8f * Cell && OldCell <= 1.25f * Cell)
+		{
+			Cell = OldCell;
+			Centre = OldCentre;
+		}
+	}
 	const float Half = 0.5f * N * Cell;
 	// Each parcel's light: the others in front of it toward the key light (a cylinder of their summed radii).
 	const FVector3f Key = Cloud.KeyDir;

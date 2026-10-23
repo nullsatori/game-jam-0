@@ -433,7 +433,9 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
 	{
 		// v11: every vent is a gas source; the muzzle's card stream only with os.Gas.Cards 1.
-		const FVector Carrier = GetOwner()->GetVelocity();
+		// The gun's velocity the gas takes: whole in a vacuum, a quarter in air - the still air takes the rest at once
+		// (walking back while shooting, the whole jet flew back at the shooter: owner 23.10).
+		const FVector Carrier = GetOwner()->GetVelocity() * (OSAirZoneAt(GetWorld(), Muzzle.GetLocation()) ? 0.25f : 1.0f);
 		for (const FOSGasVent& Vent : Def.GasVents)
 		{
 			if (!Vent.bJet && !Vent.bCling)
@@ -571,7 +573,7 @@ void UOSMuzzleFxComponent::Seep(const FOSWeapon& Def, const FTransform& Muzzle, 
 			FOSGasRecipe R = VentRecipe(Vent);
 			R.SpeedCm *= 0.1f;
 			R.Mass = 0.15f;
-			Gas->EmitNow(R, GunSmoke(), Frame.TransformPosition(Vent.Location), Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()), GetOwner()->GetVelocity(), 1);
+			Gas->EmitNow(R, GunSmoke(), Frame.TransformPosition(Vent.Location), Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()), GetOwner()->GetVelocity() * (OSAirZoneAt(GetWorld(), Frame.GetLocation()) ? 0.25f : 1.0f), 1);
 		}
 		if (!OSGasCardsEnabled())
 		{
@@ -2563,7 +2565,9 @@ namespace
 			// [after s]: starts that many seconds later (the pawn spawned, the shaders warm).
 			const float Delay = Args.Num() > 0 ? FMath::Max(FCString::Atof(*Args[0]), 0.01f) : 0.01f;
 			FTimerHandle Later;
-			World->GetTimerManager().SetTimer(Later, FTimerDelegate::CreateLambda([World]()
+			// [after s] back: walking back at 4 m/s, five shots 0.3 s apart (owner 23.10: the gas flew at him).
+			const bool bBack = Args.Num() > 1 && Args[1] == TEXT("back");
+			World->GetTimerManager().SetTimer(Later, FTimerDelegate::CreateLambda([World, bBack]()
 			{
 			APlayerController* Controller = World->GetFirstPlayerController();
 			AOSZeroGPawn* Pawn = Controller ? Cast<AOSZeroGPawn>(Controller->GetPawn()) : nullptr;
@@ -2581,8 +2585,14 @@ namespace
 			TSharedRef<int32> Logged = MakeShared<int32>(-1);
 			TSharedRef<int32> Shots = MakeShared<int32>(0);
 			TSharedRef<bool> Fired = MakeShared<bool>(false);
+			// Per frame: the largest jump of the centroid and of the drawn box (same cloud), and the farthest the
+			// centroid came toward the pawn's start.
+			TSharedRef<FVector4> Jumps = MakeShared<FVector4>(0.0, 0.0, 0.0, 0.0);
+			TSharedRef<FVector> LastC = MakeShared<FVector>(FVector::ZeroVector);
+			TSharedRef<FVector> LastB = MakeShared<FVector>(FVector::ZeroVector);
+			TSharedRef<int32> LastN = MakeShared<int32>(0);
 			TSharedRef<FTimerHandle> Handle = MakeShared<FTimerHandle>();
-			World->GetTimerManager().SetTimer(*Handle, FTimerDelegate::CreateLambda([World, Handle, Controller, Pawn, Gas, Start, Home, Look, First, Logged, Shots, Fired]()
+			World->GetTimerManager().SetTimer(*Handle, FTimerDelegate::CreateLambda([World, Handle, Controller, Pawn, Gas, Start, Home, Look, First, Logged, Shots, Fired, bBack, Jumps, LastC, LastB, LastN]()
 			{
 				const float T = float(World->GetTimeSeconds() - Start);
 				const FVector Ahead = FRotator(0.0f, Look.Yaw, 0.0f).Vector();
@@ -2593,7 +2603,7 @@ namespace
 				FRotator View = Look;
 				View.Pitch = -25.0f;
 				if (T <= 0.6f) { Velocity = Ahead * 300.0f; }
-				if (T >= 0.3f && !*Fired) { *Fired = true; Pawn->Fire(); }
+				if (T >= 0.3f && !*Fired) { *Fired = true; if (!bBack) { Pawn->Fire(); } }
 				if (T > 1.2f && T <= 1.2f + UE_PI * 150.0f / 440.0f && !First->IsZero())
 				{
 					const FVector P = Pawn->Body->GetComponentLocation();
@@ -2609,29 +2619,58 @@ namespace
 				{
 					View = Controller->GetControlRotation();
 				}
+				if (bBack)
+				{
+					View = Look;
+					Velocity = T <= 2.0f ? -Ahead * 400.0f : FVector::ZeroVector;
+					static int32 BackShots = 0;
+					if (T < 0.1f) { BackShots = 0; }
+					if (BackShots < 5 && T >= 0.3f + 0.3f * BackShots) { ++BackShots; Pawn->Fire(); }
+				}
 				const FVector Now = Pawn->Body->GetPhysicsLinearVelocity();
 				Pawn->Body->SetPhysicsLinearVelocity(FVector(Velocity.X, Velocity.Y, Now.Z));
 				Controller->SetControlRotation(View);
+				{
+					FVector C, B;
+					int32 N = 0, Behind = 0;
+					float Sp = 0.0f, Hf = 0.0f, Gc = 0.0f, Old = 0.0f;
+					if (Gas->ProbeYoungest(C, N, Behind, B, Sp, Hf, Gc, Old))
+					{
+						if (*LastN > 0 && FMath::Abs(N - *LastN) < FMath::Max(3, *LastN / 10))
+						{
+							Jumps->X = FMath::Max(Jumps->X, FVector::Dist(C, *LastC));
+							Jumps->Y = FMath::Max(Jumps->Y, FVector::Dist(B, *LastB));
+						}
+						if (!First->IsZero())
+						{
+							// Toward the pawn's start (the shooter walks back from there): + is toward him.
+							Jumps->Z = FMath::Max(Jumps->Z, (C - *First) | (Home - *First).GetSafeNormal2D());
+						}
+						*LastC = C;
+						*LastB = B;
+						*LastN = N;
+					}
+				}
 				const int32 Tick = FMath::FloorToInt(T / 0.25f);
 				if (Tick != *Logged)
 				{
 					*Logged = Tick;
 					FVector Centroid, Box;
 					int32 Parcels = 0, Behind = 0;
-					float Spread = 0.0f, Half = 0.0f, GridCell = 0.0f;
+					float Spread = 0.0f, Half = 0.0f, GridCell = 0.0f, OldSpeed = 0.0f;
 					if (Tick == 2 || Tick == 3 || Tick == 4 || Tick == 8)
 					{
 						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s,%s; %s"), T, *Gas->DescribeClouds(), *Gas->TakeCostLine());
 					}
-					if (Gas->ProbeYoungest(Centroid, Parcels, Behind, Box, Spread, Half, GridCell))
+					if (Gas->ProbeYoungest(Centroid, Parcels, Behind, Box, Spread, Half, GridCell, OldSpeed))
 					{
 						if (First->IsZero())
 						{
 							*First = Centroid;
 						}
 						const FVector P = Pawn->Body->GetComponentLocation();
-						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s, centroid %s (%.0f cm from the first), box %s half %.0f cm, grid cell %.0f cm, spread %.0f cm, %d parcels, %d behind a plane, pawn %s at %.0f cm, |v| %.0f"),
-							T, *Centroid.ToCompactString(), FVector::Dist(Centroid, *First), *Box.ToCompactString(), Half, GridCell, Spread, Parcels, Behind, *P.ToCompactString(),
+						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s, centroid %s (%.0f cm from the first), box %s half %.0f cm, grid cell %.0f cm, spread %.0f cm, old gas %.0f cm/s, %d cloud(s), %d parcels, %d behind a plane, pawn %s at %.0f cm, |v| %.0f"),
+							T, *Centroid.ToCompactString(), FVector::Dist(Centroid, *First), *Box.ToCompactString(), Half, GridCell, Spread, OldSpeed, Gas->GetCloudCount(), Parcels, Behind, *P.ToCompactString(),
 							FVector::Dist(P, Centroid), Pawn->Body->GetPhysicsLinearVelocity().Size());
 					}
 					else
@@ -2649,6 +2688,7 @@ namespace
 				if (T > 8.0f)
 				{
 					World->GetTimerManager().ClearTimer(*Handle);
+					UE_LOG(LogMindKore, Log, TEXT("Walk probe: largest jump a frame - centroid %.1f cm, box %.1f cm; the centroid came %.0f cm toward the shooter's start"), Jumps->X, Jumps->Y, Jumps->Z);
 					UE_LOG(LogMindKore, Log, TEXT("Walk probe: done"));
 				}
 			}), 0.001f, true);

@@ -198,7 +198,7 @@ public:
 	 * The cloud with most parcels (os.Gas.WalkProbe): its parcels' mass centroid (world), their count, how many are behind one of
 	 * its wall/floor planes, its drawn box's centre (world). Waits for the steps in flight.
 	 */
-	bool ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int32& OutBehind, FVector& OutBox, float& OutSpread, float& OutHalf, float& OutGridCell) const;
+	bool ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int32& OutBehind, FVector& OutBox, float& OutSpread, float& OutHalf, float& OutGridCell, float& OutOldSpeed) const;
 	/** os.Gas.Debug 1: the clouds' boxes, parcels, bodies, tunnels, planes and sources drawn in the world. */
 	void DrawDebug() const;
 
@@ -248,6 +248,9 @@ private:
 		/** Each plane's surface's bounds (+10 cm): the plane holds only inside them. */
 		TArray<FBox> PlaneBoxes;
 		TUniquePtr<FOSSmokeSim> Grid;
+		/** The velocity grid's centre (origin frame): kept while the gas's mass centre is within 3 cells of it. */
+		FVector3f GridAnchor = FVector3f::ZeroVector;
+		bool bGridAnchored = false;
 		bool bAir = true;
 		FVector Gravity = FVector::ZeroVector;
 		float Age = -1.0f;
