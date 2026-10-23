@@ -539,6 +539,7 @@ void UOSGasSubsystem::Emit(FCloud& Cloud, const FOSGasRecipe& R, const FVector& 
 		P.Heat = R.Heat;
 		P.Life = R.LifeSeconds * FMath::FRandRange(0.8f, 1.2f);
 		P.Cling = R.ClingSeconds;
+		P.MaxRadiusCm = R.MaxRadiusCm;
 		P.Seed = FMath::Rand();
 	}
 }
@@ -550,7 +551,7 @@ int32 UOSGasSubsystem::AddSource(const FOSGasRecipe& Recipe, const FOSGasLook& L
 	Source.Id = NextSourceId++;
 	Source.Recipe = Recipe;
 	// In a vacuum the recipe's vacuum release: longer, even, bigger parcels.
-	if (Recipe.VacuumBurstCount > 0 && OSAirZoneAt(GetWorld(), Where) == nullptr)
+	if (Recipe.VacuumBurstCount > 0 && OSAirZoneAt(GetWorld(), Attach ? Attach->GetComponentTransform().TransformPosition(Where) : Where) == nullptr)
 	{
 		Source.Recipe.BurstCount = Recipe.VacuumBurstCount;
 		Source.Recipe.BurstSeconds = Recipe.VacuumBurstSeconds;
@@ -567,6 +568,13 @@ int32 UOSGasSubsystem::AddSource(const FOSGasRecipe& Recipe, const FOSGasLook& L
 	Source.bAttached = Attach != nullptr;
 	Source.BurstOwed = float(Used.BurstCount);
 	Source.BurstLeft = Used.BurstCount > 0 ? FMath::Max(Used.BurstSeconds, 1e-3f) : 0.0f;
+	// An attached source's Where and Direction are in its parent's space: its first parcels go out in the world.
+	FVector WorldWhere = Where, WorldDirection = Direction;
+	if (Attach)
+	{
+		WorldWhere = Attach->GetComponentTransform().TransformPosition(Where);
+		WorldDirection = Attach->GetComponentTransform().TransformVectorNoScale(Direction);
+	}
 	if (Used.BurstCount > 0)
 	{
 		// The first frame's share now, stamped into the atlas on the game thread this frame (TickCloud).
@@ -574,9 +582,9 @@ int32 UOSGasSubsystem::AddSource(const FOSGasRecipe& Recipe, const FOSGasLook& L
 		// At most 20 on the game thread (the rest from the next step on: no hitch).
 		const int32 Now = FMath::Clamp(FMath::RoundToInt(Source.BurstOwed * Frame), 1, 20);
 		Source.BurstOwed = FMath::Max(0.0f, Source.BurstOwed - Now);
-		Source.Cloud = CloudFor(Look, Where, Used.BurstCount >= 20 ? -1.0f : 0.3f);
+		Source.Cloud = CloudFor(Look, WorldWhere, Used.BurstCount >= 20 ? -1.0f : 0.3f);
 		FCloud& Cloud = Clouds[Source.Cloud];
-		Emit(Cloud, Used, Where, Direction, CarrierVelocity, Now);
+		Emit(Cloud, Used, WorldWhere, WorldDirection, CarrierVelocity, Now);
 		Cloud.bStamp = true;
 	}
 	return Source.Id;
@@ -876,8 +884,8 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		FVector3f Dir;
 		FLinearColor Colour;
 		PickKey(Centre, Dir, Colour);
-		// Half white: a saturated lamp (the planetoid's red rock light) does not tint the gas whole.
-		Colour = FMath::Lerp(Colour, FLinearColor(Colour.GetLuminance(), Colour.GetLuminance(), Colour.GetLuminance()), 0.5f);
+		// 80% white: a saturated lamp (the planetoid's red rock light) barely tints the gas (it turned it brown).
+		Colour = FMath::Lerp(Colour, FLinearColor(Colour.GetLuminance(), Colour.GetLuminance(), Colour.GetLuminance()), 0.8f);
 		const float Ease = 1.0f - FMath::Exp(-DeltaTime / 0.25f);
 		Cloud.KeyDir = (Cloud.KeyDir + (Dir - Cloud.KeyDir) * Ease).GetSafeNormal(UE_SMALL_NUMBER, Dir);
 		Cloud.KeyColour = Cloud.KeyColour + (Colour - Cloud.KeyColour) * Ease;
@@ -890,8 +898,8 @@ void UOSGasSubsystem::AmbientFor(bool bAir, FLinearColor& OutTop, FLinearColor& 
 	// ponytail: by the map's name until the zones carry their own (stage 4: a field on the air zone).
 	if (!bAir)
 	{
-		OutTop = FLinearColor(0.16f, 0.16f, 0.20f);
-		OutBottom = FLinearColor(0.07f, 0.07f, 0.10f);
+		OutTop = FLinearColor(0.30f, 0.32f, 0.38f);
+		OutBottom = FLinearColor(0.15f, 0.16f, 0.20f);
 		return;
 	}
 	const FString Map = GetWorld()->GetMapName();
@@ -1257,7 +1265,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			}
 			const float Speed = P.V.Size();
 			P.P += P.V * Dt;
-			P.RadiusCm = Cloud.bAir ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, 14.0f) : P.RadiusCm + VacuumGrowPerCm * Speed * Dt;
+			P.RadiusCm = Cloud.bAir ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, P.MaxRadiusCm) : P.RadiusCm + VacuumGrowPerCm * Speed * Dt;
 			P.Heat *= FMath::Exp(-Dt / HeatSeconds);
 			// Bodies push it out of themselves (within two steps) at their own speed.
 			for (const FOSSmokeSim::FMover& M : Cloud.Movers)
@@ -1628,7 +1636,8 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 				}
 				const float Dens = FMath::Min(D[I] * DensityGain, 1.0f);
 				const float Around = At(X + 2, Y, Z) + At(X - 2, Y, Z) + At(X, Y + 2, Z) + At(X, Y - 2, Z) + At(X, Y, Z + 2) + At(X, Y, Z - 2);
-				const float Heat = W[I] > 1e-4f ? H[I] / W[I] : 0.0f;
+				// The warm core only while the gas is hot (heat over 0.3: its first 0.3-0.5 s), not a brown tint after.
+				const float Heat = W[I] > 1e-4f ? FMath::Clamp((H[I] / W[I] - 0.3f) / 0.7f, 0.0f, 1.0f) : 0.0f;
 				// The key light's shadow through the drawn gas itself (1-12 cells toward it, as the old grid's Pack): a
 				// lit flank and a dark belly - the relief (owner 23.10: «недостаточно рельефным»). The parcels' own
 				// light (L / W) shades it further.

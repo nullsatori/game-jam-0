@@ -351,6 +351,24 @@ namespace
 		return FOSGasLook();
 	}
 
+	/** The pistol's wisp after a shot: 10 small parcels over 1 s from the muzzle, almost still, rising. */
+	FOSGasRecipe PistolWisp()
+	{
+		FOSGasRecipe R;
+		R.BurstCount = 10;
+		R.BurstSeconds = 1.0f;
+		R.SpeedCm = 12.0f;
+		R.SpeedMin = 0.3f;
+		R.ConeDeg = 25.0f;
+		R.RadiusMinCm = 0.8f;
+		R.RadiusMaxCm = 1.4f;
+		R.MaxRadiusCm = 6.0f;
+		R.Mass = 0.5f;
+		R.Heat = 0.4f;
+		R.LifeSeconds = 2.5f;
+		return R;
+	}
+
 	FOSGasRecipe VentRecipe(const FOSGasVent& Vent)
 	{
 		FOSGasRecipe R;
@@ -366,6 +384,23 @@ namespace
 			// More, smaller parcels (owner 23.10: «набор шаров»): 160 at most, 2-4 cm in air, 4-6 in a vacuum.
 			R.RadiusMinCm = 2.0f;
 			R.RadiusMaxCm = 4.0f;
+			// A narrow muzzle (WidthCm under 3, the pistol): a thin stream, not a puff (owner 23.10: «у пистолета дым должен
+			// выходить более тонкой струйкой») - 25 parcels over 0.06 s, 1-2 cm growing to 6, no ring, 3 s; its
+			// lingering wisp from the muzzle is PistolWisp.
+			if (Vent.WidthCm < 3.0f)
+			{
+				R.BurstCount = 25;
+				R.BurstSeconds = 0.06f;
+				R.VacuumBurstCount = 30;
+				R.RingCm = 0.0f;
+				R.RadiusMinCm = 1.0f;
+				R.RadiusMaxCm = 2.0f;
+				R.VacuumRadiusMinCm = 2.0f;
+				R.VacuumRadiusMaxCm = 3.0f;
+				R.MaxRadiusCm = 6.0f;
+				R.SpeedMin = 0.5f;
+				R.LifeSeconds = 3.0f;
+			}
 			R.VacuumBurstCount = FMath::Clamp(FMath::RoundToInt(Vent.Rate * 230.0f), 40, 160);
 			R.VacuumBurstSeconds = 0.15f;
 			R.VacuumSpeedMin = 0.4f;
@@ -408,6 +443,20 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 			const bool bOnAction = Vent.Space == EOSVentSpace::Action && Action;
 			const FTransform Frame = bOnAction ? Action->GetComponentTransform() : Muzzle;
 			Gas->AddSource(VentRecipe(Vent), GunSmoke(), Frame.TransformPosition(Vent.Location), Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()), Carrier);
+			// A narrow muzzle's lingering wisp: up out of the muzzle for a second, following the gun.
+			if (Vent.bJet && Vent.WidthCm < 3.0f)
+			{
+				const FVector Up = -OSGravityAt(GetWorld(), Frame.GetLocation()).Acceleration.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+				if (Action)
+				{
+					const FTransform ActionFrame = Action->GetComponentTransform();
+					Gas->AddSource(PistolWisp(), GunSmoke(), ActionFrame.InverseTransformPosition(Frame.TransformPosition(Vent.Location)), ActionFrame.InverseTransformVectorNoScale(Up), FVector::ZeroVector, Action);
+				}
+				else
+				{
+					Gas->AddSource(PistolWisp(), GunSmoke(), Frame.TransformPosition(Vent.Location), Up, FVector::ZeroVector);
+				}
+			}
 		}
 		if (!OSGasCardsEnabled())
 		{

@@ -119,6 +119,10 @@ struct FOSGasRecipe
 	/** A parcel's life, s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.1"))
 	float LifeSeconds = 6.0f;
+
+	/** In air a parcel grows to this radius at most, cm (a thin wisp stays thin). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.5"))
+	float MaxRadiusCm = 14.0f;
 };
 
 /** One parcel of gas, box... cloud-origin frame (cm, world axes). */
@@ -137,6 +141,7 @@ struct FOSGasParcel
 	float Age = 0.0f;
 	float Life = 6.0f;
 	float Cling = 0.0f;
+	float MaxRadiusCm = 14.0f;
 	uint32 Seed = 0;
 };
 

@@ -283,13 +283,15 @@ UOSWeaponsComponent::UOSWeaponsComponent()
 	// (SpeedCm x DecaySeconds: the shotgun's ~1.05 m; further than a real one, the art first).
 	// v11 (Docs/RecoilWeapons-SmokeV11.md): the jets are parcel bursts - SpeedCm the fastest parcel (U(0.3, 1) of it),
 	// Rate x 110 the parcels; Seconds and DecaySeconds no longer shape them.
-	Pistol.GasVents = { Vent(FVector::ForwardVector, true, 0.15f, 0.05f, 320.0f, 8.0f, 0.5f, 2.5f),
+	// The pistol's jet: a thin stream, a 4 degree cone (its count and size: VentRecipe, WidthCm under 3; owner 23.10).
+	Pistol.GasVents = { Vent(FVector::ForwardVector, true, 0.15f, 0.05f, 320.0f, 4.0f, 0.3f, 2.5f),
 		Vent(FVector::ForwardVector, false, 0.1f, 0.04f, 150.0f, 10.0f, 40.0f, 1.0f) };
 	Shotgun.GasVents = { Vent(FVector::ForwardVector, true, 0.2f, 0.07f, 450.0f, 6.0f, 0.7f, 6.0f),
 		Vent(FVector::ForwardVector, false, 0.12f, 0.05f, 220.0f, 8.0f, 60.0f, 1.5f) };
-	Sniper.GasVents = { Vent(FVector::ForwardVector, true, 0.15f, 0.05f, 400.0f, 4.0f, 0.4f, 3.0f),
-		Vent(FVector(-0.35f, 1.0f, 0.0f), true, 0.15f, 0.05f, 350.0f, 10.0f, 0.35f, 4.0f),
-		Vent(FVector(-0.35f, -1.0f, 0.0f), true, 0.15f, 0.05f, 350.0f, 10.0f, 0.35f, 4.0f),
+	// The SV-98 between the pistol and the shotgun: 46 parcels ahead and 40 out of each brake port (was 92 + 2 x 81).
+	Sniper.GasVents = { Vent(FVector::ForwardVector, true, 0.15f, 0.05f, 400.0f, 4.0f, 0.2f, 3.0f),
+		Vent(FVector(-0.35f, 1.0f, 0.0f), true, 0.15f, 0.05f, 350.0f, 10.0f, 0.17f, 4.0f),
+		Vent(FVector(-0.35f, -1.0f, 0.0f), true, 0.15f, 0.05f, 350.0f, 10.0f, 0.17f, 4.0f),
 		Vent(FVector::ForwardVector, false, 0.1f, 0.04f, 220.0f, 6.0f, 40.0f, 1.0f) };
 	// The muzzle streams' wisps: thin, short-lived.
 	for (FOSWeapon* Gun : { &Pistol, &Shotgun, &Sniper })
