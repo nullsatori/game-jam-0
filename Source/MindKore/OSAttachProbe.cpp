@@ -215,9 +215,10 @@ namespace OSAttachProbe
 		{
 			Guns->Weapons[0].Ammo = 5;
 			Guns->Reload();
-			After(Pawn, 0.1f, [Pawn, Menu, R]()
+			// Tab opens the menu only once held past the tap (AOSZeroGPawn::MenuTapSeconds): look 0.3 s on.
+			After(Pawn, 0.1f, [Pawn]() { Pawn->MenuPressed(); });
+			After(Pawn, 0.4f, [Pawn, Menu, R]()
 			{
-				Pawn->MenuPressed();
 				R->Check(TEXT("Tab in a reload: refused"), Menu->GetLastOutcome() == EOSAttachMenuOutcome::Refused && !Menu->IsActive(), OutcomeName(Menu->GetLastOutcome()));
 				Pawn->MenuReleased();
 			});
@@ -229,7 +230,11 @@ namespace OSAttachProbe
 		{
 			const bool bFired = Pawn->Fire();
 			Pawn->MenuPressed();
-			R->Check(TEXT("Tab in the pump's cycle: waiting"), bFired && Menu->IsActive() && !Menu->IsOpen(), bFired ? TEXT("") : TEXT("the shotgun did not fire"));
+			// Past the tap's hold the menu is asked for - the pump still cycling, it waits.
+			After(Pawn, 0.3f, [Menu, R, bFired]()
+			{
+				R->Check(TEXT("Tab in the pump's cycle: waiting"), bFired && Menu->IsActive() && !Menu->IsOpen(), bFired ? TEXT("") : TEXT("the shotgun did not fire"));
+			});
 			EveryFrame(Pawn, [Pawn, Menu, R]()
 			{
 				if (!Menu->IsOpen())

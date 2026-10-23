@@ -469,6 +469,8 @@ public:
 	/** Tab down / up (the input bindings and the probes). */
 	void MenuPressed();
 	void MenuReleased();
+	/** Tab held: opens the attachment menu once the hold passes MenuTapSeconds (from Tick). */
+	void UpdateMenuHold();
 
 	// --- thrusters and stabiliser ------------------------------------------------
 
@@ -805,8 +807,14 @@ private:
 	void Thrust(const FInputActionValue& Value);
 	void Lift(const FInputActionValue& Value);
 	void PushPressed();
-	/** Real time Tab went down (a tap is shorter than MenuTapSeconds); < 0: up. */
-	double MenuPressedAt = -1.0;
+	/**
+	 * How long Tab has been down, s of undilated frame time (FApp::GetDeltaTime: the same at any frame rate and in
+	 * bullet time); < 0: up. A tap is shorter than MenuTapSeconds; the menu opens only once Tab is held past it
+	 * (owner 23.10: the laser's switch must not flash the menu).
+	 */
+	float MenuHeldSeconds = -1.0f;
+	/** Tab is down and the menu not asked for yet (Tick asks once MenuHeldSeconds passes MenuTapSeconds). */
+	bool bMenuPending = false;
 	/** Stored: Gun, Tool or Held (GetHands reads a Gun with none unlocked as Empty). */
 	EOSHands Hands = EOSHands::Gun;
 	/** What the hands go back to when a held body is let go: Gun or Tool. */

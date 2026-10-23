@@ -1,5 +1,7 @@
 #include "OSZeroGPawn.h"
 
+#include "Misc/App.h"
+
 #include "OSLens.h"
 
 #include "Camera/CameraComponent.h"
@@ -312,25 +314,42 @@ void AOSZeroGPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 
 void AOSZeroGPawn::MenuPressed()
 {
-	MenuPressedAt = GetWorld()->GetRealTimeSeconds();
-	// The gun starts turning at once: a tap brings it back from half-way on its springs, without a jump.
-	if (GetHands() == EOSHands::Gun && Guns->AttachMenu)
+	// Not at once: a tap only throws the switch, and the menu must not flash for it (owner 23.10). Tick opens the
+	// menu once Tab is held past MenuTapSeconds.
+	MenuHeldSeconds = 0.0f;
+	bMenuPending = true;
+}
+
+void AOSZeroGPawn::UpdateMenuHold()
+{
+	if (MenuHeldSeconds < 0.0f)
 	{
-		Guns->AttachMenu->Press();
+		return;
+	}
+	MenuHeldSeconds += float(FApp::GetDeltaTime());
+	if (bMenuPending && MenuHeldSeconds >= MenuTapSeconds)
+	{
+		bMenuPending = false;
+		if (GetHands() == EOSHands::Gun && Guns->AttachMenu)
+		{
+			Guns->AttachMenu->Press();
+		}
 	}
 }
 
 void AOSZeroGPawn::MenuReleased()
 {
-	const bool bTap = MenuPressedAt >= 0.0 && GetWorld()->GetRealTimeSeconds() - MenuPressedAt < MenuTapSeconds;
-	MenuPressedAt = -1.0;
+	// Held long enough the menu was asked for; a release before that is a tap.
+	const bool bTap = MenuHeldSeconds >= 0.0f && bMenuPending;
+	MenuHeldSeconds = -1.0f;
+	bMenuPending = false;
 	if (!Guns->AttachMenu)
 	{
 		return;
 	}
 	if (bTap)
 	{
-		// A tap: the switch of the attachment on the gun (the laser, the torch); the menu begun goes dark unapplied.
+		// A tap: the switch of the attachment on the gun (the laser, the torch); no menu was shown.
 		Guns->AttachMenu->Kill();
 		if (GetHands() == EOSHands::Gun)
 		{
@@ -1954,6 +1973,7 @@ void AOSZeroGPawn::ReviveAt(const FVector& Location)
 void AOSZeroGPawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	UpdateMenuHold();
 	// A held or roped body that stops simulating (a plate tacked by its seam) would hang the pawn on the world: let go.
 	if (GrabbedBody.IsStale() || (GrabbedBody.IsValid() && !GrabbedBody->IsSimulatingPhysics()))
 	{
