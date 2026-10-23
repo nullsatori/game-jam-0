@@ -51,7 +51,7 @@ namespace
 	constexpr float NoiseGain = 1.8f;
 	constexpr float DensityGain = 2.5f;
 	/** A parcel kernel's share of its cell (1: opaque at its core), air and vacuum: tuned to T 0.5 / 0.75 / 0.95 at 0.2 / 1 / 4 s. */
-	constexpr float AirMassScale = 3.0f;
+	constexpr float AirMassScale = 1.2f;
 	constexpr float VacuumMassScale = 0.3f;
 	constexpr float KeyShadow = 0.1f;
 	/** The key light's shadow through the render grid (relief), per unit of drawn density along the way. */
@@ -302,7 +302,12 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 		Cloud.Pending.Wait();
 		Cloud.Pending = UE::Tasks::FTask();
 	}
-	if (!Clouds.ContainsByPredicate([&Cloud](const FCloud& Each) { return !Each.IsAlive() && &Each != &Cloud; }) && Clouds.Num() >= MaxClouds)
+	int32 Free = 0;
+	for (const FCloud& Each : Clouds)
+	{
+		Free += !Each.IsAlive() && &Each != &Cloud ? 1 : 0;
+	}
+	if (Free < 3 && Clouds.Num() >= MaxClouds)
 	{
 		FCloud* Oldest = nullptr;
 		for (FCloud& Each : Clouds)
@@ -917,18 +922,21 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				{
 					const float Overlap = 1.0f - D / Reach;
 					P.Mass *= 1.0f - Overlap;
-					P.V += Off.GetSafeNormal(UE_SMALL_NUMBER, FVector3f::UpVector) * (120.0f * Overlap) + Seg.GetSafeNormal() * (80.0f * Overlap);
+					P.V += Off.GetSafeNormal(UE_SMALL_NUMBER, FVector3f::UpVector) * (120.0f * Overlap);
 				}
 			}
 			else
 			{
 				const FVector3f Off = P.P - A;
 				const float D = Off.Size();
-				if (D < C.RadiusCm)
+				const float Reach = FMath::Min(C.RadiusCm, 60.0f);
+				const FVector3f Normal = B.GetSafeNormal();
+				// Only the hemisphere in front of the surface (the side the blow comes out of), falling off with distance.
+				if (D < Reach && (C.SpeedCm < 0.0f || (Off | Normal) >= -0.2f * D))
 				{
-					const float Fall = 1.0f - D / C.RadiusCm;
-					const FVector3f Out = Off.GetSafeNormal(UE_SMALL_NUMBER, B.GetSafeNormal());
-					P.V += (Out + B.GetSafeNormal() * 0.5f).GetSafeNormal() * (C.SpeedCm * Fall);
+					const float Fall = 1.0f - D / Reach;
+					const FVector3f Out = Off.GetSafeNormal(UE_SMALL_NUMBER, Normal);
+					P.V += Out * (C.SpeedCm * Fall);
 					if (C.SpeedCm > 0.0f)
 					{
 						P.Mass *= 1.0f - 0.4f * Fall;
@@ -1057,24 +1065,8 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			}
 			const float Speed = P.V.Size();
 			P.P += P.V * Dt;
-			P.RadiusCm += Cloud.bAir ? AirGrowCmPerSecond * Dt : VacuumGrowPerCm * Speed * Dt;
+			P.RadiusCm = Cloud.bAir ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, 14.0f) : P.RadiusCm + VacuumGrowPerCm * Speed * Dt;
 			P.Heat *= FMath::Exp(-Dt / HeatSeconds);
-			// The floor and the walls: it slides (no speed into them).
-			for (const FPlane& Plane : Cloud.Planes)
-			{
-				const FVector3f Normal = FVector3f(FVector(Plane));
-				const float Dist = (FVector3f(Origin + P.P) | Normal) - float(Plane.W);
-				const float Keep = P.RadiusCm * 0.5f;
-				if (Dist < Keep)
-				{
-					P.P += Normal * (Keep - Dist);
-					const float In = P.V | Normal;
-					if (In < 0.0f)
-					{
-						P.V -= Normal * In;
-					}
-				}
-			}
 			// Bodies push it out of themselves (within two steps) at their own speed.
 			for (const FOSSmokeSim::FMover& M : Cloud.Movers)
 			{
@@ -1110,6 +1102,22 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 						{
 							P.V += Out * Push;
 						}
+					}
+				}
+			}
+			// The floor and the walls last: whatever pushed it, it slides on them (no speed into them, never through).
+			for (const FPlane& Plane : Cloud.Planes)
+			{
+				const FVector3f Normal = FVector3f(FVector(Plane));
+				const float Dist = (FVector3f(Origin + P.P) | Normal) - float(Plane.W);
+				const float Keep = P.RadiusCm * 0.5f;
+				if (Dist < Keep)
+				{
+					P.P += Normal * (Keep - Dist);
+					const float In = P.V | Normal;
+					if (In < 0.0f)
+					{
+						P.V -= Normal * In;
 					}
 				}
 			}
@@ -1496,6 +1504,18 @@ void UOSGasSubsystem::FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey
 		const FVector Velocity = Body->IsSimulatingPhysics() ? Body->GetPhysicsLinearVelocity() : Last && DeltaTime > 0.0f ? (At - *Last) / DeltaTime : FVector::ZeroVector;
 		LastMoverAt.Add(Key, At);
 		Seen.Add(Key);
+		// A pawn (the player included) is a sphere of its capsule's radius, never its bounds' box: that box (68 x 68 x
+		// 176 cm) swept the whole cloud along with the walking player (owner 23.10: «облако следует за пушкой»).
+		if (const APawn* PawnOwner = Cast<APawn>(Body->GetOwner()); PawnOwner && Body == PawnOwner->GetRootComponent())
+		{
+			float CapsuleRadius = 0.0f, CapsuleHalf = 0.0f;
+			PawnOwner->GetSimpleCollisionCylinder(CapsuleRadius, CapsuleHalf);
+			FOSSmokeSim::FMover& M = Cloud.Movers.AddDefaulted_GetRef();
+			M.Centre = FVector3f(At - Cloud.Origin);
+			M.RadiusCm = FMath::Clamp(CapsuleRadius, 15.0f, 45.0f);
+			M.Velocity = FVector3f(Velocity.GetClampedToMaxSize(1500.0f));
+			continue;
+		}
 		const bool bBig = Radius > 90.0f;
 		if (bBig && Velocity.SizeSquared() < 25.0f && !Body->IsSimulatingPhysics())
 		{

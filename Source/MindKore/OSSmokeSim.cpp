@@ -529,7 +529,7 @@ void FOSSmokeSim::StepGrid(float Dt, const FOSSmokeParams& K, float GravityScale
 			}
 			if (D < M.RadiusCm + CellCm)
 			{
-				const float Share = D < M.RadiusCm ? 1.0f : 0.5f;
+				const float Share = D < M.RadiusCm ? 1.0f : 0.2f;
 				Ux[I] += (M.Velocity.X - Ux[I]) * Share;
 				Uy[I] += (M.Velocity.Y - Uy[I]) * Share;
 				Uz[I] += (M.Velocity.Z - Uz[I]) * Share;

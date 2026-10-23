@@ -413,7 +413,7 @@ void UOSWeaponsComponent::UpdateRounds(float DeltaTime)
 			// Where it hits, the smoke round the impact is blown back out of the surface.
 			if (bLands)
 			{
-				Fx->Burst(Impact, -Round.Direction, Weapon.SmokeHoleCm * 4.0f, 350.0f);
+				Fx->Burst(Impact, -Round.Direction, Weapon.SmokeHoleCm * 4.0f, 100.0f);
 			}
 		}
 		if (UStaticMeshComponent* Tracer = Round.Tracer.Get())
@@ -840,7 +840,7 @@ bool UOSWeaponsComponent::Fire(const FVector& Start, const FVector& Direction, F
 			if (UOSMuzzleFxComponent* Fx = GetOwner()->FindComponentByClass<UOSMuzzleFxComponent>())
 			{
 				Fx->CarveRay(Start, Impact, Weapon->SmokeHoleCm);
-				Fx->Burst(Impact, -PelletDirection, Weapon->SmokeHoleCm * 4.0f, 350.0f);
+				Fx->Burst(Impact, -PelletDirection, Weapon->SmokeHoleCm * 4.0f, 100.0f);
 			}
 			continue;
 		}

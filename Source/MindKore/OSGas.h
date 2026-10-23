@@ -197,7 +197,7 @@ public:
 	/** Clouds the post-process draws at once (the nearest to the eye). */
 	static constexpr int32 MaxDrawn = 6;
 
-	static constexpr int32 MaxClouds = 8;
+	static constexpr int32 MaxClouds = 10;
 	static constexpr int32 MaxParcels = 220;
 	/** The velocity grid (air): 20 cells of 6 cm; the render grid: 48 of 2 cm (3 cm in a vacuum), same centre. */
 	static constexpr int32 VelocityCells = 20;

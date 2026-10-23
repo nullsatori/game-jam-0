@@ -483,7 +483,7 @@ int nc = (int)(CC + 0.5);
 float alpha = 1.0 - T;
 float hb = frac(sin(dot(floor(px / B), float2(41.3, 289.1))) * 43758.5453);
 // The faint tail off (no snow of lone blocks), the threshold's spread halved: stable bands, few stray blocks.
-float aq = alpha < 0.08 ? 0.0 : floor(alpha * 4.0 + 0.25 + 0.5 * hb) / 4.0;
+float aq = alpha < 0.12 ? 0.0 : floor(alpha * 4.0 + 0.25 + 0.5 * hb) / 4.0;
 float3 smoke = alpha > 1e-3 ? acc / alpha : float3(0, 0, 0);
 return float4(lerp(Col.rgb, smoke, aq), 1);
 """
