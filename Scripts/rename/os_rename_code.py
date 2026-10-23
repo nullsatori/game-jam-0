@@ -76,7 +76,20 @@ def load_keep() -> list[str]:
 KEEP = load_keep()
 
 
+# Lines left alone on a second run (a branch rebased onto the renamed main): the
+# [CoreRedirects] entries must keep their old Jam names, and prose about the rename
+# itself (any line with "Jam ... ->" or "→") would turn into "OS -> OS".
+SKIP_LINE = re.compile(r'OldName="/Script/MindKore\.|[Jj]am[^\n]*?(?:→|\s->\s)')
+
+
 def rewrite(text: str) -> str:
+    if "\n" in text or SKIP_LINE.search(text):
+        return "".join(line if SKIP_LINE.search(line) else rewrite_span(line)
+                       for line in text.splitlines(keepends=True))
+    return rewrite_span(text)
+
+
+def rewrite_span(text: str) -> str:
     held = {}
     for i, k in enumerate(KEEP):
         if k in text:
