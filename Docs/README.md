@@ -44,7 +44,7 @@
 | [RecoilWeapons-Pose](RecoilWeapons-Pose.md) | поза ствола на пружинах, смена оружия |
 | [RecoilWeapons-Aim](RecoilWeapons-Aim.md) | прицеливание, «без оружия», оптика СВ-98 |
 | [RecoilWeapons-Fx](RecoilWeapons-Fx.md) | вспышка и пороховой дым |
-| [GasSystem](GasSystem.md) | газ v11: как устроен, источник на уровне, пресеты, бюджет, отладка |
+| [GasSystem](GasSystem.md) | газ (дым v11–v16) для всех стволов: парцелы, свой проход после апскейлера, свет, дымка и туман зоны, источник `UOSGasSourceComponent` на уровне, пресеты, бюджет, `os.Gas.*` |
 | [RecoilWeapons-Sound](RecoilWeapons-Sound.md) | звук стволов, лимитер на мастере, синхрон |
 | [RecoilWeapons-Rmb93](RecoilWeapons-Rmb93.md) | Рысь: цикл вперёд, крышка окна на шарнире, дым из кожуха |
 | [Attachments](Attachments.md) | обвесы: меню проектора на Tab, посадка на планку, ЛЦУ, фонарь, глушитель, магазин 20; палитра ЛЦУ, пристрелка; выдача командами и в отладочном меню (в main с PR #25) |

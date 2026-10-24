@@ -7,8 +7,11 @@
    (что он настраивает — в разделе [Git LFS](#git-lfs)). Без него LFS выдаёт
    блокируемые `.uasset`/`.umap` только для чтения: редактор их не сохранит,
    а скрипты упадут на `os_build.save`.
-2. Открыть `OuterSpace.uproject`. Редактор предложит собрать модуль —
-   согласиться. Можно собрать и без редактора: `Scripts\build.bat` (двойной
+2. Открыть `OuterSpace.uproject`. Редактор предложит собрать модули —
+   согласиться. Модулей два: `MindKore` (игра) и `MindKoreShaders`
+   (`LoadingPhase` `PostConfigInit`: регистрирует папку `Shaders/` проекта как
+   `/MindKoreShaders` и держит шейдеры прохода газа; сам проход
+   `FOSGasViewExtension` — в `MindKore`, [GasSystem](GasSystem.md)). Можно собрать и без редактора: `Scripts\build.bat` (двойной
    клик или из консоли). Он сам находит движок по `EngineAssociation` из
    `.uproject` через реестр (или берёт `UE_ROOT`, если задана), собирает
    `OuterSpaceEditor Win64 Development` и ждёт клавишу в конце. Аргументы:

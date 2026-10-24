@@ -8,7 +8,7 @@
 
 Сохраняй чужие незавершённые изменения. Правила карты, сборки и передачи бинарных ассетов — в [Docs/Development.md](Docs/Development.md) и [Docs/LevelPipeline.md](Docs/LevelPipeline.md).
 
-Игра на UE 5.8, модуль MindKore. Вход — [README](README.md); управление — [Docs/Controls.md](Docs/Controls.md), проверки — [Docs/Probes.md](Docs/Probes.md). Нетехнический дизайн и лор — [Docs/Vision](Docs/Vision/README.md), связи механик — [Progression](Docs/Vision/Progression.md). Реализация и параметры компонентов — на технических страницах в `Docs/`; в Vision их не дублировать. Исторические планы в `Docs/Archive/` не задают текущих требований.
+Игра на UE 5.8, модули MindKore (игра) и MindKoreShaders (шейдеры прохода газа, `Shaders/OSGas.usf`). Вход — [README](README.md); управление — [Docs/Controls.md](Docs/Controls.md), проверки — [Docs/Probes.md](Docs/Probes.md). Нетехнический дизайн и лор — [Docs/Vision](Docs/Vision/README.md), связи механик — [Progression](Docs/Vision/Progression.md). Реализация и параметры компонентов — на технических страницах в `Docs/`; в Vision их не дублировать. Исторические планы в `Docs/Archive/` не задают текущих требований.
 
 Изменил поведение — обнови страницу системы в том же изменении; параметры и таблицы клавиш не дублировать. Правила содержания документации — в [Docs/README.md](Docs/README.md#как-обновлять-документацию).
 
