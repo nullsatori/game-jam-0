@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 109 команд, 48 переменных.
+Всего: 110 команд, 49 переменных.
 
 ## `os.Attach`
 
@@ -116,13 +116,15 @@
 | `os.Gas.NixieLamp` (переменная) | значение (умолч. `1.0f`) | The Nixie counter's orange glow on the smoke round the gun (a lamp for the gas only), x; 0 off. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ProbeSeconds` (переменная) | значение (умолч. `0.0f`) | > 0: os.Gas.WalkProbe runs this long and takes a HighResShot (OSWalk_4_end) half a second and a ProfileGPU 2 s before its end (the haze's frames and cost). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSpawn` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot, and runs 24 s. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
-| `os.Gas.ProbeSpawnLate` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe spawns it once at 5 s (after its shots). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Gas.ProbeSpawnLate` (переменная) | значение (умолч. `TEXT("")`) | A preset (or a whole os. command): os.Gas.WalkProbe spawns (runs) it once at 5 s (after its shots). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSuppressor` (переменная) | значение (умолч. `0`) | 1: os.Gas.WalkProbe mounts the suppressor first. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Gas.Shafts` (переменная) | значение (умолч. `1`) | 1: a sun (directional) or a spot/rect lamp tagged GasShaft lights the haze in layers with the shadows of frames and jambs - its light traced to the haze's parcels, an eighth a step (v13 13c); 0: off (80e4fec). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Shimmer` (переменная) | значение (умолч. `2.0f`) | The air's shimmer behind heat (v12 7b.3), x; 0 off. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.SmoothAlpha` (переменная) | значение (умолч. `0`) | 1: the block's result (light and opacity) read bilinearly between the blocks' centres (edge blocks as before) - finer still. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.SourceTest` | `<preset> <pulse\|burst\|rate1>` | <preset> <pulse\|burst\|rate1>: a gas source 1.5 m along the view run by a pattern (on/off, bursts every 2.5 s, 1 a second). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.Spawn` | `<muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]` | <muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for 4 s, along the view. *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.SpawnSeconds` (переменная) | значение (умолч. `4.0f`) | How long an os.Gas.Spawn source lives, s (4). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
+| `os.Gas.TestShaft` | `[distance cm]` | [distance cm]: a transient GasShaft spot lamp that far ahead of the view, aimed back (the haze's shafts on a map without a sun in its windows). *не в Shipping* | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.TickHz` (переменная) | значение (умолч. `0.0f`) | > 0: the gas's own evolution shown in steps of 1/TickHz s (stop motion); its place and the camera stay smooth. 0: off. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.TileLamps` (переменная) | значение (умолч. `1`) | 1: a haze takes up to os.Gas.ZoneLamps of the zone's lamps and each screen block its own strongest at its gas (v13 13d), the player's lamps apart; 0: 4 lamps for the whole haze (80e4fec). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.TileSlots` (переменная) | значение (умолч. `4`) | The zone's lamps a screen block takes (4-6; the last one soft - no seam where the 4th and 5th swap). | `Source/MindKore/OSGas.cpp` |

@@ -193,6 +193,8 @@ float3 GasLamps(int c, int lr[8], int Soft, float SoftW, float3 pw, float3 dir, 
 		// The key's share (D.y, 0 -> 1 over 0.25 s as the key moves) of its baked self-shadow; the rest: the player's own
 		// lamp (by the eye) the march's transmittance so far (the near face lit, the depth dark), the others the occlusion.
 		float Shadow = lerp(D.z > 0.5 ? T : 0.35 + 0.65 * v.a, v.b, saturate(D.y));
+		// A haze's shaft source (v13 13c): its parcels' traced light (the window's frame in the smoke).
+		Shadow = D.w > 0.5 ? v.g : Shadow;
 		// The torch (the player's lamp with a cone): what stands in its beam shades the smoke behind (v13 13a).
 		// GasTorchOn is the shadow's share: 0 until its map's first round is traced, then up over 0.1 s.
 		if (GasTorchOn > 0.0 && D.z > 0.5 && Cone.w > -1.5)

@@ -33,6 +33,7 @@
 #include "OSGravity.h"
 #include "OSShip.h"
 #include "OSLaserSight.h"
+#include "Engine/SpotLight.h"
 #include "UObject/UObjectIterator.h"
 
 namespace
@@ -164,6 +165,9 @@ namespace
 	TAutoConsoleVariable<int32> CVarGasTileSlots(
 		TEXT("os.Gas.TileSlots"), 4,
 		TEXT("The zone's lamps a screen block takes (4-6; the last one soft - no seam where the 4th and 5th swap)."));
+	TAutoConsoleVariable<int32> CVarGasShafts(
+		TEXT("os.Gas.Shafts"), 1,
+		TEXT("1: a sun (directional) or a spot/rect lamp tagged GasShaft lights the haze in layers with the shadows of frames and jambs - its light traced to the haze's parcels, an eighth a step (v13 13c); 0: off (80e4fec)."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -1761,7 +1765,8 @@ void UOSGasSubsystem::UpdatePost()
 		// The haze whitens as it ages (v12 7d): to os.Gas.ZoneAlbedo over its gas's 20 s.
 		const FLinearColor Shown = Cloud.bZone && bNewLight ? FMath::Lerp(Albedo, FLinearColor(FVector3f(CVarGasZoneAlbedo.GetValueOnGameThread())), FMath::Clamp(Cloud.HazeAge / 20.0f, 0.0f, 1.0f)) : Albedo;
 		Data[3 * MaxDrawn + Index] = FLinearColor(Shown.R, Shown.G, Shown.B, Cloud.BirthWorld);
-		const FLinearColor Warm = Cloud.Look.bEmbers ? Cloud.Look.WarmColour : FLinearColor::Black;
+		// The haze's G is the shafts' light (v13 13c): no warm core read from it.
+		const FLinearColor Warm = Cloud.Look.bEmbers && !(Cloud.bZone && CVarGasShafts.GetValueOnGameThread() > 0) ? Cloud.Look.WarmColour : FLinearColor::Black;
 		Data[4 * MaxDrawn + Index] = FLinearColor(Warm.R, Warm.G, Warm.B, float(Cloud.CurHalf));
 		Data[5 * MaxDrawn + Index] = Top;
 		Data[6 * MaxDrawn + Index] = Bottom;
@@ -1827,7 +1832,9 @@ void UOSGasSubsystem::UpdatePost()
 			Data[(Row + 1) * MaxDrawn + Index] = FLinearColor(Light.R, Light.G, Light.B, Point && !Point->bUseInverseSquaredFalloff ? Point->LightFalloffExponent : 0.0f);
 			Data[(Row + 2) * MaxDrawn + Index] = FLinearColor(Axis.X, Axis.Y, Axis.Z, CosOuter);
 			// z: the player's own lamp (by the camera: its shadow in the gas is the march's own transmittance).
-			Data[(Row + 3) * MaxDrawn + Index] = FLinearColor(CosInner, Slot.KeyShare, bPlayers ? 1.0f : 0.0f, 0.0f);
+			// w: the haze's shaft source (its shadow is the parcels' traced light in G).
+			const bool bShaftLamp = Cloud.bZone && Cloud.bShafts && Cloud.ShaftLamp.Get() == L;
+			Data[(Row + 3) * MaxDrawn + Index] = FLinearColor(CosInner, Slot.KeyShare, bPlayers ? 1.0f : 0.0f, bShaftLamp ? 1.0f : 0.0f);
 		}
 		if (BoundGrids[Index] != Cloud.Texture)
 		{
@@ -2005,6 +2012,32 @@ void UOSGasSubsystem::LaunchStep(FCloud& Cloud, int32 Steps, float Dt)
 			Cloud.AirCursor = (Cloud.AirCursor + 1) % Num;
 			FOSGasParcel& P = Cloud.Parcels[Cloud.AirCursor];
 			P.AirTarget = OSAirZoneAt(GetWorld(), Cloud.Origin + FVector(P.P)) ? 1.0f : 0.0f;
+		}
+	}
+	// A haze's shaft source (v13 13c): an eighth of its parcels traced to it each launch (a sun 200 m away, a lamp to 30 cm
+	// short of it), the player and what they carry left out (walking through a shaft casts no shadow in the smoke).
+	Cloud.bShafts = Cloud.bZone && CVarGasShafts.GetValueOnGameThread() > 0;
+	if (const ULightComponent* Source = Cloud.ShaftLamp.Get(); Cloud.bShafts && Source && !Cloud.Parcels.IsEmpty())
+	{
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(OSGasShafts), false);
+		if (const APlayerController* Controller = GetWorld()->GetFirstPlayerController(); Controller && Controller->GetPawn())
+		{
+			Params.AddIgnoredActor(Controller->GetPawn());
+			TArray<AActor*> Carried;
+			Controller->GetPawn()->GetAttachedActors(Carried, true, true);
+			Params.AddIgnoredActors(Carried);
+		}
+		Params.AddIgnoredActor(Source->GetOwner());
+		const bool bSun = Source->IsA<UDirectionalLightComponent>();
+		const int32 Num = Cloud.Parcels.Num();
+		for (int32 K = 0; K < FMath::Max(1, (Num + 7) / 8); ++K)
+		{
+			Cloud.ShaftCursor = (Cloud.ShaftCursor + 1) % Num;
+			FOSGasParcel& P = Cloud.Parcels[Cloud.ShaftCursor];
+			const FVector From = Cloud.Origin + FVector(P.P);
+			const FVector Way = bSun ? -Source->GetDirection() : (Source->GetComponentLocation() - From).GetSafeNormal();
+			const FVector End = bSun ? From + Way * 20000.0 : Source->GetComponentLocation() - Way * 30.0;
+			P.ShaftTarget = GetWorld()->LineTraceTestByChannel(From, End, ECC_Visibility, Params) ? 0.0f : 1.0f;
 		}
 	}
 	// The snapshot Transmittance reads (the parcels are the step's until it is done).
@@ -2356,6 +2389,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			const FVector3f Before = P.P;
 			// Air or vacuum where it is now, eased over 0.2 s at a zone's border (v12 7c.4).
 			P.Air = FMath::FInterpConstantTo(P.Air, P.AirTarget, Dt, 1.0f / 0.2f);
+			P.Shaft = FMath::FInterpConstantTo(P.Shaft, P.ShaftTarget, Dt, 1.0f / 0.25f);
 			if (P.Air > 0.0f)
 			{
 				// The gun's velocity it inherited goes into the air in ~0.2 s (a shot on the walk stops with the walker);
@@ -2831,7 +2865,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 					const float KM = Kernel * M;
 					// The union in log space: D sums -ln(1 - k), the density is 1 - e^-D (1 - prod(1 - k_i)).
 					D[I] -= FMath::Loge(1.0f - FMath::Min(KM * MassScale, 0.95f));
-					H[I] += KM * P.Heat;
+					H[I] += KM * (Cloud.bShafts ? P.Shaft : P.Heat);
 					L[I] += KM * Light[Index];
 					W[I] += KM;
 					TX[I] += KM * Travelled.X;
@@ -2986,6 +3020,8 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 				const float Around = At(X + 2, Y, Z) + At(X - 2, Y, Z) + At(X, Y + 2, Z) + At(X, Y - 2, Z) + At(X, Y, Z + 2) + At(X, Y, Z - 2);
 				// The warm core only while the gas is hot (heat over 0.3: its first 0.3-0.5 s), not a brown tint after.
 				const float Heat = W[I] > 1e-4f ? FMath::Clamp((H[I] / W[I] - 0.3f) / 0.7f, 0.0f, 1.0f) : 0.0f;
+				// A haze with shafts (v13 13c): G is its parcels' light from the shaft source, not heat.
+				const float G = Cloud.bShafts ? (W[I] > 1e-4f ? FMath::Clamp(H[I] / W[I], 0.0f, 1.0f) : 1.0f) : Heat * FMath::Min(W[I] * 2.0f, 1.0f);
 				// The key light's shadow through the drawn gas itself (1-12 cells toward it, as the old grid's Pack): a
 				// lit flank and a dark belly - the relief (owner 23.10: В«РЅРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ СЂРµР»СЊРµС„РЅС‹РјВ»). The parcels' own
 				// light (L / W) shades it further.
@@ -2995,7 +3031,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 					Toward += At(X + KeyCells[S].X, Y + KeyCells[S].Y, Z + KeyCells[S].Z) * KeyWeights[S];
 				}
 				const float Lit = FMath::Exp(-GridKeyShadow * Toward) * (W[I] > 1e-4f ? L[I] / W[I] : 1.0f);
-				Cloud.Atlas[(OY + Y) * Size.X + OX + X] = FColor(Byte(Dens), Byte(Heat * FMath::Min(W[I] * 2.0f, 1.0f)), Byte(Lit), Byte(FMath::Exp(-AmbientOcclusion * FMath::Min(Around * DensityGain, 6.0f))));
+				Cloud.Atlas[(OY + Y) * Size.X + OX + X] = FColor(Byte(Dens), Byte(G), Byte(Lit), Byte(FMath::Exp(-AmbientOcclusion * FMath::Min(Around * DensityGain, 6.0f))));
 			}
 		}
 	});
@@ -3173,7 +3209,9 @@ namespace
 			: FMath::Square(FMath::Clamp(1.0f - float(FMath::Square(D2 / (R * R))), 0.0f, 1.0f)) / float(D2 + 1.0);
 		float CosOuter, CosInner;
 		FVector Axis;
-		if (OSGasLampCone(L, Axis, CosOuter, CosInner))
+		// The cone only for a lamp outside the box: one inside it lights some of it whichever way it points (by the way to
+		// the box's centre a spot aimed past the centre scored 0 and never lit the haze it stood in).
+		if (D2 > 1.0 && OSGasLampCone(L, Axis, CosOuter, CosInner))
 		{
 			Falloff *= FMath::SmoothStep(CosOuter, CosInner, float(FVector::DotProduct(-Toward, Axis)));
 		}
@@ -3250,7 +3288,14 @@ void UOSGasSubsystem::UpdateLamps(FCloud& Cloud, const FVector& Centre, float De
 		{
 			continue;
 		}
-		const FVector Near = L->IsA<UDirectionalLightComponent>() ? Centre : Box.GetClosestPointTo(L->GetComponentLocation());
+		// The box's point nearest the lamp - for a spot or a rect the one nearest its beam at the box centre's distance (the
+		// point nearest the lamp itself is mostly outside its cone: a spot outside a haze scored 0).
+		const FVector Pos = L->GetComponentLocation();
+		const bool bBeam = L->IsA<USpotLightComponent>() || L->IsA<URectLightComponent>();
+		const ULocalLightComponent* AsLocal = Cast<ULocalLightComponent>(L);
+		const double Along = FMath::Min(FVector::Dist(Pos, Centre), AsLocal ? 0.5 * AsLocal->AttenuationRadius : 0.0);
+		const FVector Near = L->IsA<UDirectionalLightComponent>() ? Centre
+			: Box.IsInside(Pos) ? Pos : Box.GetClosestPointTo(bBeam ? Pos + L->GetDirection() * Along : Pos);
 		FVector Toward;
 		const float Score = LampAt(L, Near, Toward, Centre, IsFlash(L) ? CVarGasFlashReach.GetValueOnGameThread() : 1.0f);
 		if (Score > 0.0f)
@@ -3288,6 +3333,32 @@ void UOSGasSubsystem::UpdateLamps(FCloud& Cloud, const FVector& Centre, float De
 		}
 		List.SetNum(FMath::Min(List.Num(), Keep));
 	};
+#if !UE_BUILD_SHIPPING
+	// os.Gas.Debug 2: a haze's shaft sources among its candidates (raw score, before the 9 points).
+	if (Cloud.bZone && CVarGasDebug.GetValueOnGameThread() > 1 && FMath::FloorToInt(World->GetTimeSeconds()) != FMath::FloorToInt(World->GetTimeSeconds() - World->GetDeltaSeconds()))
+	{
+		for (const ULightComponent* L : Lamps)
+		{
+			if (L->ComponentHasTag(TEXT("GasShaft")))
+			{
+				FVector Way;
+				const FVector P = L->GetComponentLocation();
+				UE_LOG(LogMindKore, Log, TEXT("Gas: haze lamp %s visible %d world %d intensity %.0f, in box %d, raw at itself %.3g"), *L->GetOwner()->GetName(), L->IsVisible() ? 1 : 0,
+					L->bAffectsWorld ? 1 : 0, L->Intensity, Box.IsInside(P) ? 1 : 0, LampAt(L, P, Way, Centre));
+			}
+		}
+		int32 Rank = 0;
+		for (const FCandidate& C : Zone)
+		{
+			if (C.Lamp->ComponentHasTag(TEXT("GasShaft")) || C.Lamp->IsA<UDirectionalLightComponent>())
+			{
+				const FCloud::FLampSeen* Seen = Cloud.LampsSeen.Find(C.Lamp);
+				UE_LOG(LogMindKore, Log, TEXT("Gas: haze candidate %s rank %d of %d, raw %.3g, seen %.2f"), *C.Lamp->GetOwner()->GetName(), Rank, Zone.Num(), C.Score, Seen ? Seen->Seen : -1.0f);
+			}
+			++Rank;
+		}
+	}
+#endif
 	See(Zone, bTiled ? WorldSlots + 2 : 6, WorldSlots, bTiled);
 	See(Players, MaxPlayerSlots, MaxPlayerSlots, false);
 	// The crossfade: a lamp out of the set fades over 0.25 s, a new one comes in from 0 (the player's own at once; a new
@@ -3371,6 +3442,23 @@ void UOSGasSubsystem::UpdateLamps(FCloud& Cloud, const FVector& Centre, float De
 	{
 		FCloud::FLampSlot& S = Cloud.Lamps[Index];
 		S.KeyShare = FMath::Clamp(S.KeyShare + (Index == Cloud.KeyLamp ? Step : -Step), 0.0f, 1.0f);
+	}
+	// The haze's shaft source (v13 13c): the strongest sun, or spot/rect lamp tagged GasShaft, among its lamps.
+	if (Cloud.bZone)
+	{
+		const ULightComponent* Shaft = nullptr;
+		float Strongest = 0.0f;
+		for (int32 Index = 0; Index < Used; ++Index)
+		{
+			const FCloud::FLampSlot& S = Cloud.Lamps[Index];
+			const ULightComponent* L = S.Lamp.Get();
+			if (L && (L->IsA<UDirectionalLightComponent>() || ((L->IsA<USpotLightComponent>() || L->IsA<URectLightComponent>()) && L->ComponentHasTag(TEXT("GasShaft")))) && S.Weight * S.Score > Strongest)
+			{
+				Strongest = S.Weight * S.Score;
+				Shaft = L;
+			}
+		}
+		Cloud.ShaftLamp = Shaft;
 	}
 #if !UE_BUILD_SHIPPING
 	// os.Gas.Debug 2: the cloud's lamps in the log once a second.
@@ -3635,3 +3723,46 @@ bool OSGasCardsEnabled()
 {
 	return CVarGasCards.GetValueOnGameThread() != 0;
 }
+
+#if !UE_BUILD_SHIPPING
+namespace
+{
+	/**
+	 * os.Gas.TestShaft [distance cm]: a transient spot lamp tagged GasShaft that far ahead of the view (behind a window),
+	 * aimed back at the eye - the haze's shafts (v13 13c) on a map without a sun through its windows. Not saved.
+	 */
+	FAutoConsoleCommandWithWorldAndArgs GGasTestShaft(
+		TEXT("os.Gas.TestShaft"),
+		TEXT("[distance cm]: a transient GasShaft spot lamp that far ahead of the view, aimed back (the haze's shafts on a map without a sun in its windows)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			const APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
+			if (!Controller)
+			{
+				return;
+			}
+			FVector Eye;
+			FRotator View;
+			Controller->GetPlayerViewPoint(Eye, View);
+			const float Distance = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 600.0f;
+			const FVector At = Eye + View.Vector() * Distance + FVector::UpVector * 30.0f;
+			FActorSpawnParameters Params;
+			Params.ObjectFlags |= RF_Transient;
+			ASpotLight* Lamp = World->SpawnActor<ASpotLight>(At, (Eye - At).Rotation(), Params);
+			if (!Lamp)
+			{
+				return;
+			}
+			USpotLightComponent* Spot = Cast<USpotLightComponent>(Lamp->GetLightComponent());
+			Spot->SetMobility(EComponentMobility::Movable);
+			Spot->SetIntensityUnits(ELightUnits::Candelas);
+			Spot->SetIntensity(3000.0f);
+			Spot->SetOuterConeAngle(30.0f);
+			Spot->SetInnerConeAngle(20.0f);
+			Spot->SetAttenuationRadius(Distance * 2.5f);
+			Spot->SetLightColor(FLinearColor(1.0f, 0.92f, 0.8f));
+			Spot->ComponentTags.Add(TEXT("GasShaft"));
+			UE_LOG(LogMindKore, Log, TEXT("os.Gas.TestShaft: a GasShaft spot at %s, aimed at the eye"), *At.ToCompactString());
+		}));
+}
+#endif

@@ -2691,7 +2691,7 @@ namespace
 	TAutoConsoleVariable<FString> CVarGasProbeSpawn(TEXT("os.Gas.ProbeSpawn"), TEXT(""), TEXT("A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot, and runs 24 s."));
 
 	TAutoConsoleVariable<float> CVarGasProbeSeconds(TEXT("os.Gas.ProbeSeconds"), 0.0f, TEXT("> 0: os.Gas.WalkProbe runs this long and takes a HighResShot (OSWalk_4_end) half a second and a ProfileGPU 2 s before its end (the haze's frames and cost)."));
-	TAutoConsoleVariable<FString> CVarGasProbeSpawnLate(TEXT("os.Gas.ProbeSpawnLate"), TEXT(""), TEXT("A preset: os.Gas.WalkProbe spawns it once at 5 s (after its shots)."));
+	TAutoConsoleVariable<FString> CVarGasProbeSpawnLate(TEXT("os.Gas.ProbeSpawnLate"), TEXT(""), TEXT("A preset (or a whole os. command): os.Gas.WalkProbe spawns (runs) it once at 5 s (after its shots)."));
 
 	TAutoConsoleVariable<int32> CVarGasProbeSuppressor(TEXT("os.Gas.ProbeSuppressor"), 0, TEXT("1: os.Gas.WalkProbe mounts the suppressor first."));
 
@@ -3041,7 +3041,8 @@ namespace
 					const FString Late = IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSpawnLate"))->GetString();
 					if (!Late.IsEmpty())
 					{
-						GEngine->Exec(World, *(TEXT("os.Gas.Spawn ") + Late));
+						// A preset, or a whole command (os.Gas.TestShaft 600).
+						GEngine->Exec(World, *(Late.StartsWith(TEXT("os.")) ? Late : TEXT("os.Gas.Spawn ") + Late));
 					}
 				}
 				const bool bLongRun = !IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSpawn"))->GetString().IsEmpty();

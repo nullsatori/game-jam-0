@@ -184,6 +184,9 @@ struct FOSGasParcel
 	/** Air (1) or vacuum (0) where it is (v12 7c.4: checked on the game thread, eased over 0.2 s): rest and the grid, or ballistic. */
 	float Air = 1.0f;
 	float AirTarget = 1.0f;
+	/** A haze's parcel in a shaft source's light (v13 13c: a sun or a GasShaft lamp through a window), eased over 0.25 s. */
+	float Shaft = 1.0f;
+	float ShaftTarget = 1.0f;
 };
 
 /**
@@ -326,6 +329,11 @@ private:
 		FBox SnapBox = FBox(ForceInit);
 		/** Its density's gain as drawn last frame (the life's fade, the eviction). */
 		float DrawGain = 1.0f;
+		/** A haze's shaft source (v13 13c: a sun, or a spot/rect lamp tagged GasShaft, among its lamps that see it); its
+		 *  parcels' light from it goes into the atlas's G (no warm core then). */
+		TWeakObjectPtr<const ULightComponent> ShaftLamp;
+		bool bShafts = false;
+		int32 ShaftCursor = 0;
 		/** The next parcel whose air or vacuum is checked (an eighth at each launch). */
 		int32 AirCursor = 0;
 		/** The haze's densest drawn cell and how long it has been unseen (it ends after 5 s). */
