@@ -637,6 +637,8 @@ private:
 public:
 	/** A gun has let out all of a shot's gas this frame: its clouds' stamps start on a worker (os.Gas.StampAsync), the tick joins them. */
 	void KickStamps();
+	/** The view's forward last frame (the room's light history shortened while it turns). */
+	FVector LastViewForward = FVector::ForwardVector;
 	/** os.Gas.Fog: the fog of the zone the player stands in, in memory only (the map is untouched). */
 	void SetFogOverride(const AOSGravityZone* Zone, EOSZoneFog Fog, float Density, float HeightCm);
 private:

@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 112 команд, 88 переменных.
+Всего: 112 команд, 91 переменных.
 
 ## `os.Attach`
 
@@ -98,7 +98,10 @@
 | Команда | Аргументы | Что делает | Файл |
 |---|---|---|---|
 | `os.Gas.Albedo` (переменная) | значение (умолч. `1.0f`) | os.Gas.Light 1: the gas's albedo, x its look's colour. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.AmbientClamp` (переменная) | значение (умолч. `1`) | 1: the room's light history the haze takes is clamped into the current neighbours' range - no trail of a torch's spot when turning (v16d); 0 as before. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.AmbientHistory` (переменная) | значение (умолч. `1`) | 0: the room's light the haze takes has no history (a debug switch). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.AmbientScale` (переменная) | значение (умолч. `0.75f`) | os.Gas.Light 1: the room's light on the gas, x (unlit gas about 0.5-0.6 of the walls round it). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.AmbientTurn` (переменная) | значение (умолч. `20.0f`) | The room's light the haze takes follows the frame over 0.1 s / (1 + the view's turn, deg/s / this): turning, the last frames' light (a torch's spot) leaves no trail in the haze; 0: 0.1 s always. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Bands` (переменная) | значение (умолч. `4`) | The gas's opacity levels (4; 8 a finer variant). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.BlockDiv` (переменная) | значение (умолч. `360.0f`) | The gas's screen block: round(height / BlockDiv) px (360: 4 px at 1440p, 3 at 1080p; 270 before v12 7d). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Capture` (переменная) | значение (умолч. `0`) | 1: os.Gas.WalkProbe saves every frame from 0.2 to 3.2 s (a self-check). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |

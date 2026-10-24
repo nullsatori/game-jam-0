@@ -133,6 +133,7 @@ public:
 		SHADER_PARAMETER(FIntPoint, AmbientSize)
 		SHADER_PARAMETER(FIntPoint, AmbientDir)
 		SHADER_PARAMETER(float, AmbientBlend)
+		SHADER_PARAMETER(float, AmbientClamp)
 		SHADER_PARAMETER(float, AmbientFloor)
 		SHADER_PARAMETER(float, AmbientHasHistory)
 	END_SHADER_PARAMETER_STRUCT()
@@ -298,8 +299,9 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 			P->AmbientOut = GraphBuilder.CreateUAV(Pass == 0 ? Across : Ambient);
 			P->AmbientSize = AmbientSize;
 			P->AmbientDir = Pass == 0 ? FIntPoint(1, 0) : FIntPoint(0, 1);
-			P->AmbientBlend = Pass == 0 ? -1.0f : 1.0f - FMath::Exp(-FMath::Max(Data.DeltaSeconds, 0.0f) / 0.1f);
+			P->AmbientBlend = Pass == 0 ? -1.0f : 1.0f - FMath::Exp(-FMath::Max(Data.DeltaSeconds, 0.0f) / FMath::Max(Data.AmbientSeconds, 0.005f));
 			P->AmbientFloor = 0.02f;
+			P->AmbientClamp = Data.AmbientClamp;
 			P->AmbientHasHistory = bHistory ? 1.0f : 0.0f;
 			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("OSGas.AmbientBlur"), TShaderMapRef<FOSGasAmbientBlurCS>(ShaderMap), P,
 				FComputeShaderUtils::GetGroupCount(AmbientSize, FIntPoint(8, 8)));

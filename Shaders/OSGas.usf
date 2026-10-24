@@ -948,6 +948,7 @@ Texture2D<float4> AmbientIn;
 Texture2D<float4> AmbientHistory;
 int2 AmbientDir;
 float AmbientBlend;
+float AmbientClamp;
 float AmbientFloor;
 float AmbientHasHistory;
 
@@ -961,12 +962,15 @@ void AmbientBlurCS(uint3 Id : SV_DispatchThreadID)
 	static const float K[5] = { 0.0625, 0.25, 0.375, 0.25, 0.0625 };
 	float3 Sum = 0;
 	float W = 0;
+	float3 Lo = 1e9, Hi = -1e9;
 	for (int i = -2; i <= 2; i++)
 	{
 		int2 P = clamp(int2(Id.xy) + AmbientDir * i * 2, 0, AmbientSize - 1);
 		float4 S = AmbientIn.Load(int3(P, 0));
 		Sum += S.rgb * S.a * K[i + 2];
 		W += S.a * K[i + 2];
+		Lo = S.a > 1e-4 ? min(Lo, S.rgb) : Lo;
+		Hi = S.a > 1e-4 ? max(Hi, S.rgb) : Hi;
 	}
 	float3 Now = W > 1e-4 ? Sum / W : 0.0;
 	float Valid = saturate(W * 8.0);
@@ -974,6 +978,9 @@ void AmbientBlurCS(uint3 Id : SV_DispatchThreadID)
 	{
 		// The second pass: into the last frame's, a texel with nothing behind it (the gun over the tile) keeps the last.
 		float3 Last = AmbientHasHistory > 0.5 ? AmbientHistory.Load(int3(Id.xy, 0)).rgb : Now;
+		// v16d: clamped into the current neighbours' range (as TAA): the history is screen space, a bright spot the
+		// view turned away from (the torch's) left a trail in the haze.
+		Last = AmbientClamp > 0.5 && Hi.x >= Lo.x ? clamp(Last, Lo, Hi) : Last;
 		Now = lerp(Last, max(Now, AmbientFloor), AmbientBlend * Valid);
 		AmbientOut[Id.xy] = float4(max(Now, AmbientFloor), 1.0);
 	}

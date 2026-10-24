@@ -59,8 +59,12 @@ struct FOSGasRenderData
 	FVector3f LaserFrom = FVector3f::ZeroVector;
 	FVector3f LaserTo = FVector3f::ZeroVector;
 	FLinearColor LaserLight = FLinearColor::Black;
-	/** The game's frame time, s: the room's light follows the frame over 0.1 s. */
+	/** The game's frame time, s: the room's light follows the frame over AmbientSeconds (0.1 s; shorter while the view
+	 * turns - a screen-space history not reprojected left a bright spot's trail, the torch's, in the haze). */
 	float DeltaSeconds = 1.0f / 60.0f;
+	float AmbientSeconds = 0.1f;
+	/** 1: the history clamped into the current neighbours' range (a ghost of a spot the view has left cannot stay). */
+	float AmbientClamp = 1.0f;
 };
 
 /**

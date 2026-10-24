@@ -278,6 +278,15 @@ namespace
 	TAutoConsoleVariable<float> CVarGasZoneAlbedoSeconds(
 		TEXT("os.Gas.ZoneAlbedoSeconds"), 8.0f,
 		TEXT("The haze whitens to os.Gas.ZoneAlbedo over its smoke's this, s (a thin haze in a lit room is light grey, not a black veil; 20 as before)."));
+	TAutoConsoleVariable<int32> CVarGasAmbientClamp(
+		TEXT("os.Gas.AmbientClamp"), 1,
+		TEXT("1: the room's light history the haze takes is clamped into the current neighbours' range - no trail of a torch's spot when turning (v16d); 0 as before."));
+	TAutoConsoleVariable<int32> CVarGasAmbientHistory(
+		TEXT("os.Gas.AmbientHistory"), 1,
+		TEXT("0: the room's light the haze takes has no history (a debug switch)."));
+	TAutoConsoleVariable<float> CVarGasAmbientTurn(
+		TEXT("os.Gas.AmbientTurn"), 20.0f,
+		TEXT("The room's light the haze takes follows the frame over 0.1 s / (1 + the view's turn, deg/s / this): turning, the last frames' light (a torch's spot) leaves no trail in the haze; 0: 0.1 s always."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -2432,6 +2441,17 @@ void UOSGasSubsystem::UpdatePost()
 		Frame.Dither = float(CVarGasDither.GetValueOnGameThread());
 		Frame.Bands = float(FMath::Max(1, CVarGasBands.GetValueOnGameThread()));
 		Frame.DeltaSeconds = World->GetDeltaSeconds();
+		// The view's turn this frame (the room's light history is screen space: shortened while turning).
+		if (const APlayerController* Controller = World->GetFirstPlayerController(); Controller && Controller->PlayerCameraManager)
+		{
+			const FVector Forward = Controller->PlayerCameraManager->GetCameraRotation().Vector();
+			const float TurnDeg = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(float(Forward | LastViewForward), -1.0f, 1.0f)));
+			LastViewForward = Forward;
+			const float Per = CVarGasAmbientTurn.GetValueOnGameThread();
+			Frame.AmbientSeconds = Per > 0.0f ? 0.1f / (1.0f + TurnDeg / FMath::Max(Frame.DeltaSeconds, 1e-4f) / Per) : 0.1f;
+		}
+		Frame.AmbientSeconds = CVarGasAmbientHistory.GetValueOnGameThread() > 0 ? Frame.AmbientSeconds : 0.0f;
+		Frame.AmbientClamp = CVarGasAmbientClamp.GetValueOnGameThread() > 0 ? 1.0f : 0.0f;
 		GasView->SetData(Frame);
 		if (bLowRes)
 		{
