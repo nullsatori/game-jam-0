@@ -623,6 +623,8 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 				}
 			}
 		}
+		// All of the shot's gas is out: its stamp starts on a worker now, the gas tick joins it (os.Gas.StampAsync).
+		Gas->KickStamps();
 		if (!OSGasCardsEnabled())
 		{
 			return;

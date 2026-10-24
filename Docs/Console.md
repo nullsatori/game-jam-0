@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 111 команд, 84 переменных.
+Всего: 111 команд, 85 переменных.
 
 ## `os.Attach`
 
@@ -158,6 +158,7 @@
 | `os.Gas.Spawn` | `<muzzle\|port\|weld\|breach\|rcs\|dust\|fog\|steam\|list> [x y z]` | <muzzle\|port\|weld\|breach\|rcs\|dust\|fog\|steam\|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for os.Gas.SpawnSeconds, along the view. *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.SpawnSeconds` (переменная) | значение (умолч. `4.0f`) | How long an os.Gas.Spawn source lives, s (4). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.SpreadLog` (переменная) | значение (умолч. `0`) | 1: every 5 s each haze logs its parcels, mass, spread across and up (mass-weighted sigma, cm), CentreT - the spreading's probe (v14). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.StampAsync` (переменная) | значение (умолч. `1`) | 1: a shot's stamp (its first parcels into the atlas) starts on a worker the moment the gun has let its gas out; the gas tick only joins it - the same atlas on the same frame; 0: splatted in the gas tick. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.StampPriority` (переменная) | значение (умолч. `1`) | 1: a shot's first splat on the game thread runs its parallel loops at normal priority (the frame waits for it); 0: at background priority, as the steps. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.TestShaft` | `[distance cm]` | [distance cm]: a transient GasShaft spot lamp that far ahead of the view, aimed back (the haze's shafts on a map without a sun in its windows). *не в Shipping* | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.TickHz` (переменная) | значение (умолч. `0.0f`) | > 0: the gas's own evolution shown in steps of 1/TickHz s (stop motion); its place and the camera stay smooth. 0: off. | `Source/MindKore/OSGas.cpp` |

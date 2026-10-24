@@ -488,6 +488,8 @@ private:
 		bool bHasGas = false;
 		/** A burst began this frame: its first parcels are splatted on the game thread and drawn on the shot's frame. */
 		bool bStamp = false;
+		/** The stamp's splat runs as Pending (os.Gas.StampAsync): the cloud's tick joins it before anything else. */
+		bool bStampRunning = false;
 		/** The view's transmittance through the box's centre along X in the last atlas (os.Fx.SmokeCost calibration). */
 		float CentreT = 1.0f;
 		FVector3f KeyDir = FVector3f::UpVector;
@@ -613,6 +615,8 @@ private:
 	void TickFog(float DeltaTime);
 	FFogZone* FogOf(const AOSGravityZone* Zone);
 public:
+	/** A gun has let out all of a shot's gas this frame: its clouds' stamps start on a worker (os.Gas.StampAsync), the tick joins them. */
+	void KickStamps();
 	/** os.Gas.Fog: the fog of the zone the player stands in, in memory only (the map is untouched). */
 	void SetFogOverride(const AOSGravityZone* Zone, EOSZoneFog Fog, float Density, float HeightCm);
 private:

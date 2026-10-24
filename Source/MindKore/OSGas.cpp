@@ -269,6 +269,9 @@ namespace
 	TAutoConsoleVariable<float> CVarGasHazeDriftZ(
 		TEXT("os.Gas.HazeDriftZ"), 0.4f,
 		TEXT("The vertical of the room's currents for the haze in gravity x this (v14c; a floor fog: the least of this and os.Gas.FogStir); 1 off."));
+	TAutoConsoleVariable<int32> CVarGasStampAsync(
+		TEXT("os.Gas.StampAsync"), 1,
+		TEXT("1: a shot's stamp (its first parcels into the atlas) starts on a worker the moment the gun has let its gas out; the gas tick only joins it - the same atlas on the same frame; 0: splatted in the gas tick."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -531,12 +534,50 @@ void UOSGasSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	}
 }
 
+#if !UE_BUILD_SHIPPING
+namespace
+{
+	/** The gas tick's sections (os.Gas.WalkProbe's cost line: the worst frame's split), us this frame and in the worst one. */
+	enum EGasSec { SecSources, SecLights, SecTorch, SecFlood, SecFog, SecHeat, SecMovers, SecStamp, SecUpload, SecRoom, SecHand, SecKey, SecLamps, SecCloudRest, SecPost, SecCount };
+	const TCHAR* const GGasSecName[SecCount] = { TEXT("sources"), TEXT("lights"), TEXT("torch"), TEXT("flood"), TEXT("fog"), TEXT("heat"), TEXT("movers"), TEXT("stamp"),
+		TEXT("upload"), TEXT("room"), TEXT("handover"), TEXT("key"), TEXT("lamps"), TEXT("cloud rest"), TEXT("post") };
+	double GGasSec[SecCount] = {}, GGasPeakSec[SecCount] = {};
+	/** How long the gas tick waited for async stamps (os.Gas.StampAsync): joins, of them still running, the total and the longest wait. */
+	int32 GStampJoins = 0, GStampWaited = 0;
+	double GStampWaitUs = 0.0, GStampMaxWaitUs = 0.0;
+	struct FGasSecTimer
+	{
+		EGasSec Sec;
+		double T0 = FPlatformTime::Seconds();
+		explicit FGasSecTimer(EGasSec InSec) : Sec(InSec) {}
+		~FGasSecTimer() { GGasSec[Sec] += (FPlatformTime::Seconds() - T0) * 1e6; }
+	};
+}
+#define OS_GAS_SEC(Name) FGasSecTimer GasSecTimer##Name(Sec##Name)
+#else
+#define OS_GAS_SEC(Name)
+#endif
+
 void UOSGasSubsystem::WaitAll() const
 {
 	for (const FCloud& Cloud : Clouds)
 	{
 		if (Cloud.Pending.IsValid())
 		{
+#if !UE_BUILD_SHIPPING
+			// A stamp still on its worker (the walk probe asks every frame): its wait counted as the tick's would be.
+			if (Cloud.bStampRunning)
+			{
+				const bool bRunning = !Cloud.Pending.IsCompleted();
+				const double W0 = FPlatformTime::Seconds();
+				Cloud.Pending.Wait();
+				const double Us = (FPlatformTime::Seconds() - W0) * 1e6;
+				++GStampJoins;
+				GStampWaited += bRunning ? 1 : 0;
+				GStampWaitUs += Us;
+				GStampMaxWaitUs = FMath::Max(GStampMaxWaitUs, Us);
+			}
+#endif
 			Cloud.Pending.Wait();
 			Cloud.Pending = UE::Tasks::FTask();
 		}
@@ -738,26 +779,6 @@ void UOSGasSubsystem::DrawDebug() const
 	}
 }
 
-#if !UE_BUILD_SHIPPING
-namespace
-{
-	/** The gas tick's sections (os.Gas.WalkProbe's cost line: the worst frame's split), us this frame and in the worst one. */
-	enum EGasSec { SecSources, SecLights, SecTorch, SecFlood, SecFog, SecHeat, SecMovers, SecStamp, SecUpload, SecRoom, SecHand, SecKey, SecLamps, SecCloudRest, SecPost, SecCount };
-	const TCHAR* const GGasSecName[SecCount] = { TEXT("sources"), TEXT("lights"), TEXT("torch"), TEXT("flood"), TEXT("fog"), TEXT("heat"), TEXT("movers"), TEXT("stamp"),
-		TEXT("upload"), TEXT("room"), TEXT("handover"), TEXT("key"), TEXT("lamps"), TEXT("cloud rest"), TEXT("post") };
-	double GGasSec[SecCount] = {}, GGasPeakSec[SecCount] = {};
-	struct FGasSecTimer
-	{
-		EGasSec Sec;
-		double T0 = FPlatformTime::Seconds();
-		explicit FGasSecTimer(EGasSec InSec) : Sec(InSec) {}
-		~FGasSecTimer() { GGasSec[Sec] += (FPlatformTime::Seconds() - T0) * 1e6; }
-	};
-}
-#define OS_GAS_SEC(Name) FGasSecTimer GasSecTimer##Name(Sec##Name)
-#else
-#define OS_GAS_SEC(Name)
-#endif
 
 FString UOSGasSubsystem::TakeCostLine()
 {
@@ -775,6 +796,9 @@ FString UOSGasSubsystem::TakeCostLine()
 		Peak += GGasPeakSec[I] >= 10.0 ? FString::Printf(TEXT(" %s %.0f"), GGasSecName[I], GGasPeakSec[I]) : FString();
 		GGasPeakSec[I] = 0.0;
 	}
+	Peak += FString::Printf(TEXT("; async stamps %d, still running at the tick %d, waited %.0f us in all, %.0f us at most"), GStampJoins, GStampWaited, GStampWaitUs, GStampMaxWaitUs);
+	GStampJoins = GStampWaited = 0;
+	GStampWaitUs = GStampMaxWaitUs = 0.0;
 #endif
 	const FString Line = FString::Printf(TEXT("Gas cost: %d step(s) off the game thread, %.0f us mean (the splat %.0f: light, kernels, noise, sharpen, atlas, rest%s), %.0f us max; game thread in %d frame(s), %.0f us mean, %.0f us max; %d cloud(s), %d parcel(s)"),
 		CostSteps, CostSteps ? CostStepUs / CostSteps : 0.0, Splats ? double(SplatUs) / Splats : 0.0, *Parts, CostMaxStepUs, CostFrames, CostFrames ? CostFrameUs / CostFrames : 0.0, CostMaxFrameUs,
@@ -894,6 +918,7 @@ void UOSGasSubsystem::InitCloud(FCloud& Cloud, const FOSGasLook& Look, const FVe
 	Cloud.StepDt = FastStep;
 	Cloud.CurHalf = 0;
 	Cloud.bStampAtlas = false;
+	Cloud.bStampRunning = false;
 	Cloud.bDrawable = false;
 	Cloud.LooseSince = Cloud.LastRebox = -1.0f;
 	Cloud.Serial = NextSerial++;
@@ -1753,9 +1778,57 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 	}
 }
 
+void UOSGasSubsystem::KickStamps()
+{
+	if (CVarGasStampAsync.GetValueOnGameThread() <= 0)
+	{
+		return;
+	}
+	for (FCloud& Cloud : Clouds)
+	{
+		if (!Cloud.IsAlive() || !Cloud.bStamp || Cloud.IsBusy() || Cloud.bStampRunning)
+		{
+			continue;
+		}
+		// The same work as the tick's stamp, moved: the parcels let out so far go in; later ones wait in Incoming for
+		// the next step. The cloud is busy (Pending) until the tick joins it: no step, no atlas, no hand-over meanwhile.
+		Cloud.bStamp = false;
+		Cloud.Parcels.Append(MoveTemp(Cloud.Incoming));
+		Cloud.Incoming.Reset();
+		Cloud.bStampRunning = true;
+		FCloud* Ptr = &Cloud;
+		Cloud.Pending = UE::Tasks::Launch(UE_SOURCE_LOCATION, [Ptr]() { Splat(*Ptr); });
+	}
+}
+
 void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 {
 	UWorld* World = GetWorld();
+	// The shot's stamp on a worker (os.Gas.StampAsync): joined here, waited for if still running - the shot is seen on
+	// its own frame (the owner's v11 rule); then on as a stamp splatted here.
+	if (Cloud.bStampRunning)
+	{
+		Cloud.bStampRunning = false;
+		if (Cloud.Pending.IsValid())
+		{
+#if !UE_BUILD_SHIPPING
+			const bool bRunning = !Cloud.Pending.IsCompleted();
+			const double W0 = FPlatformTime::Seconds();
+#endif
+			Cloud.Pending.Wait();
+#if !UE_BUILD_SHIPPING
+			const double Us = (FPlatformTime::Seconds() - W0) * 1e6;
+			++GStampJoins;
+			GStampWaited += bRunning ? 1 : 0;
+			GStampWaitUs += Us;
+			GStampMaxWaitUs = FMath::Max(GStampMaxWaitUs, Us);
+			GGasSec[SecStamp] += Us;
+#endif
+			Cloud.Pending = UE::Tasks::FTask();
+		}
+		Cloud.bStampAtlas = true;
+		Cloud.PackedTime = Cloud.SimTime;
+	}
 	const bool bBusy = Cloud.IsBusy();
 	if (!bBusy && Cloud.Pending.IsValid())
 	{
