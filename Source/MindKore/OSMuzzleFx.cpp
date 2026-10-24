@@ -472,6 +472,8 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 		const FVector Carrier = GetOwner()->GetVelocity() * (OSAirZoneAt(GetWorld(), Muzzle.GetLocation()) ? 0.25f : 1.0f);
 		// Heat without smoke out of the muzzle (v12 7b.1): the air's shimmer over 80 ms - pistol 6, RMB-93 12, SV-98 16.
 		Gas->AddHeat(Muzzle.GetLocation(), Muzzle.GetRotation().GetForwardVector(), Def.Id == TEXT("Pistol") ? 6 : Def.Id == TEXT("Sniper") ? 16 : 12);
+		// The shot shoves the room's old haze aside (v14; its own cloud untouched).
+		Gas->PushHaze(Muzzle.GetLocation(), Muzzle.GetRotation().GetForwardVector(), 120.0f * JetScale, 80.0f * JetScale);
 		for (const FOSGasVent& Vent : Def.GasVents)
 		{
 			if (!Vent.bJet && !Vent.bCling)

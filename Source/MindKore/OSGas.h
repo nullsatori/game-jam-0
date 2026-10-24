@@ -265,6 +265,8 @@ public:
 
 	/** A projectile's tunnel (as UOSMuzzleFxComponent::CarveRay): drawn at once, healing; the parcels in it lose mass and are pushed out. */
 	void CarveRay(const FVector& Start, const FVector& End, float RadiusCm);
+	/** A shot pushes the zones' old haze aside (v14): a blow at the muzzle for the haze clouds only, no mass taken. */
+	void PushHaze(const FVector& Location, const FVector& Direction, float RadiusCm, float SpeedCm);
 	/** A radial blow (as UOSMuzzleFxComponent::Burst), half again in a vacuum. */
 	void Burst(const FVector& Location, const FVector& Normal, float RadiusCm, float SpeedCm);
 	/** Air leaving through a hole (as UOSMuzzleFxComponent::AddAirFlow). */
@@ -354,6 +356,9 @@ private:
 		float HazeRadius = 60.0f;
 		/** The haze's spreading (v14, read at each launch): diffusivity cm^2/s, its vertical share, the eddies' time, zero-G's share. */
 		float HazeDiffuse = 0.0f, HazeDiffuseZ = 0.33f, HazeEddy = 10.0f, HazeZeroG = 0.5f;
+		/** A body's turbulent wake in the haze (os.Gas.HazeWake); the vents near it (GasVent: where its last gas goes). */
+		float HazeWake = 0.15f;
+		TArray<FVector3f> Vents;
 		/** Steps taken (the wander's random draws go by it: the same at any frame rate). */
 		uint32 StepIndex = 0;
 		/** Its zone's room (v14), read by its step; written by the game thread only while no step runs. */
@@ -556,6 +561,9 @@ private:
 	TArray<TWeakObjectPtr<ULightComponent>> PlayerLights;
 	/** The zones' rooms for their haze (v14), from their first shot. */
 	TMap<TObjectKey<AOSGravityZone>, TSharedPtr<FOSGasRoom>> Rooms;
+	/** Actors tagged GasVent (v14: a ventilation grille - it slowly draws the haze's strands in), gathered once a second. */
+	TArray<TWeakObjectPtr<AActor>> Vents;
+	float VentsAge = 1e6f;
 	/** The zone's room, made with its flood seeded at Where if it has none. */
 	TSharedPtr<FOSGasRoom> RoomFor(const AOSGravityZone* Zone, const FVector& Where);
 	/** The rooms' floods for this frame within os.Gas.HazeFillMs. */
