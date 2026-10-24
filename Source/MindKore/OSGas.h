@@ -375,6 +375,9 @@ private:
 		float HazeRadiusMax = 250.0f;
 		/** v15: the fog's ramp in (0 -> 1 over 1 s at its seeding and waking, out as it sleeps); a floor layer (its vertical stirred less). */
 		float FogIn = 1.0f;
+		/** v15c: the fog's share of the haze's mass and its colour (both eased over 0.5 s): the look mixes toward the fog's. */
+		float FogShare = 0.0f;
+		FLinearColor FogColour = FLinearColor(0.88f, 0.88f, 0.88f);
 		bool bFogFloor = false;
 		float FogStir = 0.25f;
 		/** v14b: the eddy field's size and the wander's own share; the room's currents (speed, size); the haze's noise cut. */

@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 111 команд, 74 переменных.
+Всего: 111 команд, 78 переменных.
 
 ## `os.Attach`
 
@@ -110,7 +110,10 @@
 | `os.Gas.DriftCm` (переменная) | значение (умолч. `3.0f`) | The zone's air drift (v12 7a.3): a slow divergence-free field, 1.5 m across, changing over ~20 s - its top speed, cm/s. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FlashReach` (переменная) | значение (умолч. `2.5f`) | The muzzle's flash for the gas reaches this x its radius (v13 13b: the whole room's haze shows on the shot's frames); 1: as the lamp (80e4fec). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Fog` (переменная) | значение (умолч. `1`) | 1: zones with a fog keep it in their air (v15: seeded over the room's grid, held against ventilation, asleep out of reach); 0: as without one. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.FogAmbient` (переменная) | значение (умолч. `0.35f`) | A fog's share of the room's light (the haze's: os.Gas.ZoneAmbient). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FogFallScale` (переменная) | значение (умолч. `1.0f`) | A floor fog's settling x (its layer's height). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.FogG` (переменная) | значение (умолч. `0.65f`) | A fog's Henyey-Greenstein g toward the lamps (a glow round them). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.FogLook` (переменная) | значение (умолч. `1`) | 1: the haze's look mixes toward its fog's by the fog's share of its mass (v15: its colour, a dimmer room light, a forward scatter); 0: as in v14. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FogMass` (переменная) | значение (умолч. `9.0f`) | A fog's background parcel mass at density 1 (calibrated: TestRoom, a floor fog 0.5 - CentreT ~0.35). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FogRefill` (переменная) | значение (умолч. `4.0f`) | A fog refills a furrow cut in it over this, s. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FogSet` | `<floor\|haze\|off> [density 0-1] [height cm]` | <floor\|haze\|off> [density 0-1] [height cm]: the fog of the zone the player stands in, for this play only (the map is untouched). *не в Shipping* | `Source/MindKore/OSGas.cpp` |
@@ -130,6 +133,7 @@
 | `os.Gas.HazeRadius` (переменная) | значение (умолч. `60.0f`) | The haze's parcels diffuse up to this radius, cm (60: a veil; 20: as before 24.10). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.HazeRadiusMax` (переменная) | значение (умолч. `250.0f`) | A spreading haze parcel's radius grows with the haze's spread up to this, cm (overlapping into a veil, not round puffs); its matter kept. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.HazeRoom` (переменная) | значение (умолч. `1`) | 1: the haze knows its room - a 25 cm grid flooded from the first shot by overlap tests: its walls hold it, open doors let it through, vacuum stops it (v14); 0: only the zone box's faces and the shots' planes. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.HazeSamples` (переменная) | значение (умолч. `32`) | The haze's march samples at most. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.HazeVents` (переменная) | значение (умолч. `1`) | 1: actors tagged GasVent draw the haze in (15 cm/s within 1 m) and take it 4x faster within 50 cm - its last gas goes there (v14); 0 off. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.HazeVentScale` (переменная) | значение (умолч. `1.0f`) | The zones' haze half-life x (1: as set on the zone, 45 s; 2: 90 s). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.HazeWake` (переменная) | значение (умолч. `0.15f`) | A body moving through the haze leaves a turbulent wake: its wander kicked by this x the body's speed (30 cm/s at most); 0 off (v14). | `Source/MindKore/OSGas.cpp` |

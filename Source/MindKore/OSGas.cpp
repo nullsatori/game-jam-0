@@ -241,6 +241,18 @@ namespace
 	TAutoConsoleVariable<float> CVarGasFogFallScale(
 		TEXT("os.Gas.FogFallScale"), 1.0f,
 		TEXT("A floor fog's settling x (its layer's height)."));
+	TAutoConsoleVariable<int32> CVarGasFogLook(
+		TEXT("os.Gas.FogLook"), 1,
+		TEXT("1: the haze's look mixes toward its fog's by the fog's share of its mass (v15: its colour, a dimmer room light, a forward scatter); 0: as in v14."));
+	TAutoConsoleVariable<float> CVarGasFogAmbient(
+		TEXT("os.Gas.FogAmbient"), 0.35f,
+		TEXT("A fog's share of the room's light (the haze's: os.Gas.ZoneAmbient)."));
+	TAutoConsoleVariable<float> CVarGasFogG(
+		TEXT("os.Gas.FogG"), 0.65f,
+		TEXT("A fog's Henyey-Greenstein g toward the lamps (a glow round them)."));
+	TAutoConsoleVariable<int32> CVarGasHazeSamples(
+		TEXT("os.Gas.HazeSamples"), 32,
+		TEXT("The haze's march samples at most."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -811,6 +823,7 @@ void UOSGasSubsystem::InitCloud(FCloud& Cloud, const FOSGasLook& Look, const FVe
 	Cloud.MaxDensity = 1.0f;
 	Cloud.FogIn = 1.0f;
 	Cloud.bFogFloor = false;
+	Cloud.FogShare = 0.0f;
 	Cloud.HazeAge = 0.0f;
 	Cloud.SimToWorld = World->GetTimeSeconds();
 	Cloud.DrawnCentre = Cloud.PackedCentre = FVector3f::ZeroVector;
@@ -2001,7 +2014,8 @@ void UOSGasSubsystem::UpdatePost()
 		// ponytail: os.Gas.Light 0 shows the default look's old blue-grey (the A/B); goes with the old light after the merge.
 		const FLinearColor Albedo = !bNewLight && Cloud.Look.Colour == FOSGasLook().Colour ? FLinearColor(0.50f, 0.52f, 0.56f) : Cloud.Look.Colour;
 		// The haze whitens as it ages (v12 7d): to os.Gas.ZoneAlbedo over its gas's 20 s.
-		const FLinearColor Shown = Cloud.bZone && bNewLight ? FMath::Lerp(Albedo, FLinearColor(FVector3f(CVarGasZoneAlbedo.GetValueOnGameThread())), FMath::Clamp(Cloud.HazeAge / 20.0f, 0.0f, 1.0f)) : Albedo;
+		// v15c: and toward its fog's colour by the fog's share.
+		const FLinearColor Shown = Cloud.bZone && bNewLight ? FMath::Lerp(FMath::Lerp(Albedo, FLinearColor(FVector3f(CVarGasZoneAlbedo.GetValueOnGameThread())), FMath::Clamp(Cloud.HazeAge / 20.0f, 0.0f, 1.0f)), Cloud.FogColour, Cloud.FogShare) : Albedo;
 		Data[3 * MaxDrawn + Index] = FLinearColor(Shown.R, Shown.G, Shown.B, Cloud.BirthWorld);
 		// The haze's G is the shafts' light (v13 13c): no warm core read from it.
 		const FLinearColor Warm = Cloud.Look.bEmbers && !(Cloud.bZone && CVarGasShafts.GetValueOnGameThread() > 0) ? Cloud.Look.WarmColour : FLinearColor::Black;
@@ -2011,20 +2025,32 @@ void UOSGasSubsystem::UpdatePost()
 		Data[7 * MaxDrawn + Index] = FLinearColor(PrevCentre.X, PrevCentre.Y, PrevCentre.Z, 0.5f * RenderCells * Cloud.PrevCellCm);
 		// 8: the previous atlas's cell; os.Gas.Light 1: the room's light x (the haze 0.5), the lamps' Henyey-Greenstein g
 		// (the haze from 0.55 to 0.3 over its gas's 20 s), the march's samples at most (the haze 32).
+		// v15c: the age is the smoke's only (a fog's parcels live for ever); the fog's share of the mass eased over 0.5 s.
 		float HazeAge = 0.0f;
 		if (Cloud.bZone && !Cloud.IsBusy() && !Cloud.Parcels.IsEmpty())
 		{
-			float Mass = 0.0f;
+			float Mass = 0.0f, FogMass = 0.0f;
 			for (const FOSGasParcel& P : Cloud.Parcels)
 			{
+				if (P.bFog)
+				{
+					FogMass += P.Mass;
+					continue;
+				}
 				HazeAge += P.Age * P.Mass;
 				Mass += P.Mass;
 			}
-			HazeAge /= FMath::Max(Mass, 1e-4f);
-			Cloud.HazeAge = HazeAge;
+			Cloud.HazeAge = HazeAge / FMath::Max(Mass, 1e-4f);
+			const float Target = CVarGasFogLook.GetValueOnGameThread() > 0 ? FogMass / FMath::Max(Mass + FogMass, 1e-4f) : 0.0f;
+			const float Ease = 1.0f - FMath::Exp(-GetWorld()->GetDeltaSeconds() / 0.5f);
+			Cloud.FogShare += (Target - Cloud.FogShare) * Ease;
+			const FFogZone* Fog = Cloud.Zone.IsValid() ? FogZones.Find(Cloud.Zone.Get()) : nullptr;
+			Cloud.FogColour += ((Fog && Fog->Fog != EOSZoneFog::None ? Fog->Colour : FLinearColor(0.88f, 0.88f, 0.88f)) - Cloud.FogColour) * Ease;
 		}
+		const float AgeShare = FMath::Clamp(Cloud.HazeAge / 20.0f, 0.0f, 1.0f);
 		Data[8 * MaxDrawn + Index] = Cloud.bZone
-			? FLinearColor(Cloud.PrevCellCm, CVarGasZoneAmbient.GetValueOnGameThread(), FMath::Lerp(0.55f, 0.3f, FMath::Clamp(Cloud.HazeAge / 20.0f, 0.0f, 1.0f)), 32.0f)
+			? FLinearColor(Cloud.PrevCellCm, FMath::Lerp(CVarGasZoneAmbient.GetValueOnGameThread(), CVarGasFogAmbient.GetValueOnGameThread(), Cloud.FogShare),
+				FMath::Lerp(FMath::Lerp(0.55f, 0.3f, AgeShare), CVarGasFogG.GetValueOnGameThread(), Cloud.FogShare), float(FMath::Clamp(CVarGasHazeSamples.GetValueOnGameThread(), 8, 96)))
 			: FLinearColor(Cloud.PrevCellCm, 1.0f, 0.55f, 96.0f);
 		// 9-12: where each atlas holds gas (world): the march goes through these, not the whole boxes.
 		const FVector O(Cloud.Origin);
