@@ -321,7 +321,7 @@ public:
 
 	static constexpr int32 MaxClouds = 10;
 	/** The zones' haze clouds (v12 7a): their own pool after the shots' slots. */
-	static constexpr int32 MaxZones = 2;
+	static constexpr int32 MaxZones = 4;
 	static constexpr int32 MaxZoneParcels = 400;
 	/** Past this a haze's lightest parcels dissolve into their neighbours over 1 s (v14: the merges never jump). */
 	static constexpr int32 HardZoneParcels = 500;

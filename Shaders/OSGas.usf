@@ -24,6 +24,8 @@ Texture2D GasGrid9;
 // The zones' haze (v12 7a): slots 10 and 11.
 Texture2D GasGrid10;
 Texture2D GasGrid11;
+Texture2D GasGrid12;
+Texture2D GasGrid13;
 SamplerState GasSampler;
 // The composite (v12 7a.6): 1 an ordered 4x4 Bayer threshold over the blocks and the tail from 0.03, 0 a hash; levels.
 float GasDither;
@@ -585,6 +587,8 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, b
 	        else if (c == 9) { if (inC) { sA0 = GasGrid9.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid9.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid9.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid9.SampleLevel(GasSampler, uB1, 0); } }
 	        else if (c == 10) { if (inC) { sA0 = GasGrid10.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid10.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid10.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid10.SampleLevel(GasSampler, uB1, 0); } }
 	        else if (c == 11) { if (inC) { sA0 = GasGrid11.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid11.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid11.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid11.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 12) { if (inC) { sA0 = GasGrid12.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid12.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid12.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid12.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 13) { if (inC) { sA0 = GasGrid13.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid13.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid13.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid13.SampleLevel(GasSampler, uB1, 0); } }
 	        // Gas reaching a box's face fades over its last 1.5 cells (a cut face read as a flat soft square).
 	        if (inC) vC = lerp(sA0, sA1, fA) * saturate(min(min(H - abs(p.x), H - abs(p.y)), H - abs(p.z)) / (1.5 * cell));
 	        if (inP) vP = lerp(sB0, sB1, fB) * saturate(min(min(HP - abs(pp.x), HP - abs(pp.y)), HP - abs(pp.z)) / (1.5 * cellP));

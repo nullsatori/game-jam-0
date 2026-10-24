@@ -255,7 +255,7 @@ namespace
 		TEXT("The haze's march samples at most."));
 	TAutoConsoleVariable<int32> CVarGasFogSplit(
 		TEXT("os.Gas.FogSplit"), 1,
-		TEXT("1: the zone's haze is marched in two goes round the other clouds - in front of a puff over it, behind it under it (v15d); 0: in one go."));
+		TEXT("1: a zone's haze with a fog in it is marched in two goes round the other clouds - in front of a puff over it, behind it under it (v15d; smoke alone as before); 0: in one go."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -2055,7 +2055,7 @@ void UOSGasSubsystem::UpdatePost()
 			? FLinearColor(Cloud.PrevCellCm, FMath::Lerp(CVarGasZoneAmbient.GetValueOnGameThread(), CVarGasFogAmbient.GetValueOnGameThread(), Cloud.FogShare),
 				FMath::Lerp(FMath::Lerp(0.55f, 0.3f, AgeShare), CVarGasFogG.GetValueOnGameThread(), Cloud.FogShare),
 				// Negative: the shader marches the haze in two goes round the other clouds (os.Gas.FogSplit, v15d).
-				float(FMath::Clamp(CVarGasHazeSamples.GetValueOnGameThread(), 8, 96)) * (CVarGasFogSplit.GetValueOnGameThread() > 0 ? -1.0f : 1.0f))
+				float(FMath::Clamp(CVarGasHazeSamples.GetValueOnGameThread(), 8, 96)) * (CVarGasFogSplit.GetValueOnGameThread() > 0 && Cloud.FogShare > 0.01f ? -1.0f : 1.0f))
 			: FLinearColor(Cloud.PrevCellCm, 1.0f, 0.55f, 96.0f);
 		// 9-12: where each atlas holds gas (world): the march goes through these, not the whole boxes.
 		const FVector O(Cloud.Origin);

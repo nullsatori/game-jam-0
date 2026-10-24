@@ -15,7 +15,7 @@ struct IPooledRenderTarget;
 /** One frame's gas for the pass: UOSGasSubsystem's textures and counts (the same as M_OS_GasPost's parameters). */
 struct FOSGasRenderData
 {
-	static constexpr int32 MaxGrids = 12;
+	static constexpr int32 MaxGrids = 14;
 	FTextureResource* Grids[MaxGrids] = {};
 	FTextureResource* Data = nullptr;
 	FTextureResource* Tunnels = nullptr;

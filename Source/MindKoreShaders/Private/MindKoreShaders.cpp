@@ -43,6 +43,8 @@ BEGIN_SHADER_PARAMETER_STRUCT(FOSGasCommonParameters, )
 	SHADER_PARAMETER_TEXTURE(Texture2D, GasGrid9)
 	SHADER_PARAMETER_TEXTURE(Texture2D, GasGrid10)
 	SHADER_PARAMETER_TEXTURE(Texture2D, GasGrid11)
+	SHADER_PARAMETER_TEXTURE(Texture2D, GasGrid12)
+	SHADER_PARAMETER_TEXTURE(Texture2D, GasGrid13)
 	SHADER_PARAMETER(float, GasDither)
 	SHADER_PARAMETER(float, GasBands)
 	SHADER_PARAMETER(float, GasDitherPx)
@@ -319,7 +321,7 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 		C.SceneDepth = SceneTextures->SceneDepthTexture;
 		C.GasData = RHIOf(Data.Data);
 		C.GasTunnels = RHIOf(Data.Tunnels);
-		FRHITexture** Grids[] = { &C.GasGrid0, &C.GasGrid1, &C.GasGrid2, &C.GasGrid3, &C.GasGrid4, &C.GasGrid5, &C.GasGrid6, &C.GasGrid7, &C.GasGrid8, &C.GasGrid9, &C.GasGrid10, &C.GasGrid11 };
+		FRHITexture** Grids[] = { &C.GasGrid0, &C.GasGrid1, &C.GasGrid2, &C.GasGrid3, &C.GasGrid4, &C.GasGrid5, &C.GasGrid6, &C.GasGrid7, &C.GasGrid8, &C.GasGrid9, &C.GasGrid10, &C.GasGrid11, &C.GasGrid12, &C.GasGrid13 };
 		for (int32 Index = 0; Index < FOSGasRenderData::MaxGrids; ++Index)
 		{
 			*Grids[Index] = RHIOf(Data.Grids[Index]);

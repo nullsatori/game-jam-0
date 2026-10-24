@@ -118,7 +118,7 @@
 | `os.Gas.FogRefill` (переменная) | значение (умолч. `4.0f`) | A fog refills a furrow cut in it over this, s. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FogSet` | `<floor\|haze\|off> [density 0-1] [height cm]` | <floor\|haze\|off> [density 0-1] [height cm]: the fog of the zone the player stands in, for this play only (the map is untouched). *не в Shipping* | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FogSource` (переменная) | значение (умолч. `1`) | 1: a source with bIntoHaze (the fog and steam presets) lets its gas straight into the zone's haze (v15); 0: through a cloud slot of its own, as a weld. | `Source/MindKore/OSGas.cpp` |
-| `os.Gas.FogSplit` (переменная) | значение (умолч. `1`) | 1: the zone's haze is marched in two goes round the other clouds - in front of a puff over it, behind it under it (v15d); 0: in one go. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.FogSplit` (переменная) | значение (умолч. `1`) | 1: a zone's haze with a fog in it is marched in two goes round the other clouds - in front of a puff over it, behind it under it (v15d; smoke alone as before); 0: in one go. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FogStir` (переменная) | значение (умолч. `0.25f`) | A floor fog's vertical drift and wander x (its layer stays down). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FogWakeCm` (переменная) | значение (умолч. `1200.0f`) | A zone's fog wakes within this of the camera, cm (sleeps past 1.25 x). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Forward` (переменная) | значение (умолч. `0.7f`) | os.Gas.Light 1: the forward-scattering share of the lamps' light (Henyey-Greenstein g 0.55; the rest isotropic) - smoke against a lamp glows at its rim. | `Source/MindKore/OSGas.cpp` |
