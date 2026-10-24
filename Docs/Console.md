@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 111 команд, 87 переменных.
+Всего: 112 команд, 87 переменных.
 
 ## `os.Attach`
 
@@ -304,6 +304,7 @@
 | `os.Weapons.MagFrames` | — | The USP's and the SV-98's magazine drop and insert in first person at 60 fps (HighResShot; needs a real RHI). | `Source/MindKore/OSWeaponParts.cpp` |
 | `os.Weapons.MagTrace` | — | Log the magazines' pose on the gun every 1/60 s through the reload. | `Source/MindKore/OSWeaponParts.cpp` |
 | `os.Weapons.PortSmoke` | — | The RMB-93's shroud smoke up close on Lvl_OS_TestRoom (HighResShot OSPorts_*; needs a real RHI, -UseFixedTimeStep -FPS=60): three quick shots, stills 0.2-2 s after, two more and a turn. *не в Shipping* | `Source/MindKore/OSPortSmokeStand.cpp` |
+| `os.Weapons.PortSmokeSide` | `[side -1\|1] [distance cm]` | [side -1\|1] [distance cm]: the RMB-93 from outside, 3/4 beside its shroud (style stills): one shot, HighResShot OSPortsSide_* 0.35 and 1 s after. The view stays on that camera. *не в Shipping* | `Source/MindKore/OSPortSmokeStand.cpp` |
 | `os.Weapons.PoseAt` (переменная) | значение (умолч. `-1.0f`) | Hold the gun in view (kick and moving part) this many seconds after its last shot; < 0: live. | `Source/MindKore/OSWeapons.cpp` |
 | `os.Weapons.PoseTrace` | — | Log the guns' pose springs and part curves every 10 ms through a cycle and a reload. | `Source/MindKore/OSWeaponParts.cpp` |
 | `os.Weapons.ReloadPoseAt` (переменная) | значение (умолч. `-1.0f`) | Hold the gun in view this many seconds into a reload (a round-by-round gun loads two rounds); < 0: live. | `Source/MindKore/OSWeaponParts.cpp` |
