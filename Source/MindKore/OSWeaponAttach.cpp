@@ -858,8 +858,9 @@ void UOSWeaponsComponent::MakeAttachmentComponents()
 	// The suit projector's lasers' reasons: no shadow (a light moving with the camera every frame), no MegaLights.
 	TorchInView->CastShadows = false;
 	TorchInView->bAllowMegaLights = false;
-	// No bounce or haze: Lumen's temporal GI dragged the moving pool behind (playtest 22.10, ghosting).
-	TorchInView->IndirectLightingIntensity = 0.0f;
+	// Bounce through Lumen's surface cache, not screen traces: those read last frame's colour and left a hard trail
+	// where the pool had been (B35; r.Lumen.ScreenProbeGather.ScreenTraces=0 in DefaultEngine.ini). No haze.
+	TorchInView->IndirectLightingIntensity = 1.0f;
 	TorchInView->VolumetricScatteringIntensity = 0.0f;
 	TorchInView->IntensityUnits = ELightUnits::Candelas;
 	TorchInView->bUseInverseSquaredFalloff = true;
