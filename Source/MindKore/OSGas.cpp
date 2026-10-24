@@ -39,11 +39,15 @@
 
 namespace
 {
-	/** The step's parallel loops at background priority (they took the render's workers). */
+	/** The step's parallel loops at background priority (they took the render's workers); the shot's stamp on the game
+	 * thread at normal priority (the frame waits for it: os.Gas.StampPriority 0 - background as the steps). */
+	TAutoConsoleVariable<int32> CVarGasStampPriority(
+		TEXT("os.Gas.StampPriority"), 1,
+		TEXT("1: a shot's first splat on the game thread runs its parallel loops at normal priority (the frame waits for it); 0: at background priority, as the steps."));
 	template <typename FBody>
 	void GasFor(int32 Num, const FBody& Body)
 	{
-		ParallelFor(Num, Body, EParallelForFlags::BackgroundPriority);
+		ParallelFor(Num, Body, IsInGameThread() && CVarGasStampPriority.GetValueOnAnyThread() > 0 ? EParallelForFlags::None : EParallelForFlags::BackgroundPriority);
 	}
 
 	/** The grids step at fixed rates (the same gas at any frame rate): 60 Hz to 0.5 s, 30 Hz after. */
