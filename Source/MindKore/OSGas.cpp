@@ -168,6 +168,9 @@ namespace
 	TAutoConsoleVariable<int32> CVarGasShafts(
 		TEXT("os.Gas.Shafts"), 1,
 		TEXT("1: a sun (directional) or a spot/rect lamp tagged GasShaft lights the haze in layers with the shadows of frames and jambs - its light traced to the haze's parcels, an eighth a step (v13 13c); 0: off (80e4fec)."));
+	TAutoConsoleVariable<float> CVarGasWarmLift(
+		TEXT("os.Gas.WarmLift"), 4.0f,
+		TEXT("Residual warmth's lift at full gravity, cm/s (4; try 10-15: the haze gathers under the ceiling sooner)."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -318,8 +321,7 @@ namespace
 		}
 	}
 
-	/** Residual warmth's lift at full gravity, cm/s per unit (v12 7a.5: 2-5 cm/s), and how long the warmth lasts, s. */
-	constexpr float WarmLiftCm = 4.0f;
+	/** How long residual warmth lasts, s (its lift: os.Gas.WarmLift). */
 	constexpr float WarmSeconds = 20.0f;
 	/** The haze's strands: the longest stretch, its relaxing, s. */
 	constexpr float MaxStretch = 5.0f;
@@ -1625,6 +1627,7 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 			// The gas's clock against the world's (it loses time on a hitch: the hand-over's ramps go by the world's).
 			Cloud.SimToWorld = World->GetTimeSeconds() - Cloud.StepCarry - Cloud.SimTime;
 			Cloud.DriftCm = CVarGasDriftCm.GetValueOnGameThread();
+			Cloud.WarmLift = CVarGasWarmLift.GetValueOnGameThread();
 			if (!Cloud.bZone)
 			{
 				const AOSGravityZone* Zone = OSAirZoneAt(World, Centre);
@@ -2423,7 +2426,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					}
 					if (P.Age > 1.0f)
 					{
-						Target -= Down * (WarmLiftCm * P.Warm * GScale);
+						Target -= Down * (Cloud.WarmLift * P.Warm * GScale);
 					}
 					P.V = Target + (P.V - Target) * FMath::Exp(-Dt * P.Air / AirRestSeconds);
 				}

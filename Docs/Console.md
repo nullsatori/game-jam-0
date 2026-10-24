@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 110 команд, 49 переменных.
+Всего: 110 команд, 50 переменных.
 
 ## `os.Attach`
 
@@ -133,6 +133,7 @@
 | `os.Gas.TorchShadowRes` (переменная) | значение (умолч. `16`) | The torch's shadow map for the gas, texels a side (16, up to 32). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.TorchTracesPerFrame` (переменная) | значение (умолч. `64`) | The torch's shadow map: traces a frame (texels in turn; 64: a 16x16 map in 4 frames). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.WalkProbe` | `[after s]` | [after s] Shoot while walking, stop, step back, turn, walk round the cloud; log the cloud's centroid every 0.25 s (and HighResShot OSWalk_*). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Gas.WarmLift` (переменная) | значение (умолч. `4.0f`) | Residual warmth's lift at full gravity, cm/s (4; try 10-15: the haze gathers under the ceiling sooner). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneAlbedo` (переменная) | значение (умолч. `0.8f`) | The haze's albedo it ages to over 20 s (old smoke coagulates and whitens: a light veil in the light, dark in the shade). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneAmbient` (переменная) | значение (умолч. `0.5f`) | The zone's haze: the room's light on it, x (it is seen by the lamps, not by the room). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneDensity` (переменная) | значение (умолч. `0.4f`) | The zone's haze: the gas handed to it, x its mass. | `Source/MindKore/OSGas.cpp` |
