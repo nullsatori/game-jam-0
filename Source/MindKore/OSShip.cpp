@@ -165,6 +165,18 @@ void AOSShipController::UpdateRotation(float DeltaTime)
 
 // --- gravity zone ----------------------------------------------------------------------
 
+#if WITH_EDITOR
+void AOSGravityZone::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	// The fog's kind picked: its colour from the kind's default (tuned after if wanted).
+	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(AOSGravityZone, Fog))
+	{
+		FogColour = Fog == EOSZoneFog::Haze ? FLinearColor(0.84f, 0.84f, 0.84f) : FLinearColor(0.88f, 0.88f, 0.88f);
+	}
+}
+#endif
+
 AOSGravityZone::AOSGravityZone()
 {
 	Zone = CreateDefaultSubobject<UBoxComponent>(TEXT("Zone"));

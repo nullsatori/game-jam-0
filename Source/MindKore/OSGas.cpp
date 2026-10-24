@@ -223,6 +223,24 @@ namespace
 	TAutoConsoleVariable<int32> CVarGasFogSource(
 		TEXT("os.Gas.FogSource"), 1,
 		TEXT("1: a source with bIntoHaze (the fog and steam presets) lets its gas straight into the zone's haze (v15); 0: through a cloud slot of its own, as a weld."));
+	TAutoConsoleVariable<int32> CVarGasFog(
+		TEXT("os.Gas.Fog"), 1,
+		TEXT("1: zones with a fog keep it in their air (v15: seeded over the room's grid, held against ventilation, asleep out of reach); 0: as without one."));
+	TAutoConsoleVariable<float> CVarGasFogMass(
+		TEXT("os.Gas.FogMass"), 9.0f,
+		TEXT("A fog's background parcel mass at density 1 (calibrated: TestRoom, a floor fog 0.5 - CentreT ~0.35)."));
+	TAutoConsoleVariable<float> CVarGasFogRefill(
+		TEXT("os.Gas.FogRefill"), 4.0f,
+		TEXT("A fog refills a furrow cut in it over this, s."));
+	TAutoConsoleVariable<float> CVarGasFogWakeCm(
+		TEXT("os.Gas.FogWakeCm"), 1200.0f,
+		TEXT("A zone's fog wakes within this of the camera, cm (sleeps past 1.25 x)."));
+	TAutoConsoleVariable<float> CVarGasFogStir(
+		TEXT("os.Gas.FogStir"), 0.25f,
+		TEXT("A floor fog's vertical drift and wander x (its layer stays down)."));
+	TAutoConsoleVariable<float> CVarGasFogFallScale(
+		TEXT("os.Gas.FogFallScale"), 1.0f,
+		TEXT("A floor fog's settling x (its layer's height)."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -378,6 +396,8 @@ namespace
 
 	/** A haze parcel's spreading radius grows past this share of the diffusivity (r^2 = r0^2 + 2 x share x D x t). */
 	constexpr float HazeSpreadShare = 0.5f;
+	/** A fog refills a furrow over this, s (os.Gas.FogRefill, read each frame on the game thread). */
+	std::atomic<float> GFogRefill{ 4.0f };
 	/** How long residual warmth lasts, s (its lift: os.Gas.WarmLift). */
 	constexpr float WarmSeconds = 20.0f;
 	/** The haze's strands: the longest stretch, its relaxing, s. */
@@ -789,6 +809,8 @@ void UOSGasSubsystem::InitCloud(FCloud& Cloud, const FOSGasLook& Look, const FVe
 	Cloud.HandStart = -1.0;
 	Cloud.FaintFor = 0.0f;
 	Cloud.MaxDensity = 1.0f;
+	Cloud.FogIn = 1.0f;
+	Cloud.bFogFloor = false;
 	Cloud.HazeAge = 0.0f;
 	Cloud.SimToWorld = World->GetTimeSeconds();
 	Cloud.DrawnCentre = Cloud.PackedCentre = FVector3f::ZeroVector;
@@ -879,7 +901,8 @@ void UOSGasSubsystem::InitCloud(FCloud& Cloud, const FOSGasLook& Look, const FVe
 
 int32 UOSGasSubsystem::ZoneCloudFor(const AOSGravityZone* Zone)
 {
-	if (!Zone || Zone->HazeHalfLifeSeconds <= 0.0f)
+	const FFogZone* Fogged = Zone ? FogZones.Find(Zone) : nullptr;
+	if (!Zone || (Zone->HazeHalfLifeSeconds <= 0.0f && !(Fogged && Fogged->Fog != EOSZoneFog::None)))
 	{
 		return INDEX_NONE;
 	}
@@ -1570,6 +1593,7 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 	}
 	UpdateTorchShadow(DeltaTime);
 	FloodRooms();
+	TickFog(DeltaTime);
 	// Heat puffs: up 20-30 cm/s against gravity (none in zero-G), widening, cooling.
 	for (int32 Index = HeatPuffs.Num() - 1; Index >= 0; --Index)
 	{
@@ -1639,7 +1663,9 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 	Cloud.FadeAge = !bFed ? Cloud.FadeAge + DeltaTime : Cloud.FadeAge > Hold ? FMath::Max(Hold, Cloud.FadeAge - DeltaTime) : FMath::Min(Cloud.FadeAge + DeltaTime, Hold);
 	// The haze ends once it is no longer seen - its drawn opacity under 0.03 for 5 s, faded out as an eviction - not by
 	// its parcels' mass (it held its two slots ~5 minutes: a third zone got none).
-	if (Cloud.bZone && !bBusy && Cloud.bDrawable && Cloud.Evict <= 0.0f)
+	const AOSGravityZone* FogZoneOf = Cloud.bZone ? Cloud.Zone.Get() : nullptr;
+	const FFogZone* FogState = FogZoneOf ? FogZones.Find(FogZoneOf) : nullptr;
+	if (Cloud.bZone && !bBusy && Cloud.bDrawable && Cloud.Evict <= 0.0f && !(FogState && FogState->bAwake))
 	{
 		const float Seen = FMath::Max(1.0f - Cloud.CentreT, 1.0f - FMath::Exp(-Cloud.MaxDensity * Cloud.Look.Extinction * Cloud.PackedCellCm * 3.0f));
 		Cloud.FaintFor = Seen < 0.03f ? Cloud.FaintFor + DeltaTime : 0.0f;
@@ -1817,6 +1843,11 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 			Cloud.HazeDriftCm = CVarGasHazeDriftCm.GetValueOnGameThread();
 			Cloud.HazeDriftScale = FMath::Max(CVarGasHazeDriftScaleCm.GetValueOnGameThread(), 30.0f);
 			Cloud.HazeNoiseCut = CVarGasHazeNoiseCut.GetValueOnGameThread();
+			{
+				const FFogZone* Fog = Cloud.bZone && Cloud.Zone.IsValid() ? FogZones.Find(Cloud.Zone.Get()) : nullptr;
+				Cloud.bFogFloor = Fog && Fog->Fog == EOSZoneFog::Floor && Cloud.Gravity.SizeSquared() > 1.0;
+				Cloud.FogStir = CVarGasFogStir.GetValueOnGameThread();
+			}
 			Cloud.HazeDiffuseZ = CVarGasHazeDiffuseZ.GetValueOnGameThread();
 			Cloud.HazeEddy = FMath::Max(CVarGasHazeEddySeconds.GetValueOnGameThread(), 0.1f);
 			Cloud.HazeZeroG = CVarGasHazeDiffuseZeroG.GetValueOnGameThread();
@@ -1948,7 +1979,7 @@ void UOSGasSubsystem::UpdatePost()
 		const float FadeAt = Cloud.bHands ? FMath::Min(Cloud.FadeAge, HandFrom) : Cloud.FadeAge;
 		const float LifeFade = Cloud.bZone ? 1.0f : FMath::Cube(1.0f - FMath::SmoothStep(0.3f * Cloud.Look.LifeSeconds, Cloud.Look.LifeSeconds, FadeAt));
 		const float EvictFade = Cloud.Evict > 0.0f ? FMath::Cube(Cloud.Evict / EvictSeconds) : 1.0f;
-		Cloud.DrawGain = LifeFade * EvictFade;
+		Cloud.DrawGain = LifeFade * EvictFade * Cloud.FogIn;
 		// The key light in display terms (the post-process is after the tonemapper): a soft knee, never blown white.
 		const bool bNewLight = CVarGasLight.GetValueOnGameThread() > 0;
 		const FLinearColor K = Cloud.KeyColour;
@@ -1965,7 +1996,7 @@ void UOSGasSubsystem::UpdatePost()
 		const float Phase = Cloud.CurTime > Cloud.PrevTime + 1e-5f ? FMath::Clamp((Show - Cloud.PrevTime) / (Cloud.CurTime - Cloud.PrevTime), 0.0f, 1.0f) : 1.0f;
 		const FVector PrevCentre = Cloud.Origin + FVector(Cloud.PrevCentre);
 		Data[0 * MaxDrawn + Index] = FLinearColor(Centre.X, Centre.Y, Centre.Z, Half);
-		Data[1 * MaxDrawn + Index] = FLinearColor(float(RenderCells), Cloud.RenderCellCm, LifeFade * EvictFade, Cloud.Look.Extinction);
+		Data[1 * MaxDrawn + Index] = FLinearColor(float(RenderCells), Cloud.RenderCellCm, LifeFade * EvictFade * Cloud.FogIn, Cloud.Look.Extinction);
 		Data[2 * MaxDrawn + Index] = FLinearColor(Key.R, Key.G, Key.B, Phase);
 		// ponytail: os.Gas.Light 0 shows the default look's old blue-grey (the A/B); goes with the old light after the merge.
 		const FLinearColor Albedo = !bNewLight && Cloud.Look.Colour == FOSGasLook().Colour ? FLinearColor(0.50f, 0.52f, 0.56f) : Cloud.Look.Colour;
@@ -2399,6 +2430,8 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				A.Stretch = B.Stretch;
 			}
 			A.Mass = M;
+			A.Base += B.Base;
+			A.bFog = A.bFog || B.bFog;
 			A.HandIn = -1.0f;
 		};
 		TMap<FIntVector, int32> Cells;
@@ -2493,11 +2526,14 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			}
 			const int32 Near = Nearest(I).Key;
 			const float Share = FMath::Min(P.Dissolve * StepsDt, P.Mass);
+			const float BaseShare = P.Mass > 1e-6f ? P.Base * Share / P.Mass : P.Base;
 			if (Near != INDEX_NONE)
 			{
 				Parcels[Near].Mass += Share;
+				Parcels[Near].Base += BaseShare;
 			}
 			P.Mass -= Share;
+			P.Base = FMath::Max(0.0f, P.Base - BaseShare);
 		}
 	}
 	const float GScale = Cloud.Gravity.Size() / 980.0f;
@@ -2673,6 +2709,11 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 						if (Cloud.bZone)
 						{
 							DriftAt(Origin + P.P, float(Cloud.SimToWorld + Cloud.SimTime), Cloud.DriftSeed, Cloud.HazeDriftCm, Drift, Grad, Cloud.HazeDriftScale);
+							// A floor fog's layer stays down (v15): its vertical currents stirred less.
+							if (P.bFog && Cloud.bFogFloor)
+							{
+								Drift -= Down * ((Drift | Down) * (1.0f - Cloud.FogStir));
+							}
 						}
 						else
 						{
@@ -2720,7 +2761,12 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 						DriftAt(Origin + P.P, float(Cloud.SimToWorld + Cloud.SimTime), Cloud.DriftSeed ^ 0x9E3779B9u, 2.0f * Across, Eddy, EddyGrad, Cloud.HazeEddyCm, Cloud.HazeEddy);
 						const FVector3f EddyUp = Down * (Eddy | Down);
 						Eddy = (Eddy - EddyUp) + EddyUp * (Up / FMath::Max(Across, 1e-3f));
-						Target += P.Wander * Cloud.HazeOwn + Eddy * (1.0f - Cloud.HazeOwn);
+						FVector3f Wanders = P.Wander * Cloud.HazeOwn + Eddy * (1.0f - Cloud.HazeOwn);
+						if (P.bFog && Cloud.bFogFloor)
+						{
+							Wanders -= Down * ((Wanders | Down) * (1.0f - Cloud.FogStir));
+						}
+						Target += Wanders;
 					}
 					P.V = Target + (P.V - Target) * FMath::Exp(-Dt * P.Air / AirRestSeconds);
 				}
@@ -2893,12 +2939,18 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				{
 					Rate = FVector3f::DistSquared(P.P, Vent) < 2500.0f ? 4.0f : Rate;
 				}
-				// A parcel's own ventilation (v15: steam goes in 12 s) or the zone's.
-				P.Mass *= FMath::Exp(-Dt * Rate * (P.Vent > 0.0f ? P.Vent : UE_LN2 / Cloud.HazeHalfLife));
+				// A parcel's own ventilation (v15: steam goes in 12 s) or the zone's - on its mass over a fog's background
+				// only; the background refills a furrow over os.Gas.FogRefill.
+				const float Over = FMath::Max(P.Mass - P.Base, 0.0f);
+				P.Mass = FMath::Min(P.Mass, P.Base) + Over * FMath::Exp(-Dt * Rate * (P.Vent > 0.0f ? P.Vent : UE_LN2 / Cloud.HazeHalfLife));
+			}
+			if (Cloud.bZone && P.Base > 0.0f && P.Mass < P.Base)
+			{
+				P.Mass += (P.Base - P.Mass) * (1.0f - FMath::Exp(-Dt / FMath::Max(GFogRefill.load(), 0.1f)));
 			}
 			// A parcel handed over goes when its ramp is done (not by its age: the haze has it at full weight by then).
 			const bool bGone = P.HandOut >= 0.0f ? Cloud.SimToWorld + Cloud.SimTime >= P.HandOut + HandRamp : P.Age >= P.Life;
-			if (bGone || P.Mass < 0.002f)
+			if (bGone || (P.Mass < 0.002f && P.Base <= 0.0f))
 			{
 				Parcels.RemoveAtSwap(Index, EAllowShrinking::No);
 			}
@@ -4054,6 +4106,19 @@ void UOSGasSubsystem::FloodRooms()
 			const bool bSolid = World->OverlapAnyTestByObjectType(At, FQuat::Identity, Types, FCollisionShape::MakeBox(FVector(0.4f * Room.Cell)), Params)
 				|| OSAirZoneAt(World, At) != Zone;
 			Room.Cells[I] = bSolid ? 2 : 1;
+			// The fog seeds from the flood's air cells; a floor found under an air cell found earlier sends that one again.
+			if (FFogZone* Fog = FogZones.Find(Pair.Key); Fog && Fog->bAwake)
+			{
+				const FIntVector Up = C + FIntVector(0, 0, 1);
+				if (!bSolid)
+				{
+					Fog->SeedQueue.Add(I);
+				}
+				else if (Room.Inside(Up) && Room.Cells[Room.Index(Up)] == 1)
+				{
+					Fog->SeedQueue.Add(Room.Index(Up));
+				}
+			}
 			if (bSolid)
 			{
 				continue;
@@ -4104,6 +4169,234 @@ void UOSGasSubsystem::RoomChanged(const FBox& Bounds)
 					}
 				}
 			}
+		}
+	}
+}
+
+UOSGasSubsystem::FFogZone* UOSGasSubsystem::FogOf(const AOSGravityZone* Zone)
+{
+	FFogZone& Fog = FogZones.FindOrAdd(Zone);
+	if (!Fog.bOverride)
+	{
+		Fog.Fog = Zone->Fog;
+		Fog.Density = Zone->FogDensity;
+		Fog.HeightCm = Zone->FogHeightCm;
+		Fog.Colour = Zone->FogColour;
+	}
+	return &Fog;
+}
+
+void UOSGasSubsystem::SetFogOverride(const AOSGravityZone* Zone, EOSZoneFog Fog, float Density, float HeightCm)
+{
+	FFogZone& State = *FogOf(Zone);
+	const bool bChanged = State.Fog != Fog || State.Density != Density || State.HeightCm != HeightCm;
+	State.bOverride = true;
+	State.Fog = Fog;
+	State.Density = Density;
+	State.HeightCm = HeightCm;
+	State.Colour = Fog == EOSZoneFog::Haze ? FLinearColor(0.84f, 0.84f, 0.84f) : FLinearColor(0.88f, 0.88f, 0.88f);
+	// A new fog over an old one: the old background goes (its Base to 0 - it ventilates out), the new one seeds afresh.
+	if (bChanged)
+	{
+		for (FCloud& Cloud : Clouds)
+		{
+			if (Cloud.bZone && Cloud.IsAlive() && Cloud.Zone.Get() == Zone && !Cloud.IsBusy())
+			{
+				for (FOSGasParcel& P : Cloud.Parcels)
+				{
+					P.Base = 0.0f;
+				}
+				for (FOSGasParcel& P : Cloud.Incoming)
+				{
+					P.Base = 0.0f;
+				}
+			}
+		}
+		State.Seeded.Reset();
+		State.SeedQueue.Reset();
+		State.SeedHead = 0;
+		State.bAwake = false;
+		State.RetryIn = 0.0f;
+	}
+}
+
+void UOSGasSubsystem::TickFog(float DeltaTime)
+{
+	GFogRefill = CVarGasFogRefill.GetValueOnGameThread();
+	UWorld* World = GetWorld();
+	const bool bOn = CVarGasFog.GetValueOnGameThread() > 0;
+	FVector Eye = FVector::ZeroVector;
+	if (const APlayerController* Controller = World->GetFirstPlayerController(); Controller && Controller->PlayerCameraManager)
+	{
+		Eye = Controller->PlayerCameraManager->GetCameraLocation();
+	}
+	// The zones with a fog (their fields or an override), each a frame.
+	for (TActorIterator<AOSGravityZone> It(World); It; ++It)
+	{
+		if (It->Fog != EOSZoneFog::None)
+		{
+			FogOf(*It);
+		}
+	}
+	const double Until = FPlatformTime::Seconds() + 0.0001;
+	const float Wake = CVarGasFogWakeCm.GetValueOnGameThread();
+	for (auto& Pair : FogZones)
+	{
+		const AOSGravityZone* Zone = Pair.Key.ResolveObjectPtr();
+		FFogZone& Fog = Pair.Value;
+		if (!Zone)
+		{
+			continue;
+		}
+		if (!Fog.bOverride)
+		{
+			FogOf(Zone);
+		}
+		FVector Centre;
+		const FCollisionShape Shape = Zone->GetQueryShape(Centre);
+		const FVector Extent = Shape.IsSphere() ? FVector(Shape.GetSphereRadius()) : Shape.GetExtent();
+		const FBox Box(Centre - Extent, Centre + Extent);
+		const double Away = FMath::Sqrt(Box.ComputeSquaredDistanceToPoint(Eye));
+		int32 Slot = INDEX_NONE;
+		for (int32 Index = MaxClouds; Index < Clouds.Num(); ++Index)
+		{
+			Slot = Clouds[Index].IsAlive() && Clouds[Index].Zone.Get() == Zone ? Index : Slot;
+		}
+		const bool bWant = bOn && Fog.Fog != EOSZoneFog::None && (Fog.bAwake ? Away < 1.25 * Wake : Away < Wake);
+		if (!bWant)
+		{
+			// Asleep (or off): the fog ramps out over 1 s, then its cloud gives its slot back (as an eviction).
+			if (Fog.bAwake && Slot != INDEX_NONE)
+			{
+				FCloud& Cloud = Clouds[Slot];
+				Cloud.FogIn = FMath::Max(0.0f, Cloud.FogIn - DeltaTime);
+				if (Cloud.FogIn <= 0.0f && Cloud.Evict <= 0.0f)
+				{
+					Cloud.Evict = 1e-4f;
+					Fog.bAwake = false;
+					Fog.Seeded.Reset();
+					Fog.SeedQueue.Reset();
+					Fog.SeedHead = 0;
+					UE_LOG(LogMindKore, Log, TEXT("Gas: the fog of %s sleeps"), *Zone->GetName());
+				}
+			}
+			else if (Fog.bAwake)
+			{
+				Fog.bAwake = false;
+			}
+			continue;
+		}
+		if (!Fog.bAwake)
+		{
+			// Waking: its room, a haze slot (none: again in 0.5 s), the seeding from the room's air.
+			if ((Fog.RetryIn -= DeltaTime) > 0.0f)
+			{
+				continue;
+			}
+			Fog.RetryIn = 0.5f;
+			// The seed: the zone's centre, or the nearest free cell round it (26 ways, then outward to 2 m).
+			FVector Seed = Centre;
+			{
+				FCollisionQueryParams Params(SCENE_QUERY_STAT(OSGasFogSeed), false);
+				FCollisionObjectQueryParams Types;
+				Types.AddObjectTypesToQuery(ECC_WorldStatic);
+				Types.AddObjectTypesToQuery(ECC_WorldDynamic);
+				const auto Free = [&](const FVector& At) { return !World->OverlapAnyTestByObjectType(At, FQuat::Identity, Types, FCollisionShape::MakeBox(FVector(10.0f)), Params) && OSAirZoneAt(World, At) == Zone; };
+				bool bFound = Free(Seed);
+				for (float Step = 25.0f; !bFound && Step <= 200.0f; Step += 25.0f)
+				{
+					for (int32 K = 0; K < 27 && !bFound; ++K)
+					{
+						const FVector Try = Centre + FVector(K % 3 - 1, (K / 3) % 3 - 1, K / 9 - 1) * Step;
+						if (Free(Try))
+						{
+							Seed = Try;
+							bFound = true;
+						}
+					}
+				}
+			}
+			const TSharedPtr<FOSGasRoom> Room = RoomFor(Zone, Seed);
+			Slot = ZoneCloudFor(Zone);
+			if (Slot == INDEX_NONE)
+			{
+				continue;
+			}
+			FCloud& Cloud = Clouds[Slot];
+			Cloud.FogIn = Cloud.Parcels.IsEmpty() && Cloud.Incoming.IsEmpty() ? 0.0f : Cloud.FogIn;
+			Fog.bAwake = true;
+			Fog.Seeded.Reset();
+			Fog.SeedQueue.Reset();
+			Fog.SeedHead = 0;
+			// Cells the flood already found: all of them to the seeding.
+			for (int32 I = 0; I < Room->Cells.Num(); ++I)
+			{
+				if (Room->Cells[I] == 1)
+				{
+					Fog.SeedQueue.Add(I);
+				}
+			}
+			const bool bFloor = Fog.Fog == EOSZoneFog::Floor && Zone->bWalk && Zone->GravityCm > 0.0f;
+			const FVector Size = Box.GetSize();
+			// The lattice: neighbours 1.6 radii apart (closer, the spheres show as separate patches), ~250 buckets over the zone's box at most.
+			const float FloorRadius = FMath::Min(CVarGasHazeRadius.GetValueOnGameThread(), 0.8f * Fog.HeightCm);
+			Fog.Spacing = bFloor ? FMath::Max(1.6f * FloorRadius, float(FMath::Sqrt(Size.X * Size.Y / 250.0))) : FMath::Max(80.0f, float(FMath::Pow(Size.X * Size.Y * Size.Z / 250.0, 1.0 / 3.0)));
+			UE_LOG(LogMindKore, Log, TEXT("Gas: the fog of %s wakes (%s, density %.2f, spacing %.0f cm)"), *Zone->GetName(), bFloor ? TEXT("floor") : TEXT("haze"), Fog.Density, Fog.Spacing);
+		}
+		if (Slot == INDEX_NONE)
+		{
+			Fog.bAwake = false;
+			continue;
+		}
+		FCloud& Cloud = Clouds[Slot];
+		Cloud.FogIn = FMath::Min(1.0f, Cloud.FogIn + DeltaTime);
+		Cloud.Evict = 0.0f;
+		// The seeding, within 0.1 ms a frame, only while the haze takes no step.
+		const TSharedPtr<FOSGasRoom>* RoomRef = Rooms.Find(Zone);
+		if (!RoomRef || Cloud.IsBusy())
+		{
+			continue;
+		}
+		const FOSGasRoom& Room = **RoomRef;
+		const bool bFloor = Fog.Fog == EOSZoneFog::Floor && Zone->bWalk && Zone->GravityCm > 0.0f;
+		const float Radius = bFloor ? FMath::Min(Cloud.HazeRadius, 0.8f * Fog.HeightCm) : FMath::Min(Cloud.HazeRadius, 1.2f * Fog.Spacing);
+		const float Mass = Fog.Density * CVarGasFogMass.GetValueOnGameThread();
+		const float Fall = bFloor ? 0.33f * CVarGasHazeDiffuse.GetValueOnGameThread() / FMath::Max(Fog.HeightCm, 10.0f) / AirRestSeconds * CVarGasFogFallScale.GetValueOnGameThread() : 0.0f;
+		while (Fog.SeedHead < Fog.SeedQueue.Num() && FPlatformTime::Seconds() < Until && Cloud.Parcels.Num() + Cloud.Incoming.Num() < MaxZoneParcels)
+		{
+			const int32 I = Fog.SeedQueue[Fog.SeedHead++];
+			const FIntVector C(I % Room.Dim.X, (I / Room.Dim.X) % Room.Dim.Y, I / (Room.Dim.X * Room.Dim.Y));
+			// A floor layer: a cell on the floor (solid or the grid's edge below it); a haze: any air cell.
+			if (bFloor)
+			{
+				const FIntVector Below = C - FIntVector(0, 0, 1);
+				// Not yet known below: sent again once the flood finds a floor there.
+				if (Room.Inside(Below) && Room.Cells[Room.Index(Below)] != 2)
+				{
+					continue;
+				}
+			}
+			const FVector At = Room.CentreOf(C);
+			const FIntVector Bucket = bFloor ? FIntVector(FMath::FloorToInt(At.X / Fog.Spacing), FMath::FloorToInt(At.Y / Fog.Spacing), 0)
+				: FIntVector(FMath::FloorToInt(At.X / Fog.Spacing), FMath::FloorToInt(At.Y / Fog.Spacing), FMath::FloorToInt(At.Z / Fog.Spacing));
+			if (Fog.Seeded.Contains(Bucket))
+			{
+				continue;
+			}
+			Fog.Seeded.Add(Bucket);
+			FOSGasParcel& P = Cloud.Incoming.AddDefaulted_GetRef();
+			const FVector Jitter(FMath::FRandRange(-0.3f, 0.3f) * Fog.Spacing, FMath::FRandRange(-0.3f, 0.3f) * Fog.Spacing, 0.0f);
+			P.P = FVector3f(At + Jitter - Cloud.Origin);
+			P.Birth = P.P;
+			P.RadiusCm = P.MaxRadiusCm = Radius;
+			P.Mass = P.Base = Mass;
+			P.Heat = P.Warm = 0.0f;
+			P.Age = 2.0f;
+			P.Life = 1e9f;
+			P.bFog = true;
+			P.Fall = Fall;
+			P.Seed = FMath::Rand();
+			P.Air = P.AirTarget = 1.0f;
 		}
 	}
 }
@@ -4262,6 +4555,36 @@ namespace
 			Spot->SetLightColor(FLinearColor(1.0f, 0.92f, 0.8f));
 			Spot->ComponentTags.Add(TEXT("GasShaft"));
 			UE_LOG(LogMindKore, Log, TEXT("os.Gas.TestShaft: a GasShaft spot at %s, aimed at the eye"), *At.ToCompactString());
+		}));
+}
+#endif
+
+#if !UE_BUILD_SHIPPING
+namespace
+{
+	/** os.Gas.Fog <floor|haze|off> [density] [heightCm]: the fog of the zone the player stands in, in memory (the map untouched). */
+	FAutoConsoleCommandWithWorldAndArgs GGasFogCommand(
+		TEXT("os.Gas.FogSet"),
+		TEXT("<floor|haze|off> [density 0-1] [height cm]: the fog of the zone the player stands in, for this play only (the map is untouched)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			const APlayerController* Controller = World ? World->GetFirstPlayerController() : nullptr;
+			UOSGasSubsystem* Gas = UOSGasSubsystem::Get(World);
+			if (!Controller || !Controller->GetPawn() || !Gas || Args.IsEmpty())
+			{
+				return;
+			}
+			const AOSGravityZone* Zone = OSAirZoneAt(World, Controller->GetPawn()->GetActorLocation());
+			if (!Zone)
+			{
+				UE_LOG(LogMindKore, Warning, TEXT("os.Gas.FogSet: no air zone here"));
+				return;
+			}
+			const EOSZoneFog Fog = Args[0].Equals(TEXT("floor"), ESearchCase::IgnoreCase) ? EOSZoneFog::Floor : Args[0].Equals(TEXT("haze"), ESearchCase::IgnoreCase) ? EOSZoneFog::Haze : EOSZoneFog::None;
+			const float Density = Args.Num() > 1 ? FMath::Clamp(FCString::Atof(*Args[1]), 0.0f, 1.0f) : 0.5f;
+			const float Height = Args.Num() > 2 ? FMath::Clamp(FCString::Atof(*Args[2]), 30.0f, 120.0f) : 60.0f;
+			Gas->SetFogOverride(Zone, Fog, Density, Height);
+			UE_LOG(LogMindKore, Log, TEXT("os.Gas.FogSet: %s %s %.2f %.0f cm"), *Zone->GetName(), *Args[0], Density, Height);
 		}));
 }
 #endif

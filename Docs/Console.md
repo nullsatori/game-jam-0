@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 110 команд, 68 переменных.
+Всего: 111 команд, 74 переменных.
 
 ## `os.Attach`
 
@@ -109,7 +109,14 @@
 | `os.Gas.DitherPx` (переменная) | значение (умолч. `0.0f`) | The Bayer threshold's cell, px (0: half a block, 1 px at least) - a finer lattice inside a block; the opacity is still the block's. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DriftCm` (переменная) | значение (умолч. `3.0f`) | The zone's air drift (v12 7a.3): a slow divergence-free field, 1.5 m across, changing over ~20 s - its top speed, cm/s. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FlashReach` (переменная) | значение (умолч. `2.5f`) | The muzzle's flash for the gas reaches this x its radius (v13 13b: the whole room's haze shows on the shot's frames); 1: as the lamp (80e4fec). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.Fog` (переменная) | значение (умолч. `1`) | 1: zones with a fog keep it in their air (v15: seeded over the room's grid, held against ventilation, asleep out of reach); 0: as without one. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.FogFallScale` (переменная) | значение (умолч. `1.0f`) | A floor fog's settling x (its layer's height). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.FogMass` (переменная) | значение (умолч. `9.0f`) | A fog's background parcel mass at density 1 (calibrated: TestRoom, a floor fog 0.5 - CentreT ~0.35). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.FogRefill` (переменная) | значение (умолч. `4.0f`) | A fog refills a furrow cut in it over this, s. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.FogSet` | `<floor\|haze\|off> [density 0-1] [height cm]` | <floor\|haze\|off> [density 0-1] [height cm]: the fog of the zone the player stands in, for this play only (the map is untouched). *не в Shipping* | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FogSource` (переменная) | значение (умолч. `1`) | 1: a source with bIntoHaze (the fog and steam presets) lets its gas straight into the zone's haze (v15); 0: through a cloud slot of its own, as a weld. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.FogStir` (переменная) | значение (умолч. `0.25f`) | A floor fog's vertical drift and wander x (its layer stays down). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.FogWakeCm` (переменная) | значение (умолч. `1200.0f`) | A zone's fog wakes within this of the camera, cm (sleeps past 1.25 x). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Forward` (переменная) | значение (умолч. `0.7f`) | os.Gas.Light 1: the forward-scattering share of the lamps' light (Henyey-Greenstein g 0.55; the rest isotropic) - smoke against a lamp glows at its rim. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.HazeDiffuse` (переменная) | значение (умолч. `350.0f`) | The haze spreads through the room by a slow turbulent wander (v14), cm^2/s: 200 denser and slower, 400 faster and paler; 0: stays where it was (cb97b4e). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.HazeDiffuseZ` (переменная) | значение (умолч. `0.33f`) | The haze's wander: its vertical share (warm air over cool is stable). | `Source/MindKore/OSGas.cpp` |

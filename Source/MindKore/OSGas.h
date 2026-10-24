@@ -13,6 +13,7 @@ class UMaterialInterface;
 class UTexture2D;
 class ULightComponent;
 class AOSGravityZone;
+enum class EOSZoneFog : uint8;
 /** A spot's cone (axis, cos of outer and inner) or a rect's cosine to its normal (0, 1); false for others. */
 bool OSGasLampCone(const ULightComponent* L, FVector& OutAxis, float& OutCosOuter, float& OutCosInner);
 class USceneComponent;
@@ -372,6 +373,10 @@ private:
 		/** The haze's spreading (v14, read at each launch): diffusivity cm^2/s, its vertical share, the eddies' time, zero-G's share. */
 		float HazeDiffuse = 0.0f, HazeDiffuseZ = 0.33f, HazeEddy = 10.0f, HazeZeroG = 0.5f;
 		float HazeRadiusMax = 250.0f;
+		/** v15: the fog's ramp in (0 -> 1 over 1 s at its seeding and waking, out as it sleeps); a floor layer (its vertical stirred less). */
+		float FogIn = 1.0f;
+		bool bFogFloor = false;
+		float FogStir = 0.25f;
 		/** v14b: the eddy field's size and the wander's own share; the room's currents (speed, size); the haze's noise cut. */
 		float HazeEddyCm = 80.0f, HazeOwn = 0.25f, HazeDriftCm = 6.0f, HazeDriftScale = 300.0f, HazeNoiseCut = 0.15f;
 		/** A body's turbulent wake in the haze (os.Gas.HazeWake); the vents near it (GasVent: where its last gas goes). */
@@ -579,6 +584,29 @@ private:
 	TArray<TWeakObjectPtr<ULightComponent>> PlayerLights;
 	/** The zones' rooms for their haze (v14), from their first shot. */
 	TMap<TObjectKey<AOSGravityZone>, TSharedPtr<FOSGasRoom>> Rooms;
+	/** A zone's fog (v15): the settings in force (the zone's, or os.Gas.Fog's transient override), awake or asleep, its seeding. */
+	struct FFogZone
+	{
+		EOSZoneFog Fog{};  // None
+		float Density = 0.5f, HeightCm = 60.0f;
+		FLinearColor Colour = FLinearColor(0.88f, 0.88f, 0.88f);
+		bool bOverride = false;
+		bool bAwake = false;
+		float RetryIn = 0.0f;
+		/** Air cells to seed (from the flood) and the lattice buckets already seeded. */
+		TArray<int32> SeedQueue;
+		int32 SeedHead = 0;
+		TSet<FIntVector> Seeded;
+		float Spacing = 60.0f;
+	};
+	TMap<TObjectKey<AOSGravityZone>, FFogZone> FogZones;
+	/** The fogs for this frame: wake and sleep by the camera, seed within the budget. */
+	void TickFog(float DeltaTime);
+	FFogZone* FogOf(const AOSGravityZone* Zone);
+public:
+	/** os.Gas.Fog: the fog of the zone the player stands in, in memory only (the map is untouched). */
+	void SetFogOverride(const AOSGravityZone* Zone, EOSZoneFog Fog, float Density, float HeightCm);
+private:
 	/** Actors tagged GasVent (v14: a ventilation grille - it slowly draws the haze's strands in), gathered once a second. */
 	TArray<TWeakObjectPtr<AActor>> Vents;
 	float VentsAge = 1e6f;
