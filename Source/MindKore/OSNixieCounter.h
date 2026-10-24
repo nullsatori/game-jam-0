@@ -96,6 +96,8 @@ private:
 	double PowerTime = -1000.0;
 
 	UPROPERTY(Transient) TObjectPtr<UMeshComponent> BoundMesh = nullptr;
+	/** The digit's orange glow on the smoke round the tube (v13 13b): a lamp for the gas only (GasOnly), lighting nothing else. */
+	UPROPERTY(Transient) TObjectPtr<class UPointLightComponent> GasGlow = nullptr;
 	UPROPERTY(Transient) TArray<FOSNixieMaterialBinding> Bindings;
 
 	void ApplyState();

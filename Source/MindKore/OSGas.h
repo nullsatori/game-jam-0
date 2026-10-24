@@ -508,6 +508,9 @@ private:
 		FVector Pos = FVector::ZeroVector, Axis = FVector::ForwardVector, U = FVector::RightVector, V = FVector::UpVector;
 		float TanOuter = 0.3f, Range = 2500.0f;
 		bool bOn = false;
+		/** Texels traced since it was switched on (no shadow until the first round is done), the shadow's share (0 -> 1 over 0.1 s). */
+		int32 Filled = 0;
+		float Strength = 0.0f;
 	};
 	FTorchShadow Torch;
 	UPROPERTY()

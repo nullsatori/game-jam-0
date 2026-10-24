@@ -1,6 +1,8 @@
 #include "OSNixieCounter.h"
 
 #include "Components/MeshComponent.h"
+#include "Components/PointLightComponent.h"
+#include "HAL/IConsoleManager.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/World.h"
 #include "MindKore.h"
@@ -68,6 +70,15 @@ double UOSNixieCounterComponent::Now() const
 
 void UOSNixieCounterComponent::ApplyState()
 {
+	// The glow for the gas: lit with a digit, its strength by os.Gas.NixieLamp (read when the digit changes).
+	if (GasGlow)
+	{
+		static const IConsoleVariable* Strength = IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.NixieLamp"));
+		const float Scale = Strength ? Strength->GetFloat() : 1.0f;
+		const bool bLit = bCounterEnabled && Digit < 10 && Scale > 0.0f;
+		GasGlow->SetIntensity(bLit ? 2.0f * Scale : 0.0f);
+		GasGlow->SetVisibility(bLit);
+	}
 	for (const FOSNixieMaterialBinding& Binding : Bindings)
 	{
 		Binding.Instance->SetScalarParameterValue(DigitParameter, float(Digit));
@@ -92,6 +103,25 @@ int32 UOSNixieCounterComponent::BindMesh(UMeshComponent* Mesh, const TArray<int3
 	Digit = SafeDigit(Digit);
 	if (!IsValid(Mesh)) return 0;
 	BoundMesh = Mesh;
+	// The digit's glow on the smoke (v13 13b): 30 cm, orange, for the gas only - the world's renderer never sees it.
+	if (GetWorld() && GetWorld()->IsGameWorld())
+	{
+		if (!GasGlow)
+		{
+			GasGlow = NewObject<UPointLightComponent>(GetOwner(), TEXT("NixieGasGlow"));
+			GasGlow->SetMobility(EComponentMobility::Movable);
+			GasGlow->bAffectsWorld = false;
+			GasGlow->SetCastShadows(false);
+			GasGlow->bUseInverseSquaredFalloff = false;
+			GasGlow->LightFalloffExponent = 2.0f;
+			GasGlow->SetIntensityUnits(ELightUnits::Unitless);
+			GasGlow->SetAttenuationRadius(30.0f);
+			GasGlow->SetLightColor(FLinearColor(1.0f, 0.35f, 0.08f));
+			GasGlow->ComponentTags.Add(TEXT("GasOnly"));
+			GasGlow->RegisterComponent();
+		}
+		GasGlow->AttachToComponent(Mesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	}
 	for (const int32 Slot : MaterialSlots)
 	{
 		if (Slot < 0 || Slot >= Mesh->GetNumMaterials() || Bindings.ContainsByPredicate(

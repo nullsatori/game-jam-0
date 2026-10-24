@@ -178,9 +178,10 @@ float3 GasLamps(int nl, float4 LA[4], float4 LL[4], float4 LC[4], float4 LD[4], 
 		// face lit, the depth dark (v12, a review's point); the others the ambient occlusion.
 		float Shadow = D.y > 0.5 ? v.b : D.z > 0.5 ? T : 0.35 + 0.65 * v.a;
 		// The torch (the player's lamp with a cone): what stands in its beam shades the smoke behind (v13 13a).
-		if (GasTorchOn > 0.5 && D.z > 0.5 && Cone.w > -1.5)
+		// GasTorchOn is the shadow's share: 0 until its map's first round is traced, then up over 0.1 s.
+		if (GasTorchOn > 0.0 && D.z > 0.5 && Cone.w > -1.5)
 		{
-			Shadow *= TorchLit(pw);
+			Shadow *= lerp(1.0, TorchLit(pw), GasTorchOn);
 		}
 		Sum += L.rgb * (Att * Phase * Shadow);
 	}

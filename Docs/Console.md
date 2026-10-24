@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 109 команд, 43 переменных.
+Всего: 109 команд, 45 переменных.
 
 ## `os.Attach`
 
@@ -108,10 +108,12 @@
 | `os.Gas.DitherHold` (переменная) | значение (умолч. `0.125f`) | os.Gas.Dither 2: a block keeps its last frame's opacity while the new one is within this (0.5 / bands). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DitherPx` (переменная) | значение (умолч. `0.0f`) | The Bayer threshold's cell, px (0: half a block, 1 px at least) - a finer lattice inside a block; the opacity is still the block's. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DriftCm` (переменная) | значение (умолч. `3.0f`) | The zone's air drift (v12 7a.3): a slow divergence-free field, 1.5 m across, changing over ~20 s - its top speed, cm/s. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.FlashReach` (переменная) | значение (умолч. `2.5f`) | The muzzle's flash for the gas reaches this x its radius (v13 13b: the whole room's haze shows on the shot's frames); 1: as the lamp (80e4fec). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Forward` (переменная) | значение (умолч. `0.7f`) | os.Gas.Light 1: the forward-scattering share of the lamps' light (Henyey-Greenstein g 0.55; the rest isotropic) - smoke against a lamp glows at its rim. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Light` (переменная) | значение (умолч. `1`) | 1: the gas lit by the room (the frame before it, 1/32 and blurred) and the key lamp's full colour, a darker albedo (v11 stage 6); 0: the light before stage 6 (A/B). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.LightScale` (переменная) | значение (умолч. `2.0f`) | os.Gas.Light 1: the lamps' light on the gas, x. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.LowRes` (переменная) | значение (умолч. `1`) | 1: the gas drawn once per screen block by its own pass after the tonemapper (v11 stage 5); 0: by M_OS_GasPost in every pixel (the old way, kept until the merge). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.NixieLamp` (переменная) | значение (умолч. `1.0f`) | The Nixie counter's orange glow on the smoke round the gun (a lamp for the gas only), x; 0 off. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ProbeSeconds` (переменная) | значение (умолч. `0.0f`) | > 0: os.Gas.WalkProbe runs this long and takes a HighResShot (OSWalk_4_end) half a second and a ProfileGPU 2 s before its end (the haze's frames and cost). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSpawn` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot, and runs 24 s. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSpawnLate` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe spawns it once at 5 s (after its shots). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |

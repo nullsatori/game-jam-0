@@ -149,6 +149,12 @@ namespace
 	TAutoConsoleVariable<float> CVarGasTorchShadowEase(
 		TEXT("os.Gas.TorchShadowEase"), 0.08f,
 		TEXT("The torch's shadow map: each texel's distance eases to its trace over this, s."));
+	TAutoConsoleVariable<float> CVarGasFlashReach(
+		TEXT("os.Gas.FlashReach"), 2.5f,
+		TEXT("The muzzle's flash for the gas reaches this x its radius (v13 13b: the whole room's haze shows on the shot's frames); 1: as the lamp (80e4fec)."));
+	TAutoConsoleVariable<float> CVarGasNixieLamp(
+		TEXT("os.Gas.NixieLamp"), 1.0f,
+		TEXT("The Nixie counter's orange glow on the smoke round the gun (a lamp for the gas only), x; 0 off."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -1797,13 +1803,17 @@ void UOSGasSubsystem::UpdatePost()
 			float CosOuter = -2.0f, CosInner = -1.0f;
 			OSGasLampCone(L, Axis, CosOuter, CosInner) ? void() : void(Axis = FVector::ZeroVector);
 			const int32 Row = 13 + 4 * Lamp;
-			Data[(Row + 0) * MaxDrawn + Index] = FLinearColor(At.X, At.Y, At.Z, bSun || !Local ? 0.0f : Local->AttenuationRadius);
-			Data[(Row + 1) * MaxDrawn + Index] = FLinearColor(Light.R, Light.G, Light.B, Point && !Point->bUseInverseSquaredFalloff ? Point->LightFalloffExponent : 0.0f);
-			Data[(Row + 2) * MaxDrawn + Index] = FLinearColor(Axis.X, Axis.Y, Axis.Z, CosOuter);
-			// z: the player's own lamp (by the camera: its shadow in the gas is the march's own transmittance).
 			const APawn* Player = GetWorld()->GetFirstPlayerController() ? GetWorld()->GetFirstPlayerController()->GetPawn() : nullptr;
 			const AActor* Owner = L->GetOwner();
 			const bool bPlayers = Player && Owner && (Owner == Player || Owner->GetAttachParentActor() == Player || Owner->GetOwner() == Player);
+			// The muzzle's flash for the gas reaches the whole room's haze (v13 13b): its radius x os.Gas.FlashReach, the
+			// same falloff's exponent - at the muzzle about as before, the far haze lit on the shot's frames.
+			const bool bFlash = bPlayers && Point && !L->IsA<USpotLightComponent>() && L->bAffectsWorld;
+			const float Radius = bSun || !Local ? 0.0f : Local->AttenuationRadius * (bFlash ? CVarGasFlashReach.GetValueOnGameThread() : 1.0f);
+			Data[(Row + 0) * MaxDrawn + Index] = FLinearColor(At.X, At.Y, At.Z, Radius);
+			Data[(Row + 1) * MaxDrawn + Index] = FLinearColor(Light.R, Light.G, Light.B, Point && !Point->bUseInverseSquaredFalloff ? Point->LightFalloffExponent : 0.0f);
+			Data[(Row + 2) * MaxDrawn + Index] = FLinearColor(Axis.X, Axis.Y, Axis.Z, CosOuter);
+			// z: the player's own lamp (by the camera: its shadow in the gas is the march's own transmittance).
 			Data[(Row + 3) * MaxDrawn + Index] = FLinearColor(CosInner, Lamp == Cloud.KeyLamp ? 1.0f : 0.0f, bPlayers ? 1.0f : 0.0f, 0.0f);
 		}
 		if (BoundGrids[Index] != Cloud.Texture)
@@ -1917,7 +1927,7 @@ void UOSGasSubsystem::UpdatePost()
 		}
 		// The torch's shadow map (v13 13a).
 		Frame.TorchShadow = TorchTexture ? TorchTexture->GetResource() : nullptr;
-		Frame.TorchOn = Torch.bOn ? 1.0f : 0.0f;
+		Frame.TorchOn = Torch.bOn ? Torch.Strength : 0.0f;
 		Frame.TorchPos = FVector3f(Torch.Pos);
 		Frame.TorchAxis = FVector3f(Torch.Axis);
 		Frame.TorchU = FVector3f(Torch.U);
@@ -3122,7 +3132,7 @@ namespace
 	 * inverse square windowed by the radius, or (1 - d^2/R^2)^exponent; a spot's cone, a rect's cosine to its normal),
 	 * its luminance - and Toward, P to the lamp. 0 out of its reach.
 	 */
-	float LampAt(const ULightComponent* L, const FVector& P, FVector& Toward, const FVector& Centre)
+	float LampAt(const ULightComponent* L, const FVector& P, FVector& Toward, const FVector& Centre, float Reach = 1.0f)
 	{
 		if (L->IsA<UDirectionalLightComponent>())
 		{
@@ -3136,7 +3146,7 @@ namespace
 		}
 		const FVector Offset = L->GetComponentLocation() - P;
 		const double D2 = Offset.SizeSquared();
-		const double R = Local->AttenuationRadius;
+		const double R = Local->AttenuationRadius * Reach;
 		if (D2 >= R * R)
 		{
 			return 0.0f;
@@ -3199,6 +3209,11 @@ void UOSGasSubsystem::UpdateLamps(FCloud& Cloud, const FVector& Centre, float De
 		const AActor* Owner = L->GetOwner();
 		return Player && Owner && (Owner == Player || Owner->GetAttachParentActor() == Player || Owner->GetOwner() == Player);
 	};
+	// The muzzle's flash: the player's point lamp without a cone that lights the world (not a GasOnly glow).
+	const auto IsFlash = [&OwnedByPlayer](const ULightComponent* L)
+	{
+		return L->IsA<UPointLightComponent>() && !L->IsA<USpotLightComponent>() && L->bAffectsWorld && OwnedByPlayer(L);
+	};
 	TArray<const ULightComponent*, TInlineAllocator<64>> Lamps;
 	for (const TWeakObjectPtr<ULightComponent>& Each : KeyLights)
 	{
@@ -3223,7 +3238,7 @@ void UOSGasSubsystem::UpdateLamps(FCloud& Cloud, const FVector& Centre, float De
 		}
 		const FVector Near = L->IsA<UDirectionalLightComponent>() ? Centre : Box.GetClosestPointTo(L->GetComponentLocation());
 		FVector Toward;
-		const float Score = LampAt(L, Near, Toward, Centre);
+		const float Score = LampAt(L, Near, Toward, Centre, IsFlash(L) ? CVarGasFlashReach.GetValueOnGameThread() : 1.0f);
 		if (Score > 0.0f)
 		{
 			const AActor* Owner = L->GetOwner();
@@ -3358,17 +3373,19 @@ void UOSGasSubsystem::UpdateTorchShadow(float DeltaTime)
 	const int32 Count = Res * Res;
 	if (!Torch.bOn || Torch.Res != Res)
 	{
-		// Switched on: the whole map traced at once, no ease up from nothing.
+		// Switched on: the map fills over its usual round (no 256 traces in one frame), its texels taken as traced (no ease
+		// up from nothing); no shadow until the round is done, then it comes in over 0.1 s.
 		Torch.Res = Res;
-		Torch.Depth.SetNumUninitialized(Count);
-		Torch.Target.SetNumUninitialized(Count);
-		for (int32 I = 0; I < Count; ++I)
-		{
-			Torch.Target[I] = Torch.Depth[I] = Trace(DirOf(I, Axis, U, V, TanOuter));
-		}
-		Torch.Cursor = 0;
+		Torch.Depth.Init(Range, Count);
+		Torch.Target.Init(Range, Count);
+		Torch.Cursor = Count - 1;
+		Torch.Filled = 0;
+		Torch.Strength = 0.0f;
+		Torch.Axis = Axis;
+		Torch.U = U;
+		Torch.V = V;
+		Torch.TanOuter = TanOuter;
 	}
-	else
 	{
 		// The map re-sampled from the lamp's last frame into this one (its texels not yet traced again would ride with
 		// the screen as it turns); outside the last map: the range.
@@ -3393,13 +3410,20 @@ void UOSGasSubsystem::UpdateTorchShadow(float DeltaTime)
 		}
 		// Traces in turn, then the ease.
 		const int32 Traces = FMath::Clamp(CVarGasTorchTracesPerFrame.GetValueOnGameThread(), 1, Count);
+		const bool bFirstRound = Torch.Filled < Count;
 		for (int32 K = 0; K < Traces; ++K)
 		{
 			Torch.Cursor = (Torch.Cursor + 1) % Count;
 			Torch.Target[Torch.Cursor] = Trace(DirOf(Torch.Cursor, Axis, U, V, TanOuter));
+			if (bFirstRound)
+			{
+				Torch.Depth[Torch.Cursor] = Torch.Target[Torch.Cursor];
+			}
 		}
+		Torch.Filled = FMath::Min(Torch.Filled + Traces, Count);
+		Torch.Strength = Torch.Filled < Count ? 0.0f : FMath::Min(1.0f, Torch.Strength + DeltaTime / 0.1f);
 		const float Ease = 1.0f - FMath::Exp(-DeltaTime / FMath::Max(CVarGasTorchShadowEase.GetValueOnGameThread(), 0.005f));
-		for (int32 I = 0; I < Count; ++I)
+		for (int32 I = 0; I < Count && !bFirstRound; ++I)
 		{
 			Torch.Depth[I] += (Torch.Target[I] - Torch.Depth[I]) * Ease;
 		}
