@@ -2677,6 +2677,7 @@ namespace
 	 */
 	TAutoConsoleVariable<FString> CVarGasProbeSpawn(TEXT("os.Gas.ProbeSpawn"), TEXT(""), TEXT("A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot, and runs 24 s."));
 
+	TAutoConsoleVariable<float> CVarGasProbeSeconds(TEXT("os.Gas.ProbeSeconds"), 0.0f, TEXT("> 0: os.Gas.WalkProbe runs this long and takes a HighResShot (OSWalk_4_end) half a second and a ProfileGPU 2 s before its end (the haze's frames and cost)."));
 	TAutoConsoleVariable<FString> CVarGasProbeSpawnLate(TEXT("os.Gas.ProbeSpawnLate"), TEXT(""), TEXT("A preset: os.Gas.WalkProbe spawns it once at 5 s (after its shots)."));
 
 	TAutoConsoleVariable<int32> CVarGasProbeSuppressor(TEXT("os.Gas.ProbeSuppressor"), 0, TEXT("1: os.Gas.WalkProbe mounts the suppressor first."));
@@ -3031,7 +3032,23 @@ namespace
 					}
 				}
 				const bool bLongRun = !IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSpawn"))->GetString().IsEmpty();
-				if (T > (bLongRun ? 24.0f : 8.0f))
+				const float RunFor = IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSeconds"))->GetFloat();
+				static bool bEndShot = false;
+				if (T < 0.1f) { bEndShot = false; }
+				if (RunFor > 0.0f && !bEndShot && T >= RunFor - 0.5f)
+				{
+					bEndShot = true;
+					Controller->ConsoleCommand(TEXT("HighResShot 1 filename=OSWalk_4_end"));
+				}
+				// The cost 2 s before the end (in the screenshot's frame it profiled the shot's own pass).
+				static bool bEndProfile = false;
+				if (T < 0.1f) { bEndProfile = false; }
+				if (RunFor > 0.0f && !bEndProfile && T >= RunFor - 2.0f)
+				{
+					bEndProfile = true;
+					Controller->ConsoleCommand(TEXT("ProfileGPU"));
+				}
+				if (T > (RunFor > 0.0f ? RunFor : bLongRun ? 24.0f : 8.0f))
 				{
 					UE_LOG(LogMindKore, Log, TEXT("Walk probe: the drawn set changed %d time(s)"), Gas->DrawnSetChanges);
 					UE_LOG(LogMindKore, Log, TEXT("Walk probe: the gas's opacity - the largest jump a frame in a block %.3f, %d of %d frame(s) over 0.25 (the gun's corner left out; the muzzle's jet in its first 0.25 s apart: up to %.2f); %s"),

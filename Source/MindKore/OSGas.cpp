@@ -31,6 +31,7 @@
 #include "Materials/MaterialInterface.h"
 #include "MindKore.h"
 #include "OSGravity.h"
+#include "OSShip.h"
 #include "UObject/UObjectIterator.h"
 
 namespace
@@ -110,6 +111,25 @@ namespace
 	TAutoConsoleVariable<float> CVarGasAlbedo(
 		TEXT("os.Gas.Albedo"), 1.0f,
 		TEXT("os.Gas.Light 1: the gas's albedo, x its look's colour."));
+
+	TAutoConsoleVariable<float> CVarGasDriftCm(
+		TEXT("os.Gas.DriftCm"), 6.0f,
+		TEXT("The zone's air drift (v12 7a.3): a slow divergence-free field, 1.5 m across, changing over ~20 s - its top speed, cm/s."));
+	TAutoConsoleVariable<float> CVarGasZoneAmbient(
+		TEXT("os.Gas.ZoneAmbient"), 0.5f,
+		TEXT("The zone's haze: the room's light on it, x (it is seen by the lamps, not by the room)."));
+	TAutoConsoleVariable<float> CVarGasZoneDensity(
+		TEXT("os.Gas.ZoneDensity"), 0.4f,
+		TEXT("The zone's haze: the gas handed to it, x its mass."));
+	TAutoConsoleVariable<int32> CVarGasDither(
+		TEXT("os.Gas.Dither"), 1,
+		TEXT("1: the gas's opacity bands thresholded by an ordered 4x4 Bayer over the screen blocks (thin gas a sparse even lattice, not snow), the tail from 0.03; 0: a hash per block, the tail from 0.12 (before v12)."));
+	TAutoConsoleVariable<int32> CVarGasBands(
+		TEXT("os.Gas.Bands"), 4,
+		TEXT("The gas's opacity levels (4; 8 a finer variant)."));
+	TAutoConsoleVariable<float> CVarGasTickHz(
+		TEXT("os.Gas.TickHz"), 0.0f,
+		TEXT("> 0: the gas's own evolution shown in steps of 1/TickHz s (stop motion); its place and the camera stay smooth. 0: off."));
 
 	TAutoConsoleVariable<int32> CVarGasDebug(
 		TEXT("os.Gas.Debug"), 0,
@@ -198,6 +218,63 @@ private:
 	FOSGasRenderData Data;
 };
 
+namespace
+{
+	/**
+	 * The zone's drift (v12 7a.3): the curl of a few travelling sine waves' potential - divergence-free by construction,
+	 * 1.5 m across, each wave's phase turning over ~20 s (no jerks), world-anchored; the velocity and its gradient
+	 * (dV_i/dx_j in OutGrad[i]) at a world point. Speed at most SpeedCm.
+	 */
+	void DriftAt(const FVector3f& World, float Time, uint32 Seed, float SpeedCm, FVector3f& OutV, FVector3f OutGrad[3])
+	{
+		constexpr int32 Waves = 5;
+		OutV = FVector3f::ZeroVector;
+		OutGrad[0] = OutGrad[1] = OutGrad[2] = FVector3f::ZeroVector;
+		if (SpeedCm <= 0.0f)
+		{
+			return;
+		}
+		const float Amp = SpeedCm / 3.0f;
+		for (int32 W = 0; W < Waves; ++W)
+		{
+			const auto R = [Seed, W](int32 K) { return float(Hash3(W, K, 7, Seed) & 0xFFFF) / 65535.0f; };
+			// A direction on the sphere, a wavelength round 1.5 m, a rate round 20 s, a phase; the potential across it.
+			const float Z = R(0) * 2.0f - 1.0f, A = R(1) * UE_TWO_PI;
+			const FVector3f Dir(FMath::Sqrt(1.0f - Z * Z) * FMath::Cos(A), FMath::Sqrt(1.0f - Z * Z) * FMath::Sin(A), Z);
+			const float K = UE_TWO_PI / (150.0f * (0.75f + 0.5f * R(2)));
+			const float Omega = UE_TWO_PI / (20.0f * (0.7f + 0.6f * R(3)));
+			FVector3f U, V;
+			Dir.FindBestAxisVectors(U, V);
+			const float B = R(4) * UE_TWO_PI;
+			const FVector3f Pot = U * FMath::Cos(B) + V * FMath::Sin(B);
+			const FVector3f Curl = Dir.Cross(Pot) * Amp;
+			const float Theta = K * (Dir | World) + Omega * Time + R(5) * UE_TWO_PI;
+			OutV += Curl * FMath::Cos(Theta);
+			const float S = -FMath::Sin(Theta) * K;
+			for (int32 I = 0; I < 3; ++I)
+			{
+				OutGrad[I] += Dir * (Curl[I] * S);
+			}
+		}
+		const float Speed = OutV.Size();
+		if (Speed > SpeedCm)
+		{
+			OutV *= SpeedCm / Speed;
+		}
+	}
+
+	/** Residual warmth's lift at full gravity, cm/s per unit (v12 7a.5: 2-5 cm/s), and how long the warmth lasts, s. */
+	constexpr float WarmLiftCm = 4.0f;
+	constexpr float WarmSeconds = 20.0f;
+	/** The haze's strands: the longest stretch, its relaxing, s. */
+	constexpr float MaxStretch = 5.0f;
+	constexpr float StretchSeconds = 15.0f;
+	/** A shot's cloud starts its hand-over at this fade age, spreads it over HandSpread s, each parcel over HandRamp. */
+	constexpr float HandFrom = 3.0f;
+	constexpr float HandSpread = 1.0f;
+	constexpr float HandRamp = 0.5f;
+}
+
 UOSGasSubsystem* UOSGasSubsystem::Get(const UObject* WorldContext)
 {
 	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
@@ -256,9 +333,11 @@ void UOSGasSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		GasView = FSceneViewExtensions::NewExtension<FOSGasViewExtension>(&InWorld);
 	}
 	// The pool: every cloud's volume, material, textures and grid made now, not on the first shot (a 30 ms frame).
-	Clouds.SetNum(MaxClouds);
-	for (FCloud& Cloud : Clouds)
+	Clouds.SetNum(MaxClouds + MaxZones);
+	for (int32 Index = 0; Index < Clouds.Num(); ++Index)
 	{
+		FCloud& Cloud = Clouds[Index];
+		Cloud.bZone = Index >= MaxClouds;
 		EnsureRender(Cloud);
 		if (!Cloud.Grid)
 		{
@@ -318,7 +397,7 @@ bool UOSGasSubsystem::GetYoungestCloud(float MinAge, FVector& OutCentre, float& 
 	const FCloud* Best = nullptr;
 	for (const FCloud& Cloud : Clouds)
 	{
-		if (Cloud.Age >= MinAge && (!Best || Cloud.Age < Best->Age))
+		if (!Cloud.bZone && Cloud.Age >= MinAge && (!Best || Cloud.Age < Best->Age))
 		{
 			Best = &Cloud;
 		}
@@ -361,7 +440,7 @@ bool UOSGasSubsystem::ProbeYoungest(FVector& OutCentroid, int32& OutParcels, int
 	const FCloud* Best = nullptr;
 	for (const FCloud& Cloud : Clouds)
 	{
-		if (Cloud.IsAlive() && (!Best || Cloud.Parcels.Num() > Best->Parcels.Num()))
+		if (!Cloud.bZone && Cloud.IsAlive() && (!Best || Cloud.Parcels.Num() > Best->Parcels.Num()))
 		{
 			Best = &Cloud;
 		}
@@ -501,7 +580,7 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	// youngest: a shot's hole puffs went into the shot before it (the first match), stretching that cloud's box to
 	// the new muzzle - it jumped (owner 23.10: В«СЂС‹РІРєРѕРј СЃРєР»РµРёРІР°СЋС‚СЃСЏВ»).
 	int32 Join = INDEX_NONE;
-	for (int32 Index = 0; Index < Clouds.Num() && JoinAge >= 0.0f; ++Index)
+	for (int32 Index = 0; Index < MaxClouds && JoinAge >= 0.0f; ++Index)
 	{
 		const FCloud& Cloud = Clouds[Index];
 		if (Cloud.IsAlive() && Cloud.Age <= JoinAge && Cloud.Evict <= 0.0f && Cloud.Look == Look && Cloud.Parcels.Num() + Cloud.Incoming.Num() < MaxParcels
@@ -517,11 +596,7 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	// A free slot (its last step done: no wait on the game thread) or a new one. None: the gas goes into the youngest
 	// of its look within 1.5 m while a fading cloud frees a slot - a living cloud's slot was taken on the spot (it
 	// vanished in one frame); none near, it is not let out.
-	int32 Slot = Clouds.IndexOfByPredicate([](const FCloud& Each) { return !Each.IsAlive() && !Each.IsBusy(); });
-	if (Slot == INDEX_NONE && Clouds.Num() < MaxClouds)
-	{
-		Slot = Clouds.AddDefaulted();
-	}
+	int32 Slot = Clouds.IndexOfByPredicate([](const FCloud& Each) { return !Each.bZone && !Each.IsAlive() && !Each.IsBusy(); });
 	if (Slot == INDEX_NONE && bFreeSlotOnly)
 	{
 		return INDEX_NONE;
@@ -529,7 +604,7 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	if (Slot == INDEX_NONE)
 	{
 		int32 Youngest = INDEX_NONE;
-		for (int32 Index = 0; Index < Clouds.Num(); ++Index)
+		for (int32 Index = 0; Index < MaxClouds; ++Index)
 		{
 			const FCloud& Each = Clouds[Index];
 			if (Each.IsAlive() && Each.Look == Look && Each.Parcels.Num() + Each.Incoming.Num() < MaxParcels
@@ -545,16 +620,16 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	int32 Free = 0;
 	for (const FCloud& Each : Clouds)
 	{
-		Free += !Each.IsAlive() && &Each != &Cloud ? 1 : 0;
+		Free += !Each.bZone && !Each.IsAlive() && &Each != &Cloud ? 1 : 0;
 	}
 	// A level source never starts an eviction (it would take a shot's cloud); a shot does - the oldest unfed first.
-	if (Free < 3 && Clouds.Num() >= MaxClouds && !bFreeSlotOnly)
+	if (Free < 3 && !bFreeSlotOnly)
 	{
 		FCloud* Oldest = nullptr;
 		for (FCloud& Each : Clouds)
 		{
 			const double WorldNow = World->GetTimeSeconds();
-			if (&Each != &Cloud && Each.IsAlive() && Each.Evict <= 0.0f
+			if (!Each.bZone && &Each != &Cloud && Each.IsAlive() && Each.Evict <= 0.0f
 				&& (!Oldest || (Oldest->IsFed(WorldNow) && !Each.IsFed(WorldNow)) || (Oldest->IsFed(WorldNow) == Each.IsFed(WorldNow) && Each.Age > Oldest->Age)))
 			{
 				Oldest = &Each;
@@ -565,8 +640,18 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 			Oldest->Evict = EvictSeconds;
 		}
 	}
+	InitCloud(Cloud, Look, Where, true);
+	return Slot;
+}
+
+void UOSGasSubsystem::InitCloud(FCloud& Cloud, const FOSGasLook& Look, const FVector& Where, bool bTrace)
+{
+	UWorld* World = GetWorld();
 	Cloud.Look = Look;
 	Cloud.Origin = Where;
+	Cloud.bHands = false;
+	Cloud.HandStart = -1.0;
+	Cloud.SimToWorld = World->GetTimeSeconds();
 	Cloud.DrawnCentre = Cloud.PackedCentre = FVector3f::ZeroVector;
 	Cloud.Parcels.Reset();
 	Cloud.Incoming.Reset();
@@ -628,6 +713,10 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	}
 	for (const FVector& Direction : Ways)
 	{
+		if (!bTrace)
+		{
+			break;
+		}
 		FHitResult Hit;
 		if (World->LineTraceSingleByObjectType(Hit, Where, Where + Direction * 400.0f, Statics, Query)
 			&& !Hit.bStartPenetrating && (Hit.ImpactNormal | Direction) < -0.2f
@@ -647,7 +736,150 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	}
 	Cloud.KeyLamp = INDEX_NONE;
 	Cloud.bLampsFresh = true;
+}
+
+int32 UOSGasSubsystem::ZoneCloudFor(const AOSGravityZone* Zone)
+{
+	if (!Zone || Zone->HazeHalfLifeSeconds <= 0.0f)
+	{
+		return INDEX_NONE;
+	}
+	for (int32 Index = MaxClouds; Index < Clouds.Num(); ++Index)
+	{
+		if (Clouds[Index].IsAlive() && Clouds[Index].Zone.Get() == Zone)
+		{
+			return Index;
+		}
+	}
+	const int32 Slot = Clouds.IndexOfByPredicate([](const FCloud& Each) { return Each.bZone && !Each.IsAlive() && !Each.IsBusy(); });
+	if (Slot == INDEX_NONE)
+	{
+		return INDEX_NONE;
+	}
+	FVector Centre;
+	const FCollisionShape Shape = Zone->GetQueryShape(Centre);
+	const FVector Extent = Shape.IsSphere() ? FVector(Shape.GetSphereRadius()) : Shape.GetExtent();
+	FOSGasLook Look;
+	Look.LifeSeconds = 1e9f;
+	Look.bEmbers = false;
+	FCloud& Cloud = Clouds[Slot];
+	Cloud.Pending = UE::Tasks::FTask();
+	InitCloud(Cloud, Look, Centre, false);
+	Cloud.Zone = Zone;
+	Cloud.HazeHalfLife = Zone->HazeHalfLifeSeconds;
+	Cloud.DriftSeed = GetTypeHash(Zone->GetFName());
+	Cloud.bAir = true;
+	Cloud.StepDt = 0.2f;
+	// Its walls: the zone's box faces (the shots that hand over bring their own traced walls too).
+	const FBox Box(Centre - Extent, Centre + Extent);
+	for (int32 Axis = 0; Axis < 3; ++Axis)
+	{
+		for (const float Side : { -1.0f, 1.0f })
+		{
+			FVector Normal = FVector::ZeroVector;
+			Normal[Axis] = -Side;
+			FVector At = Centre;
+			At[Axis] += Side * Extent[Axis];
+			Cloud.Planes.Emplace(At, Normal);
+			Cloud.PlaneBoxes.Add(Box.ExpandBy(10.0f));
+		}
+	}
+	UE_LOG(LogMindKore, Log, TEXT("Gas: the haze of %s begins (half-life %.0f s)"), *Zone->GetName(), Cloud.HazeHalfLife);
 	return Slot;
+}
+
+void UOSGasSubsystem::HandOver(FCloud& Cloud, const FVector& Centre)
+{
+	UWorld* World = GetWorld();
+	const double Now = World->GetTimeSeconds();
+	const AOSGravityZone* Zone = OSAirZoneAt(World, Centre);
+	// Only gas that lives long (a thruster's second-long cone fades as it did) and only into a zone with haze.
+	Cloud.bHands = Cloud.bAir && Cloud.Look.LifeSeconds > HandFrom + 0.5f && Zone && Zone->HazeHalfLifeSeconds > 0.0f;
+	if (!Cloud.bHands)
+	{
+		return;
+	}
+	const bool bStart = Cloud.HandStart < 0.0 && Cloud.FadeAge >= HandFrom;
+	// A fed cloud's parcels go one by one as they would fade (a weld's steady flow); the rest once it is HandFrom old.
+	// One by one only while fed (a weld): an unfed cloud's short-lived wisps fade by their age as before.
+	const bool bFed = Cloud.IsFed(Now);
+	bool bAny = bStart || Cloud.HandStart >= 0.0;
+	for (const FOSGasParcel& P : Cloud.Parcels)
+	{
+		bAny |= bFed && P.HandOut < 0.0f && P.Age >= 0.6f * P.Life;
+	}
+	if (!bAny)
+	{
+		return;
+	}
+	const int32 ZoneSlot = ZoneCloudFor(Zone);
+	if (ZoneSlot == INDEX_NONE)
+	{
+		// No haze cloud free: it fades as before.
+		Cloud.bHands = false;
+		return;
+	}
+	FCloud& Haze = Clouds[ZoneSlot];
+	if (bStart)
+	{
+		// The oldest first, all of them leaving within HandSpread s.
+		Cloud.HandStart = Now;
+		TArray<int32> Order;
+		for (int32 I = 0; I < Cloud.Parcels.Num(); ++I)
+		{
+			if (Cloud.Parcels[I].HandOut < 0.0f)
+			{
+				Order.Add(I);
+			}
+		}
+		Order.Sort([&Cloud](int32 A, int32 B) { return Cloud.Parcels[A].Age > Cloud.Parcels[B].Age; });
+		for (int32 Rank = 0; Rank < Order.Num(); ++Rank)
+		{
+			Cloud.Parcels[Order[Rank]].HandOut = float(Now + HandSpread * Rank / FMath::Max(1, Order.Num() - 1));
+		}
+	}
+	const float L = Cloud.Look.LifeSeconds;
+	// The cloud's own fade held where it stands at HandFrom (UpdatePost): the haze takes the gas at that weight.
+	const float Held = FMath::Cube(1.0f - FMath::SmoothStep(0.3f * L, L, HandFrom));
+	const float Gain = Held * Cloud.Look.Extinction / FMath::Max(Haze.Look.Extinction, 1e-4f) * CVarGasZoneDensity.GetValueOnGameThread();
+	const FVector3f Shift(Cloud.Origin - Haze.Origin);
+	for (FOSGasParcel& P : Cloud.Parcels)
+	{
+		if (P.HandOut < 0.0f && (Cloud.HandStart >= 0.0 || (bFed && P.Age >= 0.6f * P.Life)))
+		{
+			// Late gas (a seep after the start), or one fading by its own age: next.
+			P.HandOut = float(Now + HandRamp);
+		}
+		// The copy goes in HandRamp s ahead of its ramp: the haze's atlas (5 Hz, a step behind) has it by then.
+		if (P.HandOut >= 0.0f && !P.bHanded && Now >= P.HandOut - HandRamp && Haze.Parcels.Num() + Haze.Incoming.Num() < 4 * MaxZoneParcels)
+		{
+			P.bHanded = true;
+			FOSGasParcel& C = Haze.Incoming.Add_GetRef(P);
+			C.P += Shift;
+			C.Birth += Shift;
+			C.HandIn = P.HandOut;
+			C.HandOut = -1.0f;
+			C.bHanded = false;
+			C.Life = 1e9f;
+			C.Cling = 0.0f;
+			C.Carrier = FVector3f::ZeroVector;
+			C.bInstant = false;
+			const float AgeThen = P.Age + float(P.HandOut - Now);
+			C.Mass = P.Mass * Gain * (1.0f - FMath::SmoothStep(0.6f * P.Life, P.Life, AgeThen));
+			C.MaxRadiusCm = FMath::Max(C.MaxRadiusCm, 20.0f);
+		}
+	}
+	// Its walls join the haze's (the zone's box knows no inner walls).
+	for (int32 I = 0; I < Cloud.Planes.Num() && Haze.Planes.Num() < 48 && !Haze.IsBusy(); ++I)
+	{
+		const FPlane& Plane = Cloud.Planes[I];
+		if (!Haze.Planes.ContainsByPredicate([&Plane](const FPlane& Each) { return (FVector(Each) | FVector(Plane)) > 0.99f && FMath::Abs(Each.W - Plane.W) < 5.0f; }))
+		{
+			Haze.Planes.Add(Plane);
+			Haze.PlaneBoxes.Add(Cloud.PlaneBoxes[I]);
+		}
+	}
+	Haze.LastFed = Now;
 }
 
 void UOSGasSubsystem::Emit(FCloud& Cloud, const FOSGasRecipe& R, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count)
@@ -690,6 +922,7 @@ void UOSGasSubsystem::Emit(FCloud& Cloud, const FOSGasRecipe& R, const FVector& 
 		P.RadiusCm = FMath::FRandRange(R.RadiusMinCm, R.RadiusMaxCm);
 		P.Mass = R.Mass;
 		P.Heat = R.Heat;
+		P.Warm = R.Heat;
 		P.Life = R.LifeSeconds * FMath::FRandRange(0.8f, 1.2f);
 		P.Cling = R.ClingSeconds;
 		P.MaxRadiusCm = R.MaxRadiusCm;
@@ -1071,7 +1304,8 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 	const float Hold = 0.3f * Cloud.Look.LifeSeconds;
 	Cloud.FadeAge = !bFed ? Cloud.FadeAge + DeltaTime : Cloud.FadeAge > Hold ? FMath::Max(Hold, Cloud.FadeAge - DeltaTime) : FMath::Min(Cloud.FadeAge + DeltaTime, Hold);
 	const bool bEvicted = Cloud.Evict > 0.0f && (Cloud.Evict -= DeltaTime) <= 0.0f;
-	const bool bEmpty = !bBusy && Cloud.Parcels.IsEmpty() && Cloud.Incoming.IsEmpty() && Cloud.Age > 0.3f;
+	// The haze waits 2 s for its first gas (the copies come ahead of their ramps).
+	const bool bEmpty = !bBusy && Cloud.Parcels.IsEmpty() && Cloud.Incoming.IsEmpty() && Cloud.Age > (Cloud.bZone ? 2.0f : 0.3f);
 	if ((Cloud.FadeAge >= Cloud.Look.LifeSeconds || bEvicted) && bBusy)
 	{
 		// Faded out already; tried again next frame (an eviction kept pending).
@@ -1150,9 +1384,18 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		// Drawn from its first atlas with gas on; off only when the cloud ends (no flicker).
 		Cloud.bDrawable |= Cloud.bHasGas;
 	}
-	// Air or vacuum and gravity where the gas is now.
+	// Air or vacuum and gravity where the gas is now (the haze: its zone's).
 	const FVector Centre = Cloud.Origin + FVector(Cloud.DrawnCentre);
-	if (!bBusy)
+	if (!bBusy && !Cloud.bZone)
+	{
+		HandOver(Cloud, Centre);
+	}
+	if (!bBusy && Cloud.bZone)
+	{
+		const AOSGravityZone* Zone = Cloud.Zone.Get();
+		Cloud.HazeHalfLife = Zone ? Zone->HazeHalfLifeSeconds : 1.0f;
+	}
+	else if (!bBusy)
 	{
 		Cloud.bAir = OSAirZoneAt(World, Centre) != nullptr;
 		Cloud.Gravity = OSGravityAt(World, Centre).Acceleration;
@@ -1167,13 +1410,23 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 	{
 		// A fed cloud keeps stepping at 30 Hz at least (fresh gas in it).
 		const float Since = bFed ? FMath::Min(Cloud.SimTime, 1.0f) : Cloud.SimTime;
-		const float Dt = Since < FastSeconds ? FastStep : Since < 1.5f ? SlowStep : Since < 3.0f ? 1.0f / 15.0f : 0.1f;
+		// The haze: 5 Hz, 15 with a body in it (a hole in it followed a walker 0.2 s late).
+		const float Dt = Cloud.bZone ? (Cloud.NextMovers.IsEmpty() ? 0.2f : 1.0f / 15.0f)
+			: Since < FastSeconds ? FastStep : Since < 1.5f ? SlowStep : Since < 3.0f ? 1.0f / 15.0f : 0.1f;
 		const int32 Steps = FMath::Min(FMath::FloorToInt(Cloud.StepCarry / Dt + 1e-3f), 4);
 		if (Steps > 0)
 		{
 			Cloud.StepCarry = FMath::Max(0.0f, Cloud.StepCarry - Steps * Dt);
 			Cloud.SimTime += Steps * Dt;
 			Cloud.StepDt = Dt;
+			// The gas's clock against the world's (it loses time on a hitch: the hand-over's ramps go by the world's).
+			Cloud.SimToWorld = World->GetTimeSeconds() - Cloud.StepCarry - Cloud.SimTime;
+			Cloud.DriftCm = CVarGasDriftCm.GetValueOnGameThread();
+			if (!Cloud.bZone)
+			{
+				const AOSGravityZone* Zone = OSAirZoneAt(World, Centre);
+				Cloud.DriftSeed = Zone ? GetTypeHash(Zone->GetFName()) : 0u;
+			}
 			LaunchStep(Cloud, Steps, Dt);
 		}
 	}
@@ -1239,7 +1492,7 @@ void UOSGasSubsystem::UpdatePost()
 		Eye = Controller->PlayerCameraManager->GetCameraLocation();
 	}
 	// Every drawable cloud (MaxDrawn = MaxClouds: a set picked by distance swapped clouds in and out whole).
-	TArray<FCloud*, TInlineAllocator<MaxClouds>> Drawn;
+	TArray<FCloud*, TInlineAllocator<MaxDrawn>> Drawn;
 	for (FCloud& Cloud : Clouds)
 	{
 		if (Cloud.IsAlive() && Cloud.bDrawable)
@@ -1274,13 +1527,16 @@ void UOSGasSubsystem::UpdatePost()
 	BoundGrids.SetNum(MaxDrawn);
 	for (int32 Index = 0; Index < Drawn.Num(); ++Index)
 	{
-		const FCloud& Cloud = *Drawn[Index];
+		FCloud& Cloud = *Drawn[Index];
 		const FVector Centre = Cloud.Origin + FVector(Cloud.DrawnCentre);
 		const float Half = 0.5f * RenderCells * Cloud.RenderCellCm;
 		// The cloud melts from 0.3 of its life: the density's gain as the cube of the fade, so a thick cloud's opacity
 		// (1 - exp(-density)) falls about evenly instead of holding to the last half second and going at once (owner
 		// 23.10: the veil went in 0.2 s).
-		const float LifeFade = FMath::Cube(1.0f - FMath::SmoothStep(0.3f * Cloud.Look.LifeSeconds, Cloud.Look.LifeSeconds, Cloud.FadeAge));
+		// A cloud handing its gas to the haze holds its fade where it stands at HandFrom (the haze takes the rest); the
+		// haze itself never fades by age.
+		const float FadeAt = Cloud.bHands ? FMath::Min(Cloud.FadeAge, HandFrom) : Cloud.FadeAge;
+		const float LifeFade = Cloud.bZone ? 1.0f : FMath::Cube(1.0f - FMath::SmoothStep(0.3f * Cloud.Look.LifeSeconds, Cloud.Look.LifeSeconds, FadeAt));
 		const float EvictFade = Cloud.Evict > 0.0f ? FMath::Cube(Cloud.Evict / EvictSeconds) : 1.0f;
 		// The key light in display terms (the post-process is after the tonemapper): a soft knee, never blown white.
 		const bool bNewLight = CVarGasLight.GetValueOnGameThread() > 0;
@@ -1289,7 +1545,13 @@ void UOSGasSubsystem::UpdatePost()
 		FLinearColor Top, Bottom;
 		AmbientFor(Cloud.bAir, Top, Bottom);
 		// The blend of the two atlases: where the moment shown is between their times.
-		const float Phase = Cloud.CurTime > Cloud.PrevTime + 1e-5f ? FMath::Clamp((Cloud.ShowTime - Cloud.PrevTime) / (Cloud.CurTime - Cloud.PrevTime), 0.0f, 1.0f) : 1.0f;
+		// os.Gas.TickHz: the moment shown in steps on the world's clock (stop motion; the box and the camera stay smooth).
+		float Show = Cloud.ShowTime;
+		if (const float Hz = CVarGasTickHz.GetValueOnGameThread(); Hz > 0.0f)
+		{
+			Show = float(FMath::FloorToDouble((Cloud.SimToWorld + Show) * Hz) / Hz - Cloud.SimToWorld);
+		}
+		const float Phase = Cloud.CurTime > Cloud.PrevTime + 1e-5f ? FMath::Clamp((Show - Cloud.PrevTime) / (Cloud.CurTime - Cloud.PrevTime), 0.0f, 1.0f) : 1.0f;
 		const FVector PrevCentre = Cloud.Origin + FVector(Cloud.PrevCentre);
 		Data[0 * MaxDrawn + Index] = FLinearColor(Centre.X, Centre.Y, Centre.Z, Half);
 		Data[1 * MaxDrawn + Index] = FLinearColor(float(RenderCells), Cloud.RenderCellCm, LifeFade * EvictFade, Cloud.Look.Extinction);
@@ -1302,7 +1564,23 @@ void UOSGasSubsystem::UpdatePost()
 		Data[5 * MaxDrawn + Index] = Top;
 		Data[6 * MaxDrawn + Index] = Bottom;
 		Data[7 * MaxDrawn + Index] = FLinearColor(PrevCentre.X, PrevCentre.Y, PrevCentre.Z, 0.5f * RenderCells * Cloud.PrevCellCm);
-		Data[8 * MaxDrawn + Index] = FLinearColor(Cloud.PrevCellCm, 0.0f, 0.0f, 0.0f);
+		// 8: the previous atlas's cell; os.Gas.Light 1: the room's light x (the haze 0.5), the lamps' Henyey-Greenstein g
+		// (the haze from 0.55 to 0.3 over its gas's 20 s), the march's samples at most (the haze 32).
+		float HazeAge = 0.0f;
+		if (Cloud.bZone && !Cloud.IsBusy() && !Cloud.Parcels.IsEmpty())
+		{
+			float Mass = 0.0f;
+			for (const FOSGasParcel& P : Cloud.Parcels)
+			{
+				HazeAge += P.Age * P.Mass;
+				Mass += P.Mass;
+			}
+			HazeAge /= FMath::Max(Mass, 1e-4f);
+			Cloud.HazeAge = HazeAge;
+		}
+		Data[8 * MaxDrawn + Index] = Cloud.bZone
+			? FLinearColor(Cloud.PrevCellCm, CVarGasZoneAmbient.GetValueOnGameThread(), FMath::Lerp(0.55f, 0.3f, FMath::Clamp(Cloud.HazeAge / 20.0f, 0.0f, 1.0f)), 32.0f)
+			: FLinearColor(Cloud.PrevCellCm, 1.0f, 0.55f, 96.0f);
 		// 9-12: where each atlas holds gas (world): the march goes through these, not the whole boxes.
 		const FVector O(Cloud.Origin);
 		const FVector A0 = O + FVector(Cloud.CurOccLo), A1 = O + FVector(Cloud.CurOccHi), B0 = O + FVector(Cloud.PrevOccLo), B1 = O + FVector(Cloud.PrevOccHi);
@@ -1335,7 +1613,11 @@ void UOSGasSubsystem::UpdatePost()
 			Data[(Row + 0) * MaxDrawn + Index] = FLinearColor(At.X, At.Y, At.Z, bSun || !Local ? 0.0f : Local->AttenuationRadius);
 			Data[(Row + 1) * MaxDrawn + Index] = FLinearColor(Light.R, Light.G, Light.B, Point && !Point->bUseInverseSquaredFalloff ? Point->LightFalloffExponent : 0.0f);
 			Data[(Row + 2) * MaxDrawn + Index] = FLinearColor(Axis.X, Axis.Y, Axis.Z, CosOuter);
-			Data[(Row + 3) * MaxDrawn + Index] = FLinearColor(CosInner, Lamp == Cloud.KeyLamp ? 1.0f : 0.0f, 0.0f, 0.0f);
+			// z: the player's own lamp (by the camera: its shadow in the gas is the march's own transmittance).
+			const APawn* Player = GetWorld()->GetFirstPlayerController() ? GetWorld()->GetFirstPlayerController()->GetPawn() : nullptr;
+			const AActor* Owner = L->GetOwner();
+			const bool bPlayers = Player && Owner && (Owner == Player || Owner->GetAttachParentActor() == Player || Owner->GetOwner() == Player);
+			Data[(Row + 3) * MaxDrawn + Index] = FLinearColor(CosInner, Lamp == Cloud.KeyLamp ? 1.0f : 0.0f, bPlayers ? 1.0f : 0.0f, 0.0f);
 		}
 		if (BoundGrids[Index] != Cloud.Texture)
 		{
@@ -1419,6 +1701,8 @@ void UOSGasSubsystem::UpdatePost()
 		Frame.LightScale = CVarGasLightScale.GetValueOnGameThread();
 		Frame.Albedo = CVarGasAlbedo.GetValueOnGameThread();
 		Frame.Forward = CVarGasForward.GetValueOnGameThread();
+		Frame.Dither = float(CVarGasDither.GetValueOnGameThread());
+		Frame.Bands = float(FMath::Max(1, CVarGasBands.GetValueOnGameThread()));
 		Frame.DeltaSeconds = World->GetDeltaSeconds();
 		GasView->SetData(Frame);
 		if (bLowRes)
@@ -1558,6 +1842,81 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			}
 		}
 	};
+	if (Cloud.bZone && Parcels.Num() > 1)
+	{
+		// The haze: parcels within 8 cm of each other become one (mass summed, radius by volume) - only those fully in.
+		const double Now = Cloud.SimToWorld + Cloud.SimTime;
+		const auto Settled = [Now](const FOSGasParcel& P) { return P.HandIn < 0.0f || Now >= P.HandIn + HandRamp + 0.5; };
+		const auto Merge = [](FOSGasParcel& A, const FOSGasParcel& B)
+		{
+			const float M = FMath::Max(A.Mass + B.Mass, 1e-6f);
+			A.P = (A.P * A.Mass + B.P * B.Mass) / M;
+			A.V = (A.V * A.Mass + B.V * B.Mass) / M;
+			A.Birth = (A.Birth * A.Mass + B.Birth * B.Mass) / M;
+			A.Warm = (A.Warm * A.Mass + B.Warm * B.Mass) / M;
+			A.RadiusCm = FMath::Min(FMath::Pow(FMath::Cube(A.RadiusCm) + FMath::Cube(B.RadiusCm), 1.0f / 3.0f), FMath::Max(A.MaxRadiusCm, B.MaxRadiusCm));
+			if (B.Mass > A.Mass)
+			{
+				A.StretchAxis = B.StretchAxis;
+				A.Stretch = B.Stretch;
+			}
+			A.Mass = M;
+			A.HandIn = -1.0f;
+		};
+		TMap<FIntVector, int32> Cells;
+		for (int32 I = Parcels.Num() - 1; I >= 0; --I)
+		{
+			if (!Settled(Parcels[I]))
+			{
+				continue;
+			}
+			const FIntVector Key(FMath::FloorToInt(Parcels[I].P.X / 8.0f), FMath::FloorToInt(Parcels[I].P.Y / 8.0f), FMath::FloorToInt(Parcels[I].P.Z / 8.0f));
+			if (int32* Other = Cells.Find(Key); Other && FVector3f::DistSquared(Parcels[*Other].P, Parcels[I].P) < 64.0f)
+			{
+				Merge(Parcels[*Other], Parcels[I]);
+				Parcels.RemoveAtSwap(I, EAllowShrinking::No);
+				// The swapped-in last parcel's cell entry pointed past the end: re-point it.
+				for (auto& Pair : Cells)
+				{
+					Pair.Value = Pair.Value == Parcels.Num() ? I : Pair.Value;
+				}
+			}
+			else
+			{
+				Cells.Add(Key, I);
+			}
+		}
+		// Still too many: the lightest settled one into its nearest.
+		while (Parcels.Num() > MaxZoneParcels)
+		{
+			int32 Light = INDEX_NONE;
+			for (int32 I = 0; I < Parcels.Num(); ++I)
+			{
+				Light = Settled(Parcels[I]) && (Light == INDEX_NONE || Parcels[I].Mass < Parcels[Light].Mass) ? I : Light;
+			}
+			if (Light == INDEX_NONE)
+			{
+				break;
+			}
+			int32 Near = INDEX_NONE;
+			float Best = 1e30f;
+			for (int32 I = 0; I < Parcels.Num(); ++I)
+			{
+				const float D2 = I == Light ? 1e30f : FVector3f::DistSquared(Parcels[I].P, Parcels[Light].P);
+				if (D2 < Best)
+				{
+					Best = D2;
+					Near = I;
+				}
+			}
+			if (Near == INDEX_NONE)
+			{
+				break;
+			}
+			Merge(Parcels[Near], Parcels[Light]);
+			Parcels.RemoveAtSwap(Light, EAllowShrinking::No);
+		}
+	}
 	const float GScale = Cloud.Gravity.Size() / 980.0f;
 	const FVector3f Down = FVector3f(Cloud.Gravity.GetSafeNormal());
 	const FOSSmokeParams K = GridParams();
@@ -1582,6 +1941,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			G.CellCm = Cloud.bAir ? 12.0f : FMath::Clamp((Hi3 - Lo3).GetMax() / (VelocityCells - 2), VelocityCellCm, 40.0f);
 		}
 		const float GridCell = G.CellCm;
+		if (!Cloud.bZone)
 		{
 			// The velocity grid round the gas (whole cells): the parcels' momentum, mass and heat onto it.
 			float Mass = 0.0f;
@@ -1711,11 +2071,36 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					P.Carrier -= Lost;
 					P.V -= Lost;
 				}
-				// Old gas relaxes to the still room's air (it moved forever: В«СѓРµР·Р¶Р°РµС‚ С…СЂРµРЅ РїРѕР№РјРё РєСѓРґР°В»); the young
-				// keep their ring.
+				// Old gas relaxes to the room's air (it moved forever otherwise); the young keep their ring. The room's
+				// air is not still (v12 7a.3): its slow drift takes the haze wholly, a shot's gas from 1.5 s over a
+				// second; warm gas rises 2-5 cm/s after its first second (7a.5) - the haze gathers under the ceiling.
 				if (P.Age > 0.3f)
 				{
-					P.V *= FMath::Exp(-Dt / AirRestSeconds);
+					FVector3f Target = FVector3f::ZeroVector;
+					const float DriftShare = Cloud.bZone ? 1.0f : FMath::SmoothStep(1.5f, 2.5f, P.Age);
+					if (DriftShare > 0.0f && Cloud.DriftSeed != 0u)
+					{
+						FVector3f Drift, Grad[3];
+						DriftAt(Origin + P.P, float(Cloud.SimToWorld + Cloud.SimTime), Cloud.DriftSeed, Cloud.DriftCm, Drift, Grad);
+						Target += Drift * DriftShare;
+						if (Cloud.bZone)
+						{
+							// The strand: stretched along the flow's strain (its axis turns into it), volume kept, relaxing.
+							const FVector3f GA(Grad[0] | P.StretchAxis, Grad[1] | P.StretchAxis, Grad[2] | P.StretchAxis);
+							const float Rate = GA | P.StretchAxis;
+							P.StretchAxis = (P.StretchAxis + (GA - P.StretchAxis * Rate) * Dt).GetSafeNormal(UE_SMALL_NUMBER, P.StretchAxis);
+							P.Stretch = FMath::Clamp(1.0f + (P.Stretch * FMath::Exp(Rate * Dt) - 1.0f) * FMath::Exp(-Dt / StretchSeconds), 1.0f, MaxStretch);
+						}
+					}
+					if (P.Age > 1.0f)
+					{
+						Target -= Down * (WarmLiftCm * P.Warm * GScale);
+					}
+					P.V = Target + (P.V - Target) * FMath::Exp(-Dt / AirRestSeconds);
+				}
+				if (P.Age > 1.0f)
+				{
+					P.Warm *= FMath::Exp(-Dt / WarmSeconds);
 				}
 
 			}
@@ -1732,7 +2117,8 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			}
 			const float Speed = P.V.Size();
 			P.P += P.V * Dt;
-			P.RadiusCm = Cloud.bAir ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, P.MaxRadiusCm) : P.RadiusCm + VacuumGrowPerCm * Speed * Dt;
+			P.RadiusCm = Cloud.bZone ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Max(P.MaxRadiusCm, 1.5f * Cloud.PackedCellCm))
+				: Cloud.bAir ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, P.MaxRadiusCm) : P.RadiusCm + VacuumGrowPerCm * Speed * Dt;
 			P.Heat *= FMath::Exp(-Dt / HeatSeconds);
 			// Bodies push it out of themselves (within two steps) at their own speed.
 			for (const FOSSmokeSim::FMover& M : Cloud.Movers)
@@ -1808,7 +2194,14 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					}
 				}
 			}
-			if (P.Age >= P.Life || P.Mass < 0.002f)
+			// The haze thins by the zone's ventilation.
+			if (Cloud.bZone && Cloud.HazeHalfLife > 0.0f)
+			{
+				P.Mass *= FMath::Exp(-Dt * UE_LN2 / Cloud.HazeHalfLife);
+			}
+			// A parcel handed over goes when its ramp is done (not by its age: the haze has it at full weight by then).
+			const bool bGone = P.HandOut >= 0.0f ? Cloud.SimToWorld + Cloud.SimTime >= P.HandOut + HandRamp : P.Age >= P.Life;
+			if (bGone || P.Mass < 0.002f)
 			{
 				Parcels.RemoveAtSwap(Index, EAllowShrinking::No);
 			}
@@ -1877,8 +2270,10 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	// The box: the frame round every parcel with its reach, 10% more; it grows and shrinks with the gas, never jumps
 	// (owner 23.10: В«СЂРµСЃРїР°РІРЅРёС‚СЃСЏ Сѓ РѕСЂСѓР¶РёСЏВ», В«РєСѓР±РѕРј РѕР±СЂРµР·Р°РµС‚СЃСЏВ»). Its cell: the size over 48, 2 to 8 cm.
 	// An outlier (farther than 3x the mean spread) does not set the box; its gas fades at the box's faces (the shader).
-	const float FarCm = FMath::Max(3.0f * Spread, 40.0f);
-	const float MaxCell = 8.0f;
+	const float FarCm = FMath::Max(3.0f * Spread, Cloud.bZone ? 150.0f : 40.0f);
+	// The haze: box / 48, 4-24 cm.
+	const float MinCell = Cloud.bZone ? 4.0f : 2.0f;
+	const float MaxCell = Cloud.bZone ? 24.0f : 8.0f;
 	FVector3f BoxLo(1e9f), BoxHi(-1e9f);
 	for (const FOSGasParcel& P : Parcels)
 	{
@@ -1886,7 +2281,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		{
 			continue;
 		}
-		const float Reach = FMath::Max(P.RadiusCm, P.V.Size() * 0.08f);
+		const float Reach = FMath::Max3(P.RadiusCm, P.V.Size() * 0.08f, Cloud.bZone ? P.RadiusCm * FMath::Pow(P.Stretch, 2.0f / 3.0f) : 0.0f);
 		BoxLo = BoxLo.ComponentMin(P.P - FVector3f(Reach));
 		BoxHi = BoxHi.ComponentMax(P.P + FVector3f(Reach));
 	}
@@ -1894,7 +2289,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	{
 		BoxLo = BoxHi = Centre;
 	}
-	const float Need = FMath::Clamp((BoxHi - BoxLo).GetMax() * 1.1f / N, 2.0f, MaxCell);
+	const float Need = FMath::Clamp((BoxHi - BoxLo).GetMax() * 1.1f / N, MinCell, MaxCell);
 	float Cell = Need;
 	const FVector3f MassCentre = Centre;
 	Centre = SnapTo((BoxLo + BoxHi) * 0.5f, 0.5f);
@@ -1913,7 +2308,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			Cloud.LooseSince = Need < 0.6f * OldCell ? (Cloud.LooseSince < 0.0f ? Now : Cloud.LooseSince) : -1.0f;
 			if (Cloud.LooseSince >= 0.0f && Now - Cloud.LooseSince >= 0.5f && Now - Cloud.LastRebox >= 0.5f)
 			{
-				Cell = FMath::Clamp(FMath::Max(Need * 1.15f, OldCell * 0.8f), 2.0f, MaxCell);
+				Cell = FMath::Clamp(FMath::Max(Need * 1.15f, OldCell * 0.8f), MinCell, MaxCell);
 				Cloud.LastRebox = Now;
 				Cloud.LooseSince = -1.0f;
 			}
@@ -1925,7 +2320,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		}
 		else
 		{
-			Cell = FMath::Clamp(FMath::Max(Need * 1.15f, Cloud.bHasGas ? OldCell : 0.0f), 2.0f, MaxCell);
+			Cell = FMath::Clamp(FMath::Max(Need * 1.15f, Cloud.bHasGas ? OldCell : 0.0f), MinCell, MaxCell);
 			Cloud.LastRebox = Now;
 			Cloud.LooseSince = -1.0f;
 		}
@@ -1941,6 +2336,13 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		// 0.12 s, not the contract's 0.05: a thin parcel half a metre from the eye came in by 0.3 of opacity a frame.
 		const float In = P.bInstant ? 1.0f : FMath::SmoothStep(0.0f, 0.12f, P.Age);
 		Weight[I] = In * (1.0f - FMath::SmoothStep(0.6f * P.Life, P.Life, P.Age));
+		// The hand-over (v12 7a.2), by the world's time this atlas is shown at (a step after it is packed): out of a
+		// shot's cloud and into the haze over the same 0.5 s - the two weights sum to 1.
+		if (P.HandOut >= 0.0f || P.HandIn >= 0.0f)
+		{
+			const double Shown = Cloud.SimToWorld + Cloud.SimTime + Cloud.StepDt;
+			Weight[I] *= P.HandOut >= 0.0f ? 1.0f - FMath::Clamp(float(Shown - P.HandOut) / HandRamp, 0.0f, 1.0f) : FMath::Clamp(float(Shown - P.HandIn) / HandRamp, 0.0f, 1.0f);
+		}
 		// In a vacuum the gas thins with the way it went (~1/d^2 past 90 cm): dense by the muzzle, sparse at the front.
 		if (!Cloud.bAir)
 		{
@@ -1993,7 +2395,8 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	});
 	// A vacuum's edges torn a little harder (0.18), as the holes' threads; more tore the thin streamers into dots.
 	const float Cut = Cloud.bAir ? NoiseCut + 0.1f : 0.18f;
-	const float Scale = Cloud.bAir ? NoiseCm : 12.0f;
+	// The haze: a coarse noise (~40 cm) on its coarse cells.
+	const float Scale = Cloud.bZone ? 40.0f : Cloud.bAir ? NoiseCm : 12.0f;
 	const uint32 CloudSeed = Cloud.Seed;
 	SplatLap(1);
 	// The splat, slice by slice: the parcels' smooth kernels only (the noise comes once per cell below).
@@ -2055,7 +2458,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	FIntVector Lo(N - 1), Hi(0);
 	for (const FOSGasParcel& P : Parcels)
 	{
-		const float Reach = FMath::Max(P.RadiusCm, P.V.Size() * 0.08f);
+		const float Reach = FMath::Max3(P.RadiusCm, P.V.Size() * 0.08f, Cloud.bZone ? P.RadiusCm * FMath::Pow(P.Stretch, 2.0f / 3.0f) : 0.0f);
 		for (int32 Axis = 0; Axis < 3; ++Axis)
 		{
 			Lo[Axis] = FMath::Min(Lo[Axis], FMath::Max(0, FMath::FloorToInt((P.P[Axis] - Reach - Centre[Axis] + Half) / Cell) - 3));
@@ -2080,18 +2483,26 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			// An ellipsoid: semi-axis max(radius, |v| x 0.08 s) along the velocity, the radius across - a fast parcel
 			// draws a streak of jet, not a ball (owner 23.10: В«РІ РЅРµРІРµСЃРѕРјРѕСЃС‚Рё РґС‹Рј РІС‹Р»РµС‚Р°РµС‚ РєР°Рє Р±СѓРґС‚Рѕ РґСЂРѕР±РёРЅРєР°РјРёВ»).
 			const float Speed = P.V.Size();
-			const FVector3f Along = Speed > 1.0f ? P.V / Speed : FVector3f::ZeroVector;
+			FVector3f Along = Speed > 1.0f ? P.V / Speed : FVector3f::ZeroVector;
 			// The streak along the velocity joins a streamer's parcels into a thread; in a vacuum half of it (0.04 s) and
 			// 4 radii at most - a full streak of fast parcels drew bright comets (owner 23.10: В«Сѓ РїРёСЃС‚РѕР»РµС‚Р° РєР°РєРёРµ-С‚Рѕ
 			// РєРѕРјРµС‚С‹В»), and merged across into a cylinder before the jet became a fan.
-			const float Long = Cloud.bAir ? FMath::Max(P.RadiusCm, Speed * 0.08f) : FMath::Clamp(Speed * 0.04f, P.RadiusCm, 4.0f * P.RadiusCm);
-			const float InvAcross2 = 1.0f / (P.RadiusCm * P.RadiusCm);
+			float Long = Cloud.bAir ? FMath::Max(P.RadiusCm, Speed * 0.08f) : FMath::Clamp(Speed * 0.04f, P.RadiusCm, 4.0f * P.RadiusCm);
+			float Across = P.RadiusCm;
+			// The haze's strand: along its stretch axis, volume kept (v12 7a.4).
+			if (Cloud.bZone)
+			{
+				Along = P.StretchAxis;
+				Long = P.RadiusCm * FMath::Pow(P.Stretch, 2.0f / 3.0f);
+				Across = P.RadiusCm * FMath::Pow(P.Stretch, -1.0f / 3.0f);
+			}
+			const float InvAcross2 = 1.0f / (Across * Across);
 			const float InvLong2 = 1.0f / (Long * Long);
 			// The ellipsoid's own bounds per axis (a streak along X is long in X only): its sphere's box made a fast
 			// parcel visit ~14000 cells a splat.
-			const float Stretch = Long * Long - P.RadiusCm * P.RadiusCm;
-			const FVector3f Ext(FMath::Sqrt(Stretch * Along.X * Along.X + P.RadiusCm * P.RadiusCm), FMath::Sqrt(Stretch * Along.Y * Along.Y + P.RadiusCm * P.RadiusCm),
-				FMath::Sqrt(Stretch * Along.Z * Along.Z + P.RadiusCm * P.RadiusCm));
+			const float Stretch = Long * Long - Across * Across;
+			const FVector3f Ext(FMath::Sqrt(Stretch * Along.X * Along.X + Across * Across), FMath::Sqrt(Stretch * Along.Y * Along.Y + Across * Across),
+				FMath::Sqrt(Stretch * Along.Z * Along.Z + Across * Across));
 			if (FMath::Abs(P.P.Z - CZ) >= Ext.Z || P.Mass * Weight[Index] < 1e-4f)
 			{
 				continue;

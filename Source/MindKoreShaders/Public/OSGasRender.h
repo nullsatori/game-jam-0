@@ -15,7 +15,7 @@ struct IPooledRenderTarget;
 /** One frame's gas for the pass: UOSGasSubsystem's textures and counts (the same as M_OS_GasPost's parameters). */
 struct FOSGasRenderData
 {
-	static constexpr int32 MaxGrids = 10;
+	static constexpr int32 MaxGrids = 12;
 	FTextureResource* Grids[MaxGrids] = {};
 	FTextureResource* Data = nullptr;
 	FTextureResource* Tunnels = nullptr;
@@ -32,6 +32,9 @@ struct FOSGasRenderData
 	float Albedo = 1.0f;
 	/** The Henyey-Greenstein share of the lamps' phase (os.Gas.Forward; the rest isotropic). */
 	float Forward = 0.7f;
+	/** The composite (v12 7a.6): os.Gas.Dither, os.Gas.Bands. */
+	float Dither = 1.0f;
+	float Bands = 4.0f;
 	/** The game's frame time, s: the room's light follows the frame over 0.1 s. */
 	float DeltaSeconds = 1.0f / 60.0f;
 };

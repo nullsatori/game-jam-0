@@ -21,7 +21,13 @@ Texture2D GasGrid6;
 Texture2D GasGrid7;
 Texture2D GasGrid8;
 Texture2D GasGrid9;
+// The zones' haze (v12 7a): slots 10 and 11.
+Texture2D GasGrid10;
+Texture2D GasGrid11;
 SamplerState GasSampler;
+// The composite (v12 7a.6): 1 an ordered 4x4 Bayer threshold over the blocks and the tail from 0.03, 0 a hash; levels.
+float GasDither;
+float GasBands;
 float GasCloudCount;
 float GasTunnelCount;
 float GasBlockPx;
@@ -95,7 +101,7 @@ float3 GasToSrgb(float3 c)
 // 1 - GasForward isotropic (1 = isotropic's level), the key's baked self-shadow, the others' ambient occlusion.
 // The cloud's lamps are loaded once a cloud (LA position + radius, LL light + exponent, LC cone, LD cos inner + key);
 // nl > 0: any lit.
-float3 GasLamps(int nl, float4 LA[4], float4 LL[4], float4 LC[4], float4 LD[4], float3 pw, float3 dir, float4 v)
+float3 GasLamps(int nl, float4 LA[4], float4 LL[4], float4 LC[4], float4 LD[4], float3 pw, float3 dir, float4 v, float g, float T)
 {
 	float3 Sum = 0;
 	[unroll] for (int k = 0; k < 4; k++)
@@ -114,11 +120,12 @@ float3 GasLamps(int nl, float4 LA[4], float4 LL[4], float4 LC[4], float4 LD[4], 
 			Att *= Cone.w > -1.5 ? smoothstep(Cone.w, D.x, dot(-Ld, Cone.xyz)) : 1.0;
 		}
 		// The scattering angle: the light's way (-Ld) against the way to the eye (-dir).
-		const float g = 0.55;
 		float CosT = dot(Ld, dir);
 		float HG = (1.0 - g * g) / pow(max(1.0 + g * g - 2.0 * g * CosT, 1e-4), 1.5);
 		float Phase = (1.0 - GasForward) + GasForward * HG;
-		float Shadow = D.y > 0.5 ? v.b : 0.35 + 0.65 * v.a;
+		// The key: its baked self-shadow; the player's own lamp (by the eye): the march's transmittance so far - the near
+		// face lit, the depth dark (v12, a review's point); the others the ambient occlusion.
+		float Shadow = D.y > 0.5 ? v.b : D.z > 0.5 ? T : 0.35 + 0.65 * v.a;
 		Sum += L.rgb * (Att * Phase * Shadow);
 	}
 	return Sum;
@@ -211,7 +218,12 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, b
 	    float4 d3 = GasData.Load(int3(c, 3, 0));
 	    float4 d4 = GasData.Load(int3(c, 4, 0));
 	    float4 d7 = GasData.Load(int3(c, 7, 0));
-	    float cellP = GasData.Load(int3(c, 8, 0)).x;
+	    float4 d8 = GasData.Load(int3(c, 8, 0));
+	    float cellP = d8.x;
+	    // os.Gas.Light 1: the room's light x, the lamps' g, the samples at most (the haze: 0.5, 0.55 -> 0.3, 32).
+	    float ambMul = d8.y > 0.0 ? d8.y : 1.0;
+	    float hg = d8.z > 0.0 ? d8.z : 0.55;
+	    int maxS = d8.w > 0.0 ? (int)d8.w : 96;
 	    float3 C = d0.xyz;
 	    float H = d0.w;
 	    float n = d1.x, cell = d1.y, gain = d1.z, ext = d1.w;
@@ -241,7 +253,7 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, b
 	    // Coarse cells (a vacuum cone metres long) at 1.5 cells a step: the jitter hides it, a third fewer samples.
 	    float stepCm = max(min(cell, cellP), 1.5) * (min(cell, cellP) >= 4.0 ? 1.5 : 1.0);
 	    // 96 samples a cloud at most (a doubled step through thin gas lost half the thin smoke: not taken).
-	    int ns = min((int)((b - a) / stepCm) + 1, 96);
+	    int ns = min((int)((b - a) / stepCm) + 1, maxS);
 	    float t = a + jit * stepCm;
 	    float adv = 0.0;
 	    float rows = ceil(n / 8.0) * n;
@@ -314,6 +326,8 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, b
 	        else if (c == 7) { if (inC) { sA0 = GasGrid7.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid7.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid7.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid7.SampleLevel(GasSampler, uB1, 0); } }
 	        else if (c == 8) { if (inC) { sA0 = GasGrid8.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid8.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid8.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid8.SampleLevel(GasSampler, uB1, 0); } }
 	        else if (c == 9) { if (inC) { sA0 = GasGrid9.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid9.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid9.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid9.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 10) { if (inC) { sA0 = GasGrid10.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid10.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid10.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid10.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 11) { if (inC) { sA0 = GasGrid11.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid11.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid11.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid11.SampleLevel(GasSampler, uB1, 0); } }
 	        // Gas reaching a box's face fades over its last 1.5 cells (a cut face read as a flat soft square).
 	        if (inC) vC = lerp(sA0, sA1, fA) * saturate(min(min(H - abs(p.x), H - abs(p.y)), H - abs(p.z)) / (1.5 * cell));
 	        if (inP) vP = lerp(sB0, sB1, fB) * saturate(min(min(HP - abs(pp.x), HP - abs(pp.y)), HP - abs(pp.z)) / (1.5 * cellP));
@@ -327,10 +341,10 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, b
 	        {
 	            // Linear display light (the composite encodes it): the room (the graded frame, decoded) by the occlusion;
 	            // the lamps' scene light gathered apart and filmed once a ray (below).
-	            col = base * GasAlbedo * room * GasAmbientScale * (0.35 + 0.65 * v.a) + warm * v.g * v.g;
+	            col = base * GasAlbedo * room * GasAmbientScale * ambMul * (0.35 + 0.65 * v.a) + warm * v.g * v.g;
 	            if (nl > 0)
 	            {
-	                accL += T * aStep * base * GasLamps(nl, LA, LL, LC, LD, pw, dir, v);
+	                accL += T * aStep * base * GasLamps(nl, LA, LL, LC, LD, pw, dir, v, hg, T);
 	            }
 	        }
 	        else
@@ -469,9 +483,23 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 		OutColor = float4(Diff, Diff, Diff, 1);
 		return;
 	}
-	float hn = frac(sin(dot(floor(px / B), float2(41.3, 289.1))) * 43758.5453);
-	// The faint tail off (no snow of lone blocks), the threshold's spread halved: stable bands, few stray blocks.
-	float aq = alpha < 0.12 ? 0.0 : floor(alpha * 4.0 + 0.25 + 0.5 * hn) / 4.0;
+	float aq;
+	if (GasDither > 0.5)
+	{
+		// An ordered 4x4 Bayer over the screen blocks, the threshold's full spread: thin gas (from 0.03) a sparse even
+		// lattice whose mean is its opacity, not snow (v12 7a.6).
+		const float Bayer[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+		int2 Q = int2(floor(px / B)) & 3;
+		float hb = (Bayer[Q.y * 4 + Q.x] + 0.5) / 16.0;
+		float Levels = max(GasBands, 1.0);
+		aq = alpha < 0.03 ? 0.0 : min(floor(alpha * Levels + hb) / Levels, 1.0);
+	}
+	else
+	{
+		float hn = frac(sin(dot(floor(px / B), float2(41.3, 289.1))) * 43758.5453);
+		// The faint tail off (no snow of lone blocks), the threshold's spread halved: stable bands, few stray blocks.
+		aq = alpha < 0.12 ? 0.0 : floor(alpha * 4.0 + 0.25 + 0.5 * hn) / 4.0;
+	}
 	if (GasDebugAlpha > 0.5)
 	{
 		OutColor = float4(alpha, alpha, alpha, 1);

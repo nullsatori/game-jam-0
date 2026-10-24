@@ -131,6 +131,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Ship", meta = (ClampMin = "0.0"))
 	float RefillPerSecond = 5.0f;
 
+	/**
+	 * The smoke's haze here (v12 7a): an old shot's gas stays in the zone's air and thins with this half-life, s (the
+	 * room's ventilation); 0: no haze, the gas fades as it ages.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Ship", meta = (ClampMin = "0.0"))
+	float HazeHalfLifeSeconds = 45.0f;
+
 	/** Shown on the HUD while inside (empty: nothing). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Ship")
 	FText HudText;

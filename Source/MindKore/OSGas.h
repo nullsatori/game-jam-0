@@ -12,6 +12,7 @@ class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UTexture2D;
 class ULightComponent;
+class AOSGravityZone;
 /** A spot's cone (axis, cos of outer and inner) or a rect's cosine to its normal (0, 1); false for others. */
 bool OSGasLampCone(const ULightComponent* L, FVector& OutAxis, float& OutCosOuter, float& OutCosInner);
 class USceneComponent;
@@ -169,6 +170,17 @@ struct FOSGasParcel
 	float Fall = 0.0f;
 	bool bInstant = false;
 	uint32 Seed = 0;
+	/** The haze (v12 7a): its strand's axis and stretch (1 a ball, 5 at most; volume kept), its residual warmth (lifts it). */
+	FVector3f StretchAxis = FVector3f(1.0f, 0.0f, 0.0f);
+	float Stretch = 1.0f;
+	float Warm = 0.0f;
+	/**
+	 * The hand-over to the zone's haze (world s): in a shot's cloud the moment it starts to leave (over 0.5 s; -1 never);
+	 * in the zone's cloud the moment it starts to come in. bHanded: its copy is in the zone's cloud.
+	 */
+	float HandOut = -1.0f;
+	float HandIn = -1.0f;
+	bool bHanded = false;
 };
 
 /**
@@ -243,8 +255,11 @@ public:
 	TSoftObjectPtr<UMaterialInterface> PostMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(TEXT("/Game/OSArt/FX/M_OS_GasPost.M_OS_GasPost")));
 
 	static constexpr int32 MaxClouds = 10;
+	/** The zones' haze clouds (v12 7a): their own pool after the shots' slots. */
+	static constexpr int32 MaxZones = 2;
+	static constexpr int32 MaxZoneParcels = 400;
 	/** Clouds the post-process draws: all of them (a set picked by distance swapped clouds in and out whole). */
-	static constexpr int32 MaxDrawn = MaxClouds;
+	static constexpr int32 MaxDrawn = MaxClouds + MaxZones;
 	/** A cloud's parcels: the Рысь's shot is 160 from the muzzle, 80 from its 16 shroud holes, its thread and seep. */
 	static constexpr int32 MaxParcels = 300;
 	/** GasData's rows a cloud (Scripts/os_muzzle_fx.py, GAS_POST_HLSL). */
@@ -270,6 +285,23 @@ private:
 	struct FCloud
 	{
 		FOSGasLook Look;
+		/**
+		 * A zone's haze (v12 7a, slots MaxClouds..): no velocity grid, 5 Hz, a coarse cell, the zone's drift, its box's
+		 * faces and the shots' planes for walls, thinned by the zone's ventilation.
+		 */
+		bool bZone = false;
+		TWeakObjectPtr<const AOSGravityZone> Zone;
+		float HazeHalfLife = 45.0f;
+		/** The drift's field (by the zone the gas is in) and its speed, cm/s. */
+		uint32 DriftSeed = 0;
+		float DriftCm = 6.0f;
+		/** World time = SimTime + this (set at each launch: the hand-over's ramps go by world time in both clouds). */
+		double SimToWorld = 0.0;
+		/** A shot's cloud hands its gas to its zone's haze (from FadeAge 3 s); when it began (world s, -1 not yet). */
+		bool bHands = false;
+		double HandStart = -1.0;
+		/** The haze's gas's mean age (its phase's g ages with it), s. */
+		float HazeAge = 0.0f;
 		/** The parcels' frame origin, world (fixed for the cloud's life: floats stay small). */
 		FVector Origin = FVector::ZeroVector;
 		/** The render box's centre (origin frame, snapped to a render cell) of the last packed atlas, and the next one's. */
@@ -463,6 +495,12 @@ private:
 	/** How much a lamp sees Where (0-1, traced every 0.25 s, eased 0.15 s), by the cloud's record. */
 	float LampSees(FCloud& Cloud, const ULightComponent* Lamp, const FVector& Where, const FVector& Toward, bool bDirectional);
 	void EnsureRender(FCloud& Cloud);
+	/** A cloud made new in its slot: the look, the origin, the clocks, the lamps; bTrace: its walls traced round Where. */
+	void InitCloud(FCloud& Cloud, const FOSGasLook& Look, const FVector& Where, bool bTrace);
+	/** The zone's haze cloud (a slot of its pool), made at its first gas; INDEX_NONE: none free. */
+	int32 ZoneCloudFor(const AOSGravityZone* Zone);
+	/** A shot's cloud in air: its old gas handed to its zone's haze (v12 7a.2). */
+	void HandOver(FCloud& Cloud, const FVector& Centre);
 	void WaitAll() const;
 
 	/** The step off the game thread: commands, the velocity grid (air), the parcels' motion, the splat and the atlas. */
