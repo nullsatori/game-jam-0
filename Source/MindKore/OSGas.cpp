@@ -175,8 +175,11 @@ namespace
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
 	TAutoConsoleVariable<float> CVarGasDitherHold(
-		TEXT("os.Gas.DitherHold"), 0.125f,
-		TEXT("os.Gas.Dither 2: a block keeps its last frame's opacity while the new one is within this (0.5 / bands)."));
+		TEXT("os.Gas.DitherHold"), 0.15f,
+		TEXT("os.Gas.Dither 2: a pixel keeps its last frame's level while the new opacity has crossed into the next by less than this share of a step (the opacity itself is always this frame's)."));
+	TAutoConsoleVariable<float> CVarGasHazeRadius(
+		TEXT("os.Gas.HazeRadius"), 60.0f,
+		TEXT("The haze's parcels diffuse up to this radius, cm (60: a veil; 20: as before 24.10)."));
 	TAutoConsoleVariable<float> CVarGasDitherGrain(
 		TEXT("os.Gas.DitherGrain"), 0.5f,
 		TEXT("os.Gas.Dither 2: the world grain's nudge of the threshold, x half a level."));
@@ -1628,6 +1631,7 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 			Cloud.SimToWorld = World->GetTimeSeconds() - Cloud.StepCarry - Cloud.SimTime;
 			Cloud.DriftCm = CVarGasDriftCm.GetValueOnGameThread();
 			Cloud.WarmLift = CVarGasWarmLift.GetValueOnGameThread();
+			Cloud.HazeRadius = CVarGasHazeRadius.GetValueOnGameThread();
 			if (!Cloud.bZone)
 			{
 				const AOSGravityZone* Zone = OSAirZoneAt(World, Centre);
@@ -2051,7 +2055,7 @@ void UOSGasSubsystem::LaunchStep(FCloud& Cloud, int32 Steps, float Dt)
 		const float MassScale = Cloud.bAir ? AirMassScale : VacuumMassScale;
 		for (const FOSGasParcel& P : Cloud.Parcels)
 		{
-			const float Thin = Cloud.bAir ? FMath::Clamp(FMath::Square(3.0f / P.RadiusCm), 0.02f, 1.0f) : FMath::Clamp(5.0f / P.RadiusCm, 0.05f, 1.0f);
+			const float Thin = Cloud.bAir ? FMath::Clamp(FMath::Square(3.0f / P.RadiusCm), Cloud.bZone ? 0.005f : 0.02f, 1.0f) : FMath::Clamp(5.0f / P.RadiusCm, 0.05f, 1.0f);
 			// The kernel's core density as the splat lays it, about half torn by the noise.
 			const float Density = FMath::Min(P.Mass * Thin * MassScale, 0.95f) * DensityGain * 0.5f;
 			if (Density < 1e-3f)
@@ -2449,7 +2453,8 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			}
 			const float Speed = P.V.Size();
 			P.P += P.V * Dt;
-			P.RadiusCm = Cloud.bZone ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Max(P.MaxRadiusCm, 1.5f * Cloud.PackedCellCm))
+			// The haze diffuses on (to 60 cm over ~15 s): a veil, not lumps (merged parcels at 20 cm read as dark blots, owner 24.10).
+			P.RadiusCm = Cloud.bZone ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Max3(P.MaxRadiusCm, 1.5f * Cloud.PackedCellCm, Cloud.HazeRadius))
 				: P.Air > 0.5f ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Max(P.MaxRadiusCm, P.RadiusCm)) : P.RadiusCm + VacuumGrowPerCm * Speed * Dt;
 			P.Heat *= FMath::Exp(-Dt / HeatSeconds);
 			// Bodies push it out of themselves (within two steps) at their own speed.
@@ -2841,7 +2846,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			}
 			const FVector3f Travelled = P.P - P.Birth;
 			// The same matter in more room: a parcel thins as it grows (air: (3 cm / r)^2; vacuum: 5 cm / r, it spreads metres).
-			const float Thin = Cloud.bAir ? FMath::Clamp(FMath::Square(3.0f / P.RadiusCm), 0.02f, 1.0f) : FMath::Clamp(5.0f / P.RadiusCm, 0.05f, 1.0f);
+			const float Thin = Cloud.bAir ? FMath::Clamp(FMath::Square(3.0f / P.RadiusCm), Cloud.bZone ? 0.005f : 0.02f, 1.0f) : FMath::Clamp(5.0f / P.RadiusCm, 0.05f, 1.0f);
 			const float M = P.Mass * Weight[Index] * Fade * Thin;
 			const int32 X0 = FMath::Max(0, FMath::FloorToInt((P.P.X - Ext.X - Centre.X + Half) / Cell));
 			const int32 X1 = FMath::Min(N - 1, FMath::FloorToInt((P.P.X + Ext.X - Centre.X + Half) / Cell));

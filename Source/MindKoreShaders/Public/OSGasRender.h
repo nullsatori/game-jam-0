@@ -39,7 +39,7 @@ struct FOSGasRenderData
 	float DitherPx = 2.0f;
 	float SmoothAlpha = 0.0f;
 	/** v13 13e: os.Gas.DitherHold, os.Gas.DitherGrain. */
-	float DitherHold = 0.125f;
+	float DitherHold = 0.15f;
 	float DitherGrain = 0.5f;
 	/** v13 13d: os.Gas.TileSlots (the zone's lamps a block takes, 4-6). */
 	float TileSlots = 4.0f;

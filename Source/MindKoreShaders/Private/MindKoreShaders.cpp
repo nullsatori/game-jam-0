@@ -173,7 +173,9 @@ public:
 		SHADER_PARAMETER_STRUCT_INCLUDE(FOSGasCommonParameters, Common)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float4>, HoldBlocks)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float>, HoldHistory)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float>, HoldFirst)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, OutHeld)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, OutAlpha)
 		SHADER_PARAMETER(float, HoldHasHistory)
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -378,6 +380,7 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 	FRDGTextureRef BlockEdge = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_R32_FLOAT, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.Edge"));
 	FRDGTextureRef BlockFirst = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_R32_FLOAT, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.First"));
 	FRDGTextureRef BlockHeld = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_R16F, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.Held"));
+	FRDGTextureRef BlockAlpha = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_R16F, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.Alpha"));
 	{
 		FOSGasBlockCS::FParameters* P = GraphBuilder.AllocParameters<FOSGasBlockCS::FParameters>();
 		FillCommon(P->Common);
@@ -395,11 +398,14 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 		FOSGasHoldCS::FParameters* P = GraphBuilder.AllocParameters<FOSGasHoldCS::FParameters>();
 		FillCommon(P->Common);
 		P->HoldBlocks = BlockResult;
+		P->HoldFirst = BlockFirst;
 		P->HoldHistory = bHistory ? GraphBuilder.RegisterExternalTexture(HoldHistory) : GSystemTextures.GetBlackDummy(GraphBuilder);
 		P->OutHeld = GraphBuilder.CreateUAV(BlockHeld);
+		P->OutAlpha = GraphBuilder.CreateUAV(BlockAlpha);
 		P->HoldHasHistory = bHistory ? 1.0f : 0.0f;
 		FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("OSGas.Hold"), TShaderMapRef<FOSGasHoldCS>(ShaderMap), P, FComputeShaderUtils::GetGroupCount(Blocks, FIntPoint(8, 8)));
-		GraphBuilder.QueueTextureExtraction(BlockHeld, &HoldHistory);
+		// The history is this frame's opacity, not the held one (held values re-sampled frame after frame made islands).
+		GraphBuilder.QueueTextureExtraction(BlockAlpha, &HoldHistory);
 	}
 	FScreenPassRenderTarget Output = Inputs.OverrideOutput;
 	if (!Output.IsValid())

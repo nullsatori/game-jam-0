@@ -320,6 +320,8 @@ private:
 		float DriftCm = 6.0f;
 		/** Residual warmth's lift at full gravity, cm/s a unit (os.Gas.WarmLift, read at each launch). */
 		float WarmLift = 4.0f;
+		/** The haze's parcels diffuse up to this radius (os.Gas.HazeRadius, read at each launch), cm. */
+		float HazeRadius = 60.0f;
 		/** World time = SimTime + this (set at each launch: the hand-over's ramps go by world time in both clouds). */
 		double SimToWorld = 0.0;
 		/** A shot's cloud hands its gas to its zone's haze (from FadeAge 3 s); when it began (world s, -1 not yet). */

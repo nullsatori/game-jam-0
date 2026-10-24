@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 110 команд, 50 переменных.
+Всего: 110 команд, 51 переменных.
 
 ## `os.Attach`
 
@@ -105,11 +105,12 @@
 | `os.Gas.DebugAlpha` (переменная) | значение (умолч. `0`) | 1: the gas post-process draws only its opacity, grey (os.Gas.WalkProbe measures its jumps a frame); 3: the block less the pixel's own march; 4: the room's light the gas takes (os.Gas.Light 1). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Dither` (переменная) | значение (умолч. `2`) | 2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DitherGrain` (переменная) | значение (умолч. `0.5f`) | os.Gas.Dither 2: the world grain's nudge of the threshold, x half a level. | `Source/MindKore/OSGas.cpp` |
-| `os.Gas.DitherHold` (переменная) | значение (умолч. `0.125f`) | os.Gas.Dither 2: a block keeps its last frame's opacity while the new one is within this (0.5 / bands). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.DitherHold` (переменная) | значение (умолч. `0.15f`) | os.Gas.Dither 2: a pixel keeps its last frame's level while the new opacity has crossed into the next by less than this share of a step (the opacity itself is always this frame's). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DitherPx` (переменная) | значение (умолч. `0.0f`) | The Bayer threshold's cell, px (0: half a block, 1 px at least) - a finer lattice inside a block; the opacity is still the block's. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DriftCm` (переменная) | значение (умолч. `3.0f`) | The zone's air drift (v12 7a.3): a slow divergence-free field, 1.5 m across, changing over ~20 s - its top speed, cm/s. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FlashReach` (переменная) | значение (умолч. `2.5f`) | The muzzle's flash for the gas reaches this x its radius (v13 13b: the whole room's haze shows on the shot's frames); 1: as the lamp (80e4fec). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Forward` (переменная) | значение (умолч. `0.7f`) | os.Gas.Light 1: the forward-scattering share of the lamps' light (Henyey-Greenstein g 0.55; the rest isotropic) - smoke against a lamp glows at its rim. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.HazeRadius` (переменная) | значение (умолч. `60.0f`) | The haze's parcels diffuse up to this radius, cm (60: a veil; 20: as before 24.10). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Light` (переменная) | значение (умолч. `1`) | 1: the gas lit by the room (the frame before it, 1/32 and blurred) and the key lamp's full colour, a darker albedo (v11 stage 6); 0: the light before stage 6 (A/B). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.LightScale` (переменная) | значение (умолч. `2.0f`) | os.Gas.Light 1: the lamps' light on the gas, x. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.LowRes` (переменная) | значение (умолч. `1`) | 1: the gas drawn once per screen block by its own pass after the tonemapper (v11 stage 5); 0: by M_OS_GasPost in every pixel (the old way, kept until the merge). | `Source/MindKore/OSGas.cpp` |

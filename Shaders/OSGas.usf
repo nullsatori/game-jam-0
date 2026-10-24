@@ -666,7 +666,11 @@ void MainBlockCS(uint3 Id : SV_DispatchThreadID)
 // the last one stays (no level flicking back and forth on a still haze). Blocks with no history take their own.
 Texture2D<float4> HoldBlocks;
 Texture2D<float> HoldHistory;
+Texture2D<float> HoldFirst;
+// OutHeld: the block's last-frame opacity taken back through the camera's motion (-1 none) - the composite keeps a
+// pixel's last level only where the new opacity barely crossed its threshold. OutAlpha: this frame's opacity (history).
 RWTexture2D<float> OutHeld;
+RWTexture2D<float> OutAlpha;
 float HoldHasHistory;
 
 [numthreads(8, 8, 1)]
@@ -679,22 +683,29 @@ void HoldCS(uint3 Id : SV_DispatchThreadID)
 		return;
 	}
 	float a = 1.0 - HoldBlocks.Load(int3(Id.xy, 0)).a;
-	float held = a;
-	if (HoldHasHistory > 0.5 && a > 0.03)
+	float held = -1.0;
+	float First = HoldFirst.Load(int3(Id.xy, 0));
+	if (HoldHasHistory > 0.5 && a > 0.03 && First < 1e8)
 	{
+		// The block's gas where it is (its first gas along the ray) taken back through the camera's whole motion - the
+		// turn and the step (a far point took only the turn: walking, the haze 3-5 m away slid 1-2 blocks a frame and the
+		// blocks held their neighbours' opacity - the smoke smeared and stuck, owner 24.10).
 		float2 Centre = floor(OutMin / B) * B + Id.xy * B + 0.5 * B;
-		float2 Ndc = float2((Centre.x - OutMin.x) / OutSize.x * 2.0 - 1.0, 1.0 - (Centre.y - OutMin.y) / OutSize.y * 2.0);
-		float4 Prev = mul(float4(Ndc, 1e-6, 1.0), View.ClipToPrevClip);
+		float3 Gas = View.TranslatedWorldCameraOrigin + DirOf(Centre) * First;
+		float4 Clip = mul(float4(Gas, 1.0), View.TranslatedWorldToClip);
+		float3 Ndc3 = Clip.xyz / max(Clip.w, 1e-6);
+		float4 Prev = mul(float4(Ndc3, 1.0), View.ClipToPrevClip);
 		float2 PrevNdc = Prev.xy / max(Prev.w, 1e-6);
 		float2 PrevPx = OutMin + float2(PrevNdc.x * 0.5 + 0.5, 0.5 - PrevNdc.y * 0.5) * OutSize;
 		int2 PrevBlock = int2(floor(PrevPx / B) - floor(OutMin / B));
 		if (all(PrevBlock >= 0) && all(PrevBlock < Blocks))
 		{
 			float p = HoldHistory.Load(int3(PrevBlock, 0));
-			held = p > 0.0 && abs(a - p) < GasDitherHold ? p : a;
+			held = p > 0.0 ? p : -1.0;
 		}
 	}
 	OutHeld[Id.xy] = held;
+	OutAlpha[Id.xy] = a;
 }
 
 Texture2D SceneColor;
@@ -819,13 +830,25 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 		int2 Q = SphereCell(dirPx, GasPixelAngle * max(GasDitherPx, 1.0)).xy & 3;
 		float hb = (Bayer[Q.y * 4 + Q.x] + 0.5) / 16.0;
 		float Levels = max(GasBands, 1.0);
-		float aUse = FirstGas < 0.0 && GasSmoothAlpha < 0.5 ? BlockHeld.Load(int3(Block, 0)) : alpha;
+		// The opacity shown is always this frame's; only a level's flick at its threshold is held: the last frame's level
+		// stays while the new value has crossed into the next by less than os.Gas.DitherHold of a step (no dot blinking at
+		// the edge, none living longer than its smoke). One scale for both (eighths under 0.25).
+		float prev = FirstGas < 0.0 && GasSmoothAlpha < 0.5 ? BlockHeld.Load(int3(Block, 0)) : -1.0;
+		float Lv = min(alpha, prev >= 0.0 ? prev : alpha) < 0.25 ? 8.0 : Levels;
 		float First = BlockFirst.Load(int3(Block, 0));
 		if (First < 1e8)
 		{
-			hb += (GasNoise3((GasCamera + dirPx * First) / 12.0) - 0.5) * GasDitherGrain / (aUse < 0.25 ? 8.0 : Levels);
+			hb += (GasNoise3((GasCamera + dirPx * First) / 12.0) - 0.5) * GasDitherGrain / Lv;
 		}
-		aq = aUse < 0.03 ? 0.0 : aUse < 0.25 ? saturate(floor(aUse * 8.0 + hb) / 8.0) : saturate(floor(aUse * Levels + hb) / Levels);
+		float x = alpha * Lv + hb;
+		float L = floor(x);
+		if (prev >= 0.0)
+		{
+			float Lp = floor(prev * Lv + hb);
+			float fx = frac(x);
+			L = (L == Lp + 1.0 && fx < GasDitherHold) || (L == Lp - 1.0 && fx > 1.0 - GasDitherHold) ? Lp : L;
+		}
+		aq = alpha < 0.03 ? 0.0 : saturate(L / Lv);
 	}
 	else if (GasDither > 0.5)
 	{
