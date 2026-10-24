@@ -96,7 +96,9 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
 | `os.Weapons.SlideTake` | звук затворной задержки USP (рендер не нужен, `-nullrhi` без `-nosound`): последний выстрел, пустая перезарядка со сбросом, снова последний выстрел, только сброс — запись мастера 9 с, `Saved/Clips/SlideTake.wav`, покадровая таблица `SlideTake.csv`, время действий в лог ([RecoilWeapons-Sound](RecoilWeapons-Sound.md#затворная-задержка-usp-2010-ветка-jam-slide-sound)) |
 | `os.Wall.BlastFrames [См]` | выстрел дробовика в стену с 10 м, кадр каждый кадр 0.5 с (`OSBlast_<кадр>_<мс>.png`; с `-UseFixedTimeStep -FPS=60`) |
 | `os.Weapons.Fx [space]` | вспышка покадрово и дым за 3 с |
-| `os.Weapons.Smoke room` / `roomspace` | живой дым ([RecoilWeapons-Fx](RecoilWeapons-Fx.md#живой-дым-2210)): `room` — `Lvl_OS_TestRoom`, Рысь, выстрел в пол 2.5 м впереди, кадры 0.05–4 с, свидетель сбоку, второй выстрел сквозь облако, гильза от первого лица; `roomspace` — тот же выстрел на `Lvl_OS_ZeroG` в чёрное (вакуум). В лог — газ, масса, скорость, жар каждые 0.25 с и `os.Fx.SmokeCost`. Первый прогон после пересборки материала — без облака (шейдеры) |
+| `os.Gas.WalkProbe [после, с]` | газ ([GasSystem](GasSystem.md#отладка)): выстрел на ходу, остановка, отход, разворот, обход облака; в лог центр облака каждые 0.25 с и скачки альфы по кадрам. Пресет вместо выстрела — `os.Gas.ProbeSpawn`, длина и кадр с `ProfileGPU` — `os.Gas.ProbeSeconds`, с глушителем — `os.Gas.ProbeSuppressor 1`. На TestRoom ловит ensure Slate (B34) |
+| `os.Weapons.PortSmokeSide [side -1\|1] [distance cm]` | дым кожуха Рыси снаружи, 3/4 сбоку: один выстрел, кадры `OSPortsSide_*` через 0.35 и 1 с ([RecoilWeapons-Rmb93](RecoilWeapons-Rmb93.md)) |
+| `os.Weapons.Smoke room` / `roomspace` | (до v11) живой дым ([RecoilWeapons-Fx](RecoilWeapons-Fx.md#живой-дым-2210)): `room` — `Lvl_OS_TestRoom`, Рысь, выстрел в пол 2.5 м впереди, кадры 0.05–4 с, свидетель сбоку, второй выстрел сквозь облако, гильза от первого лица; `roomspace` — тот же выстрел на `Lvl_OS_ZeroG` в чёрное (вакуум). В лог — газ, масса, скорость, жар каждые 0.25 с и `os.Fx.SmokeCost`. Первый прогон после пересборки материала — без облака (шейдеры) |
 | `os.Weapons.Smoke [budget \| foot cling burst sv98]` | дым в мире на `Lvl_OS_Range` (с `-UseFixedTimeStep -FPS=60`): пешком в зале — дробовик и второй выстрел сквозь облако; вис на якоре — СВ-98 и второй; очередь пистолета в невесомости; СВ-98 — лента «облако на месте, тело уплывает» и возврат сквозь облако (или только названные моменты); кадры от глаза и со стороны, в лог — облака против дула каждые 0.25 с. `budget` — три облака дробовика на стенде `os.Weapons.Fx` и `ProfileGPU` ([RecoilWeapons-Fx](RecoilWeapons-Fx.md#честная-физика-ветка-jam-smoke-world-1910)) |
 | `os.Fx.TunnelStill [после, с]` | ждёт облако игрока возрастом 0.6 с, прорезает сквозь него сетку 3×3 туннелей вдоль взгляда (`CarveRay`, 7 см), кадры `OSTunnels_0050/1000/2000ms` ([RecoilWeapons-Fx](RecoilWeapons-Fx.md#дым-в-мире-жизнь-пули-тела-v5v10-222310)); запускать вместе с `os.Weapons.Smoke room` и `8`, чтобы не попасть на прогревочное облако |
 | `os.Fx.MoverStill [после, с]` | ждёт облако, бросает сквозь него ближайший физический проп поперёк взгляда со скоростью 3.5 м/с, кадры `OSMover_0100/0250/0500ms` |
@@ -121,8 +123,9 @@ Start-Process -WindowStyle Hidden "C:\Program Files\Epic Games\UE_5.8\Engine\Bin
   `-1` — живая игра;
 - `os.Scope.Trace 1` пишет пружины прицела каждый тик
   (`Scripts/plot_scope_aim.py` строит графики);
-- `os.Fx.VolumetricSmoke` — 1 (по умолчанию): объёмный дым; 0: плоский из карточек;
-  `os.Fx.ClearSmoke` убирает облака дыма игрока (для кадров);
+- `os.Fx.VolumetricSmoke` и `os.Fx.ClearSmoke` — дым до v11; в игре и PIE облака
+  выстрела с v11 рисует газ, а у него своя отладка (`os.Gas.Debug`,
+  `os.Gas.DebugAlpha`, `os.Gas.Spawn`) — [GasSystem «Отладка»](GasSystem.md#отладка);
 - `os.Flyer.LogFlaps 1` — в лог каждый слышимый взмах крыла (`os.Flyer.Probe`
   включает сама).
 
