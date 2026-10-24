@@ -123,7 +123,7 @@ namespace
 		TEXT("os.Gas.DriftCm"), 3.0f,
 		TEXT("The zone's air drift (v12 7a.3): a slow divergence-free field, 1.5 m across, changing over ~20 s - its top speed, cm/s."));
 	TAutoConsoleVariable<float> CVarGasZoneAmbient(
-		TEXT("os.Gas.ZoneAmbient"), 0.5f,
+		TEXT("os.Gas.ZoneAmbient"), 1.0f,
 		TEXT("The zone's haze: the room's light on it, x (it is seen by the lamps, not by the room)."));
 	TAutoConsoleVariable<float> CVarGasZoneDensity(
 		TEXT("os.Gas.ZoneDensity"), 0.6f,
@@ -272,6 +272,12 @@ namespace
 	TAutoConsoleVariable<int32> CVarGasStampAsync(
 		TEXT("os.Gas.StampAsync"), 1,
 		TEXT("1: a shot's stamp (its first parcels into the atlas) starts on a worker the moment the gun has let its gas out; the gas tick only joins it - the same atlas on the same frame; 0: splatted in the gas tick."));
+	TAutoConsoleVariable<float> CVarGasRise(
+		TEXT("os.Gas.Rise"), 25.0f,
+		TEXT("A shot's warm gas rises as a thermal: this x sqrt(1 s / its age), cm/s (keeps rising till the ceiling, slowing as it mixes; at least os.Gas.WarmLift); 0: os.Gas.WarmLift alone, from 1 s."));
+	TAutoConsoleVariable<float> CVarGasZoneAlbedoSeconds(
+		TEXT("os.Gas.ZoneAlbedoSeconds"), 8.0f,
+		TEXT("The haze whitens to os.Gas.ZoneAlbedo over its smoke's this, s (a thin haze in a lit room is light grey, not a black veil; 20 as before)."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -1875,8 +1881,8 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 			Z2 += P.Mass * Z * Z;
 			H2 += P.Mass * ((D - Down * Z).SizeSquared() * 0.5f);
 		}
-		UE_LOG(LogMindKore, Log, TEXT("Gas: haze spread at %.0f s - %d parcels, mass %.2f, sigma across %.0f cm, up %.0f cm, CentreT %.2f"), Cloud.Age, Cloud.Parcels.Num(), M,
-			FMath::Sqrt(H2 / FMath::Max(M, 1e-6f)), FMath::Sqrt(Z2 / FMath::Max(M, 1e-6f)), Cloud.CentreT);
+		UE_LOG(LogMindKore, Log, TEXT("Gas: haze spread at %.0f s - %d parcels, mass %.2f, sigma across %.0f cm, up %.0f cm, CentreT %.2f, its centre at z %.0f cm"), Cloud.Age, Cloud.Parcels.Num(), M,
+			FMath::Sqrt(H2 / FMath::Max(M, 1e-6f)), FMath::Sqrt(Z2 / FMath::Max(M, 1e-6f)), Cloud.CentreT, Cloud.Origin.Z + C.Z);
 	}
 #endif
 	const bool bEvicted = Cloud.Evict > 0.0f && (Cloud.Evict -= DeltaTime) <= 0.0f;
@@ -2018,6 +2024,7 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 			Cloud.SimToWorld = World->GetTimeSeconds() - Cloud.StepCarry - Cloud.SimTime;
 			Cloud.DriftCm = CVarGasDriftCm.GetValueOnGameThread();
 			Cloud.WarmLift = CVarGasWarmLift.GetValueOnGameThread();
+			Cloud.Rise = FMath::Max(CVarGasRise.GetValueOnGameThread(), 0.0f);
 			Cloud.HazeRadius = CVarGasHazeRadius.GetValueOnGameThread();
 			Cloud.HazeDiffuse = CVarGasHazeDiffuse.GetValueOnGameThread();
 			Cloud.HazeRadiusMax = CVarGasHazeRadiusMax.GetValueOnGameThread();
@@ -2192,7 +2199,7 @@ void UOSGasSubsystem::UpdatePost()
 		const FLinearColor Albedo = !bNewLight && Cloud.Look.Colour == FOSGasLook().Colour ? FLinearColor(0.50f, 0.52f, 0.56f) : Cloud.Look.Colour;
 		// The haze whitens as it ages (v12 7d): to os.Gas.ZoneAlbedo over its gas's 20 s.
 		// v15c: and toward its fog's colour by the fog's share.
-		const FLinearColor Shown = Cloud.bZone && bNewLight ? FMath::Lerp(FMath::Lerp(Albedo, FLinearColor(FVector3f(CVarGasZoneAlbedo.GetValueOnGameThread())), FMath::Clamp(Cloud.HazeAge / 20.0f, 0.0f, 1.0f)), Cloud.FogColour, Cloud.FogShare) : Albedo;
+		const FLinearColor Shown = Cloud.bZone && bNewLight ? FMath::Lerp(FMath::Lerp(Albedo, FLinearColor(FVector3f(CVarGasZoneAlbedo.GetValueOnGameThread())), FMath::Clamp(Cloud.HazeAge / FMath::Max(CVarGasZoneAlbedoSeconds.GetValueOnGameThread(), 0.1f), 0.0f, 1.0f)), Cloud.FogColour, Cloud.FogShare) : Albedo;
 		Data[3 * MaxDrawn + Index] = FLinearColor(Shown.R, Shown.G, Shown.B, Cloud.BirthWorld);
 		// The haze's G is the shafts' light (v13 13c): no warm core read from it.
 		const FLinearColor Warm = Cloud.Look.bEmbers && !(Cloud.bZone && CVarGasShafts.GetValueOnGameThread() > 0) ? Cloud.Look.WarmColour : FLinearColor::Black;
@@ -3077,7 +3084,15 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 							P.Stretch = FMath::Clamp(1.0f + (P.Stretch * FMath::Exp(Rate * Dt) - 1.0f) * FMath::Exp(-Dt / StretchSeconds), 1.0f, MaxStretch);
 						}
 					}
-					if (P.Age > 1.0f)
+					// Warm gas rises as a thermal (owner 24.10: it hung): mixing keeps its buoyancy, so it slows as 1/sqrt(t) and
+					// rises till the ceiling; eased in after the muzzle's jet (0.3-0.8 s). By the parcel's age: the haze's copy
+					// rises on at the hand-over. os.Gas.Rise 0: the residual warmth's lift from 1 s, as before.
+					if (Cloud.Rise > 0.0f && P.Age > 0.3f)
+					{
+						const float Thermal = Cloud.Rise * FMath::Sqrt(1.0f / FMath::Max(P.Age, 1.0f)) * FMath::SmoothStep(0.3f, 0.8f, P.Age);
+						Target -= Down * (FMath::Max(Cloud.WarmLift, Thermal) * P.Warm * GScale);
+					}
+					else if (Cloud.Rise <= 0.0f && P.Age > 1.0f)
 					{
 						Target -= Down * (Cloud.WarmLift * P.Warm * GScale);
 					}

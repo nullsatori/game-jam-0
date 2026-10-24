@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 111 команд, 85 переменных.
+Всего: 111 команд, 87 переменных.
 
 ## `os.Attach`
 
@@ -151,6 +151,7 @@
 | `os.Gas.ProbeSpawn` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot, and runs 24 s. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSpawnLate` (переменная) | значение (умолч. `TEXT("")`) | A preset (or a whole os. command): os.Gas.WalkProbe spawns (runs) it once at 5 s (after its shots). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSuppressor` (переменная) | значение (умолч. `0`) | 1: os.Gas.WalkProbe mounts the suppressor first. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Gas.Rise` (переменная) | значение (умолч. `25.0f`) | A shot's warm gas rises as a thermal: this x sqrt(1 s / its age), cm/s (keeps rising till the ceiling, slowing as it mixes; at least os.Gas.WarmLift); 0: os.Gas.WarmLift alone, from 1 s. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Shafts` (переменная) | значение (умолч. `1`) | 1: a sun (directional) or a spot/rect lamp tagged GasShaft lights the haze in layers with the shadows of frames and jambs - its light traced to the haze's parcels, an eighth a step (v13 13c); 0: off (80e4fec). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Shimmer` (переменная) | значение (умолч. `2.0f`) | The air's shimmer behind heat (v12 7b.3), x; 0 off. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.SmoothAlpha` (переменная) | значение (умолч. `0`) | 1: the block's result (light and opacity) read bilinearly between the blocks' centres (edge blocks as before) - finer still. | `Source/MindKore/OSGas.cpp` |
@@ -171,7 +172,8 @@
 | `os.Gas.WalkProbe` | `[after s]` | [after s] Shoot while walking, stop, step back, turn, walk round the cloud; log the cloud's centroid every 0.25 s (and HighResShot OSWalk_*). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.WarmLift` (переменная) | значение (умолч. `4.0f`) | Residual warmth's lift at full gravity, cm/s (4; try 10-15: the haze gathers under the ceiling sooner). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneAlbedo` (переменная) | значение (умолч. `0.8f`) | The haze's albedo it ages to over 20 s (old smoke coagulates and whitens: a light veil in the light, dark in the shade). | `Source/MindKore/OSGas.cpp` |
-| `os.Gas.ZoneAmbient` (переменная) | значение (умолч. `0.5f`) | The zone's haze: the room's light on it, x (it is seen by the lamps, not by the room). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.ZoneAlbedoSeconds` (переменная) | значение (умолч. `8.0f`) | The haze whitens to os.Gas.ZoneAlbedo over its smoke's this, s (a thin haze in a lit room is light grey, not a black veil; 20 as before). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.ZoneAmbient` (переменная) | значение (умолч. `1.0f`) | The zone's haze: the room's light on it, x (it is seen by the lamps, not by the room). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneDensity` (переменная) | значение (умолч. `0.6f`) | The zone's haze: the gas handed to it, x its mass. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneLamps` (переменная) | значение (умолч. `16`) | The haze's lamps a block chooses from (4-16). | `Source/MindKore/OSGas.cpp` |
 

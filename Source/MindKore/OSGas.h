@@ -380,6 +380,8 @@ private:
 		/** v14c: the haze spreads as a layer (os.Gas.HazeSlump, cm/s), its kernels squashed (os.Gas.HazeFlat), its room currents' vertical x HazeDriftZ;
 		 * each layer's (haze, fog) thickness reference, eased over 2 s. */
 		float HazeSlump = 0.0f, HazeFlat = 1.0f, HazeDriftZ = 1.0f;
+		/** A shot's warm gas rising as a thermal, cm/s at 1 s (os.Gas.Rise). */
+		float Rise = 0.0f;
 		float SlumpRef[2] = { 0.0f, 0.0f };
 		/** v15c: the fog's share of the haze's mass and its colour (both eased over 0.5 s): the look mixes toward the fog's. */
 		float FogShare = 0.0f;
