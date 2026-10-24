@@ -121,6 +121,18 @@ struct FOSGasRecipe
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.0"))
 	float ClingSeconds = 0.0f;
 
+	/** The share of the carrier's velocity a parcel takes, and how fast it gives it to the air, s (v16c: a shroud hole's
+	 * boundary layer - a short soft tail behind the hole on the move). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.0"))
+	float CarrierShare = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.01"))
+	float CarrierSeconds = 0.08f;
+
+	/** An attached source lets its parcels out with its point's own velocity each frame, not the one it was made with (v16c). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
+	bool bLiveCarrier = false;
+
 	/** A parcel's life, s. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.1"))
 	float LifeSeconds = 6.0f;
@@ -231,6 +243,8 @@ struct FOSGasParcel
 	float Base = 0.0f;
 	float Vent = 0.0f;
 	bool bFog = false;
+	/** v16c: how fast it gives the carrier's velocity to the air, s. */
+	float CarrierTau = 0.08f;
 	/** v14c: the kernel squashed along gravity - vertical semi-axis R x Flat, horizontal R / sqrt(Flat), volume kept (1: a ball). */
 	float Flat = 1.0f;
 };
@@ -542,6 +556,10 @@ private:
 		FVector Where, Direction, Carrier;
 		TWeakObjectPtr<const USceneComponent> Attach;
 		bool bAttached = false;
+		/** v16c (bLiveCarrier): the point's last world position and its smoothed velocity. */
+		FVector LastWhere = FVector::ZeroVector;
+		FVector LiveVelocity = FVector::ZeroVector;
+		bool bHasLast = false;
 		/** A burst: parcels still owed and the time left to let them out. */
 		float BurstLeft = 0.0f;
 		float BurstOwed = 0.0f;

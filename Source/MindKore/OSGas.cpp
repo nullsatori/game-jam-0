@@ -1148,7 +1148,8 @@ void UOSGasSubsystem::Emit(FCloud& Cloud, const FOSGasRecipe& R, const FVector& 
 		const float Speed = R.SpeedCm * FMath::FRandRange(R.SpeedMin, 1.0f);
 		P.P = At;
 		P.Throw = Dir * Speed;
-		P.Carrier = FVector3f(Carrier);
+		P.Carrier = FVector3f(Carrier * R.CarrierShare);
+		P.CarrierTau = FMath::Max(R.CarrierSeconds, 0.01f);
 		P.V = P.Carrier + P.Throw;
 		if (R.RingCm > 0.0f)
 		{
@@ -1324,6 +1325,15 @@ void UOSGasSubsystem::TickSources(float DeltaTime)
 			const FTransform Frame = Attach->GetComponentTransform();
 			Where = Frame.TransformPosition(S.Where);
 			Direction = Frame.TransformVectorNoScale(S.Direction);
+			// The point's own velocity (v16c): the gun turned, swayed or stopped after the shot - its later wisps leave
+			// with the hole as it moves now (the shot's frozen velocity threw them ahead or aside). Smoothed over ~0.03 s.
+			if (S.Recipe.bLiveCarrier && DeltaTime > 1e-5f)
+			{
+				const FVector Now = S.bHasLast ? (Where - S.LastWhere) / DeltaTime : S.Carrier;
+				S.LiveVelocity = S.bHasLast ? S.LiveVelocity + (Now - S.LiveVelocity) * (1.0f - FMath::Exp(-DeltaTime / 0.03f)) : Now;
+				S.LastWhere = Where;
+				S.bHasLast = true;
+			}
 		}
 		float Owed = 0.0f;
 		if (S.BurstLeft > 0.0f)
@@ -1348,7 +1358,7 @@ void UOSGasSubsystem::TickSources(float DeltaTime)
 			}
 			if (S.Cloud != INDEX_NONE)
 			{
-				Emit(Clouds[S.Cloud], S.Recipe, Where, Direction, S.Carrier, Count);
+				Emit(Clouds[S.Cloud], S.Recipe, Where, Direction, S.Recipe.bLiveCarrier && S.bHasLast ? S.LiveVelocity : S.Carrier, Count);
 			}
 		}
 		if (S.BurstLeft <= 0.0f && S.Rate <= 0.0f && S.Carry < 1.0f)
@@ -3046,7 +3056,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				// in a vacuum it keeps it.
 				if (P.Cling <= 0.0f)
 				{
-					const FVector3f Lost = P.Carrier * ((1.0f - FMath::Exp(-Dt / CarrierSeconds)) * P.Air);
+					const FVector3f Lost = P.Carrier * ((1.0f - FMath::Exp(-Dt / P.CarrierTau)) * P.Air);
 					P.Carrier -= Lost;
 					P.V -= Lost;
 				}

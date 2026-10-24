@@ -47,6 +47,22 @@ namespace
 		TEXT("os.Fx.HoleWrap"), 1,
 		TEXT("1 (v16): a shroud hole's pop rides with the gun 0.2 s, then every hole lets a slow wisp out and back along the shroud that climbs round it; the seep leaves along its hole and rises. 0: the pop left in the world at once, threads straight up out of 4 holes, the seep straight up."));
 
+	TAutoConsoleVariable<int32> CVarHoleLive(
+		TEXT("os.Fx.HoleLive"), 1,
+		TEXT("1 (v16c): a shroud hole's pop and wrap leave with the hole's live velocity, 0.6 of it, given to the air over 0.18 s - a short soft tail behind each hole on the move, nothing riding on and stopping dead; 0: the pop and wrap ride with the gun (cling) at the shot's velocity."));
+
+	/** v16c (os.Fx.HoleLive): a hole's gas takes 0.6 of the hole's velocity and gives it to the air over 0.18 s, no cling. */
+	void HoleCarrier(FOSGasRecipe& R)
+	{
+		if (CVarHoleLive.GetValueOnGameThread() != 0)
+		{
+			R.ClingSeconds = 0.0f;
+			R.CarrierShare = 0.6f;
+			R.CarrierSeconds = 0.18f;
+			R.bLiveCarrier = true;
+		}
+	}
+
 	/** The exhaust's throw (relative to the cloud's centre of mass) dies down to its drift with this time constant, s. */
 	constexpr float GasSlowSeconds = 0.4f;
 
@@ -419,6 +435,7 @@ namespace
 		R.LifeSeconds = 2.2f;
 		R.ClingSeconds = 0.3f;
 		R.FallCmPerS2 = -10.0f;
+		HoleCarrier(R);
 		return R;
 	}
 
@@ -482,6 +499,10 @@ namespace
 			const bool bWrap = CVarHoleWrap.GetValueOnGameThread() != 0;
 			R.BurstCount = bWrap ? 4 : 5;
 			R.ClingSeconds = bWrap ? 0.2f : 0.0f;
+			if (bWrap)
+			{
+				HoleCarrier(R);
+			}
 			R.BurstSeconds = 0.03f;
 			R.SpeedCm = 450.0f;
 			R.SpeedMin = 0.6f;

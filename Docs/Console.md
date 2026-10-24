@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 112 команд, 87 переменных.
+Всего: 112 команд, 88 переменных.
 
 ## `os.Attach`
 
@@ -84,6 +84,7 @@
 | Команда | Аргументы | Что делает | Файл |
 |---|---|---|---|
 | `os.Fx.ClearSmoke` | — | Remove every muzzle smoke cloud of the player (stills). | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Fx.HoleLive` (переменная) | значение (умолч. `1`) | 1 (v16c): a shroud hole's pop and wrap leave with the hole's live velocity, 0.6 of it, given to the air over 0.18 s - a short soft tail behind each hole on the move, nothing riding on and stopping dead; 0: the pop and wrap ride with the gun (cling) at the shot's velocity. | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Fx.HoleWrap` (переменная) | значение (умолч. `1`) | 1 (v16): a shroud hole's pop rides with the gun 0.2 s, then every hole lets a slow wisp out and back along the shroud that climbs round it; the seep leaves along its hole and rises. 0: the pop left in the world at once, threads straight up out of 4 holes, the seep straight up. | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Fx.MoverStill` | `[after s]` | [after s] Wait for the player's next smoke cloud (0.6 s old), throw the nearest simulating prop through it across the view at 3.5 m/s, HighResShot OSMover_0100/0250/0500ms. | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Fx.SmokeCost` | — | Log what the smoke grids cost since the last call - a step (on a worker thread): mean / max us; the game thread in a frame with a grid stepping (waiting for the steps, the box, the upload): mean / max us - then start over. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
