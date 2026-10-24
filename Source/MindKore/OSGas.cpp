@@ -137,6 +137,18 @@ namespace
 	TAutoConsoleVariable<float> CVarGasZoneAlbedo(
 		TEXT("os.Gas.ZoneAlbedo"), 0.8f,
 		TEXT("The haze's albedo it ages to over 20 s (old smoke coagulates and whitens: a light veil in the light, dark in the shade)."));
+	TAutoConsoleVariable<int32> CVarGasTorchShadow(
+		TEXT("os.Gas.TorchShadow"), 1,
+		TEXT("1: the torch's cone cuts the smoke with the shadows of what stands in it (a map of traces, v13 13a); 0: off (80e4fec)."));
+	TAutoConsoleVariable<int32> CVarGasTorchShadowRes(
+		TEXT("os.Gas.TorchShadowRes"), 16,
+		TEXT("The torch's shadow map for the gas, texels a side (16, up to 32)."));
+	TAutoConsoleVariable<int32> CVarGasTorchTracesPerFrame(
+		TEXT("os.Gas.TorchTracesPerFrame"), 64,
+		TEXT("The torch's shadow map: traces a frame (texels in turn; 64: a 16x16 map in 4 frames)."));
+	TAutoConsoleVariable<float> CVarGasTorchShadowEase(
+		TEXT("os.Gas.TorchShadowEase"), 0.08f,
+		TEXT("The torch's shadow map: each texel's distance eases to its trace over this, s."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -345,6 +357,7 @@ void UOSGasSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		DataTexture = FloatTexture(MaxDrawn, DataRows);
 		TunnelTexture = FloatTexture(MaxTunnels, 3);
 		HeatTexture = FloatTexture(MaxHeat, 2);
+		TorchTexture = FloatTexture(MaxTorchRes, MaxTorchRes);
 		Post = UMaterialInstanceDynamic::Create(Material, this);
 		Post->SetTextureParameterValue(TEXT("GasData"), DataTexture);
 		Post->SetTextureParameterValue(TEXT("Tunnels"), TunnelTexture);
@@ -1376,6 +1389,26 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 			}
 		}
 	}
+	// The player's own lamps every frame: a lamp put on the gun counts the frame it is lit, not a second later.
+	PlayerLights.Reset();
+	if (const APlayerController* Controller = GetWorld()->GetFirstPlayerController(); Controller && Controller->GetPawn())
+	{
+		TArray<ULightComponent*> Own;
+		Controller->GetPawn()->GetComponents<ULightComponent>(Own);
+		TArray<AActor*> Carried;
+		Controller->GetPawn()->GetAttachedActors(Carried, true, true);
+		for (AActor* Each : Carried)
+		{
+			TArray<ULightComponent*> More;
+			Each->GetComponents<ULightComponent>(More);
+			Own.Append(More);
+		}
+		for (ULightComponent* L : Own)
+		{
+			PlayerLights.Add(L);
+		}
+	}
+	UpdateTorchShadow(DeltaTime);
 	// Heat puffs: up 20-30 cm/s against gravity (none in zero-G), widening, cooling.
 	for (int32 Index = HeatPuffs.Num() - 1; Index >= 0; --Index)
 	{
@@ -1882,6 +1915,15 @@ void UOSGasSubsystem::UpdatePost()
 				Frame.LaserLight = Light;
 			}
 		}
+		// The torch's shadow map (v13 13a).
+		Frame.TorchShadow = TorchTexture ? TorchTexture->GetResource() : nullptr;
+		Frame.TorchOn = Torch.bOn ? 1.0f : 0.0f;
+		Frame.TorchPos = FVector3f(Torch.Pos);
+		Frame.TorchAxis = FVector3f(Torch.Axis);
+		Frame.TorchU = FVector3f(Torch.U);
+		Frame.TorchV = FVector3f(Torch.V);
+		Frame.TorchTan = Torch.TanOuter;
+		Frame.TorchRes = float(Torch.Res);
 		Frame.BlockPx = BlockPx;
 		Frame.DitherPx = CVarGasDitherPx.GetValueOnGameThread() > 0.0f ? CVarGasDitherPx.GetValueOnGameThread() : FMath::Max(1.0f, FMath::RoundToFloat(BlockPx * 0.5f));
 		Frame.SmoothAlpha = float(CVarGasSmoothAlpha.GetValueOnGameThread());
@@ -3151,10 +3193,31 @@ void UOSGasSubsystem::UpdateLamps(FCloud& Cloud, const FVector& Centre, float De
 		bool bPlayers;
 	};
 	TArray<FCandidate, TInlineAllocator<16>> Candidates;
+	// The world's lamps from KeyLights (refreshed each second), the player's own from this frame (PlayerLights).
+	const auto OwnedByPlayer = [Player](const ULightComponent* L)
+	{
+		const AActor* Owner = L->GetOwner();
+		return Player && Owner && (Owner == Player || Owner->GetAttachParentActor() == Player || Owner->GetOwner() == Player);
+	};
+	TArray<const ULightComponent*, TInlineAllocator<64>> Lamps;
 	for (const TWeakObjectPtr<ULightComponent>& Each : KeyLights)
 	{
-		const ULightComponent* L = Each.Get();
-		if (!L || !L->IsVisible() || !L->bAffectsWorld || L->Intensity <= 0.0f)
+		if (const ULightComponent* L = Each.Get(); L && !OwnedByPlayer(L))
+		{
+			Lamps.Add(L);
+		}
+	}
+	for (const TWeakObjectPtr<ULightComponent>& Each : PlayerLights)
+	{
+		if (const ULightComponent* L = Each.Get())
+		{
+			Lamps.Add(L);
+		}
+	}
+	for (const ULightComponent* L : Lamps)
+	{
+		// A lamp for the gas only (tag GasOnly: the Nixie's glow) counts though it lights nothing in the world.
+		if (!L->IsVisible() || (!L->bAffectsWorld && !L->ComponentHasTag(TEXT("GasOnly"))) || L->Intensity <= 0.0f)
 		{
 			continue;
 		}
@@ -3249,6 +3312,128 @@ void UOSGasSubsystem::UpdateLamps(FCloud& Cloud, const FVector& Centre, float De
 		UE_LOG(LogMindKore, Log, TEXT("Gas: lamps%s"), Line.IsEmpty() ? TEXT(" none") : *Line);
 	}
 #endif
+}
+
+void UOSGasSubsystem::UpdateTorchShadow(float DeltaTime)
+{
+	// The torch: the player's lit spot lamp.
+	const USpotLightComponent* Lamp = nullptr;
+	for (const TWeakObjectPtr<ULightComponent>& Each : PlayerLights)
+	{
+		if (const USpotLightComponent* Spot = Cast<USpotLightComponent>(Each.Get()); Spot && Spot->IsVisible() && Spot->Intensity > 0.0f)
+		{
+			Lamp = Spot;
+			break;
+		}
+	}
+	if (!Lamp || CVarGasTorchShadow.GetValueOnGameThread() == 0)
+	{
+		Torch.bOn = false;
+		return;
+	}
+	const int32 Res = FMath::Clamp(CVarGasTorchShadowRes.GetValueOnGameThread(), 4, MaxTorchRes);
+	const FTransform Frame = Lamp->GetComponentTransform();
+	const FVector Pos = Frame.GetLocation();
+	const FVector Axis = Frame.GetUnitAxis(EAxis::X), U = Frame.GetUnitAxis(EAxis::Y), V = Frame.GetUnitAxis(EAxis::Z);
+	const float TanOuter = FMath::Tan(FMath::DegreesToRadians(FMath::Clamp(Lamp->OuterConeAngle, 1.0f, 80.0f)));
+	const float Range = Lamp->AttenuationRadius;
+	const auto DirOf = [&](int32 I, const FVector& A, const FVector& UU, const FVector& VV, float Tan)
+	{
+		const float Uc = (I % Res + 0.5f) / Res * 2.0f - 1.0f, Vc = (I / Res + 0.5f) / Res * 2.0f - 1.0f;
+		return (A + (UU * Uc + VV * Vc) * Tan).GetSafeNormal();
+	};
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(OSGasTorchShadow), false);
+	if (const APlayerController* Controller = GetWorld()->GetFirstPlayerController(); Controller && Controller->GetPawn())
+	{
+		Params.AddIgnoredActor(Controller->GetPawn());
+		TArray<AActor*> Carried;
+		Controller->GetPawn()->GetAttachedActors(Carried, true, true);
+		Params.AddIgnoredActors(Carried);
+	}
+	const auto Trace = [&](const FVector& Dir)
+	{
+		FHitResult Hit;
+		return GetWorld()->LineTraceSingleByChannel(Hit, Pos, Pos + Dir * Range, ECC_Visibility, Params) ? float(Hit.Distance) : Range;
+	};
+	const int32 Count = Res * Res;
+	if (!Torch.bOn || Torch.Res != Res)
+	{
+		// Switched on: the whole map traced at once, no ease up from nothing.
+		Torch.Res = Res;
+		Torch.Depth.SetNumUninitialized(Count);
+		Torch.Target.SetNumUninitialized(Count);
+		for (int32 I = 0; I < Count; ++I)
+		{
+			Torch.Target[I] = Torch.Depth[I] = Trace(DirOf(I, Axis, U, V, TanOuter));
+		}
+		Torch.Cursor = 0;
+	}
+	else
+	{
+		// The map re-sampled from the lamp's last frame into this one (its texels not yet traced again would ride with
+		// the screen as it turns); outside the last map: the range.
+		const TArray<float> OldDepth = Torch.Depth, OldTarget = Torch.Target;
+		const auto Sample = [&](const TArray<float>& From, float Uo, float Vo)
+		{
+			const float X = (Uo * 0.5f + 0.5f) * Res - 0.5f, Y = (Vo * 0.5f + 0.5f) * Res - 0.5f;
+			const int32 X0 = FMath::Clamp(FMath::FloorToInt(X), 0, Res - 1), Y0 = FMath::Clamp(FMath::FloorToInt(Y), 0, Res - 1);
+			const int32 X1 = FMath::Min(X0 + 1, Res - 1), Y1 = FMath::Min(Y0 + 1, Res - 1);
+			const float FX = FMath::Clamp(X - X0, 0.0f, 1.0f), FY = FMath::Clamp(Y - Y0, 0.0f, 1.0f);
+			return FMath::Lerp(FMath::Lerp(From[Y0 * Res + X0], From[Y0 * Res + X1], FX), FMath::Lerp(From[Y1 * Res + X0], From[Y1 * Res + X1], FX), FY);
+		};
+		for (int32 I = 0; I < Count; ++I)
+		{
+			const FVector Dir = DirOf(I, Axis, U, V, TanOuter);
+			const float Along = Dir | Torch.Axis;
+			const float Uo = Along > 0.0f ? (Dir | Torch.U) / (Along * Torch.TanOuter) : 2.0f;
+			const float Vo = Along > 0.0f ? (Dir | Torch.V) / (Along * Torch.TanOuter) : 2.0f;
+			const bool bIn = FMath::Abs(Uo) <= 1.0f && FMath::Abs(Vo) <= 1.0f;
+			Torch.Depth[I] = bIn ? Sample(OldDepth, Uo, Vo) : Range;
+			Torch.Target[I] = bIn ? Sample(OldTarget, Uo, Vo) : Range;
+		}
+		// Traces in turn, then the ease.
+		const int32 Traces = FMath::Clamp(CVarGasTorchTracesPerFrame.GetValueOnGameThread(), 1, Count);
+		for (int32 K = 0; K < Traces; ++K)
+		{
+			Torch.Cursor = (Torch.Cursor + 1) % Count;
+			Torch.Target[Torch.Cursor] = Trace(DirOf(Torch.Cursor, Axis, U, V, TanOuter));
+		}
+		const float Ease = 1.0f - FMath::Exp(-DeltaTime / FMath::Max(CVarGasTorchShadowEase.GetValueOnGameThread(), 0.005f));
+		for (int32 I = 0; I < Count; ++I)
+		{
+			Torch.Depth[I] += (Torch.Target[I] - Torch.Depth[I]) * Ease;
+		}
+	}
+#if !UE_BUILD_SHIPPING
+	// os.Gas.Debug 2: the torch's map once a second (its nearest, middle and farthest texel).
+	if (CVarGasDebug.GetValueOnGameThread() > 1 && FMath::FloorToInt(GetWorld()->GetTimeSeconds()) != FMath::FloorToInt(GetWorld()->GetTimeSeconds() - DeltaTime))
+	{
+		TArray<float> Sorted = Torch.Depth;
+		Sorted.Sort();
+		FHitResult Probe;
+		GetWorld()->LineTraceSingleByChannel(Probe, Pos, Pos + Axis * Range, ECC_Visibility, Params);
+		UE_LOG(LogMindKore, Log, TEXT("Gas: torch map %d^2 near %.0f mid %.0f far %.0f cm; the axis hits %s at %.0f cm"), Res, Sorted[0], Sorted[Sorted.Num() / 2], Sorted.Last(),
+			Probe.GetActor() ? *Probe.GetActor()->GetName() : TEXT("nothing"), Probe.Distance);
+	}
+#endif
+	Torch.Pos = Pos;
+	Torch.Axis = Axis;
+	Torch.U = U;
+	Torch.V = V;
+	Torch.TanOuter = TanOuter;
+	Torch.Range = Range;
+	Torch.bOn = true;
+	TArray<FLinearColor> Texels;
+	Texels.SetNumZeroed(MaxTorchRes * MaxTorchRes);
+	for (int32 I = 0; I < Count; ++I)
+	{
+		Texels[(I / Res) * MaxTorchRes + I % Res] = FLinearColor(Torch.Depth[I], 0.0f, 0.0f, 0.0f);
+	}
+	uint8* Bytes = static_cast<uint8*>(FMemory::Malloc(Texels.Num() * sizeof(FLinearColor)));
+	FMemory::Memcpy(Bytes, Texels.GetData(), Texels.Num() * sizeof(FLinearColor));
+	FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, MaxTorchRes, MaxTorchRes);
+	TorchTexture->UpdateTextureRegions(0, 1, Region, MaxTorchRes * sizeof(FLinearColor), sizeof(FLinearColor), Bytes,
+		[](uint8* Src, const FUpdateTextureRegion2D* Regions) { FMemory::Free(Src); delete Regions; });
 }
 
 float UOSGasSubsystem::LampSees(FCloud& Cloud, const ULightComponent* Lamp, const FVector& Where, const FVector& Toward, bool bDirectional)

@@ -49,6 +49,14 @@ BEGIN_SHADER_PARAMETER_STRUCT(FOSGasCommonParameters, )
 	SHADER_PARAMETER(float, GasSmoothAlpha)
 	SHADER_PARAMETER(float, GasDitherHold)
 	SHADER_PARAMETER(float, GasDitherGrain)
+	SHADER_PARAMETER_TEXTURE(Texture2D<float4>, GasTorchShadow)
+	SHADER_PARAMETER(float, GasTorchOn)
+	SHADER_PARAMETER(FVector3f, GasTorchPos)
+	SHADER_PARAMETER(FVector3f, GasTorchAxis)
+	SHADER_PARAMETER(FVector3f, GasTorchU)
+	SHADER_PARAMETER(FVector3f, GasTorchV)
+	SHADER_PARAMETER(float, GasTorchTan)
+	SHADER_PARAMETER(float, GasTorchRes)
 	SHADER_PARAMETER_TEXTURE(Texture2D<float4>, GasHeat)
 	SHADER_PARAMETER(float, GasHeatCount)
 	SHADER_PARAMETER(float, GasShimmer)
@@ -337,6 +345,14 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 		C.GasSmoothAlpha = Data.SmoothAlpha;
 		C.GasDitherHold = Data.DitherHold;
 		C.GasDitherGrain = Data.DitherGrain;
+		C.GasTorchShadow = RHIOf(Data.TorchShadow);
+		C.GasTorchOn = Data.TorchOn;
+		C.GasTorchPos = Data.TorchPos;
+		C.GasTorchAxis = Data.TorchAxis;
+		C.GasTorchU = Data.TorchU;
+		C.GasTorchV = Data.TorchV;
+		C.GasTorchTan = Data.TorchTan;
+		C.GasTorchRes = Data.TorchRes;
 		C.GasHeat = RHIOf(Data.Heat);
 		C.GasHeatCount = float(Data.HeatCount);
 		C.GasShimmer = Data.Shimmer;

@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 109 команд, 39 переменных.
+Всего: 109 команд, 43 переменных.
 
 ## `os.Attach`
 
@@ -122,6 +122,10 @@
 | `os.Gas.Spawn` | `<muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]` | <muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for 4 s, along the view. *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.SpawnSeconds` (переменная) | значение (умолч. `4.0f`) | How long an os.Gas.Spawn source lives, s (4). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.TickHz` (переменная) | значение (умолч. `0.0f`) | > 0: the gas's own evolution shown in steps of 1/TickHz s (stop motion); its place and the camera stay smooth. 0: off. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.TorchShadow` (переменная) | значение (умолч. `1`) | 1: the torch's cone cuts the smoke with the shadows of what stands in it (a map of traces, v13 13a); 0: off (80e4fec). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.TorchShadowEase` (переменная) | значение (умолч. `0.08f`) | The torch's shadow map: each texel's distance eases to its trace over this, s. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.TorchShadowRes` (переменная) | значение (умолч. `16`) | The torch's shadow map for the gas, texels a side (16, up to 32). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.TorchTracesPerFrame` (переменная) | значение (умолч. `64`) | The torch's shadow map: traces a frame (texels in turn; 64: a 16x16 map in 4 frames). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.WalkProbe` | `[after s]` | [after s] Shoot while walking, stop, step back, turn, walk round the cloud; log the cloud's centroid every 0.25 s (and HighResShot OSWalk_*). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ZoneAlbedo` (переменная) | значение (умолч. `0.8f`) | The haze's albedo it ages to over 20 s (old smoke coagulates and whitens: a light veil in the light, dark in the shade). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneAmbient` (переменная) | значение (умолч. `0.5f`) | The zone's haze: the room's light on it, x (it is seen by the lamps, not by the room). | `Source/MindKore/OSGas.cpp` |

@@ -34,6 +34,40 @@ float GasSmoothAlpha;
 // v13 13e (os.Gas.Dither 2): the hold of a block's opacity against its last frame's, the world grain's strength.
 float GasDitherHold;
 float GasDitherGrain;
+// v13 13a: the torch's shadow map (R: distance to the first hit per texel) and its frame.
+Texture2D<float4> GasTorchShadow;
+float GasTorchOn;
+float3 GasTorchPos;
+float3 GasTorchAxis;
+float3 GasTorchU;
+float3 GasTorchV;
+float GasTorchTan;
+float GasTorchRes;
+
+// How much of the torch reaches pw past what stands in its cone: the map's distance against pw's, a soft 30 cm edge,
+// four texels by hand (a bilinear distance drew a ghost of the shadow at the silhouette's middle distance).
+float TorchLit(float3 pw)
+{
+	float3 local = pw - GasTorchPos;
+	float along = dot(local, GasTorchAxis);
+	if (along <= 0.0)
+	{
+		return 1.0;
+	}
+	float2 uv = 0.5 + 0.5 * float2(dot(local, GasTorchU), dot(local, GasTorchV)) / max(along * GasTorchTan, 1.0);
+	float2 tc = uv * GasTorchRes - 0.5;
+	int2 i0 = int2(floor(tc));
+	float2 f = tc - i0;
+	float dist = length(local);
+	float lit[4];
+	[unroll] for (int k = 0; k < 4; k++)
+	{
+		int2 t = clamp(i0 + int2(k & 1, k >> 1), 0, (int)GasTorchRes - 1);
+		float d = GasTorchShadow.Load(int3(t, 0)).r;
+		lit[k] = smoothstep(d + 15.0, d - 15.0, dist);
+	}
+	return lerp(lerp(lit[0], lit[1], f.x), lerp(lit[2], lit[3], f.x), f.y);
+}
 // v12 7b: heat puffs (row 0 position + radius, row 1 heat), the shimmer's strength; the laser's beam (lens, dot, light);
 // a screen pixel's angle (rad) for the beam's block-wide glow.
 Texture2D<float4> GasHeat;
@@ -143,6 +177,11 @@ float3 GasLamps(int nl, float4 LA[4], float4 LL[4], float4 LC[4], float4 LD[4], 
 		// The key: its baked self-shadow; the player's own lamp (by the eye): the march's transmittance so far - the near
 		// face lit, the depth dark (v12, a review's point); the others the ambient occlusion.
 		float Shadow = D.y > 0.5 ? v.b : D.z > 0.5 ? T : 0.35 + 0.65 * v.a;
+		// The torch (the player's lamp with a cone): what stands in its beam shades the smoke behind (v13 13a).
+		if (GasTorchOn > 0.5 && D.z > 0.5 && Cone.w > -1.5)
+		{
+			Shadow *= TorchLit(pw);
+		}
 		Sum += L.rgb * (Att * Phase * Shadow);
 	}
 	return Sum;

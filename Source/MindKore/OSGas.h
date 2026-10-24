@@ -494,6 +494,27 @@ private:
 	uint32 ShotSerial = 0, SmallSerial = 0;
 	TMap<TObjectKey<UPrimitiveComponent>, FVector> LastMoverAt;
 	TArray<TWeakObjectPtr<ULightComponent>> KeyLights;
+	/** The player's own lamps (the torch, the muzzle's flash, the Nixie's glow): gathered every frame, never waiting for KeyLights' second. */
+	TArray<TWeakObjectPtr<ULightComponent>> PlayerLights;
+	/**
+	 * The torch's shadow map for the gas (v13 13a): a square of traces round its outer cone from the lamp (distance to
+	 * the first hit, eased), a few texels a frame in turn, re-sampled into the lamp's new frame as it turns.
+	 */
+	struct FTorchShadow
+	{
+		TArray<float> Depth, Target;
+		int32 Res = 0;
+		int32 Cursor = 0;
+		FVector Pos = FVector::ZeroVector, Axis = FVector::ForwardVector, U = FVector::RightVector, V = FVector::UpVector;
+		float TanOuter = 0.3f, Range = 2500.0f;
+		bool bOn = false;
+	};
+	FTorchShadow Torch;
+	UPROPERTY()
+	TObjectPtr<UTexture2D> TorchTexture = nullptr;
+	static constexpr int32 MaxTorchRes = 32;
+	/** The torch's map for this frame (Tick, before UpdatePost). */
+	void UpdateTorchShadow(float DeltaTime);
 	float KeyLightsAge = 1e6f;
 	/** The unbound post-process volume carrying PostMaterial, its instance, the clouds' data and the tunnels (float textures). */
 	UPROPERTY()

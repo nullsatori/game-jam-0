@@ -41,6 +41,15 @@ struct FOSGasRenderData
 	/** v13 13e: os.Gas.DitherHold, os.Gas.DitherGrain. */
 	float DitherHold = 0.125f;
 	float DitherGrain = 0.5f;
+	/** v13 13a: the torch's shadow map (distance per texel), its frame, on/off. */
+	FTextureResource* TorchShadow = nullptr;
+	float TorchOn = 0.0f;
+	FVector3f TorchPos = FVector3f::ZeroVector;
+	FVector3f TorchAxis = FVector3f::ForwardVector;
+	FVector3f TorchU = FVector3f::RightVector;
+	FVector3f TorchV = FVector3f::UpVector;
+	float TorchTan = 0.3f;
+	float TorchRes = 16.0f;
 	/** v12 7b: the heat puffs (shimmer) and the laser's beam (lens, dot, light; black: off). */
 	FTextureResource* Heat = nullptr;
 	int32 HeatCount = 0;
