@@ -734,6 +734,27 @@ void UOSGasSubsystem::DrawDebug() const
 	}
 }
 
+#if !UE_BUILD_SHIPPING
+namespace
+{
+	/** The gas tick's sections (os.Gas.WalkProbe's cost line: the worst frame's split), us this frame and in the worst one. */
+	enum EGasSec { SecSources, SecLights, SecTorch, SecFlood, SecFog, SecHeat, SecMovers, SecStamp, SecUpload, SecRoom, SecHand, SecKey, SecLamps, SecCloudRest, SecPost, SecCount };
+	const TCHAR* const GGasSecName[SecCount] = { TEXT("sources"), TEXT("lights"), TEXT("torch"), TEXT("flood"), TEXT("fog"), TEXT("heat"), TEXT("movers"), TEXT("stamp"),
+		TEXT("upload"), TEXT("room"), TEXT("handover"), TEXT("key"), TEXT("lamps"), TEXT("cloud rest"), TEXT("post") };
+	double GGasSec[SecCount] = {}, GGasPeakSec[SecCount] = {};
+	struct FGasSecTimer
+	{
+		EGasSec Sec;
+		double T0 = FPlatformTime::Seconds();
+		explicit FGasSecTimer(EGasSec InSec) : Sec(InSec) {}
+		~FGasSecTimer() { GGasSec[Sec] += (FPlatformTime::Seconds() - T0) * 1e6; }
+	};
+}
+#define OS_GAS_SEC(Name) FGasSecTimer GasSecTimer##Name(Sec##Name)
+#else
+#define OS_GAS_SEC(Name)
+#endif
+
 FString UOSGasSubsystem::TakeCostLine()
 {
 	FScopeLock Lock(&CostLock);
@@ -743,9 +764,17 @@ FString UOSGasSubsystem::TakeCostLine()
 	{
 		Parts += FString::Printf(TEXT(" %.0f"), Splats ? double(GSplatPartUs[I].exchange(0)) / Splats : 0.0);
 	}
+	FString Peak;
+#if !UE_BUILD_SHIPPING
+	for (int32 I = 0; I < SecCount; ++I)
+	{
+		Peak += GGasPeakSec[I] >= 10.0 ? FString::Printf(TEXT(" %s %.0f"), GGasSecName[I], GGasPeakSec[I]) : FString();
+		GGasPeakSec[I] = 0.0;
+	}
+#endif
 	const FString Line = FString::Printf(TEXT("Gas cost: %d step(s) off the game thread, %.0f us mean (the splat %.0f: light, kernels, noise, sharpen, atlas, rest%s), %.0f us max; game thread in %d frame(s), %.0f us mean, %.0f us max; %d cloud(s), %d parcel(s)"),
 		CostSteps, CostSteps ? CostStepUs / CostSteps : 0.0, Splats ? double(SplatUs) / Splats : 0.0, *Parts, CostMaxStepUs, CostFrames, CostFrames ? CostFrameUs / CostFrames : 0.0, CostMaxFrameUs,
-		GetCloudCount(), GetParcelCount());
+		GetCloudCount(), GetParcelCount()) + TEXT("; the worst tick (us):") + Peak;
 	CostStepUs = CostMaxStepUs = CostFrameUs = CostMaxFrameUs = 0.0;
 	CostSteps = CostFrames = 0;
 	return Line;
@@ -1545,7 +1574,16 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 {
 	const double FrameStart = FPlatformTime::Seconds();
 	const bool bAny = GetCloudCount() > 0 || !Sources.IsEmpty() || !HeatPuffs.IsEmpty();
-	TickSources(DeltaTime);
+#if !UE_BUILD_SHIPPING
+	FMemory::Memzero(GGasSec, sizeof(GGasSec));
+#endif
+	{
+		OS_GAS_SEC(Sources);
+		TickSources(DeltaTime);
+	}
+#if !UE_BUILD_SHIPPING
+	const double LightsT0 = FPlatformTime::Seconds();
+#endif
 	for (int32 Index = Tunnels.Num() - 1; Index >= 0; --Index)
 	{
 		FTunnel& T = Tunnels[Index];
@@ -1617,9 +1655,24 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 			PlayerLights.Add(L);
 		}
 	}
-	UpdateTorchShadow(DeltaTime);
-	FloodRooms();
-	TickFog(DeltaTime);
+#if !UE_BUILD_SHIPPING
+	GGasSec[SecLights] += (FPlatformTime::Seconds() - LightsT0) * 1e6;
+#endif
+	{
+		OS_GAS_SEC(Torch);
+		UpdateTorchShadow(DeltaTime);
+	}
+	{
+		OS_GAS_SEC(Flood);
+		FloodRooms();
+	}
+	{
+		OS_GAS_SEC(Fog);
+		TickFog(DeltaTime);
+	}
+#if !UE_BUILD_SHIPPING
+	const double HeatT0 = FPlatformTime::Seconds();
+#endif
 	// Heat puffs: up 20-30 cm/s against gravity (none in zero-G), widening, cooling.
 	for (int32 Index = HeatPuffs.Num() - 1; Index >= 0; --Index)
 	{
@@ -1640,13 +1693,27 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 		H.P += H.V * DeltaTime;
 		H.RadiusCm = FMath::Min(H.RadiusCm + 4.0f * DeltaTime, 9.0f);
 	}
+#if !UE_BUILD_SHIPPING
+	GGasSec[SecHeat] += (FPlatformTime::Seconds() - HeatT0) * 1e6;
+#endif
 	TSet<TObjectKey<UPrimitiveComponent>> Seen;
 	for (FCloud& Cloud : Clouds)
 	{
 		if (Cloud.IsAlive())
 		{
-			FindMovers(Cloud, DeltaTime, Seen);
+			{
+				OS_GAS_SEC(Movers);
+				FindMovers(Cloud, DeltaTime, Seen);
+			}
+#if !UE_BUILD_SHIPPING
+			const double Inner0 = GGasSec[SecStamp] + GGasSec[SecUpload] + GGasSec[SecRoom] + GGasSec[SecHand] + GGasSec[SecKey] + GGasSec[SecLamps];
+			const double CloudT0 = FPlatformTime::Seconds();
+#endif
 			TickCloud(Cloud, DeltaTime);
+#if !UE_BUILD_SHIPPING
+			const double Inner1 = GGasSec[SecStamp] + GGasSec[SecUpload] + GGasSec[SecRoom] + GGasSec[SecHand] + GGasSec[SecKey] + GGasSec[SecLamps];
+			GGasSec[SecCloudRest] += (FPlatformTime::Seconds() - CloudT0) * 1e6 - (Inner1 - Inner0);
+#endif
 		}
 	}
 	for (auto It = LastMoverAt.CreateIterator(); It; ++It)
@@ -1656,7 +1723,10 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 			It.RemoveCurrent();
 		}
 	}
-	UpdatePost();
+	{
+		OS_GAS_SEC(Post);
+		UpdatePost();
+	}
 #if !UE_BUILD_SHIPPING
 	if (CVarGasDebug.GetValueOnGameThread() > 0)
 	{
@@ -1668,6 +1738,12 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 		const double Us = (FPlatformTime::Seconds() - FrameStart) * 1e6;
 		FScopeLock Lock(&CostLock);
 		CostFrameUs += Us;
+#if !UE_BUILD_SHIPPING
+		if (Us > CostMaxFrameUs)
+		{
+			FMemory::Memcpy(GGasPeakSec, GGasSec, sizeof(GGasSec));
+		}
+#endif
 		CostMaxFrameUs = FMath::Max(CostMaxFrameUs, Us);
 		++CostFrames;
 	}
@@ -1755,6 +1831,7 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		Cloud.bStamp = false;
 		Cloud.Parcels.Append(MoveTemp(Cloud.Incoming));
 		Cloud.Incoming.Reset();
+		OS_GAS_SEC(Stamp);
 		Splat(Cloud);
 		Cloud.bStampAtlas = true;
 		Cloud.PackedTime = Cloud.SimTime;
@@ -1792,6 +1869,7 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		}
 		Cloud.CurHalf = bBoth ? 0 : 1 - Cloud.CurHalf;
 		const FIntPoint Size = FOSSmokeSim::AtlasSize(RenderCells);
+		OS_GAS_SEC(Upload);
 		for (int32 Half = 0; Half < 2; ++Half)
 		{
 			if (!bBoth && Half != Cloud.CurHalf)
@@ -1816,9 +1894,11 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		{
 			if (const AOSGravityZone* Zone = OSAirZoneAt(World, Cloud.Origin); Zone && Zone->HazeHalfLifeSeconds > 0.0f)
 			{
+				OS_GAS_SEC(Room);
 				RoomFor(Zone, Cloud.Origin);
 			}
 		}
+		OS_GAS_SEC(Hand);
 		HandOver(Cloud, Centre);
 	}
 	if (!bBusy && Cloud.bZone)
@@ -1906,11 +1986,15 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 	{
 		FVector3f Dir;
 		FLinearColor Colour;
-		PickKey(Centre, Dir, Colour);
+		{
+			OS_GAS_SEC(Key);
+			PickKey(Centre, Dir, Colour);
+		}
 		const float Ease = 1.0f - FMath::Exp(-DeltaTime / 0.25f);
 		// os.Gas.Light 1: four lamps that see the cloud; the self-shadow baked toward the strongest (eased below: 0.25 s).
 		if (CVarGasLight.GetValueOnGameThread() > 0)
 		{
+			OS_GAS_SEC(Lamps);
 			UpdateLamps(Cloud, Centre, DeltaTime, Dir);
 		}
 		// os.Gas.Light 0: 80% white: a saturated lamp (the planetoid's red rock light) barely tints the gas (it turned it brown).
