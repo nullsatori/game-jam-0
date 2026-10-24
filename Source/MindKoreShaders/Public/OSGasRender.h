@@ -35,6 +35,9 @@ struct FOSGasRenderData
 	/** The composite (v12 7a.6): os.Gas.Dither, os.Gas.Bands. */
 	float Dither = 1.0f;
 	float Bands = 4.0f;
+	/** v12 7d: the Bayer threshold's cell, px; 1: the block's result read bilinearly between the blocks' centres. */
+	float DitherPx = 2.0f;
+	float SmoothAlpha = 0.0f;
 	/** v12 7b: the heat puffs (shimmer) and the laser's beam (lens, dot, light; black: off). */
 	FTextureResource* Heat = nullptr;
 	int32 HeatCount = 0;

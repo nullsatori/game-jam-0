@@ -123,8 +123,20 @@ namespace
 		TEXT("os.Gas.ZoneDensity"), 0.4f,
 		TEXT("The zone's haze: the gas handed to it, x its mass."));
 	TAutoConsoleVariable<float> CVarGasShimmer(
-		TEXT("os.Gas.Shimmer"), 1.0f,
+		TEXT("os.Gas.Shimmer"), 2.0f,
 		TEXT("The air's shimmer behind heat (v12 7b.3), x; 0 off."));
+	TAutoConsoleVariable<float> CVarGasBlockDiv(
+		TEXT("os.Gas.BlockDiv"), 360.0f,
+		TEXT("The gas's screen block: round(height / BlockDiv) px (360: 4 px at 1440p, 3 at 1080p; 270 before v12 7d)."));
+	TAutoConsoleVariable<float> CVarGasDitherPx(
+		TEXT("os.Gas.DitherPx"), 0.0f,
+		TEXT("The Bayer threshold's cell, px (0: half a block, 1 px at least) - a finer lattice inside a block; the opacity is still the block's."));
+	TAutoConsoleVariable<int32> CVarGasSmoothAlpha(
+		TEXT("os.Gas.SmoothAlpha"), 0,
+		TEXT("1: the block's result (light and opacity) read bilinearly between the blocks' centres (edge blocks as before) - finer still."));
+	TAutoConsoleVariable<float> CVarGasZoneAlbedo(
+		TEXT("os.Gas.ZoneAlbedo"), 0.8f,
+		TEXT("The haze's albedo it ages to over 20 s (old smoke coagulates and whitens: a light veil in the light, dark in the shade)."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 1,
 		TEXT("1: the gas's opacity bands thresholded by an ordered 4x4 Bayer over the screen blocks (thin gas a sparse even lattice, not snow), the tail from 0.03; 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -1230,7 +1242,7 @@ int32 UOSGasSubsystem::EmitForSource(const FOSGasRecipe& Recipe, const FOSGasLoo
 	return Count;
 }
 
-void UOSGasSubsystem::AddHeat(const FVector& Where, const FVector& Direction, int32 Count, float Heat)
+void UOSGasSubsystem::AddHeat(const FVector& Where, const FVector& Direction, int32 Count, float Heat, float Seconds, float LifeMax)
 {
 	// No air, no shimmer.
 	if (!OSAirZoneAt(GetWorld(), Where))
@@ -1249,9 +1261,9 @@ void UOSGasSubsystem::AddHeat(const FVector& Where, const FVector& Direction, in
 		H.V = FMath::VRandCone(Axis, FMath::DegreesToRadians(15.0f)) * FMath::FRandRange(20.0f, 60.0f);
 		H.RadiusCm = FMath::FRandRange(2.0f, 3.5f);
 		H.Heat = Heat;
-		// Over 50 ms: a negative age waits.
-		H.Age = -0.05f * Index / FMath::Max(1, Count - 1);
-		H.Life = FMath::FRandRange(1.0f, 2.0f);
+		// Over Seconds (a shot's 80 ms): a negative age waits.
+		H.Age = -Seconds * Index / FMath::Max(1, Count - 1);
+		H.Life = FMath::FRandRange(1.0f, FMath::Max(LifeMax, 1.0f));
 	}
 }
 
@@ -1662,7 +1674,9 @@ void UOSGasSubsystem::UpdatePost()
 		Data[2 * MaxDrawn + Index] = FLinearColor(Key.R, Key.G, Key.B, Phase);
 		// ponytail: os.Gas.Light 0 shows the default look's old blue-grey (the A/B); goes with the old light after the merge.
 		const FLinearColor Albedo = !bNewLight && Cloud.Look.Colour == FOSGasLook().Colour ? FLinearColor(0.50f, 0.52f, 0.56f) : Cloud.Look.Colour;
-		Data[3 * MaxDrawn + Index] = FLinearColor(Albedo.R, Albedo.G, Albedo.B, Cloud.BirthWorld);
+		// The haze whitens as it ages (v12 7d): to os.Gas.ZoneAlbedo over its gas's 20 s.
+		const FLinearColor Shown = Cloud.bZone && bNewLight ? FMath::Lerp(Albedo, FLinearColor(FVector3f(CVarGasZoneAlbedo.GetValueOnGameThread())), FMath::Clamp(Cloud.HazeAge / 20.0f, 0.0f, 1.0f)) : Albedo;
+		Data[3 * MaxDrawn + Index] = FLinearColor(Shown.R, Shown.G, Shown.B, Cloud.BirthWorld);
 		const FLinearColor Warm = Cloud.Look.bEmbers ? Cloud.Look.WarmColour : FLinearColor::Black;
 		Data[4 * MaxDrawn + Index] = FLinearColor(Warm.R, Warm.G, Warm.B, float(Cloud.CurHalf));
 		Data[5 * MaxDrawn + Index] = Top;
@@ -1780,7 +1794,8 @@ void UOSGasSubsystem::UpdatePost()
 	{
 		GEngine->GameViewport->GetViewportSize(View);
 	}
-	Post->SetScalarParameterValue(TEXT("BlockPx"), FMath::Max(1.0f, FMath::RoundToFloat(float(View.Y) / 270.0f)));
+	const float BlockPx = FMath::Max(1.0f, FMath::RoundToFloat(float(View.Y) / FMath::Max(CVarGasBlockDiv.GetValueOnGameThread(), 1.0f)));
+	Post->SetScalarParameterValue(TEXT("BlockPx"), BlockPx);
 	Post->SetScalarParameterValue(TEXT("EyeClear"), EyeClearCm);
 	// The screen-block pass (os.Gas.LowRes 1) gets the same; the material then draws nothing (no clouds, no tunnels).
 	if (GasView.IsValid())
@@ -1831,7 +1846,9 @@ void UOSGasSubsystem::UpdatePost()
 				Frame.LaserLight = Light;
 			}
 		}
-		Frame.BlockPx = FMath::Max(1.0f, FMath::RoundToFloat(float(View.Y) / 270.0f));
+		Frame.BlockPx = BlockPx;
+		Frame.DitherPx = CVarGasDitherPx.GetValueOnGameThread() > 0.0f ? CVarGasDitherPx.GetValueOnGameThread() : FMath::Max(1.0f, FMath::RoundToFloat(BlockPx * 0.5f));
+		Frame.SmoothAlpha = float(CVarGasSmoothAlpha.GetValueOnGameThread());
 		Frame.EyeClear = EyeClearCm;
 #if !UE_BUILD_SHIPPING
 		Frame.DebugMode = float(CVarGasDebugAlpha.GetValueOnGameThread());

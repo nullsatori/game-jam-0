@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 109 команд, 33 переменных.
+Всего: 109 команд, 37 переменных.
 
 ## `os.Attach`
 
@@ -98,11 +98,13 @@
 | `os.Gas.Albedo` (переменная) | значение (умолч. `1.0f`) | os.Gas.Light 1: the gas's albedo, x its look's colour. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.AmbientScale` (переменная) | значение (умолч. `0.75f`) | os.Gas.Light 1: the room's light on the gas, x (unlit gas about 0.5-0.6 of the walls round it). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Bands` (переменная) | значение (умолч. `4`) | The gas's opacity levels (4; 8 a finer variant). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.BlockDiv` (переменная) | значение (умолч. `360.0f`) | The gas's screen block: round(height / BlockDiv) px (360: 4 px at 1440p, 3 at 1080p; 270 before v12 7d). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Capture` (переменная) | значение (умолч. `0`) | 1: os.Gas.WalkProbe saves every frame from 0.2 to 3.2 s (a self-check). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.Cards` (переменная) | значение (умолч. `0`) | 1: the old card wisps (shroud, muzzle stream) are drawn too; 0 (v11): the gas is parcels only. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Debug` (переменная) | значение (умолч. `0`) | 1: draw every cloud's box (white), parcels (points, red heavy to blue light), bodies (yellow, velocity arrow), tunnels (cyan), wall/floor planes (green) and sources (magenta); 2: also each cloud's key lamp in the log once a second. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DebugAlpha` (переменная) | значение (умолч. `0`) | 1: the gas post-process draws only its opacity, grey (os.Gas.WalkProbe measures its jumps a frame); 3: the block less the pixel's own march; 4: the room's light the gas takes (os.Gas.Light 1). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Dither` (переменная) | значение (умолч. `1`) | 1: the gas's opacity bands thresholded by an ordered 4x4 Bayer over the screen blocks (thin gas a sparse even lattice, not snow), the tail from 0.03; 0: a hash per block, the tail from 0.12 (before v12). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.DitherPx` (переменная) | значение (умолч. `0.0f`) | The Bayer threshold's cell, px (0: half a block, 1 px at least) - a finer lattice inside a block; the opacity is still the block's. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DriftCm` (переменная) | значение (умолч. `3.0f`) | The zone's air drift (v12 7a.3): a slow divergence-free field, 1.5 m across, changing over ~20 s - its top speed, cm/s. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Forward` (переменная) | значение (умолч. `0.7f`) | os.Gas.Light 1: the forward-scattering share of the lamps' light (Henyey-Greenstein g 0.55; the rest isotropic) - smoke against a lamp glows at its rim. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Light` (переменная) | значение (умолч. `1`) | 1: the gas lit by the room (the frame before it, 1/32 and blurred) and the key lamp's full colour, a darker albedo (v11 stage 6); 0: the light before stage 6 (A/B). | `Source/MindKore/OSGas.cpp` |
@@ -112,12 +114,14 @@
 | `os.Gas.ProbeSpawn` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot, and runs 24 s. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSpawnLate` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe spawns it once at 5 s (after its shots). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSuppressor` (переменная) | значение (умолч. `0`) | 1: os.Gas.WalkProbe mounts the suppressor first. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
-| `os.Gas.Shimmer` (переменная) | значение (умолч. `1.0f`) | The air's shimmer behind heat (v12 7b.3), x; 0 off. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.Shimmer` (переменная) | значение (умолч. `2.0f`) | The air's shimmer behind heat (v12 7b.3), x; 0 off. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.SmoothAlpha` (переменная) | значение (умолч. `0`) | 1: the block's result (light and opacity) read bilinearly between the blocks' centres (edge blocks as before) - finer still. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.SourceTest` | `<preset> <pulse\|burst\|rate1>` | <preset> <pulse\|burst\|rate1>: a gas source 1.5 m along the view run by a pattern (on/off, bursts every 2.5 s, 1 a second). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.Spawn` | `<muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]` | <muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for 4 s, along the view. *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.SpawnSeconds` (переменная) | значение (умолч. `4.0f`) | How long an os.Gas.Spawn source lives, s (4). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.TickHz` (переменная) | значение (умолч. `0.0f`) | > 0: the gas's own evolution shown in steps of 1/TickHz s (stop motion); its place and the camera stay smooth. 0: off. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.WalkProbe` | `[after s]` | [after s] Shoot while walking, stop, step back, turn, walk round the cloud; log the cloud's centroid every 0.25 s (and HighResShot OSWalk_*). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Gas.ZoneAlbedo` (переменная) | значение (умолч. `0.8f`) | The haze's albedo it ages to over 20 s (old smoke coagulates and whitens: a light veil in the light, dark in the shade). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneAmbient` (переменная) | значение (умолч. `0.5f`) | The zone's haze: the room's light on it, x (it is seen by the lamps, not by the room). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneDensity` (переменная) | значение (умолч. `0.4f`) | The zone's haze: the gas handed to it, x its mass. | `Source/MindKore/OSGas.cpp` |
 

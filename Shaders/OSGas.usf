@@ -28,6 +28,9 @@ SamplerState GasSampler;
 // The composite (v12 7a.6): 1 an ordered 4x4 Bayer threshold over the blocks and the tail from 0.03, 0 a hash; levels.
 float GasDither;
 float GasBands;
+// v12 7d: the Bayer cell, px (finer than a block); 1: the block's result read bilinearly between the blocks' centres.
+float GasDitherPx;
+float GasSmoothAlpha;
 // v12 7b: heat puffs (row 0 position + radius, row 1 heat), the shimmer's strength; the laser's beam (lens, dot, light);
 // a screen pixel's angle (rad) for the beam's block-wide glow.
 Texture2D<float4> GasHeat;
@@ -536,9 +539,16 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 	float3 acc;
 	float T;
 	float4 R = BlockResult.Load(int3(Block, 0));
+	float FirstGas = BlockEdge.Load(int3(Block, 0));
+	// os.Gas.SmoothAlpha 1: the result between the blocks' centres (an edge block keeps its own: its march is below).
+	if (GasSmoothAlpha > 0.5 && FirstGas < 0.0)
+	{
+		float2 BlocksN = ceil(OutSize / B) + 1.0;
+		float2 uvS = (px - floor(OutMin / B) * B) / (B * BlocksN);
+		R = BlockResult.SampleLevel(BlockSampler, uvS, 0);
+	}
 	acc = R.rgb;
 	T = R.a;
-	float FirstGas = BlockEdge.Load(int3(Block, 0));
 	if (FirstGas >= 0.0)
 	{
 		// An edge block: a pixel nearer than the block's first gas has none in front of it; the others march their own
@@ -589,10 +599,12 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 		// An ordered 4x4 Bayer over the screen blocks, the threshold's full spread: thin gas (from 0.03) a sparse even
 		// lattice whose mean is its opacity, not snow (v12 7a.6).
 		const float Bayer[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
-		int2 Q = int2(floor(px / B)) & 3;
+		// The lattice's cell finer than the block (v12 7d: half a block): the opacity is the block's, its dots smaller.
+		int2 Q = int2(floor(px / max(GasDitherPx, 1.0))) & 3;
 		float hb = (Bayer[Q.y * 4 + Q.x] + 0.5) / 16.0;
 		float Levels = max(GasBands, 1.0);
-		aq = alpha < 0.03 ? 0.0 : min(floor(alpha * Levels + hb) / Levels, 1.0);
+		// Thin gas in eighths (a haze's dot weighs 12.5%, not 25%), the rest in the bands.
+		aq = alpha < 0.03 ? 0.0 : alpha < 0.25 ? floor(alpha * 8.0 + hb) / 8.0 : min(floor(alpha * Levels + hb) / Levels, 1.0);
 	}
 	else
 	{

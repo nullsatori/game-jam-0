@@ -223,7 +223,7 @@ public:
 	 * Heat without smoke (v12 7b.1): Count warm puffs out of Where along Direction over 50 ms, rising 20-30 cm/s against
 	 * gravity, living 1-2 s - seen only as the air's shimmer behind them, never as gas.
 	 */
-	void AddHeat(const FVector& Where, const FVector& Direction, int32 Count, float Heat = 1.0f);
+	void AddHeat(const FVector& Where, const FVector& Direction, int32 Count, float Heat = 1.0f, float Seconds = 0.08f, float LifeMax = 2.0f);
 
 	/**
 	 * How much light gets through the gas from A to B (v12 7c.1): every cloud's parcels' kernels along the segment, from

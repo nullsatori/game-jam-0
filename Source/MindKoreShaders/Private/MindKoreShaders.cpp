@@ -45,6 +45,8 @@ BEGIN_SHADER_PARAMETER_STRUCT(FOSGasCommonParameters, )
 	SHADER_PARAMETER_TEXTURE(Texture2D, GasGrid11)
 	SHADER_PARAMETER(float, GasDither)
 	SHADER_PARAMETER(float, GasBands)
+	SHADER_PARAMETER(float, GasDitherPx)
+	SHADER_PARAMETER(float, GasSmoothAlpha)
 	SHADER_PARAMETER_TEXTURE(Texture2D<float4>, GasHeat)
 	SHADER_PARAMETER(float, GasHeatCount)
 	SHADER_PARAMETER(float, GasShimmer)
@@ -304,6 +306,8 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 		C.GasForward = Data.Forward;
 		C.GasDither = Data.Dither;
 		C.GasBands = Data.Bands;
+		C.GasDitherPx = Data.DitherPx;
+		C.GasSmoothAlpha = Data.SmoothAlpha;
 		C.GasHeat = RHIOf(Data.Heat);
 		C.GasHeatCount = float(Data.HeatCount);
 		C.GasShimmer = Data.Shimmer;
