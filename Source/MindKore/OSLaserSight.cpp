@@ -1,4 +1,5 @@
 #include "OSLaserSight.h"
+#include "OSGas.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/PointLightComponent.h"
@@ -381,7 +382,7 @@ void UOSLaserSightComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	bLit = true;
 	const bool bShot = Weapon->SinceShot < LastSinceShot;
 	LastSinceShot = Weapon->SinceShot;
-	DotDrive = StepDrive(DeltaTime, true, bShot);
+	DotDrive = StepDrive(DeltaTime, true, bShot) * SmokeShare;
 	// The beam: only where there is something to scatter it - air round the eye (polled), smoke later.
 	SinceAirPoll += DeltaTime;
 	if (SinceAirPoll >= AirPollSeconds)
@@ -394,6 +395,11 @@ void UOSLaserSightComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	// The geometry from the camera as it stands now (the probes read it); DrawHud does it again if the camera has
 	// turned since (the mouse's turn lands on the camera after this tick).
 	Refresh();
+	// The dot dims through smoke (v12 7c.3): the light from the lens to it, eased over 0.1 s.
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		SmokeShare += (Gas->Transmittance(LensAt, DotAt, this) - SmokeShare) * (1.0f - FMath::Exp(-DeltaTime / 0.1f));
+	}
 }
 
 void UOSLaserSightComponent::Refresh()

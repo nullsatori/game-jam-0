@@ -14,6 +14,7 @@
 #include "NavigationPath.h"
 #include "MKMechanismMotion.h"
 #include "MindKore.h"
+#include "OSGas.h"
 
 #define LOCTEXT_NAMESPACE "MKDoor"
 
@@ -122,6 +123,14 @@ void AMKDoor::SetState(EMKDoorState NewState)
 	UE_LOG(LogMindKore, Log, TEXT("Door %s: %s -> %s (yaw %.0f)"), *GetName(),
 		*UEnum::GetValueAsString(State), *UEnum::GetValueAsString(NewState), CurrentYaw);
 	State = NewState;
+	// The swing done: the haze's room tests the doorway as it now stands (v14).
+	if (State == EMKDoorState::Open || State == EMKDoorState::Closed || State == EMKDoorState::Ajar)
+	{
+		if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+		{
+			Gas->RoomChanged(Leaf ? Leaf->Bounds.GetBox().ExpandBy(40.0f) : FBox(GetActorLocation() - FVector(100.0f), GetActorLocation() + FVector(100.0f)));
+		}
+	}
 }
 
 void AMKDoor::OpenAwayFrom(const FVector& PusherLocation)
@@ -150,6 +159,7 @@ void AMKDoor::OpenAwayFrom(const FVector& PusherLocation)
 	SwingAlpha = 0.0f;
 	MKReportMechanismNoise(this, GetActorLocation(), SwingNoiseLoudness, TEXT("MK_Door"));
 	SetState(EMKDoorState::Opening);
+	Draught();
 }
 
 void AMKDoor::Close()
@@ -163,6 +173,19 @@ void AMKDoor::Close()
 	SwingAlpha = 0.0f;
 	MKReportMechanismNoise(this, GetActorLocation(), SwingNoiseLoudness, TEXT("MK_Door"));
 	SetState(EMKDoorState::Closing);
+	Draught();
+}
+
+void AMKDoor::Draught()
+{
+	// The swinging leaf moves the room's air through the doorway (v12 7c.5): the gas within 1.5 m drawn to it for 0.6 s.
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		const FVector At = Leaf ? FVector(Leaf->Bounds.Origin) : GetActorLocation();
+		Gas->AddAirFlow(At, GetActorForwardVector(), 60.0f, 150.0f, 0.6f);
+		// The haze's room tests the doorway again (v14): closed it walls the haze in, open it lets it through.
+		Gas->RoomChanged(Leaf ? Leaf->Bounds.GetBox().ExpandBy(40.0f) : FBox(At - FVector(100.0f), At + FVector(100.0f)));
+	}
 }
 
 void AMKDoor::Unlock()

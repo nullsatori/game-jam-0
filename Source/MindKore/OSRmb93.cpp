@@ -147,15 +147,15 @@ FOSWeapon OSMakeRmb93(const FOSWeapon& PumpShotgun)
 	Lid.LatchSoundPitch = 0.9f;
 
 	// The gas (FOSGasVent): the pump gun's muzzle jet and stream, plus the shroud's 16 holes (ActionMesh space, the
-	// shroud rides the barrel: four rings along it, two holes a side each, above and below the bore). Each hole streams
-	// thin wisps for 0.3 s after a shot - out of the hole, then back along the barrel and round it, clinging to the gun
-	// for ~1.5 s in air (owner 22.10: «струйки дыма должны идти из дула и дырок в стволе», «плавно обволакивать
-	// оружие») - and seeps while the barrel is hot.
+	// shroud rides the barrel: four rings along it, two holes a side each, above and below the bore). Each hole pops at
+	// the shot, then lets a slow wisp out and back along the shroud that climbs round the barrel (OSMuzzleFx.cpp
+	// VentRecipe and HoleWrap; owner 22.10: «струйки дыма должны идти из дула и дырок в стволе», «плавно обволакивать
+	// оружие») - and seeps while the barrel is hot. The vent's own stream fields below drive only the card path (os.Gas.Cards 1).
 	FOSPortSmoke& Smoke = Gun.PortSmoke;
 	Smoke.BoreZCm = 0.75f;
-	// Seeps thin and not for long (v6, owner: «слишком долго льется из ствола»): 8 a second per unit of heat, cooling
+	// Seeps thin and not for long (v6, owner: «слишком долго льется из ствола»): 20 a second per unit of heat, cooling
 	// with 2 s (after three shots ~5 s of a thinning seep, not ~12 s of a stream).
-	Smoke.SeepPerSecond = 8.0f;
+	Smoke.SeepPerSecond = 20.0f;
 	Smoke.HeatSeconds = 2.0f;
 	Smoke.StartCm = 1.7f;
 	Smoke.EndCm = 10.0f;

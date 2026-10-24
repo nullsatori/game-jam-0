@@ -121,6 +121,12 @@ struct FOSSmokeSim
 	TArray<FMover> Movers;
 	/** One step; Age (s since the shot) times the blast's swell. */
 	void Step(float Dt, float Age, const FOSSmokeParams& K);
+	/**
+	 * A velocity-only step for the gas parcels (v11, UOSGasSubsystem): the caller fills Rho (mass), Heat and U from the
+	 * parcels; forces, churn, vorticity, bodies and the pressure solve - no advection (the parcels carry everything) and
+	 * no dissipation. Gravity scales buoyancy and the residual lift (|g| / 980).
+	 */
+	void StepGrid(float Dt, const FOSSmokeParams& K, float GravityScale);
 	/** Move the grid by whole cells (the box follows the gas): the fields shift, what leaves is lost, the planes stay put in the world. */
 	void Shift(const FIntVector& Cells);
 	/** Density centroid, cells from the grid's centre; OutMass the total density. */
@@ -159,7 +165,7 @@ private:
 					Body(X, Y, Z, Index(X, Y, Z));
 				}
 			}
-		});
+		}, EParallelForFlags::BackgroundPriority);
 	}
 	bool IsSolid(int32 X, int32 Y, int32 Z) const { return Solid[Index(X, Y, Z)] != 0; }
 	void Advect(float Dt);

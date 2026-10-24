@@ -6,6 +6,8 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "OSGas.h"
+#include "OSGravity.h"
 #include "OSShipParts.h"
 #include "OSWeldProjector.h"
 #include "OSZeroGPawn.h"
@@ -332,7 +334,38 @@ void UOSHullToolsComponent::PrimaryHeld(float DeltaSeconds)
 		WeldStatus = LOCTEXT("NoBreach", "Горелка: нечего варить");
 		return;
 	}
-	switch (Nearest->Weld(Hit.ImpactPoint, DeltaSeconds, bCutting))
+	const EOSWeldResult Result = Nearest->Weld(Hit.ImpactPoint, DeltaSeconds, bCutting);
+	// Weld fumes (v11, the gas's first source that is not a gun): a thin hot thread off the seam while it lays or is
+	// cut - in air it rises, in a vacuum it goes straight out of the hull.
+	if (Result == EOSWeldResult::Welded || Result == EOSWeldResult::Cut)
+	{
+		if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+		{
+			GasCarry += 25.0f * DeltaSeconds;
+			const int32 Count = FMath::FloorToInt(GasCarry);
+			if (Count > 0)
+			{
+				GasCarry -= Count;
+				FOSGasRecipe Fumes;
+				Fumes.SpeedCm = 40.0f;
+				Fumes.SpeedMin = 0.5f;
+				Fumes.ConeDeg = 20.0f;
+				Fumes.RadiusMinCm = 1.0f;
+				Fumes.RadiusMaxCm = 2.0f;
+				Fumes.Mass = 0.35f;
+				Fumes.Heat = 1.0f;
+				Fumes.LifeSeconds = 2.5f;
+				FOSGasLook Look;
+				Look.Colour = FLinearColor(0.62f, 0.66f, 0.72f);
+				Look.WarmColour = FLinearColor(1.0f, 0.75f, 0.45f);
+				Look.Extinction = 0.02f;
+				Look.LifeSeconds = 4.0f;
+				// Into its own small cloud (since 3h EmitNow joins only a shot's cloud, or starts one when allowed).
+				Gas->EmitNow(Fumes, Look, Hit.ImpactPoint + Hit.ImpactNormal * 2.0f, Hit.ImpactNormal, FVector::ZeroVector, Count, true);
+			}
+		}
+	}
+	switch (Result)
 	{
 	case EOSWeldResult::Welded:
 		WeldStatus = LOCTEXT("Welding", "Шов ложится");

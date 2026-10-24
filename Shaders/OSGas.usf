@@ -1,0 +1,1017 @@
+// v11 stage 5 (Docs/RecoilWeapons-SmokeV11.md): the gas drawn once per screen block, not once per pixel.
+// MainBlockCS marches the block centre's ray (the same ray M_OS_GasPost gave every pixel of the block) through every
+// cloud, to the block's farthest scene depth, and flags a block whose depths differ (a gun's edge, a wall's rim);
+// MainCompositePS takes the block's result, or marches its own pixel's depth in a flagged block (crisp edges).
+// The march is M_OS_GasPost's (Scripts/os_muzzle_fx.py, GAS_POST_HLSL), kept the same: two atlases per cloud blended
+// by the step's phase, soft tunnels, the eye's and the box faces' fades, the 4 bands; its light is the material's under
+// os.Gas.Light 0 and stage 6's under os.Gas.Light 1 (the room's light from the frame, the key lamp's full colour).
+
+#include "/Engine/Private/Common.ush"
+
+Texture2D SceneDepth;
+Texture2D<float4> GasData;
+Texture2D<float4> GasTunnels;
+Texture2D GasGrid0;
+Texture2D GasGrid1;
+Texture2D GasGrid2;
+Texture2D GasGrid3;
+Texture2D GasGrid4;
+Texture2D GasGrid5;
+Texture2D GasGrid6;
+Texture2D GasGrid7;
+Texture2D GasGrid8;
+Texture2D GasGrid9;
+// The zones' haze (v12 7a): slots 10 and 11.
+Texture2D GasGrid10;
+Texture2D GasGrid11;
+Texture2D GasGrid12;
+Texture2D GasGrid13;
+SamplerState GasSampler;
+// The composite (v12 7a.6): 1 an ordered 4x4 Bayer threshold over the blocks and the tail from 0.03, 0 a hash; levels.
+float GasDither;
+float GasBands;
+// v12 7d: the Bayer cell, px (finer than a block); 1: the block's result read bilinearly between the blocks' centres.
+float GasDitherPx;
+float GasSmoothAlpha;
+// v13 13e (os.Gas.Dither 2): the hold of a block's opacity against its last frame's, the world grain's strength.
+float GasDitherHold;
+float GasDitherGrain;
+// v13 13d: the zone's lamps a screen block takes (4-6).
+float GasTileSlots;
+// v13 13a: the torch's shadow map (R: distance to the first hit per texel) and its frame.
+Texture2D<float4> GasTorchShadow;
+float GasTorchOn;
+float3 GasTorchPos;
+float3 GasTorchAxis;
+float3 GasTorchU;
+float3 GasTorchV;
+float GasTorchTan;
+float GasTorchRes;
+
+// How much of the torch reaches pw past what stands in its cone: the map's distance against pw's, a soft 30 cm edge,
+// four texels by hand (a bilinear distance drew a ghost of the shadow at the silhouette's middle distance).
+float TorchLit(float3 pw)
+{
+	float3 local = pw - GasTorchPos;
+	float along = dot(local, GasTorchAxis);
+	if (along <= 0.0)
+	{
+		return 1.0;
+	}
+	float2 uv = 0.5 + 0.5 * float2(dot(local, GasTorchU), dot(local, GasTorchV)) / max(along * GasTorchTan, 1.0);
+	float2 tc = uv * GasTorchRes - 0.5;
+	int2 i0 = int2(floor(tc));
+	float2 f = tc - i0;
+	float dist = length(local);
+	float lit[4];
+	[unroll] for (int k = 0; k < 4; k++)
+	{
+		int2 t = clamp(i0 + int2(k & 1, k >> 1), 0, (int)GasTorchRes - 1);
+		float d = GasTorchShadow.Load(int3(t, 0)).r;
+		lit[k] = smoothstep(d + 15.0, d - 15.0, dist);
+	}
+	return lerp(lerp(lit[0], lit[1], f.x), lerp(lit[2], lit[3], f.x), f.y);
+}
+// v12 7b: heat puffs (row 0 position + radius, row 1 heat), the shimmer's strength; the laser's beam (lens, dot, light);
+// a screen pixel's angle (rad) for the beam's block-wide glow.
+Texture2D<float4> GasHeat;
+float GasHeatCount;
+float GasShimmer;
+float3 GasLaserFrom;
+float3 GasLaserTo;
+float4 GasLaserLight;
+float GasPixelAngle;
+// The frame's mean light (1x1): 30% of the room's light is it, not only what is behind the gas.
+Texture2D GasAmbientMean;
+float GasCloudCount;
+float GasTunnelCount;
+float GasBlockPx;
+float GasEyeClear;
+float GasDebugAlpha;
+float3 GasCamera;
+// Stage 6 (os.Gas.Light 1): the room's light from the frame (GasAmbient, the scene before the gas, 1/32 and blurred),
+// a darker albedo, the key lamp's full colour. 0: the light as before (the map's ambient constants, base x1.5).
+float GasLight;
+float GasAmbientScale;
+float GasLightScale;
+float GasAlbedo;
+Texture2D GasAmbient;
+SamplerState GasAmbientSampler;
+// Stage 6b: the lamps' light in scene units x the frame's exposure (View.PreExposure: the last frame's eye adaptation -
+// the adaptation buffer is the renderer's own; a frame late on a jump), through the scene's film curve (its parameters).
+float GasForward;
+float GasFilmSlope;
+float GasFilmToe;
+float GasFilmShoulder;
+float GasFilmBlackClip;
+float GasFilmWhiteClip;
+
+// UE's filmic curve (TonemapCommon.ush FilmToneMap) in linear sRGB, not ACEScg, without the grading LUT (deviation):
+// the lamps' light on the gas reaches the screen as it reaches the walls.
+float3 GasFilm(float3 x)
+{
+	const float3 Y = float3(0.2126, 0.7152, 0.0722);
+	x = max(lerp(dot(x, Y), x, 0.96), 1e-10);
+	float ToeScale = 1 + GasFilmBlackClip - GasFilmToe;
+	float ShoulderScale = 1 + GasFilmWhiteClip - GasFilmShoulder;
+	float InMatch = 0.18, OutMatch = 0.18;
+	float ToeMatch;
+	if (GasFilmToe > 0.8)
+	{
+		ToeMatch = (1 - GasFilmToe - OutMatch) / GasFilmSlope + log10(InMatch);
+	}
+	else
+	{
+		float bt = (OutMatch + GasFilmBlackClip) / ToeScale - 1;
+		ToeMatch = log10(InMatch) - 0.5 * log((1 + bt) / (1 - bt)) * (ToeScale / GasFilmSlope);
+	}
+	float StraightMatch = (1 - GasFilmToe) / GasFilmSlope - ToeMatch;
+	float ShoulderMatch = GasFilmShoulder / GasFilmSlope - StraightMatch;
+	float3 LogColor = log10(x);
+	float3 StraightColor = GasFilmSlope * (LogColor + StraightMatch);
+	float3 ToeColor = (-GasFilmBlackClip) + (2 * ToeScale) / (1 + exp((-2 * GasFilmSlope / ToeScale) * (LogColor - ToeMatch)));
+	float3 ShoulderColor = (1 + GasFilmWhiteClip) - (2 * ShoulderScale) / (1 + exp((2 * GasFilmSlope / ShoulderScale) * (LogColor - ShoulderMatch)));
+	ToeColor = select(LogColor < ToeMatch, ToeColor, StraightColor);
+	ShoulderColor = select(LogColor > ShoulderMatch, ShoulderColor, StraightColor);
+	float3 t = saturate((LogColor - ToeMatch) / (ShoulderMatch - ToeMatch));
+	t = ShoulderMatch < ToeMatch ? 1 - t : t;
+	t = (3 - 2 * t) * t * t;
+	float3 Tone = lerp(ToeColor, ShoulderColor, t);
+	return max(0, lerp(dot(Tone, Y), Tone, 0.93));
+}
+
+float3 GasToLinear(float3 c)
+{
+	return select(c <= 0.04045, c / 12.92, pow((max(c, 0) + 0.055) / 1.055, 2.4));
+}
+
+float3 GasToSrgb(float3 c)
+{
+	c = max(c, 0);
+	return select(c <= 0.0031308, c * 12.92, 1.055 * pow(c, 1.0 / 2.4) - 0.055);
+}
+
+// The four lamps' light scattered at pw toward the eye (scene units): UE's falloff (inverse square windowed by the
+// radius, or (1 - d^2/R^2)^exponent), a spot's cone (smoothstep of the cosines), Henyey-Greenstein g 0.55 with
+// 1 - GasForward isotropic (1 = isotropic's level), the key's baked self-shadow, the others' ambient occlusion.
+// The cloud's lamps are loaded once a cloud (LA position + radius, LL light + exponent, LC cone, LD cos inner + key);
+// nl > 0: any lit.
+// A lamp's falloff and cone at pw (UE's: inverse square windowed by the radius, or (1 - d^2/R^2)^exponent; a spot's cone
+// by the smoothstep of the cosines); Ld the way from pw to it.
+float GasLampAtt(float4 A, float4 L, float4 Cone, float4 D, float3 pw, out float3 Ld)
+{
+	Ld = A.xyz;
+	float Att = 1.0;
+	if (A.w > 0.0)
+	{
+		float3 V = A.xyz - pw;
+		float D2 = dot(V, V);
+		Ld = V * rsqrt(max(D2, 1.0));
+		float R2 = A.w * A.w;
+		Att = L.w > 0.0 ? pow(1.0 - saturate(D2 / R2), L.w) : Square(saturate(1.0 - Square(D2 / R2))) / (D2 + 1.0);
+		Att *= Cone.w > -1.5 ? smoothstep(Cone.w, D.x, dot(-Ld, Cone.xyz)) : 1.0;
+	}
+	return Att;
+}
+
+// The ray's lamps: up to 8 base rows in GasData (-1 none; read per sample - the texture is tiny and cached, an array of
+// 8 lamps was 32 registers), the one at Soft weighted by SoftW.
+float3 GasLamps(int c, int lr[8], int Soft, float SoftW, float3 pw, float3 dir, float4 v, float g, float T)
+{
+	float3 Sum = 0;
+	[unroll] for (int k = 0; k < 8; k++)
+	{
+		if (lr[k] < 0) continue;
+		float4 A = GasData.Load(int3(c, lr[k], 0));
+		float4 L = GasData.Load(int3(c, lr[k] + 1, 0));
+		float4 Cone = GasData.Load(int3(c, lr[k] + 2, 0));
+		float4 D = GasData.Load(int3(c, lr[k] + 3, 0));
+		float3 Ld;
+		float Att = GasLampAtt(A, L, Cone, D, pw, Ld) * (k == Soft ? SoftW : 1.0);
+		// The scattering angle: the light's way (-Ld) against the way to the eye (-dir).
+		float CosT = dot(Ld, dir);
+		float HG = (1.0 - g * g) / pow(max(1.0 + g * g - 2.0 * g * CosT, 1e-4), 1.5);
+		float Phase = (1.0 - GasForward) + GasForward * HG;
+		// The key's share (D.y, 0 -> 1 over 0.25 s as the key moves) of its baked self-shadow; the rest: the player's own
+		// lamp (by the eye) the march's transmittance so far (the near face lit, the depth dark), the others the occlusion.
+		float Shadow = lerp(D.z > 0.5 ? T : 0.35 + 0.65 * v.a, v.b, saturate(D.y));
+		// A haze's shaft source (v13 13c): its parcels' traced light (the window's frame in the smoke).
+		Shadow = D.w > 0.5 ? v.g : Shadow;
+		// The torch (the player's lamp with a cone): what stands in its beam shades the smoke behind (v13 13a).
+		// GasTorchOn is the shadow's share: 0 until its map's first round is traced, then up over 0.1 s.
+		if (GasTorchOn > 0.0 && D.z > 0.5 && Cone.w > -1.5)
+		{
+			Shadow *= lerp(1.0, TorchLit(pw), GasTorchOn);
+		}
+		Sum += L.rgb * (Att * Phase * Shadow);
+	}
+	return Sum;
+}
+// The output's rect (post-upscale pixels) and the depth's (render pixels): a pixel's depth texel is
+// DepthMin + (Px - OutMin) * DepthScale.
+int2 OutMin;
+int2 OutSize;
+int2 DepthMin;
+float2 DepthScale;
+
+// Where an output pixel's ray meets the scene (distance from the eye, cm) and its direction, from the render view.
+float3 PixelRay(float2 OutPx, out float SceneDist)
+{
+	float2 DepthPx = DepthMin + (OutPx - OutMin) * DepthScale;
+	float DeviceZ = SceneDepth.Load(int3(DepthPx, 0)).r;
+	float4 Far = mul(float4(DepthPx, 0.5, 1), View.SVPositionToTranslatedWorld);
+	float3 Dir = normalize(Far.xyz / Far.w - View.TranslatedWorldCameraOrigin);
+	if (DeviceZ <= 0.0)
+	{
+		SceneDist = 1e7;
+	}
+	else
+	{
+		float4 Hit = mul(float4(DepthPx, DeviceZ, 1), View.SVPositionToTranslatedWorld);
+		SceneDist = length(Hit.xyz / Hit.w - View.TranslatedWorldCameraOrigin);
+	}
+	return Dir;
+}
+
+// An output pixel's ray without the depth (the dither's sphere).
+float3 DirOf(float2 OutPx)
+{
+	float2 DepthPx = DepthMin + (OutPx - OutMin) * DepthScale;
+	float4 Far = mul(float4(DepthPx, 0.5, 1), View.SVPositionToTranslatedWorld);
+	return normalize(Far.xyz / Far.w - View.TranslatedWorldCameraOrigin);
+}
+
+// A cell of the view sphere (v13 13e): world-anchored, so turning the camera moves neither the dither nor the jitter.
+// Pitch in cells of CellRad; yaw in cells widened by bands of latitude (k doubles them toward the poles: no sub-pixel
+// cells looking up at a ceiling's haze), a multiple of 4 round the circle (no seam at +-pi). z: the band.
+int3 SphereCell(float3 dir, float CellRad)
+{
+	float yaw = atan2(dir.y, dir.x) + PI;
+	float pitch = asin(clamp(dir.z, -1.0, 1.0));
+	float k = floor(log2(1.0 / max(cos(pitch), 0.02)));
+	float n = 4.0 * max(1.0, round(2.0 * PI / (4.0 * CellRad * exp2(k))));
+	return int3(floor(yaw / (2.0 * PI / n)), floor((pitch + 0.5 * PI) / CellRad), (int)k);
+}
+
+float SphereHash(int3 C)
+{
+	uint h = uint(C.x) * 0x8DA6B343u ^ uint(C.y) * 0xD8163841u ^ uint(C.z) * 0xCB1AB31Fu;
+	h ^= h >> 13;
+	h *= 0x5BD1E995u;
+	h ^= h >> 15;
+	return float(h & 0xFFFF) / 65535.0;
+}
+
+// Value noise in [0, 1] (8 hashed corners): the dither's world grain.
+float GasNoise3(float3 P)
+{
+	float3 I = floor(P), F = P - I;
+	float3 S = F * F * (3.0 - 2.0 * F);
+	int3 c = int3(I);
+	float v000 = SphereHash(c), v100 = SphereHash(c + int3(1, 0, 0)), v010 = SphereHash(c + int3(0, 1, 0)), v110 = SphereHash(c + int3(1, 1, 0));
+	float v001 = SphereHash(c + int3(0, 0, 1)), v101 = SphereHash(c + int3(1, 0, 1)), v011 = SphereHash(c + int3(0, 1, 1)), v111 = SphereHash(c + int3(1, 1, 1));
+	return lerp(lerp(lerp(v000, v100, S.x), lerp(v010, v110, S.x), S.y), lerp(lerp(v001, v101, S.x), lerp(v011, v111, S.x), S.y), S.z);
+}
+
+// The march's jitter for a block: by its centre's sphere cell (os.Gas.Dither 2), or by its screen block (before v13).
+float BlockJitter(float2 Centre, float B)
+{
+	if (GasDither > 1.5)
+	{
+		return SphereHash(SphereCell(DirOf(Centre), GasPixelAngle * B) + int3(17, 31, 7));
+	}
+	return frac(sin(dot(floor(Centre / B), float2(12.9898, 78.233))) * 43758.5453);
+}
+
+float3 RayDir(float2 OutPx)
+{
+	float Unused;
+	return PixelRay(OutPx, Unused);
+}
+
+// The heat along a ray to sceneDist (v12 7b.2): each puff's chord through its sphere, weighted to its core (an analytic
+// integral - the march's empty-space skipping cannot miss it); firstHeat where it begins.
+float GasHeatAlong(float3 Cam, float3 dir, float sceneDist, out float firstHeat)
+{
+	float H = 0.0;
+	firstHeat = 1e9;
+	int n = (int)(GasHeatCount + 0.5);
+	for (int k = 0; k < n; k++)
+	{
+		float4 A = GasHeat.Load(int3(k, 0, 0));
+		float heat = GasHeat.Load(int3(k, 1, 0)).x;
+		float3 m = A.xyz - Cam;
+		float tc = dot(m, dir);
+		float d2 = dot(m, m) - tc * tc;
+		float r2 = A.w * A.w;
+		if (d2 >= r2 || heat <= 0.0) continue;
+		float h = sqrt(r2 - d2);
+		float t0 = max(tc - h, 0.0), t1 = min(tc + h, sceneDist);
+		if (t1 <= t0) continue;
+		H += heat * (t1 - t0) * (1.0 - d2 / r2);
+		firstHeat = min(firstHeat, t0);
+	}
+	return H;
+}
+
+// bLamps false: the lamps left out (an edge pixel takes its block's); lampAcc the lamps' filmed light, premultiplied.
+// A cloud's stretch of the ray: through where its two atlases hold gas (rows 9-12), up to the scene.
+void GasSpan(int c, float3 Cam, float3 inv, float sceneDist, out float a, out float b)
+{
+	float3 qa0 = GasData.Load(int3(c, 9, 0)).xyz, qa1 = GasData.Load(int3(c, 10, 0)).xyz;
+	float3 qb0 = GasData.Load(int3(c, 11, 0)).xyz, qb1 = GasData.Load(int3(c, 12, 0)).xyz;
+	float3 t0 = (qa0 - Cam) * inv, t1 = (qa1 - Cam) * inv;
+	float3 tn = min(t0, t1), tf = max(t0, t1);
+	float aC = max(max(tn.x, tn.y), tn.z), bC = min(min(tf.x, tf.y), tf.z);
+	float3 p0 = (qb0 - Cam) * inv, p1 = (qb1 - Cam) * inv;
+	float3 pn = min(p0, p1), pf = max(p0, p1);
+	float aP = max(max(pn.x, pn.y), pn.z), bP = min(min(pf.x, pf.y), pf.z);
+	a = max(min(bC > aC ? aC : 1e9, bP > aP ? aP : 1e9), GasEyeClear * 0.5);
+	b = min(max(bC > aC ? bC : -1e9, bP > aP ? bP : -1e9), sceneDist);
+}
+
+void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, bool bLamps, out float3 acc, out float T, out float firstT, out float3 lampAcc)
+{
+	firstT = 1e9;
+	// The tunnels this ray crosses: (t of the closest approach, its distance, sin of the angle, radius), the stretch
+	// inside the caps, the birth.
+	float4 hq[16];
+	float2 hc[16];
+	float hb[16];
+	int nh = 0;
+	int nt = (int)(GasTunnelCount + 0.5);
+	[loop] for (int k = 0; k < nt && nh < 16; k++)
+	{
+	    float4 ta = GasTunnels.Load(int3(k, 0, 0));
+	    float4 tb = GasTunnels.Load(int3(k, 1, 0));
+	    float birth = GasTunnels.Load(int3(k, 2, 0)).x;
+	    float r = ta.w * (1.0 - 0.5 * tb.w);
+	    if (r < 0.3) continue;
+	    float3 u = tb.xyz - ta.xyz;
+	    float L = length(u);
+	    if (L < 1e-3) continue;
+	    float3 ax = u / L;
+	    float3 m = Cam - ta.xyz;
+	    float da = dot(dir, ax), ma = dot(m, ax);
+	    float3 dp = dir - ax * da, mp = m - ax * ma;
+	    float A = dot(dp, dp);
+	    float tc = A > 1e-6 ? -dot(dp, mp) / A : 0.0;
+	    float dmin = length(mp + dp * tc);
+	    if (dmin >= r) continue;
+	    float2 caps = float2(-1e9, 1e9);
+	    if (abs(da) > 1e-6)
+	    {
+	        float c0 = (0.0 - ma) / da, c1 = (L - ma) / da;
+	        caps = float2(min(c0, c1), max(c0, c1));
+	    }
+	    else if (ma < 0 || ma > L) continue;
+	    // Only the stretch of the ray inside the cylinder is checked per sample (it was the caps' whole span).
+	    float hw = sqrt(r * r - dmin * dmin) / max(sqrt(A), 0.05);
+	    hq[nh] = float4(tc, dmin, sqrt(A), r);
+	    hc[nh] = float2(max(caps.x, tc - hw), min(caps.y, tc + hw));
+	    hb[nh] = birth;
+	    nh++;
+	}
+	T = 1.0;
+	acc = 0;
+	float3 accL = 0;
+	int nc = (int)(GasCloudCount + 0.5);
+	float3 inv = 1.0 / dir;
+	// v15d: a zone's haze (its samples sent negative) is marched in two goes: in front of where the first other cloud
+	// begins on this ray (aSplit) in its own place, behind it after all the others - the fog in front lies over a puff,
+	// the fog behind lies under it (one go: all of the haze in front or all behind).
+	float aSplit = 1e9;
+	[loop] for (int c0 = 0; c0 < nc; c0++)
+	{
+	    float a0, b0;
+	    GasSpan(c0, Cam, inv, sceneDist, a0, b0);
+	    float4 g1 = GasData.Load(int3(c0, 1, 0));
+	    aSplit = GasData.Load(int3(c0, 8, 0)).w >= 0.0 && g1.z > 0.0 && b0 > a0 ? min(aSplit, a0) : aSplit;
+	}
+	[loop] for (int i = 0; i < 2 * nc; i++)
+	{
+	    int c = i < nc ? i : i - nc;
+	    bool second = i >= nc;
+	    float4 d0 = GasData.Load(int3(c, 0, 0));
+	    float4 d1 = GasData.Load(int3(c, 1, 0));
+	    float4 d2 = GasData.Load(int3(c, 2, 0));
+	    float4 d3 = GasData.Load(int3(c, 3, 0));
+	    float4 d4 = GasData.Load(int3(c, 4, 0));
+	    float4 d7 = GasData.Load(int3(c, 7, 0));
+	    float4 d8 = GasData.Load(int3(c, 8, 0));
+	    float cellP = d8.x;
+	    // os.Gas.Light 1: the room's light x, the lamps' g, the samples at most (the haze: 0.5, 0.55 -> 0.3, 32).
+	    float ambMul = d8.y > 0.0 ? d8.y : 1.0;
+	    float hg = d8.z > 0.0 ? d8.z : 0.55;
+	    bool zone = d8.w < 0.0;
+	    if (second && !(zone && aSplit < 1e8)) continue;
+	    int maxS = d8.w != 0.0 ? (int)abs(d8.w) : 96;
+	    float3 C = d0.xyz;
+	    float H = d0.w;
+	    float n = d1.x, cell = d1.y, gain = d1.z, ext = d1.w;
+	    float phase = d2.w;
+	    float cloudBirth = d3.w;
+	    float curHalf = d4.w;
+	    float3 CP = d7.xyz;
+	    float HP = d7.w;
+	    if (gain <= 0.0 || H <= 0.0) continue;
+	    float3 key = d2.rgb;
+	    float3 base = d3.rgb;
+	    float3 warm = d4.rgb;
+	    float3 top = GasData.Load(int3(c, 5, 0)).rgb;
+	    float3 bot = GasData.Load(int3(c, 6, 0)).rgb;
+	    // Where both atlases hold gas (rows 9-12, the cells they wrote): the march over their union, not the boxes.
+	    float4 d9 = GasData.Load(int3(c, 9, 0));
+	    float a, b;
+	    GasSpan(c, Cam, inv, sceneDist, a, b);
+	    if (b <= a) continue;
+	    // Coarse cells (a vacuum cone metres long) at 1.5 cells a step: the jitter hides it, a third fewer samples.
+	    float stepCm = max(min(cell, cellP), 1.5) * (min(cell, cellP) >= 4.0 ? 1.5 : 1.0);
+	    // 96 samples a cloud at most (a doubled step through thin gas lost half the thin smoke: not taken).
+	    int ns = min((int)((b - a) / stepCm) + 1, maxS);
+	    float t = a + jit * stepCm;
+	    // The two goes on one lattice of steps: the first ends at aSplit, the second starts at its first step past it.
+	    float bGo = zone && !second ? min(b, aSplit) : b;
+	    if (second)
+	    {
+	        t += max(ceil((aSplit - t) / stepCm), 0.0) * stepCm;
+	    }
+	    if (t > bGo) continue;
+	    float adv = 0.0;
+	    float rows = ceil(n / 8.0) * n;
+	    float2 atlas = float2(8.0 * n, 2.0 * rows);
+	    float vC0 = curHalf * rows, vP0 = (1.0 - curHalf) * rows;
+	    // os.Gas.Light 1: the cloud's lit lamps, once (not per sample).
+	    // The laser's beam (v12 7b.4): where this ray passes it closest, within a block's width there - a glow by the gas.
+	    float tLaser = -1.0, wLaser = 0.0;
+	    if (GasLaserLight.a > 0.0)
+	    {
+	        float3 v = GasLaserTo - GasLaserFrom;
+	        float3 w0 = Cam - GasLaserFrom;
+	        float bb = dot(dir, v), cc = dot(v, v), dd = dot(dir, w0), ee = dot(v, w0);
+	        float den = cc - bb * bb;
+	        float q = den > 1e-6 ? saturate((ee - bb * dd) / den) : 0.0;
+	        float3 onBeam = GasLaserFrom + v * q;
+	        float sL = dot(onBeam - Cam, dir);
+	        float dist = length(Cam + dir * sL - onBeam);
+	        float width = max(sL, 1.0) * GasPixelAngle * max(GasBlockPx, 1.0);
+	        if (sL > a && sL < b && dist < width)
+	        {
+	            tLaser = sL;
+	            wLaser = 1.0 - dist / width;
+	        }
+	    }
+	    // The ray's lamps (os.Gas.Light 1): a cloud's 4 slots; a haze with tile lamps (v13 13d): its 2 player slots and the
+	    // GasTileSlots strongest of its zone's lamps at the middle of this ray's stretch through it - each screen block its
+	    // own pool of light - the last one soft (its share down to 0 where it and the next swap: no seam between tiles).
+	    int lr[8];
+	    [unroll] for (int k = 0; k < 8; k++) { lr[k] = -1; }
+	    int Soft = -1;
+	    float SoftW = 1.0;
+	    int nl = 0;
+	    int nTile = (int)(d9.w + 0.5);
+	    if (GasLight > 0.5 && bLamps && nTile > 0)
+	    {
+	        [unroll] for (int k = 0; k < 2; k++)
+	        {
+	            float4 L = GasData.Load(int3(c, 14 + 4 * k, 0));
+	            lr[k] = L.r + L.g + L.b > 0.0 ? 13 + 4 * k : -1;
+	        }
+	        float3 pm = Cam + dir * (0.5 * (a + b));
+	        float sc[16];
+	        [unroll] for (int j = 0; j < 16; j++)
+	        {
+	            sc[j] = -1.0;
+	            if (j < nTile)
+	            {
+	                int r = 13 + 4 * (2 + j);
+	                float4 A = GasData.Load(int3(c, r, 0)), L = GasData.Load(int3(c, r + 1, 0));
+	                float4 Cn = GasData.Load(int3(c, r + 2, 0)), Dd = GasData.Load(int3(c, r + 3, 0));
+	                float3 Ld;
+	                sc[j] = L.r + L.g + L.b > 0.0 ? dot(L.rgb, float3(0.3, 0.59, 0.11)) * GasLampAtt(A, L, Cn, Dd, pm, Ld) : -1.0;
+	            }
+	        }
+	        int K = clamp((int)(GasTileSlots + 0.5), 4, 6);
+	        int pick[7];
+	        float best7[7];
+	        [unroll] for (int p = 0; p < 7; p++)
+	        {
+	            float best = 0.0;
+	            int bi = -1;
+	            [unroll] for (int j = 0; j < 16; j++)
+	            {
+	                bool used = false;
+	                [unroll] for (int q = 0; q < p; q++) { used = used || pick[q] == j; }
+	                if (!used && sc[j] > best) { best = sc[j]; bi = j; }
+	            }
+	            pick[p] = bi;
+	            best7[p] = best;
+	        }
+	        [unroll] for (int p2 = 0; p2 < 6; p2++)
+	        {
+	            lr[2 + p2] = p2 < K && pick[p2] >= 0 ? 13 + 4 * (2 + pick[p2]) : -1;
+	        }
+	        // The soft last: the K-th's share by its lead over the next.
+	        float sK = 0.0, sN = 0.0;
+	        [unroll] for (int p3 = 0; p3 < 7; p3++)
+	        {
+	            sK = p3 == K - 1 ? best7[p3] : sK;
+	            sN = p3 == K ? best7[p3] : sN;
+	        }
+	        Soft = 2 + K - 1;
+	        SoftW = sK > 0.0 ? saturate((sK - sN) / (0.25 * sK)) : 1.0;
+	    }
+	    else if (GasLight > 0.5 && bLamps)
+	    {
+	        [unroll] for (int k = 0; k < 4; k++)
+	        {
+	            float4 L = GasData.Load(int3(c, 14 + 4 * k, 0));
+	            lr[k] = L.r + L.g + L.b > 0.0 ? 13 + 4 * k : -1;
+	        }
+	    }
+	    [unroll] for (int k2 = 0; k2 < 8; k2++) { nl += lr[k2] >= 0 ? 1 : 0; }
+	    [loop] for (int s = 0; s < ns; s++)
+	    {
+	        t += adv;
+	        if (t > bGo) break;
+	        adv = stepCm;
+	        // Soft tunnels: the density scaled down within 0.6 r of a tunnel's axis, 0 on it.
+	        float keep = 1.0;
+	        for (int q = 0; q < nh; q++)
+	        {
+	            if (cloudBirth < hb[q] && t > hc[q].x && t < hc[q].y)
+	            {
+	                float dd = sqrt(hq[q].y * hq[q].y + (t - hq[q].x) * (t - hq[q].x) * hq[q].z * hq[q].z);
+	                keep *= smoothstep(0.6 * hq[q].w, hq[q].w, dd);
+	            }
+	        }
+	        if (keep < 0.01) continue;
+	        float3 pw = Cam + dir * t;
+	        float4 vC = 0, vP = 0;
+	        float3 p = pw - C;
+	        bool inC = phase > 0.001 && all(abs(p) < H);
+	        float3 pp = pw - CP;
+	        bool inP = phase < 0.999 && all(abs(pp) < HP);
+	        float2 uA0 = 0, uA1 = 0, uB0 = 0, uB1 = 0;
+	        float fA = 0, fB = 0;
+	        if (inC)
+	        {
+	            float3 g = clamp((p + H) / cell - 0.5, 0.0, n - 1.001);
+	            float z0 = floor(g.z);
+	            float z1 = min(z0 + 1.0, n - 1.0);
+	            float2 xy = clamp(g.xy + 0.5, 0.5, n - 0.5);
+	            uA0 = (float2(fmod(z0, 8.0) * n, floor(z0 / 8.0) * n + vC0) + xy) / atlas;
+	            uA1 = (float2(fmod(z1, 8.0) * n, floor(z1 / 8.0) * n + vC0) + xy) / atlas;
+	            fA = g.z - z0;
+	        }
+	        if (inP)
+	        {
+	            float3 g = clamp((pp + HP) / cellP - 0.5, 0.0, n - 1.001);
+	            float z0 = floor(g.z);
+	            float z1 = min(z0 + 1.0, n - 1.0);
+	            float2 xy = clamp(g.xy + 0.5, 0.5, n - 0.5);
+	            uB0 = (float2(fmod(z0, 8.0) * n, floor(z0 / 8.0) * n + vP0) + xy) / atlas;
+	            uB1 = (float2(fmod(z1, 8.0) * n, floor(z1 / 8.0) * n + vP0) + xy) / atlas;
+	            fB = g.z - z0;
+	        }
+	        float4 sA0 = 0, sA1 = 0, sB0 = 0, sB1 = 0;
+	        if (c == 0) { if (inC) { sA0 = GasGrid0.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid0.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid0.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid0.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 1) { if (inC) { sA0 = GasGrid1.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid1.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid1.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid1.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 2) { if (inC) { sA0 = GasGrid2.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid2.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid2.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid2.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 3) { if (inC) { sA0 = GasGrid3.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid3.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid3.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid3.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 4) { if (inC) { sA0 = GasGrid4.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid4.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid4.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid4.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 5) { if (inC) { sA0 = GasGrid5.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid5.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid5.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid5.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 6) { if (inC) { sA0 = GasGrid6.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid6.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid6.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid6.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 7) { if (inC) { sA0 = GasGrid7.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid7.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid7.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid7.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 8) { if (inC) { sA0 = GasGrid8.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid8.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid8.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid8.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 9) { if (inC) { sA0 = GasGrid9.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid9.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid9.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid9.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 10) { if (inC) { sA0 = GasGrid10.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid10.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid10.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid10.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 11) { if (inC) { sA0 = GasGrid11.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid11.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid11.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid11.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 12) { if (inC) { sA0 = GasGrid12.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid12.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid12.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid12.SampleLevel(GasSampler, uB1, 0); } }
+	        else if (c == 13) { if (inC) { sA0 = GasGrid13.SampleLevel(GasSampler, uA0, 0); sA1 = GasGrid13.SampleLevel(GasSampler, uA1, 0); } if (inP) { sB0 = GasGrid13.SampleLevel(GasSampler, uB0, 0); sB1 = GasGrid13.SampleLevel(GasSampler, uB1, 0); } }
+	        // Gas reaching a box's face fades over its last 1.5 cells (a cut face read as a flat soft square).
+	        if (inC) vC = lerp(sA0, sA1, fA) * saturate(min(min(H - abs(p.x), H - abs(p.y)), H - abs(p.z)) / (1.5 * cell));
+	        if (inP) vP = lerp(sB0, sB1, fB) * saturate(min(min(HP - abs(pp.x), HP - abs(pp.y)), HP - abs(pp.z)) / (1.5 * cellP));
+	        float4 v = lerp(vP, vC, phase);
+	        float near = smoothstep(GasEyeClear * 0.5, GasEyeClear * 1.5, t);
+	        float dens = v.r * gain * keep * near;
+	        if (dens < 0.01) continue;
+	        float aStep = 1.0 - exp(-ext * dens * stepCm);
+	        float3 col;
+	        if (GasLight > 0.5)
+	        {
+	            // Linear display light (the composite encodes it): the room (the graded frame, decoded) by the occlusion;
+	            // the lamps' scene light gathered apart and filmed once a ray (below).
+	            col = base * GasAlbedo * room * GasAmbientScale * ambMul * (0.35 + 0.65 * v.a) + warm * v.g * v.g;
+	            if (nl > 0)
+	            {
+	                accL += T * aStep * base * GasLamps(c, lr, Soft, SoftW, pw, dir, v, hg, T);
+	            }
+	        }
+	        else
+	        {
+	            float3 amb = lerp(bot, top, saturate(0.5 + 0.5 * (pw.z - C.z) / H));
+	            col = base * 1.5 * (amb * (0.35 + 0.65 * v.a) + key * v.b) + warm * v.g * v.g;
+	        }
+	        firstT = min(firstT, t - stepCm);
+	        acc += T * aStep * col;
+	        // The beam's glow where this sample's step holds its nearest point.
+	        if (tLaser > 0.0 && abs(t - tLaser) <= 0.5 * stepCm)
+	        {
+	            acc += T * GasLaserLight.rgb * (saturate(dens * 2.0) * wLaser);
+	        }
+	        T *= 1.0 - aStep;
+	        if (T < 0.05) break;
+	    }
+	}
+	// The lamps on the gas (albedo x light x phase / pi, as a grey wall's albedo x light / pi) at the frame's exposure,
+	// through the film curve once a ray (the ray's mean lamp light filmed, not each sample: cheaper).
+	float alphaL = 1.0 - T;
+	lampAcc = 0;
+	if (GasLight > 0.5 && alphaL > 1e-4 && any(accL > 0.0))
+	{
+	    lampAcc = GasFilm(accL / alphaL * (GasAlbedo * GasLightScale * View.PreExposure / PI)) * alphaL;
+	}
+}
+
+// The room's light round an output pixel (os.Gas.Light 1): the frame before the gas, 1/32 and blurred.
+float3 RoomAt(float2 OutPx)
+{
+	float3 Local = GasAmbient.SampleLevel(GasAmbientSampler, (OutPx - OutMin) / max(float2(OutSize), 1.0), 0).rgb;
+	return GasToLinear(lerp(Local, GasAmbientMean.Load(int3(0, 0, 0)).rgb, 0.3));
+}
+
+RWTexture2D<float4> OutBlock;
+// The block's lamp light (filmed, premultiplied): an edge pixel's own march leaves the lamps out and takes this.
+RWTexture2D<float4> OutLamp;
+// The block's first heat along its ray (cm; 1e9 none): a pixel nearer (the gun before the shimmer) is not shifted.
+RWTexture2D<float> OutHeatNear;
+// An edge block's first gas along its ray (cm, a step early), -1 a block taken whole.
+RWTexture2D<float> OutEdge;
+// The block's first gas along its ray (cm; 1e9 none): the dither's world grain is read there.
+RWTexture2D<float> OutFirst;
+
+[numthreads(8, 8, 1)]
+void MainBlockCS(uint3 Id : SV_DispatchThreadID)
+{
+	float B = max(GasBlockPx, 1.0);
+	int2 Blocks = int2(ceil(OutSize / B));
+	if (any(int2(Id.xy) >= Blocks))
+	{
+		return;
+	}
+	// The block in absolute output pixels (as the material's SvPosition: the same blocks, the same hashes).
+	float2 Corner = floor(OutMin / B) * B + Id.xy * B;
+	float2 Centre = Corner + 0.5 * B;
+	float3 dir = RayDir(Centre);
+	float Near = 1e9, Far = 0.0;
+	for (int y = 0; y < (int)B; y++)
+	{
+		for (int x = 0; x < (int)B; x++)
+		{
+			float2 P = clamp(Corner + float2(x, y) + 0.5, OutMin + 0.5, OutMin + OutSize - 0.5);
+			float D;
+			PixelRay(P, D);
+			Near = min(Near, D);
+			Far = max(Far, D);
+		}
+	}
+	float jit = BlockJitter(Centre, B);
+	float3 acc;
+	float T;
+	float firstT;
+	float3 lampAcc;
+	GasMarch(GasCamera, dir, Far, jit, RoomAt(Centre), true, acc, T, firstT, lampAcc);
+	OutBlock[Id.xy] = float4(acc + lampAcc, T);
+	float firstHeat;
+	float H = GasHeatCount > 0.5 ? GasHeatAlong(GasCamera, dir, Far, firstHeat) : 0.0;
+	OutLamp[Id.xy] = float4(lampAcc, H);
+	OutHeatNear[Id.xy] = H > 0.0 ? firstHeat : 1e9;
+	// An edge: the block's depths differ by more than 3% of the far one or 10 cm, gas in it reached in front of the far
+	// depth; its first gas kept (a pixel nearer than that has no gas in front of it).
+	bool Edge = Far - Near > max(0.03 * min(Far, 1e5), 10.0) && T < 0.999 && firstT < Far;
+	OutEdge[Id.xy] = Edge ? firstT : -1.0;
+	OutFirst[Id.xy] = firstT;
+}
+
+// v13 13e: a block's opacity held against its last frame's - the block's centre taken back through the camera's turn
+// (a far point: the step of the camera over a frame is under a block at 1-5 m), its held opacity there; within the hold
+// the last one stays (no level flicking back and forth on a still haze). Blocks with no history take their own.
+Texture2D<float4> HoldBlocks;
+Texture2D<float> HoldHistory;
+Texture2D<float> HoldFirst;
+// OutHeld: the block's last-frame opacity taken back through the camera's motion (-1 none) - the composite keeps a
+// pixel's last level only where the new opacity barely crossed its threshold. OutAlpha: this frame's opacity (history).
+RWTexture2D<float> OutHeld;
+RWTexture2D<float> OutAlpha;
+float HoldHasHistory;
+
+[numthreads(8, 8, 1)]
+void HoldCS(uint3 Id : SV_DispatchThreadID)
+{
+	float B = max(GasBlockPx, 1.0);
+	int2 Blocks = int2(ceil(OutSize / B));
+	if (any(int2(Id.xy) >= Blocks))
+	{
+		return;
+	}
+	float a = 1.0 - HoldBlocks.Load(int3(Id.xy, 0)).a;
+	float held = -1.0;
+	float First = HoldFirst.Load(int3(Id.xy, 0));
+	if (HoldHasHistory > 0.5 && a > 0.03 && First < 1e8)
+	{
+		// The block's gas where it is (its first gas along the ray) taken back through the camera's whole motion - the
+		// turn and the step (a far point took only the turn: walking, the haze 3-5 m away slid 1-2 blocks a frame and the
+		// blocks held their neighbours' opacity - the smoke smeared and stuck, owner 24.10).
+		float2 Centre = floor(OutMin / B) * B + Id.xy * B + 0.5 * B;
+		float3 Gas = View.TranslatedWorldCameraOrigin + DirOf(Centre) * First;
+		float4 Clip = mul(float4(Gas, 1.0), View.TranslatedWorldToClip);
+		float3 Ndc3 = Clip.xyz / max(Clip.w, 1e-6);
+		float4 Prev = mul(float4(Ndc3, 1.0), View.ClipToPrevClip);
+		float2 PrevNdc = Prev.xy / max(Prev.w, 1e-6);
+		float2 PrevPx = OutMin + float2(PrevNdc.x * 0.5 + 0.5, 0.5 - PrevNdc.y * 0.5) * OutSize;
+		int2 PrevBlock = int2(floor(PrevPx / B) - floor(OutMin / B));
+		if (all(PrevBlock >= 0) && all(PrevBlock < Blocks))
+		{
+			float p = HoldHistory.Load(int3(PrevBlock, 0));
+			held = p > 0.0 ? p : -1.0;
+		}
+	}
+	OutHeld[Id.xy] = held;
+	OutAlpha[Id.xy] = a;
+}
+
+Texture2D SceneColor;
+SamplerState SceneColorSampler;
+Texture2D<float4> BlockResult;
+Texture2D<float> BlockEdge;
+Texture2D<float4> BlockLamp;
+Texture2D<float> BlockHeatNear;
+SamplerState BlockSampler;
+Texture2D<float> BlockHeld;
+Texture2D<float> BlockFirst;
+
+// The inputs as FScreenPassVS writes them (TEXCOORD0 then SV_POSITION: a pixel shader reading SV_POSITION alone did not
+// link with it on D3D12).
+void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvPosition : SV_POSITION, out float4 OutColor : SV_Target0)
+{
+	float B = max(GasBlockPx, 1.0);
+	float2 px = SvPosition.xy;
+	int2 Block = int2(floor(px / B) - floor(OutMin / B));
+	float4 Col = SceneColor.Load(int3(px, 0));
+	// The shimmer (v12 7b.3): the frame behind heat shifted by its gradient - the block's heat field read bilinearly
+	// between the blocks' centres (no seams on a door's jamb), wobbling 8-12 Hz, at most a block; a pixel nearer than
+	// the heat (the gun in front) stays.
+	if (GasHeatCount > 0.5 && GasShimmer > 0.0)
+	{
+		float2 BlocksN = ceil(OutSize / B) + 1.0;
+		float2 uv = (px - floor(OutMin / B) * B) / (B * BlocksN);
+		float2 du = float2(1.0 / BlocksN.x, 0.0), dv = float2(0.0, 1.0 / BlocksN.y);
+		// The gradient over three blocks across (v13: one block's read as rings round each puff).
+		float Hpp = BlockLamp.SampleLevel(BlockSampler, uv + du + dv, 0).a, Hpm = BlockLamp.SampleLevel(BlockSampler, uv + du - dv, 0).a;
+		float Hmp = BlockLamp.SampleLevel(BlockSampler, uv - du + dv, 0).a, Hmm = BlockLamp.SampleLevel(BlockSampler, uv - du - dv, 0).a;
+		float Hp0 = BlockLamp.SampleLevel(BlockSampler, uv + du, 0).a, Hm0 = BlockLamp.SampleLevel(BlockSampler, uv - du, 0).a;
+		float H0p = BlockLamp.SampleLevel(BlockSampler, uv + dv, 0).a, H0m = BlockLamp.SampleLevel(BlockSampler, uv - dv, 0).a;
+		float2 grad = float2(Hpp + Hp0 + Hpm - Hmp - Hm0 - Hmm, Hpp + H0p + Hmp - Hpm - H0m - Hmm) / 6.0;
+		if (any(grad != 0.0))
+		{
+			float phase = sin(px.x * 0.05 + px.y * 0.031) * 3.0 + cos(px.y * 0.043 - px.x * 0.017) * 3.0;
+			float wob = 0.55 + 0.45 * sin(View.GameTime * 6.2832 * 10.0 + phase);
+			float2 off = clamp(grad * (0.08 * B * GasShimmer) * wob, -B, B);
+			float D;
+			PixelRay(px, D);
+			// The nearest heat round this block (3x3): a block next to the heat shifts with it (no seam at its rim).
+			float nearH = 1e9;
+			for (int j = -1; j <= 1; j++)
+			{
+				for (int i = -1; i <= 1; i++)
+				{
+					nearH = min(nearH, BlockHeatNear.Load(int3(max(Block + int2(i, j), 0), 0)));
+				}
+			}
+			if (D > nearH && any(abs(off) >= 0.5))
+			{
+				Col = SceneColor.Load(int3(clamp(px + round(off), OutMin, OutMin + OutSize - 1), 0));
+			}
+		}
+	}
+	float3 acc;
+	float T;
+	float4 R = BlockResult.Load(int3(Block, 0));
+	float FirstGas = BlockEdge.Load(int3(Block, 0));
+	// os.Gas.SmoothAlpha 1: the result between the blocks' centres (an edge block keeps its own: its march is below).
+	if (GasSmoothAlpha > 0.5 && FirstGas < 0.0)
+	{
+		float2 BlocksN = ceil(OutSize / B) + 1.0;
+		float2 uvS = (px - floor(OutMin / B) * B) / (B * BlocksN);
+		R = BlockResult.SampleLevel(BlockSampler, uvS, 0);
+	}
+	acc = R.rgb;
+	T = R.a;
+	if (FirstGas >= 0.0)
+	{
+		// An edge block: a pixel nearer than the block's first gas has none in front of it; the others march their own
+		// depth (as M_OS_GasPost did in every pixel).
+		float D;
+		PixelRay(px, D);
+		if (D <= FirstGas)
+		{
+			acc = 0;
+			T = 1.0;
+		}
+		else
+		{
+			float2 Centre = floor(px / B) * B + 0.5 * B;
+			float jit = BlockJitter(Centre, B);
+			float Unused;
+			float3 NoLamps;
+			GasMarch(GasCamera, RayDir(Centre), D, jit, RoomAt(Centre), false, acc, T, Unused, NoLamps);
+			// The block's lamp light, by this pixel's opacity against the block's.
+			acc += BlockLamp.Load(int3(Block, 0)).rgb * min((1.0 - T) / max(1.0 - R.a, 1e-3), 2.0);
+		}
+	}
+	float alpha = 1.0 - T;
+	// os.Gas.DebugAlpha 4: the room's light the gas takes (os.Gas.Light 1).
+	if (GasDebugAlpha > 3.5)
+	{
+		OutColor = float4(GasToSrgb(RoomAt(px)), 1);
+		return;
+	}
+	// os.Gas.DebugAlpha 3: how far the block's opacity is from the pixel's own march (x4, grey; 0 in a flagged block).
+	if (GasDebugAlpha > 2.5)
+	{
+		float2 Centre = floor(px / B) * B + 0.5 * B;
+		float D;
+		PixelRay(px, D);
+		float3 acc2;
+		float T2;
+		float Unused2;
+		float3 NoLamps2;
+		GasMarch(GasCamera, RayDir(Centre), D, BlockJitter(Centre, B), RoomAt(Centre), false, acc2, T2, Unused2, NoLamps2);
+		float Diff = saturate(abs(T2 - T) * 4.0);
+		OutColor = float4(Diff, Diff, Diff, 1);
+		return;
+	}
+	float aq;
+	if (GasDither > 1.5)
+	{
+		// v13 13e: the dither on the smoke, not on the glass. The Bayer cell is a cell of the view sphere (a turn of the
+		// camera leaves the dots on the gas); the block's opacity held against its last frame's; a world grain (12 cm
+		// value noise at the block's first gas) nudges the threshold so the lattice is not a printed screen.
+		const float Bayer[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+		float3 dirPx = DirOf(px);
+		int2 Q = SphereCell(dirPx, GasPixelAngle * max(GasDitherPx, 1.0)).xy & 3;
+		float hb = (Bayer[Q.y * 4 + Q.x] + 0.5) / 16.0;
+		float Levels = max(GasBands, 1.0);
+		// The opacity shown is always this frame's; only a level's flick at its threshold is held: the last frame's level
+		// stays while the new value has crossed into the next by less than os.Gas.DitherHold of a step (no dot blinking at
+		// the edge, none living longer than its smoke). One scale for both (eighths under 0.25).
+		float prev = FirstGas < 0.0 && GasSmoothAlpha < 0.5 ? BlockHeld.Load(int3(Block, 0)) : -1.0;
+		float Lv = min(alpha, prev >= 0.0 ? prev : alpha) < 0.25 ? 8.0 : Levels;
+		float First = BlockFirst.Load(int3(Block, 0));
+		if (First < 1e8)
+		{
+			hb += (GasNoise3((GasCamera + dirPx * First) / 12.0) - 0.5) * GasDitherGrain / Lv;
+		}
+		float x = alpha * Lv + hb;
+		float L = floor(x);
+		if (prev >= 0.0)
+		{
+			float Lp = floor(prev * Lv + hb);
+			float fx = frac(x);
+			L = (L == Lp + 1.0 && fx < GasDitherHold) || (L == Lp - 1.0 && fx > 1.0 - GasDitherHold) ? Lp : L;
+		}
+		aq = alpha < 0.03 ? 0.0 : saturate(L / Lv);
+	}
+	else if (GasDither > 0.5)
+	{
+		// An ordered 4x4 Bayer over the screen blocks, the threshold's full spread: thin gas (from 0.03) a sparse even
+		// lattice whose mean is its opacity, not snow (v12 7a.6).
+		const float Bayer[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+		// The lattice's cell finer than the block (v12 7d: half a block): the opacity is the block's, its dots smaller.
+		int2 Q = int2(floor(px / max(GasDitherPx, 1.0))) & 3;
+		float hb = (Bayer[Q.y * 4 + Q.x] + 0.5) / 16.0;
+		float Levels = max(GasBands, 1.0);
+		// Thin gas in eighths (a haze's dot weighs 12.5%, not 25%), the rest in the bands.
+		aq = alpha < 0.03 ? 0.0 : alpha < 0.25 ? floor(alpha * 8.0 + hb) / 8.0 : min(floor(alpha * Levels + hb) / Levels, 1.0);
+	}
+	else
+	{
+		float hn = frac(sin(dot(floor(px / B), float2(41.3, 289.1))) * 43758.5453);
+		// The faint tail off (no snow of lone blocks), the threshold's spread halved: stable bands, few stray blocks.
+		aq = alpha < 0.12 ? 0.0 : floor(alpha * 4.0 + 0.25 + 0.5 * hn) / 4.0;
+	}
+	if (GasDebugAlpha > 0.5)
+	{
+		OutColor = float4(alpha, alpha, alpha, 1);
+		return;
+	}
+	float3 smoke = alpha > 1e-3 ? acc / alpha : float3(0, 0, 0);
+	smoke = GasLight > 0.5 ? GasToSrgb(smoke) : smoke;
+	OutColor = float4(lerp(Col.rgb, smoke, aq), Col.a);
+}
+
+// The room's light (stage 6): the frame before the gas at 1/32 - a thread a 32x32 tile, every 4th pixel, weighted by
+// depth so the gun and the hands (nearer than 50 cm) do not darken the smoke at the muzzle; then a blur each way, the
+// second blended into the last frame's (<= 0.1 s) with a floor (a shadow in space is not pure black).
+Texture2D AmbientSceneColor;
+Texture2D AmbientDepth;
+RWTexture2D<float4> AmbientOut;
+int2 AmbientSize;
+
+[numthreads(8, 8, 1)]
+void AmbientDownCS(uint3 Id : SV_DispatchThreadID)
+{
+	if (any(int2(Id.xy) >= AmbientSize))
+	{
+		return;
+	}
+	float3 Sum = 0;
+	float W = 0;
+	for (int y = 2; y < 32; y += 4)
+	{
+		for (int x = 2; x < 32; x += 4)
+		{
+			int2 P = min(OutMin + int2(Id.xy) * 32 + int2(x, y), OutMin + OutSize - 1);
+			float2 DepthPx = DepthMin + (P - OutMin) * DepthScale;
+			float DeviceZ = AmbientDepth.Load(int3(DepthPx, 0)).r;
+			float Depth = DeviceZ <= 0.0 ? 1e7 : ConvertFromDeviceZ(DeviceZ);
+			float w = smoothstep(40.0, 60.0, Depth);
+			Sum += AmbientSceneColor.Load(int3(P, 0)).rgb * w;
+			W += w;
+		}
+	}
+	AmbientOut[Id.xy] = float4(W > 0.0 ? Sum / W : 0.0, W / 64.0);
+}
+
+Texture2D<float4> AmbientIn;
+Texture2D<float4> AmbientHistory;
+int2 AmbientDir;
+float AmbientBlend;
+float AmbientClamp;
+float AmbientFloor;
+float AmbientHasHistory;
+
+[numthreads(8, 8, 1)]
+void AmbientBlurCS(uint3 Id : SV_DispatchThreadID)
+{
+	if (any(int2(Id.xy) >= AmbientSize))
+	{
+		return;
+	}
+	static const float K[5] = { 0.0625, 0.25, 0.375, 0.25, 0.0625 };
+	float3 Sum = 0;
+	float W = 0;
+	float3 Lo = 1e9, Hi = -1e9;
+	for (int i = -2; i <= 2; i++)
+	{
+		int2 P = clamp(int2(Id.xy) + AmbientDir * i * 2, 0, AmbientSize - 1);
+		float4 S = AmbientIn.Load(int3(P, 0));
+		Sum += S.rgb * S.a * K[i + 2];
+		W += S.a * K[i + 2];
+		Lo = S.a > 1e-4 ? min(Lo, S.rgb) : Lo;
+		Hi = S.a > 1e-4 ? max(Hi, S.rgb) : Hi;
+	}
+	float3 Now = W > 1e-4 ? Sum / W : 0.0;
+	float Valid = saturate(W * 8.0);
+	if (AmbientBlend >= 0.0)
+	{
+		// The second pass: into the last frame's, a texel with nothing behind it (the gun over the tile) keeps the last.
+		float3 Last = AmbientHasHistory > 0.5 ? AmbientHistory.Load(int3(Id.xy, 0)).rgb : Now;
+		// v16d: clamped into the current neighbours' range (as TAA): the history is screen space, a bright spot the
+		// view turned away from (the torch's) left a trail in the haze.
+		Last = AmbientClamp > 0.5 && Hi.x >= Lo.x ? clamp(Last, Lo, Hi) : Last;
+		Now = lerp(Last, max(Now, AmbientFloor), AmbientBlend * Valid);
+		AmbientOut[Id.xy] = float4(max(Now, AmbientFloor), 1.0);
+	}
+	else
+	{
+		AmbientOut[Id.xy] = float4(Now, W);
+	}
+}
+
+// The frame's mean light (v12 7b): the room's light texture summed by one group into 1x1.
+RWTexture2D<float4> MeanOut;
+groupshared float3 MeanSum[64];
+
+[numthreads(64, 1, 1)]
+void AmbientMeanCS(uint3 Id : SV_GroupThreadID)
+{
+	float3 Sum = 0;
+	int Count = AmbientSize.x * AmbientSize.y;
+	for (int I = (int)Id.x; I < Count; I += 64)
+	{
+		Sum += AmbientIn.Load(int3(I % AmbientSize.x, I / AmbientSize.x, 0)).rgb;
+	}
+	MeanSum[Id.x] = Sum;
+	GroupMemoryBarrierWithGroupSync();
+	if (Id.x == 0)
+	{
+		float3 All = 0;
+		for (int K = 0; K < 64; K++)
+		{
+			All += MeanSum[K];
+		}
+		MeanOut[int2(0, 0)] = float4(All / max(Count, 1), 1);
+	}
+}

@@ -8,5 +8,6 @@ public class OuterSpaceEditorTarget : TargetRules
 		DefaultBuildSettings = BuildSettingsVersion.V7;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;
 		ExtraModuleNames.Add("MindKore");
+		ExtraModuleNames.Add("MindKoreShaders");
 	}
 }

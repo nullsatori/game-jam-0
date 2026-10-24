@@ -309,7 +309,7 @@ public:
 	/** Tunnels drawn at once (per cloud: the material's loop); the oldest go first. */
 	static constexpr int32 MaxTunnels = 32;
 
-	int32 GetTunnelCount() const { return Tunnels.Num(); }
+	int32 GetTunnelCount() const;
 
 	/**
 	 * A radial blow at Location (an impact, a blast): the gas within RadiusCm thrown out of it at up to SpeedCm cm/s

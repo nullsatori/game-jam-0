@@ -289,6 +289,14 @@ public:
 	bool HasDot() const { return bLit && bDotHit; }
 	bool IsThreadShown() const;
 	FVector GetDotLocation() const { return DotAt; }
+	/** The beam for the gas (v12 7b.4): lens to dot (world) and its light (the beam's colour x the diode's drive); false unlit. */
+	bool GetGasBeam(FVector& OutFrom, FVector& OutTo, FLinearColor& OutLight) const
+	{
+		OutFrom = LensAt;
+		OutTo = DotAt;
+		OutLight = BeamColour * (DotDrive * TintBeamScale);
+		return bLit;
+	}
 	/** Traces since play began (os.Attach.Cost: three or more a lit frame - the round's line, the beam's for glass, the eye's sight of the dot; one more for each pane passed). */
 	int32 GetTraceCount() const { return Traces; }
 
@@ -347,6 +355,8 @@ private:
 	FVector DotAxisU = FVector::ZeroVector;
 	FVector DotAxisV = FVector::ZeroVector;
 	float DotDrive = 1.0f;
+	/** The light through smoke from the lens to the dot (eased). */
+	float SmokeShare = 1.0f;
 	float ThreadLevel = 0.0f;
 	/** The camera the geometry was last worked out from; the speckle's boil (cm travelled + rest time). */
 	FTransform RefreshedView;

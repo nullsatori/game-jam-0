@@ -349,6 +349,240 @@ def _volume(m, node, custom, data, scalar, colour, mul):
     mel.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
 
+# The gas, v11 stage 3 (Docs/RecoilWeapons-SmokeV11.md): a post-process After Tonemapping - after DLAA (the spike: the
+# Before Tonemapping point is before it in 5.8 and smears the edges) - marches up to 6 clouds' render grids
+# (UOSGasSubsystem atlases, Grid0..5; their boxes, colours and light in GasData, a float texture: column = cloud,
+# rows 0 centre + half, 1 cells + cell cm + gain + extinction, 2 key light, 3 colour, 4 warm colour, 5 ambient top,
+# 6 ambient bottom) against the scene depth of every pixel: the gun and a barrel hide the gas with their own crisp
+# edges. The density is read once per screen block (BlockPx: round(H / 270), 4 px at 1080p, the same at the muzzle and
+# at 5 m), cut into 4 bands by a stable per-block hash. Tunnels and bodies (Tunnels: row 0 start + radius, row 1 end +
+# ragged; a negative radius a body) skip their stretch of the ray. Colours are display colours (after the tonemapper:
+# no exposure, no bloom on the gas).
+GAS_POST_HLSL = """
+// v11 stage 3h: every cloud (10), each from two atlases (the current and the one before, the halves of its texture,
+// each in its own box) blended by the step's phase - the gas moves smoothly between its steps; tunnels soft-edged
+// (all 32, only for clouds born before them); the eye fades the gas in from EyeClear/2 to 3/2 x EyeClear, no cut.
+float3 toPix = W - Cam;
+float sceneDist = length(toPix);
+float3 dirP = toPix / max(sceneDist, 1e-3);
+float B = max(BlockPx, 1.0);
+float2 px = Parameters.SvPosition.xy;
+float2 bc = floor(px / B) * B + 0.5 * B;
+float3 dir = normalize(dirP + ddx(dirP) * (bc.x - px.x) + ddy(dirP) * (bc.y - px.y));
+float jit = frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453);
+// The tunnels this ray crosses: (t of the closest approach, its distance, sin of the angle, radius), the stretch
+// inside the caps, the birth.
+float4 hq[16];
+float2 hc[16];
+float hb[16];
+int nh = 0;
+int nt = (int)(TN + 0.5);
+[loop] for (int k = 0; k < nt && nh < 16; k++)
+{
+    float4 ta = Tun.Load(int3(k, 0, 0));
+    float4 tb = Tun.Load(int3(k, 1, 0));
+    float birth = Tun.Load(int3(k, 2, 0)).x;
+    float r = ta.w * (1.0 - 0.5 * tb.w);
+    if (r < 0.3) continue;
+    float3 u = tb.xyz - ta.xyz;
+    float L = length(u);
+    if (L < 1e-3) continue;
+    float3 ax = u / L;
+    float3 m = Cam - ta.xyz;
+    float da = dot(dir, ax), ma = dot(m, ax);
+    float3 dp = dir - ax * da, mp = m - ax * ma;
+    float A = dot(dp, dp);
+    float tc = A > 1e-6 ? -dot(dp, mp) / A : 0.0;
+    float dmin = length(mp + dp * tc);
+    if (dmin >= r) continue;
+    float2 caps = float2(-1e9, 1e9);
+    if (abs(da) > 1e-6)
+    {
+        float c0 = (0.0 - ma) / da, c1 = (L - ma) / da;
+        caps = float2(min(c0, c1), max(c0, c1));
+    }
+    else if (ma < 0 || ma > L) continue;
+    // Only the stretch of the ray inside the cylinder is checked per sample (it was the caps' whole span).
+    float hw = sqrt(r * r - dmin * dmin) / max(sqrt(A), 0.05);
+    hq[nh] = float4(tc, dmin, sqrt(A), r);
+    hc[nh] = float2(max(caps.x, tc - hw), min(caps.y, tc + hw));
+    hb[nh] = birth;
+    nh++;
+}
+float T = 1.0;
+float3 acc = 0;
+int nc = (int)(CC + 0.5);
+float3 inv = 1.0 / dir;
+[loop] for (int c = 0; c < nc; c++)
+{
+    float4 d0 = Data.Load(int3(c, 0, 0));
+    float4 d1 = Data.Load(int3(c, 1, 0));
+    float4 d2 = Data.Load(int3(c, 2, 0));
+    float4 d3 = Data.Load(int3(c, 3, 0));
+    float4 d4 = Data.Load(int3(c, 4, 0));
+    float4 d7 = Data.Load(int3(c, 7, 0));
+    float cellP = Data.Load(int3(c, 8, 0)).x;
+    float3 C = d0.xyz;
+    float H = d0.w;
+    float n = d1.x, cell = d1.y, gain = d1.z, ext = d1.w;
+    float phase = d2.w;
+    float cloudBirth = d3.w;
+    float curHalf = d4.w;
+    float3 CP = d7.xyz;
+    float HP = d7.w;
+    if (gain <= 0.0 || H <= 0.0) continue;
+    float3 key = d2.rgb;
+    float3 base = d3.rgb;
+    float3 warm = d4.rgb;
+    float3 top = Data.Load(int3(c, 5, 0)).rgb;
+    float3 bot = Data.Load(int3(c, 6, 0)).rgb;
+    // Where both atlases hold gas (rows 9-12, the cells they wrote): the march over their union, not the boxes.
+    float3 qa0 = Data.Load(int3(c, 9, 0)).xyz, qa1 = Data.Load(int3(c, 10, 0)).xyz;
+    float3 qb0 = Data.Load(int3(c, 11, 0)).xyz, qb1 = Data.Load(int3(c, 12, 0)).xyz;
+    float3 t0 = (qa0 - Cam) * inv, t1 = (qa1 - Cam) * inv;
+    float3 tn = min(t0, t1), tf = max(t0, t1);
+    float aC = max(max(tn.x, tn.y), tn.z), bC = min(min(tf.x, tf.y), tf.z);
+    float3 p0 = (qb0 - Cam) * inv, p1 = (qb1 - Cam) * inv;
+    float3 pn = min(p0, p1), pf = max(p0, p1);
+    float aP = max(max(pn.x, pn.y), pn.z), bP = min(min(pf.x, pf.y), pf.z);
+    float a = max(min(bC > aC ? aC : 1e9, bP > aP ? aP : 1e9), EyeClear * 0.5);
+    float b = min(max(bC > aC ? bC : -1e9, bP > aP ? bP : -1e9), sceneDist);
+    if (b <= a) continue;
+    // Coarse cells (a vacuum cone metres long) at 1.5 cells a step: the jitter hides it, a third fewer samples.
+    float stepCm = max(min(cell, cellP), 1.5) * (min(cell, cellP) >= 4.0 ? 1.5 : 1.0);
+    // 96 samples a cloud at most (a doubled step through thin gas lost half the thin smoke: not taken).
+    int ns = min((int)((b - a) / stepCm) + 1, 96);
+    float t = a + jit * stepCm;
+    float adv = 0.0;
+    float rows = ceil(n / 8.0) * n;
+    float2 atlas = float2(8.0 * n, 2.0 * rows);
+    float vC0 = curHalf * rows, vP0 = (1.0 - curHalf) * rows;
+    [loop] for (int s = 0; s < ns; s++)
+    {
+        t += adv;
+        if (t > b) break;
+        adv = stepCm;
+        // Soft tunnels: the density scaled down within 0.6 r of a tunnel's axis, 0 on it.
+        float keep = 1.0;
+        for (int q = 0; q < nh; q++)
+        {
+            if (cloudBirth < hb[q] && t > hc[q].x && t < hc[q].y)
+            {
+                float dd = sqrt(hq[q].y * hq[q].y + (t - hq[q].x) * (t - hq[q].x) * hq[q].z * hq[q].z);
+                keep *= smoothstep(0.6 * hq[q].w, hq[q].w, dd);
+            }
+        }
+        if (keep < 0.01) continue;
+        float3 pw = Cam + dir * t;
+        float4 vC = 0, vP = 0;
+        float3 p = pw - C;
+        bool inC = phase > 0.001 && all(abs(p) < H);
+        float3 pp = pw - CP;
+        bool inP = phase < 0.999 && all(abs(pp) < HP);
+        float2 uA0 = 0, uA1 = 0, uB0 = 0, uB1 = 0;
+        float fA = 0, fB = 0;
+        if (inC)
+        {
+            float3 g = clamp((p + H) / cell - 0.5, 0.0, n - 1.001);
+            float z0 = floor(g.z);
+            float z1 = min(z0 + 1.0, n - 1.0);
+            float2 xy = clamp(g.xy + 0.5, 0.5, n - 0.5);
+            uA0 = (float2(fmod(z0, 8.0) * n, floor(z0 / 8.0) * n + vC0) + xy) / atlas;
+            uA1 = (float2(fmod(z1, 8.0) * n, floor(z1 / 8.0) * n + vC0) + xy) / atlas;
+            fA = g.z - z0;
+        }
+        if (inP)
+        {
+            float3 g = clamp((pp + HP) / cellP - 0.5, 0.0, n - 1.001);
+            float z0 = floor(g.z);
+            float z1 = min(z0 + 1.0, n - 1.0);
+            float2 xy = clamp(g.xy + 0.5, 0.5, n - 0.5);
+            uB0 = (float2(fmod(z0, 8.0) * n, floor(z0 / 8.0) * n + vP0) + xy) / atlas;
+            uB1 = (float2(fmod(z1, 8.0) * n, floor(z1 / 8.0) * n + vP0) + xy) / atlas;
+            fB = g.z - z0;
+        }
+        float4 sA0 = 0, sA1 = 0, sB0 = 0, sB1 = 0;
+        GAS_SAMPLE
+        // Gas reaching a box's face fades over its last 1.5 cells (a cut face read as a flat soft square).
+        if (inC) vC = lerp(sA0, sA1, fA) * saturate(min(min(H - abs(p.x), H - abs(p.y)), H - abs(p.z)) / (1.5 * cell));
+        if (inP) vP = lerp(sB0, sB1, fB) * saturate(min(min(HP - abs(pp.x), HP - abs(pp.y)), HP - abs(pp.z)) / (1.5 * cellP));
+        float4 v = lerp(vP, vC, phase);
+        float near = smoothstep(EyeClear * 0.5, EyeClear * 1.5, t);
+        float dens = v.r * gain * keep * near;
+        if (dens < 0.01) continue;
+        float aStep = 1.0 - exp(-ext * dens * stepCm);
+        float3 amb = lerp(bot, top, saturate(0.5 + 0.5 * (pw.z - C.z) / H));
+        float3 col = base * 1.5 * (amb * (0.35 + 0.65 * v.a) + key * v.b) + warm * v.g * v.g;
+        acc += T * aStep * col;
+        T *= 1.0 - aStep;
+        if (T < 0.05) break;
+    }
+}
+float alpha = 1.0 - T;
+float hn = frac(sin(dot(floor(px / B), float2(41.3, 289.1))) * 43758.5453);
+// The faint tail off (no snow of lone blocks), the threshold's spread halved: stable bands, few stray blocks.
+float aq = alpha < 0.12 ? 0.0 : floor(alpha * 4.0 + 0.25 + 0.5 * hn) / 4.0;
+if (DebugAlpha > 0.5) return float4(alpha, alpha, alpha, 1);
+float3 smoke = alpha > 1e-3 ? acc / alpha : float3(0, 0, 0);
+return float4(lerp(Col.rgb, smoke, aq), 1);
+"""
+_SAMPLE_ONE = "if (c == %d) { if (inC) { sA0 = G%d.SampleLevel(G%dSampler, uA0, 0); sA1 = G%d.SampleLevel(G%dSampler, uA1, 0); } if (inP) { sB0 = G%d.SampleLevel(G%dSampler, uB0, 0); sB1 = G%d.SampleLevel(G%dSampler, uB1, 0); } }"
+GAS_POST_HLSL = GAS_POST_HLSL.replace("GAS_SAMPLE", "\n        ".join(
+    ("" if i == 0 else "else ") + _SAMPLE_ONE % ((i,) * 9) for i in range(10)))
+
+
+def _gas_post():
+    name = "M_OS_GasPost"
+    path = FOLDER + "/" + name
+    if eal.does_asset_exist(path):
+        m = unreal.load_asset(path)
+        mel.delete_all_material_expressions(m)
+    else:
+        m = unreal.AssetToolsHelpers.get_asset_tools().create_asset(name, FOLDER, unreal.Material, unreal.MaterialFactoryNew())
+    m.set_editor_property("material_domain", unreal.MaterialDomain.MD_POST_PROCESS)
+    m.set_editor_property("blendable_location", unreal.BlendableLocation.BL_SCENE_COLOR_AFTER_TONEMAPPING)
+    y = [0]
+
+    def node(cls, **props):
+        y[0] += 120
+        n = mel.create_material_expression(m, cls, -900, y[0])
+        for k, v in props.items():
+            n.set_editor_property(k, v)
+        return n
+
+    def tex(pname):
+        return node(unreal.MaterialExpressionTextureObjectParameter, parameter_name=pname,
+                    texture=unreal.load_asset("/Engine/EngineResources/DefaultTexture"))
+
+    inputs = {
+        "Col": node(unreal.MaterialExpressionSceneTexture, scene_texture_id=unreal.SceneTextureId.PPI_POST_PROCESS_INPUT0),
+        "W": node(unreal.MaterialExpressionWorldPosition),
+        "Cam": node(unreal.MaterialExpressionCameraPositionWS),
+        "Data": tex("GasData"),
+        "Tun": tex("Tunnels"),
+        "CC": node(unreal.MaterialExpressionScalarParameter, parameter_name="CloudCount", default_value=0.0),
+        "TN": node(unreal.MaterialExpressionScalarParameter, parameter_name="TunnelCount", default_value=0.0),
+        "BlockPx": node(unreal.MaterialExpressionScalarParameter, parameter_name="BlockPx", default_value=4.0),
+        "EyeClear": node(unreal.MaterialExpressionScalarParameter, parameter_name="EyeClear", default_value=20.0),
+        "DebugAlpha": node(unreal.MaterialExpressionScalarParameter, parameter_name="DebugAlpha", default_value=0.0),
+    }
+    # Ten grids (every cloud is drawn), on the shared clamp sampler (ten own samplers would pass the limit of 16).
+    for i in range(10):
+        g = tex("Grid%d" % i)
+        g.set_editor_property("sampler_source", unreal.SamplerSourceMode.SSM_CLAMP_WORLD_GROUP_SETTINGS)
+        inputs["G%d" % i] = g
+    n = node(unreal.MaterialExpressionCustom, code=GAS_POST_HLSL, description="GasPost",
+             output_type=unreal.CustomMaterialOutputType.CMOT_FLOAT4, inputs=[_input(k) for k in inputs])
+    for k, src in inputs.items():
+        pin = "Color" if k == "Col" else ""
+        if not mel.connect_material_expressions(src, pin, n, k):
+            raise RuntimeError("link failed: " + k)
+    mel.connect_material_property(n, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    mel.recompile_material(m)
+    os_build.save(path)
+    unreal.log("muzzle fx material: " + path)
+
+
 def build():
     _material("M_OS_MuzzleFlash", unreal.BlendMode.BLEND_ADDITIVE, _flash)
     _material("M_OS_MuzzleSmoke", unreal.BlendMode.BLEND_TRANSLUCENT, _smoke)
@@ -356,7 +590,9 @@ def build():
     # (HeterogeneousVolumesLiveShadingUtils.ush, SampleExtinctionCoefficients: not for an Unlit material), and the
     # pin is compiled only for a subsurface shading model. Until 22.10 it was Unlit - no extinction, no
     # self-shadow, no scattering: the cloud was its emission alone (the milky veil).
-    _material("M_OS_MuzzleSmokeVolume", unreal.BlendMode.BLEND_ADDITIVE, _volume, unreal.MaterialShadingModel.MSM_SUBSURFACE)
+    # v11 stage 3: the gas is drawn by the post-process M_OS_GasPost; the volume material is no longer built (the asset
+    # stays until the old cloud code goes).
+    _gas_post()
 
 
 if __name__ == "__main__":

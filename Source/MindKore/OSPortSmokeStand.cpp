@@ -2,6 +2,8 @@
 
 #if !UE_BUILD_SHIPPING
 #include "EngineUtils.h"
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
 #include "OSMuzzleFx.h"
@@ -94,6 +96,77 @@ namespace
 		After(15.2f, [Still]() { Still(TEXT("turn_1200ms")); });
 		After(16.0f, []() { UE_LOG(LogMindKore, Log, TEXT("Port smoke: done")); });
 	}
+
+	/**
+	 * os.Weapons.PortSmokeSide [side -1|1] [distance cm]: the RMB-93 seen from outside, 3/4 from a side (style stills):
+	 * the gun in view shown to every camera, a camera beside its shroud, one shot, HighResShot OSPortsSide_* 0.35 and
+	 * 1 s after. Ends "Port smoke side: done". The view stays on that camera (a still stand, not for play).
+	 */
+	void RunPortSmokeSide(const TArray<FString>& Args, UWorld* World)
+	{
+		APlayerController* Controller = World->GetFirstPlayerController();
+		AOSZeroGPawn* Pawn = Controller ? Cast<AOSZeroGPawn>(Controller->GetPawn()) : nullptr;
+		if (!Pawn || !Pawn->Guns || !Pawn->Guns->ViewModel || !Pawn->Guns->Weapons.IsValidIndex(1))
+		{
+			UE_LOG(LogMindKore, Warning, TEXT("Port smoke side: needs the AOSZeroGPawn with its guns"));
+			return;
+		}
+		const float Side = Args.Num() > 0 ? FMath::Sign(FCString::Atof(*Args[0]) + 1e-3f) : -1.0f;
+		const float Distance = Args.Num() > 1 ? FMath::Clamp(FCString::Atof(*Args[1]), 20.0f, 300.0f) : 110.0f;
+		const auto After = [Pawn](float Seconds, TFunction<void()> Step)
+		{
+			FTimerHandle Handle;
+			Pawn->GetWorldTimerManager().SetTimer(Handle, FTimerDelegate::CreateWeakLambda(Pawn, MoveTemp(Step)), FMath::Max(Seconds, 0.0001f), false);
+		};
+		const FRotator Look(-8.0f, Controller->GetControlRotation().Yaw, 0.0f);
+		After(1.0f, [Pawn, Controller, Look]()
+		{
+			UOSWeaponsComponent* Guns = Pawn->Guns;
+			Guns->ApplyPickupWeapon(1, OSMakeRmb93(GetDefault<UOSWeaponsComponent>()->Weapons[1]));
+			Guns->Scope->Aims[1] = OSMakeRmb93Aim(GetDefault<UOSScopeComponent>()->Aims[1]);
+			Guns->Weapons[1].Reserve = 24;
+			Guns->UnlockWeapon(1);
+			Guns->FinishSwitch();
+			Controller->SetControlRotation(Look);
+		});
+		After(3.0f, [Pawn, Controller, Side, Distance, After]()
+		{
+			// The gun in view to every camera; a camera at 3/4 beside its shroud (the holes at 38-47 cm along the action).
+			TArray<USceneComponent*> Parts;
+			Pawn->Guns->ViewModel->GetChildrenComponents(true, Parts);
+			Parts.Add(Pawn->Guns->ViewModel);
+			for (USceneComponent* Part : Parts)
+			{
+				if (UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Part))
+				{
+					Primitive->SetOnlyOwnerSee(false);
+				}
+			}
+			const USceneComponent* Action = Pawn->Guns->ActionInView ? static_cast<USceneComponent*>(Pawn->Guns->ActionInView) : Pawn->Guns->ViewModel.Get();
+			const FTransform Frame = Action->GetComponentTransform();
+			const FVector Target = Frame.TransformPosition(FVector(42.0f, 0.0f, 0.0f));
+			const FVector Fwd = Frame.GetUnitAxis(EAxis::X), Right = Frame.GetUnitAxis(EAxis::Y), Up = Frame.GetUnitAxis(EAxis::Z);
+			const FVector Eye = Target + (Right * (0.8f * Side) - Fwd * 0.35f + Up * 0.3f).GetSafeNormal() * Distance;
+			ACameraActor* Camera = Pawn->GetWorld()->SpawnActor<ACameraActor>(Eye, (Target - Eye).Rotation());
+			Camera->GetCameraComponent()->SetFieldOfView(50.0f);
+			Camera->GetCameraComponent()->bConstrainAspectRatio = false;
+			Controller->SetViewTargetWithBlend(Camera, 0.0f);
+			UE_LOG(LogMindKore, Log, TEXT("Port smoke side: camera %.0f cm to the %s of the shroud"), Distance, Side < 0.0f ? TEXT("left") : TEXT("right"));
+			After(0.5f, [Pawn, Controller, After]()
+			{
+				const bool bFired = Pawn->Fire();
+				UE_LOG(LogMindKore, Log, TEXT("Port smoke side: shot %s"), bFired ? TEXT("fired") : TEXT("NOT FIRED"));
+				After(0.35f, [Controller]() { Controller->ConsoleCommand(TEXT("HighResShot 1 filename=OSPortsSide_0350ms")); });
+				After(1.0f, [Controller]() { Controller->ConsoleCommand(TEXT("HighResShot 1 filename=OSPortsSide_1000ms")); });
+				After(2.0f, []() { UE_LOG(LogMindKore, Log, TEXT("Port smoke side: done")); });
+			});
+		});
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs GPortSmokeSide(
+		TEXT("os.Weapons.PortSmokeSide"),
+		TEXT("[side -1|1] [distance cm]: the RMB-93 from outside, 3/4 beside its shroud (style stills): one shot, HighResShot OSPortsSide_* 0.35 and 1 s after. The view stays on that camera."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunPortSmokeSide));
 
 	FAutoConsoleCommandWithWorld GPortSmoke(
 		TEXT("os.Weapons.PortSmoke"),

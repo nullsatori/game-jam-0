@@ -70,6 +70,15 @@ private:
  * toward the actor's centre. Where zones overlap, OSGravityAt / OSAirZoneAt
  * (OSGravity.h) pick the higher Priority, then the smaller zone.
  */
+/** A zone's fog (v15): none, a cold layer on the floor, or a thin even haze through the room. */
+UENUM(BlueprintType)
+enum class EOSZoneFog : uint8
+{
+	None,
+	Floor,
+	Haze,
+};
+
 UCLASS()
 class MINDKORE_API AOSGravityZone : public AActor
 {
@@ -130,6 +139,32 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Ship", meta = (ClampMin = "0.0"))
 	float RefillPerSecond = 5.0f;
+
+	/**
+	 * The smoke's haze here (v12 7a): an old shot's gas stays in the zone's air and thins with this half-life, s (the
+	 * room's ventilation); 0: no haze, the gas fades as it ages.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Ship", meta = (ClampMin = "0.0"))
+	float HazeHalfLifeSeconds = 45.0f;
+
+	/** The zone's own fog (v15): the gas system keeps it in the room's air as its background, held against ventilation. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Fog")
+	EOSZoneFog Fog = EOSZoneFog::None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Fog", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float FogDensity = 0.5f;
+
+	/** A floor layer's height, cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Fog", meta = (ClampMin = "30.0", ClampMax = "120.0"))
+	float FogHeightCm = 60.0f;
+
+	/** Set from the fog's kind when it is picked in the editor. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Fog")
+	FLinearColor FogColour = FLinearColor(0.88f, 0.88f, 0.88f);
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 
 	/** Shown on the HUD while inside (empty: nothing). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Ship")

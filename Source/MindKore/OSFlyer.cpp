@@ -1,4 +1,5 @@
 #include "OSFlyer.h"
+#include "OSGas.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/SphereComponent.h"
@@ -1434,6 +1435,25 @@ void AOSFlyer::Sense()
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(OSFlyerSight), /*bTraceComplex=*/false, this);
 	Params.AddIgnoredActor(Target);
 	bSeesPlayer = !GetWorld()->LineTraceTestByChannel(Eye, Target->GetActorLocation(), ECC_Visibility, Params);
+	// Through smoke it sees worse (v12 7c.2): under 0.3 of the light through, not at all; noticing takes 1/T looks
+	// (at once in clear air, as before); once tracking, it keeps the player while T >= 0.3. A RMB-93 cloud is cover.
+	if (bSeesPlayer)
+	{
+		if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+		{
+			const float T = Gas->Transmittance(Eye, Target->GetActorLocation(), this);
+			if (T < 0.3f)
+			{
+				bSeesPlayer = false;
+			}
+			else if (!IsTracking())
+			{
+				NoticeCharge += T;
+				bSeesPlayer = NoticeCharge >= 0.999f;
+			}
+		}
+	}
+	NoticeCharge = bSeesPlayer ? 0.0f : NoticeCharge;
 	if (bSeesPlayer)
 	{
 		LastSeenSeconds = GetWorld()->GetTimeSeconds();

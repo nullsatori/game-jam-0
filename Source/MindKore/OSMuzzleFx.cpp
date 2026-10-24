@@ -16,6 +16,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
 #include "OSFlyer.h"
+#include "OSGas.h"
 #include "OSGravity.h"
 #include "OSLivingWall.h"
 #include "OSWeapons.h"
@@ -27,6 +28,8 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "TimerManager.h"
+#include "UnrealClient.h"
+#include "Engine/GameViewportClient.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Algo/MaxElement.h"
 
@@ -39,6 +42,26 @@ namespace
 	TAutoConsoleVariable<int32> CVarVolumetricSmoke(
 		TEXT("os.Fx.VolumetricSmoke"), 1,
 		TEXT("1: muzzle smoke as volumetric voxel clouds (heterogeneous volumes); 0: card puffs. Both live in the world."));
+
+	TAutoConsoleVariable<int32> CVarHoleWrap(
+		TEXT("os.Fx.HoleWrap"), 1,
+		TEXT("1 (v16): a shroud hole's pop rides with the gun 0.2 s, then every hole lets a slow wisp out and back along the shroud that climbs round it; the seep leaves along its hole and rises. 0: the pop left in the world at once, threads straight up out of 4 holes, the seep straight up."));
+
+	TAutoConsoleVariable<int32> CVarHoleLive(
+		TEXT("os.Fx.HoleLive"), 1,
+		TEXT("1 (v16c): a shroud hole's pop and wrap leave with the hole's live velocity, 0.6 of it, given to the air over 0.18 s - a short soft tail behind each hole on the move, nothing riding on and stopping dead; 0: the pop and wrap ride with the gun (cling) at the shot's velocity."));
+
+	/** v16c (os.Fx.HoleLive): a hole's gas takes 0.6 of the hole's velocity and gives it to the air over 0.18 s, no cling. */
+	void HoleCarrier(FOSGasRecipe& R)
+	{
+		if (CVarHoleLive.GetValueOnGameThread() != 0)
+		{
+			R.ClingSeconds = 0.0f;
+			R.CarrierShare = 0.6f;
+			R.CarrierSeconds = 0.18f;
+			R.bLiveCarrier = true;
+		}
+	}
 
 	/** The exhaust's throw (relative to the cloud's centre of mass) dies down to its drift with this time constant, s. */
 	constexpr float GasSlowSeconds = 0.4f;
@@ -281,6 +304,11 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 	// before the kick (UOSWeaponsComponent::Fire calls this before the recoil).
 	const FVector GunVelocity = GetOwner()->GetVelocity();
 	const FVector Bore = Muzzle.GetRotation().GetAxisX();
+	// v11: the gas is the vents' parcels (Vents, UOSGasSubsystem); no grid cloud of the shot's own.
+	if (UOSGasSubsystem::Get(this))
+	{
+		return;
+	}
 	if (CVarVolumetricSmoke.GetValueOnGameThread() != 0 && CloudMaterial.LoadSynchronous())
 	{
 		// Every round punches its own tunnel as it flies (CarveRay from UOSWeaponsComponent); a shotgun blast out of
@@ -338,8 +366,291 @@ void UOSMuzzleFxComponent::Shot(int32 Weapon, const FTransform& Muzzle, const US
 	}
 }
 
+namespace
+{
+	/** The gun's smoke look and the vents' parcel recipes (v11, contract 2.2). */
+	FOSGasLook GunSmoke()
+	{
+		return FOSGasLook();
+	}
+
+	/** The pistol's wisp after a shot: 10 small parcels over 1 s from the muzzle, almost still, rising. */
+	FOSGasRecipe PistolWisp()
+	{
+		FOSGasRecipe R;
+		R.BurstCount = 10;
+		R.BurstSeconds = 1.0f;
+		R.SpeedCm = 12.0f;
+		R.SpeedMin = 0.3f;
+		R.ConeDeg = 25.0f;
+		R.RadiusMinCm = 0.8f;
+		R.RadiusMaxCm = 1.4f;
+		R.MaxRadiusCm = 6.0f;
+		R.Mass = 0.5f;
+		R.Heat = 0.4f;
+		R.LifeSeconds = 2.5f;
+		return R;
+	}
+
+	/**
+	 * A shroud hole's thread after a shot (contract 3h E): 6 parcels over 1.5 s out of the hole, rising at 20-25 cm/s
+	 * against gravity in a narrow cone, 1.5-2 cm growing to 4.5, free of the gun (the hole moves, the thread stays).
+	 */
+	FOSGasRecipe HoleThread()
+	{
+		FOSGasRecipe R;
+		R.BurstCount = 6;
+		R.BurstSeconds = 1.5f;
+		R.SpeedCm = 25.0f;
+		R.SpeedMin = 0.8f;
+		R.ConeDeg = 6.0f;
+		R.RadiusMinCm = 1.5f;
+		R.RadiusMaxCm = 2.0f;
+		R.MaxRadiusCm = 4.5f;
+		R.Mass = 1.0f;
+		R.Heat = 0.5f;
+		R.LifeSeconds = 2.5f;
+		return R;
+	}
+
+	/**
+	 * A shroud hole's wrap after its pop (v16, owner: «плавно обволакивать оружие»): 3 small parcels over 0.45 s, out of
+	 * the hole and back along the shroud at 7-14 cm/s (a ring or two back in half a second), riding with the gun for
+	 * 0.3 s, then the air's; warm, so they climb round the barrel (a terminal rise of ~7 cm/s: FallCmPerS2 x 0.7 s) -
+	 * the holes under the bore send theirs up its sides. Let out of the hole as it moves: the wisps lie along its path.
+	 */
+	FOSGasRecipe HoleWrap()
+	{
+		FOSGasRecipe R;
+		R.BurstCount = 3;
+		R.BurstSeconds = 0.45f;
+		R.SpeedCm = 14.0f;
+		R.SpeedMin = 0.5f;
+		R.ConeDeg = 15.0f;
+		R.RadiusMinCm = 1.5f;
+		R.RadiusMaxCm = 2.5f;
+		R.MaxRadiusCm = 6.0f;
+		R.Mass = 1.0f;
+		R.Heat = 0.5f;
+		R.LifeSeconds = 2.2f;
+		R.ClingSeconds = 0.3f;
+		R.FallCmPerS2 = -10.0f;
+		HoleCarrier(R);
+		return R;
+	}
+
+	/** Where a hole's wrap and seep go, in the vent's frame: out of the hole, Back of the way back along the bore. */
+	FVector HoleOut(const FOSGasVent& Vent, float Back)
+	{
+		return (Vent.Direction.GetSafeNormal() - FVector::ForwardVector * Back).GetSafeNormal();
+	}
+
+	FOSGasRecipe VentRecipe(const FOSGasVent& Vent)
+	{
+		FOSGasRecipe R;
+		R.SpeedCm = Vent.SpeedCm;
+		R.ConeDeg = Vent.ConeDeg;
+		if (Vent.bJet)
+		{
+			// The muzzle: 60-90 parcels over 0.1 s (by the vent's Rate), a vortex ring round a forward jet.
+			R.BurstCount = FMath::Clamp(FMath::RoundToInt(Vent.Rate * 230.0f), 40, 160);
+			R.BurstSeconds = 0.1f;
+			R.RingCm = Vent.Direction.X > 0.9f ? 10.0f : 0.0f;
+			R.RingTurnsPerSecond = 2.0f;
+			// More, smaller parcels (owner 23.10: «набор шаров»): 160 at most, 2-4 cm in air, 4-6 in a vacuum.
+			R.RadiusMinCm = 2.0f;
+			R.RadiusMaxCm = 4.0f;
+			// A narrow muzzle (WidthCm under 3, the pistol): a thin stream, not a puff (owner 23.10: «у пистолета дым должен
+			// выходить более тонкой струйкой») - 25 parcels over 0.06 s, 1-2 cm growing to 6, no ring, 3 s; its
+			// lingering wisp from the muzzle is PistolWisp.
+			if (Vent.WidthCm < 3.0f)
+			{
+				R.BurstCount = 25;
+				R.BurstSeconds = 0.06f;
+				R.VacuumBurstCount = 30;
+				R.RingCm = 0.0f;
+				R.RadiusMinCm = 1.0f;
+				R.RadiusMaxCm = 2.0f;
+				R.VacuumRadiusMinCm = 2.0f;
+				R.VacuumRadiusMaxCm = 3.0f;
+				R.MaxRadiusCm = 6.0f;
+				R.SpeedMin = 0.5f;
+				R.LifeSeconds = 3.0f;
+			}
+			R.VacuumBurstCount = FMath::Clamp(FMath::RoundToInt(Vent.Rate * 230.0f), 40, 160);
+			R.VacuumBurstSeconds = 0.15f;
+			R.VacuumSpeedMin = 0.3f;
+			R.VacuumRadiusMinCm = 4.0f;
+			R.VacuumRadiusMaxCm = 6.0f;
+			R.Mass = 1.0f;
+			R.Heat = 1.0f;
+			// The blast is seen at once (the shot's frame); everything else fades in over 0.12 s.
+			R.bInstant = true;
+			R.LifeSeconds = 6.0f;
+		}
+		else
+		{
+			// A shroud hole's pop at the shot, as real gas out of a shroud (owner 23.10: «списано с настоящего дыма»):
+			// 5 parcels of 2-3 cm in 0.03 s at 270-450 cm/s along the hole's normal, stopped by the air within
+			// ~12 cm (their own drag, tau 0.028 s) - a small puff at each hole (3 of 1.5-2.5 cm in 8 cm did not show:
+			// owner «незаметно»). The thin rising thread after it is the seep (Seep).
+			// v16 (os.Fx.HoleWrap): 4, and the pop rides with the gun for 0.2 s before the air takes it (left in the
+			// world at once, a walker's shroud outran its own puffs); the wrap (HoleWrap) follows it out of every hole.
+			const bool bWrap = CVarHoleWrap.GetValueOnGameThread() != 0;
+			R.BurstCount = bWrap ? 4 : 5;
+			R.ClingSeconds = bWrap ? 0.2f : 0.0f;
+			if (bWrap)
+			{
+				HoleCarrier(R);
+			}
+			R.BurstSeconds = 0.03f;
+			R.SpeedCm = 450.0f;
+			R.SpeedMin = 0.6f;
+			R.ConeDeg = 20.0f;
+			R.DragSeconds = 0.028f;
+			// 3h: up to 3 cm, 1.5 s - read as a puff at each hole before the muzzle's cloud covers them.
+			R.RadiusMinCm = 2.0f;
+			R.RadiusMaxCm = 3.0f;
+			R.MaxRadiusCm = 3.0f;
+			R.Mass = 1.0f;
+			R.Heat = 0.8f;
+			R.LifeSeconds = 1.5f;
+		}
+		return R;
+	}
+}
+
+bool OSGasCardsEnabled();
+
 void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle, const USceneComponent* Action, float JetScale)
 {
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		// v11: every vent is a gas source; the muzzle's card stream only with os.Gas.Cards 1.
+		// The gun's velocity the gas takes: whole in a vacuum, a quarter in air - the still air takes the rest at once
+		// (walking back while shooting, the whole jet flew back at the shooter: owner 23.10).
+		const FVector Carrier = GetOwner()->GetVelocity() * (OSAirZoneAt(GetWorld(), Muzzle.GetLocation()) ? 0.25f : 1.0f);
+		// Heat without smoke out of the muzzle (v12 7b.1): the air's shimmer over 80 ms - pistol 6, RMB-93 12, SV-98 16.
+		Gas->AddHeat(Muzzle.GetLocation(), Muzzle.GetRotation().GetForwardVector(), Def.Id == TEXT("Pistol") ? 6 : Def.Id == TEXT("Sniper") ? 16 : 12);
+		// The shot shoves the room's old haze aside (v14; its own cloud untouched).
+		Gas->PushHaze(Muzzle.GetLocation(), Muzzle.GetRotation().GetForwardVector(), 120.0f * JetScale, 80.0f * JetScale);
+		for (const FOSGasVent& Vent : Def.GasVents)
+		{
+			if (!Vent.bJet && !Vent.bCling)
+			{
+				continue;
+			}
+			const bool bOnAction = Vent.Space == EOSVentSpace::Action && Action;
+			const FTransform Frame = bOnAction ? Action->GetComponentTransform() : Muzzle;
+			// A muzzle device (a suppressor, FOSAttachment::MuzzleJetScale) throttles what leaves the muzzle: fewer
+			// parcels (6 at least) and slower; the gun's own ports and shroud holes blow as ever.
+			FOSGasRecipe Recipe = VentRecipe(Vent);
+			if (Vent.Space == EOSVentSpace::Muzzle && JetScale < 1.0f)
+			{
+				Recipe.BurstCount = FMath::Max(6, FMath::RoundToInt(Recipe.BurstCount * JetScale));
+				Recipe.VacuumBurstCount = Recipe.VacuumBurstCount > 0 ? FMath::Max(6, FMath::RoundToInt(Recipe.VacuumBurstCount * JetScale)) : 0;
+				Recipe.SpeedCm *= JetScale;
+			}
+			// A jet into a vacuum: a fan of streamers, as the holes' threads (owner 23.10: one jet read as a capsule) -
+			// 7 in a cone of 25 degrees round the bore, each a 3 degree thread with its own share.
+			const FVector Where = Frame.TransformPosition(Vent.Location);
+			const FVector Axis = Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal());
+			if (Vent.bJet && !OSAirZoneAt(GetWorld(), Where) && Recipe.VacuumBurstCount > 0 && Vent.WidthCm < 3.0f)
+			{
+				// A narrow muzzle (the pistol) into a vacuum: a small quick breath in a 35 degree fan, faint and gone in
+				// under a second - no streamers (4 of them read as bright comets: owner 23.10 «у пистолета какие-то кометы»).
+				FOSGasRecipe Breath = Recipe;
+				Breath.VacuumBurstCount = Breath.BurstCount = 28;
+				Breath.ConeDeg = 35.0f;
+				Breath.Mass = 0.5f;
+				Breath.LifeSeconds = 0.9f;
+				Breath.bShotCloud = true;
+				Gas->AddSource(Breath, GunSmoke(), Where, Axis, Carrier);
+				continue;
+			}
+			if (Vent.bJet && !OSAirZoneAt(GetWorld(), Where) && Recipe.VacuumBurstCount > 0)
+			{
+				const int32 Streamers = 7;
+				for (int32 Index = 0; Index < Streamers; ++Index)
+				{
+					FOSGasRecipe Thread = Recipe;
+					// The first (along the bore) starts the shot's cloud, the rest join it; even shares (a first of 20 at least
+					// made the pistol's one bright comet).
+					Thread.VacuumBurstCount = FMath::Max(5, FMath::RoundToInt(Recipe.VacuumBurstCount * FMath::FRandRange(0.6f, 1.4f) / Streamers));
+					Thread.bShotCloud = Index == 0;
+					Thread.BurstCount = Thread.VacuumBurstCount;
+					Thread.ConeDeg = 3.0f;
+					Thread.bJoinThisFrame = Index > 0;
+					const FVector Dir = Index == 0 ? Axis : FMath::VRandCone(Axis, FMath::DegreesToRadians(12.5f));
+					Gas->AddSource(Thread, GunSmoke(), Where, Dir, Carrier);
+				}
+				continue;
+			}
+			// A clinging hole's wisps ride with the gun whole (a hold, not an inherited velocity); a jet takes Carrier.
+			Gas->AddSource(Recipe, GunSmoke(), Where, Axis, Vent.bCling && !Vent.bJet ? GetOwner()->GetVelocity() : Carrier);
+			// A narrow muzzle's lingering wisp: up out of the muzzle for a second, following the gun; a suppressor's
+			// (JetScale < 1) lazier, 1.5 s, out of its end (v12 7b.5).
+			const bool bSuppressed = JetScale < 1.0f && Vent.Space == EOSVentSpace::Muzzle;
+			if (Vent.bJet && (Vent.WidthCm < 3.0f || bSuppressed))
+			{
+				FOSGasRecipe Wisp = PistolWisp();
+				if (bSuppressed)
+				{
+					Wisp.BurstSeconds = 1.5f;
+					Wisp.BurstCount = 12;
+					Wisp.SpeedCm = 8.0f;
+				}
+				const FVector Up = -OSGravityAt(GetWorld(), Frame.GetLocation()).Acceleration.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+				if (Action)
+				{
+					const FTransform ActionFrame = Action->GetComponentTransform();
+					Gas->AddSource(Wisp, GunSmoke(), ActionFrame.InverseTransformPosition(Frame.TransformPosition(Vent.Location)), ActionFrame.InverseTransformVectorNoScale(Up), FVector::ZeroVector, Action);
+				}
+				else
+				{
+					Gas->AddSource(Wisp, GunSmoke(), Frame.TransformPosition(Vent.Location), Up, FVector::ZeroVector);
+				}
+			}
+		}
+		// After the pops, the shroud's holes on the moving gun (Action): v16 (os.Fx.HoleWrap) every hole's wrap - out
+		// of it and back along the shroud, climbing round the barrel (HoleWrap); before it 4 holes at random let a
+		// thread straight up each, 24 parcels over 1.5 s (HoleThread; in zero-G its fallback pointed down).
+		if (Action)
+		{
+			TArray<const FOSGasVent*, TInlineAllocator<32>> Holes;
+			for (const FOSGasVent& Vent : Def.GasVents)
+			{
+				if (Vent.bCling && !Vent.bJet && Vent.Space == EOSVentSpace::Action)
+				{
+					Holes.Add(&Vent);
+				}
+			}
+			if (CVarHoleWrap.GetValueOnGameThread() != 0)
+			{
+				for (const FOSGasVent* Hole : Holes)
+				{
+					Gas->AddSource(HoleWrap(), GunSmoke(), Hole->Location, HoleOut(*Hole, 1.0f), GetOwner()->GetVelocity(), Action);
+				}
+			}
+			else
+			{
+				const FTransform ActionFrame = Action->GetComponentTransform();
+				const FVector Up = -OSGravityAt(GetWorld(), ActionFrame.GetLocation()).Acceleration.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+				for (int32 Index = 0; Index < 4 && !Holes.IsEmpty(); ++Index)
+				{
+					const FOSGasVent* Hole = Holes[FMath::RandHelper(Holes.Num())];
+					Holes.RemoveSingleSwap(Hole);
+					Gas->AddSource(HoleThread(), GunSmoke(), Hole->Location, ActionFrame.InverseTransformVectorNoScale(Up), FVector::ZeroVector, Action);
+				}
+			}
+		}
+		// All of the shot's gas is out: its stamp starts on a worker now, the gas tick joins it (os.Gas.StampAsync).
+		Gas->KickStamps();
+		if (!OSGasCardsEnabled())
+		{
+			return;
+		}
+	}
 	if (!Smoke)
 	{
 		return;
@@ -441,6 +752,44 @@ void UOSMuzzleFxComponent::Seep(const FOSWeapon& Def, const FTransform& Muzzle, 
 		if (Vent.bSeep)
 		{
 			Seeping.Add(&Vent);
+		}
+	}
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this); Gas && !Seeping.IsEmpty())
+	{
+		// The hot barrel's heat as its seep (v12 7b.1, 7d): two puffs for each wisp, living up to 3 s.
+		Gas->AddHeat(Muzzle.GetLocation(), FVector::UpVector, 2 * Count, 0.6f, 0.0f, 3.0f);
+		// v11: the seep is small parcels out of a random seeping hole, a tenth of its speed.
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			const FOSGasVent& Vent = *Seeping[FMath::RandHelper(Seeping.Num())];
+			const bool bOnAction = Vent.Space == EOSVentSpace::Action && Action;
+			const FTransform Frame = bOnAction ? Action->GetComponentTransform() : Muzzle;
+			// The hot barrel's thread: a small parcel rising out of the hole (20 cm/s against gravity, a narrow cone: a
+			// straight thread first, the flow curls it after), not carried by the gun - moved, the thread tears off and
+			// hangs. The heat (FOSPortSmoke) sets how many: one shot a faint thread, a burst a thicker, longer one.
+			// v16 (os.Fx.HoleWrap): out of its hole (a little back along the bore) at 6-12 cm/s and warm, so it rises
+			// round the barrel - a hole under the bore seeped straight up through it; in zero-G it leaves along the hole
+			// (the gravity fallback sent it into the barrel).
+			FOSGasRecipe R;
+			const bool bWrap = CVarHoleWrap.GetValueOnGameThread() != 0;
+			R.SpeedCm = bWrap ? 12.0f : 20.0f;
+			R.SpeedMin = bWrap ? 0.5f : 0.6f;
+			R.ConeDeg = bWrap ? 10.0f : 6.0f;
+			R.RadiusMinCm = 1.5f;
+			R.RadiusMaxCm = 2.0f;
+			R.MaxRadiusCm = 5.0f;
+			R.Mass = 0.7f;
+			R.Heat = 0.5f;
+			R.LifeSeconds = 2.5f;
+			R.FallCmPerS2 = bWrap ? -14.0f : 0.0f;
+			const FVector Where = Frame.TransformPosition(Vent.Location);
+			const FVector Out = bWrap ? Frame.TransformVectorNoScale(HoleOut(Vent, 0.3f))
+				: -OSGravityAt(GetWorld(), Where).Acceleration.GetSafeNormal(UE_SMALL_NUMBER, Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()));
+			Gas->EmitNow(R, GunSmoke(), Where, Out, FVector::ZeroVector, 1, true);
+		}
+		if (!OSGasCardsEnabled())
+		{
+			return;
 		}
 	}
 	for (int32 Index = 0; Smoke && !Seeping.IsEmpty() && Index < Count; ++Index)
@@ -547,6 +896,10 @@ void UOSMuzzleFxComponent::WaitSims() const
 
 void UOSMuzzleFxComponent::ClearClouds()
 {
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		Gas->ClearClouds();
+	}
 	WaitSims();
 	for (FCloud& Cloud : Clouds)
 	{
@@ -558,7 +911,8 @@ void UOSMuzzleFxComponent::ClearClouds()
 FString UOSMuzzleFxComponent::DescribeClouds() const
 {
 	WaitSims();
-	FString Line;
+	const UOSGasSubsystem* GasSystem = UOSGasSubsystem::Get(this);
+	FString Line = GasSystem ? GasSystem->DescribeClouds() : FString();
 	const FVector Eye = View->GetComponentLocation();
 	for (const FCloud& Cloud : Clouds)
 	{
@@ -611,9 +965,16 @@ void UOSMuzzleFxComponent::DumpClouds(const FString& Name) const
 	}
 }
 
+int32 UOSMuzzleFxComponent::GetTunnelCount() const
+{
+	const UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this);
+	return Tunnels.Num() + (Gas ? Gas->GetTunnelCount() : 0);
+}
+
 int32 UOSMuzzleFxComponent::GetCloudCount() const
 {
-	int32 Count = 0;
+	const UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this);
+	int32 Count = Gas ? Gas->GetCloudCount() : 0;
 	for (const FCloud& Cloud : Clouds)
 	{
 		Count += Cloud.Age >= 0.0f ? 1 : 0;
@@ -654,6 +1015,14 @@ namespace
 			UE_LOG(LogMindKore, Log, TEXT("Smoke cost: %d step(s) off the game thread, %.0f us mean, %.0f us max; game thread in %d frame(s) with grids, %.0f us mean, %.0f us max"),
 				C.Steps, C.Steps ? C.StepUs / C.Steps : 0.0, C.MaxStepUs, C.Frames, C.Frames ? C.FrameUs / C.Frames : 0.0, C.MaxFrameUs);
 			C = FSmokeCost();
+			// v11: the gas subsystem's own (every world with one).
+			for (TObjectIterator<UOSGasSubsystem> It; It; ++It)
+			{
+				if (It->GetWorld())
+				{
+					UE_LOG(LogMindKore, Log, TEXT("%s"), *It->TakeCostLine());
+				}
+			}
 		}));
 
 	/**
@@ -899,6 +1268,10 @@ bool UOSMuzzleFxComponent::BlastCloud(FCloud& Cloud, const FVector& Origin, cons
 
 bool UOSMuzzleFxComponent::GetYoungestCloud(float MinAge, FVector& OutCentre, float& OutHalf) const
 {
+	if (const UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this); Gas && Gas->GetYoungestCloud(MinAge, OutCentre, OutHalf))
+	{
+		return true;
+	}
 	const FCloud* Best = nullptr;
 	for (const FCloud& Cloud : Clouds)
 	{
@@ -1056,6 +1429,10 @@ void UOSMuzzleFxComponent::FindMovers(FCloud& Cloud, float Half, float DeltaTime
 
 void UOSMuzzleFxComponent::Burst(const FVector& Location, const FVector& Normal, float RadiusCm, float SpeedCm)
 {
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		Gas->Burst(Location, Normal, RadiusCm, SpeedCm);
+	}
 	if (GetCloudCount() == 0 || RadiusCm <= 0.0f)
 	{
 		return;
@@ -1070,11 +1447,19 @@ void UOSMuzzleFxComponent::Burst(const FVector& Location, const FVector& Normal,
 
 void UOSMuzzleFxComponent::AddAirFlow(const FVector& Location, const FVector& Direction, float SpeedCm, float ReachCm, float Seconds)
 {
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		Gas->AddAirFlow(Location, Direction, SpeedCm, ReachCm, Seconds);
+	}
 	AirFlows.Add({ Location, Direction.GetSafeNormal(), SpeedCm, ReachCm, Seconds });
 }
 
 void UOSMuzzleFxComponent::CarveRay(const FVector& Start, const FVector& End, float RadiusCm)
 {
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		Gas->CarveRay(Start, End, RadiusCm);
+	}
 	const FVector Along = End - Start;
 	const float Length = Along.Size();
 	if (Length < 1.0f || RadiusCm <= 0.0f)
@@ -1585,6 +1970,24 @@ void UOSMuzzleFxComponent::TickHotCases(float DeltaTime)
 		const FVector Where = Case->GetActorLocation();
 		const UPrimitiveComponent* Body = Cast<UPrimitiveComponent>(Case->GetRootComponent());
 		const FVector Velocity = Body ? Body->GetPhysicsLinearVelocity() : FVector::ZeroVector;
+		if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this); Gas && !OSGasCardsEnabled())
+		{
+			// v11: a hot case lets out one small parcel a second (contract 2.2), no cards.
+			Hot.Carry += DeltaTime;
+			if (Hot.Carry >= 1.0f)
+			{
+				Hot.Carry -= 1.0f;
+				FOSGasRecipe R;
+				R.SpeedCm = 10.0f;
+				R.ConeDeg = 30.0f;
+				R.RadiusMinCm = R.RadiusMaxCm = 1.5f;
+				R.Mass = 0.2f;
+				R.Heat = 0.5f;
+				R.LifeSeconds = 2.5f;
+				Gas->EmitNow(R, GunSmoke(), Where, -OSGravityAt(GetWorld(), Where).Acceleration.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector), Velocity * 0.3f, 1);
+			}
+			continue;
+		}
 		bool bInCloud = false;
 		for (FCloud& Cloud : Clouds)
 		{
@@ -2360,6 +2763,405 @@ namespace
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&RunSmokeMoments));
 
 #if !UE_BUILD_SHIPPING
+	/**
+	 * os.Gas.WalkProbe: a shot while walking ahead at 3 m/s, a stop, 1.2 s still, 1 m back, turns 90 degrees, walks 3 m on
+	 * an arc round the cloud and 2 m back (the body's velocity set every frame). Logs the youngest cloud's parcel centroid,
+	 * box centre and pawn distance every 0.25 s; HighResShot OSWalk_* at the shot, 1 s, the step back and the turn
+	 * (os.Gas.Debug 1 draws the gas's insides).
+	 */
+	TAutoConsoleVariable<FString> CVarGasProbeSpawn(TEXT("os.Gas.ProbeSpawn"), TEXT(""), TEXT("A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot, and runs 24 s."));
+
+	TAutoConsoleVariable<float> CVarGasProbeSeconds(TEXT("os.Gas.ProbeSeconds"), 0.0f, TEXT("> 0: os.Gas.WalkProbe runs this long and takes a HighResShot (OSWalk_4_end) half a second and a ProfileGPU 2 s before its end (the haze's frames and cost)."));
+	TAutoConsoleVariable<FString> CVarGasProbeSpawnLate(TEXT("os.Gas.ProbeSpawnLate"), TEXT(""), TEXT("A preset (or a whole os. command): os.Gas.WalkProbe spawns (runs) it once at 5 s (after its shots)."));
+
+	TAutoConsoleVariable<int32> CVarGasProbeSuppressor(TEXT("os.Gas.ProbeSuppressor"), 0, TEXT("1: os.Gas.WalkProbe mounts the suppressor first."));
+
+	TAutoConsoleVariable<int32> CVarGasCapture(TEXT("os.Gas.Capture"), 0, TEXT("1: os.Gas.WalkProbe saves every frame from 0.2 to 3.2 s (a self-check)."));
+
+	FAutoConsoleCommandWithWorldAndArgs GGasWalkProbe(
+		TEXT("os.Gas.WalkProbe"),
+		TEXT("[after s] Shoot while walking, stop, step back, turn, walk round the cloud; log the cloud's centroid every 0.25 s (and HighResShot OSWalk_*)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			// [after s]: starts that many seconds later (the pawn spawned, the shaders warm).
+			const float Delay = Args.Num() > 0 ? FMath::Max(FCString::Atof(*Args[0]), 0.01f) : 0.01f;
+			FTimerHandle Later;
+			// [after s] back: walking back at 4 m/s, five shots 0.3 s apart (owner 23.10: the gas flew at him).
+			const bool bBack = Args.Num() > 1 && Args[1] == TEXT("back");
+			// [after s] back [shots] [interval s]: how many (5), how far apart (0.3 s). near: standing, two shots, then the
+			// shots 2.5 s later beside their clouds.
+			// space: as near, but facing the farthest open way (8 tried, 30 m) - a vacuum's cone seen against the stars.
+			// side: as space, and 0.05 s after the first shot the view turns 55 degrees in 0.2 s (the cone seen from the side, still in view).
+			const bool bSide = Args.Num() > 1 && Args[1] == TEXT("side");
+			const bool bSpace = Args.Num() > 1 && (Args[1] == TEXT("space") || bSide);
+			// living: as near, facing the nearest living wall.
+			const bool bLiving = Args.Num() > 1 && Args[1] == TEXT("living");
+			const bool bNear = Args.Num() > 1 && (Args[1] == TEXT("near") || bSpace || bLiving);
+			const int32 BackCount = Args.Num() > 2 ? FCString::Atoi(*Args[2]) : 5;
+			const float BackEvery = Args.Num() > 3 ? FMath::Max(FCString::Atof(*Args[3]), 0.05f) : 0.3f;
+			World->GetTimerManager().SetTimer(Later, FTimerDelegate::CreateLambda([World, bBack, bNear, bSpace, bSide, bLiving, BackCount, BackEvery]()
+			{
+			APlayerController* Controller = World->GetFirstPlayerController();
+			AOSZeroGPawn* Pawn = Controller ? Cast<AOSZeroGPawn>(Controller->GetPawn()) : nullptr;
+			UOSGasSubsystem* Gas = UOSGasSubsystem::Get(World);
+			if (!Pawn || !Gas || !Pawn->Body)
+			{
+				UE_LOG(LogMindKore, Warning, TEXT("Walk probe: no zero-G pawn or no gas"));
+				return;
+			}
+			// os.Gas.ProbeSuppressor 1: the suppressor on the gun first (its MuzzleJetScale throttles the muzzle's gas).
+			if (IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSuppressor"))->GetInt() > 0 && Pawn->Guns)
+			{
+				Pawn->Guns->GiveAttachment(TEXT("Suppressor"), true);
+				Pawn->Guns->MountAttachment(TEXT("Suppressor"), 0);
+			}
+			Gas->ClearClouds();
+			Gas->DrawnSetChanges = 0;
+			Gas->TakeCostLine();
+			const double Start = World->GetTimeSeconds();
+			const FVector Home = Pawn->Body->GetComponentLocation();
+			FRotator Look = Controller->GetControlRotation();
+			// Walking back: the room behind, not a wall (else turned round).
+			if (bBack)
+			{
+				FHitResult Hit;
+				const FVector Behind = Home - FRotator(0.0f, Look.Yaw, 0.0f).Vector() * 300.0f;
+				if (World->LineTraceSingleByChannel(Hit, Home, Behind, ECC_Visibility, FCollisionQueryParams(SCENE_QUERY_STAT(OSWalkProbe), false, Pawn)))
+				{
+					Look.Yaw += 180.0f;
+				}
+			}
+			if (bLiving)
+			{
+				const AOSLivingWall* Nearest = nullptr;
+				for (TActorIterator<AOSLivingWall> It(World); It; ++It)
+				{
+					if (!Nearest || FVector::Dist(It->GetActorLocation(), Home) < FVector::Dist(Nearest->GetActorLocation(), Home))
+					{
+						Nearest = *It;
+					}
+				}
+				if (Nearest)
+				{
+					Look = (Nearest->GetActorLocation() - Home).Rotation();
+					Look.Pitch += 10.0f;
+					UE_LOG(LogMindKore, Log, TEXT("Walk probe: facing the living wall %s at %.0f cm"), *Nearest->GetName(), FVector::Dist(Nearest->GetActorLocation(), Home));
+				}
+			}
+			if (bSpace)
+			{
+				float Best = -1.0f;
+				const float Yaw0 = Look.Yaw;
+				for (int32 K = 0; K < 8; ++K)
+				{
+					const FVector Way = FRotator(0.0f, Yaw0 + K * 45.0f, 0.0f).Vector();
+					FHitResult Hit;
+					const float Free = World->LineTraceSingleByChannel(Hit, Home, Home + Way * 3000.0f, ECC_Visibility, FCollisionQueryParams(SCENE_QUERY_STAT(OSWalkProbe), false, Pawn)) ? Hit.Distance : 3000.0f;
+					if (Free > Best)
+					{
+						Best = Free;
+						Look.Yaw = Yaw0 + K * 45.0f;
+					}
+				}
+				UE_LOG(LogMindKore, Log, TEXT("Walk probe: facing yaw %.0f, open %.0f cm"), Look.Yaw, Best);
+			}
+			Controller->SetControlRotation(Look);
+			// os.Gas.DebugAlpha 1: the gas's opacity a frame, per screen block; its largest jump a frame (the gun's corner
+			// left out: it recoils over the gas), the frames over 0.25.
+			TSharedRef<TArray<float>> LastBlocks = MakeShared<TArray<float>>();
+			TSharedRef<FVector4> Alpha = MakeShared<FVector4>(0.0, 0.0, 0.0, 0.0);
+			// The probe's clock and its last shot, for the jumps' log (a jump within 2 frames of a shot is the shot's).
+			TSharedRef<FVector2D> Clock = MakeShared<FVector2D>(0.0, -1.0);
+			TSharedRef<int32> JumpLines = MakeShared<int32>(0);
+			// Only at 1: the delegate takes every screenshot (os.Gas.Capture's too) instead of saving it.
+			if (GEngine->GameViewport && IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.DebugAlpha"))->GetInt() == 1)
+			{
+				GEngine->GameViewport->OnScreenshotCaptured().AddLambda([LastBlocks, Alpha, Clock, JumpLines](int32 Width, int32 Height, const TArray<FColor>& Pixels)
+				{
+					const int32 Block = FMath::Max(1, FMath::RoundToInt(Height / 270.0f));
+					const int32 BX = Width / Block, BY = Height / Block;
+					if (Pixels.Num() < Width * Height || BX <= 0 || BY <= 0)
+					{
+						return;
+					}
+					TArray<float> Blocks;
+					Blocks.SetNumZeroed(BX * BY);
+					for (int32 Y = 0; Y < BY * Block; ++Y)
+					{
+						for (int32 X = 0; X < BX * Block; ++X)
+						{
+							Blocks[(Y / Block) * BX + X / Block] += Pixels[Y * Width + X].R / (255.0f * Block * Block);
+						}
+					}
+					if (LastBlocks->Num() == Blocks.Num())
+					{
+						float Most = 0.0f;
+						int32 MostAt = 0;
+						for (int32 I = 0; I < Blocks.Num(); ++I)
+						{
+							// The gun's corner left out: it recoils over the gas.
+							if (I % BX > BX / 2 && I / BX > BY * 45 / 100)
+							{
+								continue;
+							}
+							const float Jump = FMath::Abs(Blocks[I] - (*LastBlocks)[I]);
+							// The muzzle's jet in its first 0.25 s (round the aim, 45 blocks of 270 rows): a front at
+							// 4.5 m/s half a metre from the eye crosses ~30 blocks a frame at 60 FPS - speed, not a jerk.
+							const float MX = I % BX - BX * 0.5f, MY = I / BX - BY * 0.575f;
+							if (Clock->Y >= 0.0 && Clock->X - Clock->Y < 0.25 && MX * MX + MY * MY < FMath::Square(BY / 6.0f))
+							{
+								Alpha->W = FMath::Max(Alpha->W, double(Jump));
+								continue;
+							}
+							if (Jump > Most)
+							{
+								Most = Jump;
+								MostAt = I;
+							}
+						}
+						// A shot's own frames (0.05 s after it) are not counted: its blast appears at once by design.
+						const bool bShot = Clock->Y >= 0.0 && Clock->X - Clock->Y < 0.05;
+						if (!bShot)
+						{
+							Alpha->X = FMath::Max(Alpha->X, double(Most));
+							Alpha->Y += Most > 0.25f ? 1.0 : 0.0;
+							Alpha->Z += 1.0;
+						}
+						if (Most > 0.25f && *JumpLines < 40)
+						{
+							++*JumpLines;
+							UE_LOG(LogMindKore, Log, TEXT("Walk probe: jump %.2f at block (%d, %d) of (%d, %d), t %.3f s, %.3f s after a shot%s"),
+								Most, MostAt % BX, MostAt / BX, BX, BY, Clock->X, Clock->X - Clock->Y, bShot ? TEXT(" (the shot's)") : TEXT(""));
+						}
+					}
+					*LastBlocks = MoveTemp(Blocks);
+				});
+			}
+			TSharedRef<FVector> First = MakeShared<FVector>(FVector::ZeroVector);
+			TSharedRef<int32> Logged = MakeShared<int32>(-1);
+			TSharedRef<int32> Shots = MakeShared<int32>(0);
+			TSharedRef<bool> Fired = MakeShared<bool>(false);
+			// Per frame: the largest jump of the centroid and of the drawn box (same cloud), and the farthest the
+			// centroid came toward the pawn's start.
+			TSharedRef<FVector4> Jumps = MakeShared<FVector4>(0.0, 0.0, 0.0, 0.0);
+			TSharedRef<FVector> LastC = MakeShared<FVector>(FVector::ZeroVector);
+			TSharedRef<FVector> LastB = MakeShared<FVector>(FVector::ZeroVector);
+			TSharedRef<int32> LastN = MakeShared<int32>(0);
+			TSharedRef<FTimerHandle> Handle = MakeShared<FTimerHandle>();
+			World->GetTimerManager().SetTimer(*Handle, FTimerDelegate::CreateLambda([World, Handle, Controller, Pawn, Gas, Start, Home, Look, First, Logged, Shots, Fired, bBack, bNear, bSide, BackCount, BackEvery, Jumps, LastC, LastB, LastN, LastBlocks, Alpha, Clock]()
+			{
+				const float T = float(World->GetTimeSeconds() - Start);
+				Clock->X = T;
+				const FVector Ahead = FRotator(0.0f, Look.Yaw, 0.0f).Vector();
+				const FVector Side = FVector::CrossProduct(FVector::UpVector, Ahead);
+				// The walk (the owner's 23.10 video): 0-0.6 s ahead at 3 m/s, a shot 25 degrees down at 0.3 s, still to 1.2 s,
+				// then a half circle of 1.5 m round the gas at 4.4 m/s looking at it (through its edge), then still to 8 s.
+				FVector Velocity = FVector::ZeroVector;
+				FRotator View = Look;
+				View.Pitch = -25.0f;
+				if (T <= 0.6f) { Velocity = Ahead * 300.0f; }
+				if (T >= 0.3f && !*Fired) { *Fired = true; if (!bBack && !bNear) { Pawn->Fire(); Clock->Y = T; } }
+				if (T > 1.2f && T <= 1.2f + UE_PI * 150.0f / 440.0f && !First->IsZero())
+				{
+					const FVector P = Pawn->Body->GetComponentLocation();
+					FVector Off = P - *First;
+					Off.Z = 0.0;
+					const FVector Out = Off.GetSafeNormal();
+					const FVector Tangent = FVector::CrossProduct(FVector::UpVector, Out);
+					Velocity = Tangent * 440.0f + Out * (150.0f - Off.Size()) * 4.0f;
+					View = (-Out).Rotation();
+					View.Pitch = -15.0f;
+				}
+				else if (T > 1.2f)
+				{
+					View = Controller->GetControlRotation();
+				}
+				if (bBack)
+				{
+					View = Look;
+					Velocity = T <= 2.0f ? -Ahead * 400.0f : FVector::ZeroVector;
+					static int32 BackShots = 0;
+					if (T < 0.1f) { BackShots = 0; }
+					if (BackShots < BackCount && T >= 0.3f + BackEvery * BackShots) { ++BackShots; Pawn->Fire(); Clock->Y = T; }
+				}
+				if (bNear)
+				{
+					View = Look;
+					View.Pitch = -10.0f;
+					if (bSide)
+					{
+						View.Yaw += 55.0f * FMath::Clamp((T - 0.35f) / 0.2f, 0.0f, 1.0f);
+						View.Pitch = 0.0f;
+					}
+					Velocity = FVector::ZeroVector;
+					static int32 NearShots = 0;
+					if (T < 0.1f) { NearShots = 0; }
+					const float At = NearShots < 2 ? 0.3f + 0.3f * NearShots : 2.8f + BackEvery * (NearShots - 2);
+					if (NearShots < 2 + BackCount && T >= At)
+					{
+						++NearShots;
+						const FString Spawn = IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSpawn"))->GetString();
+						// A preset each shot, or a whole command once (os.Gas.SourceTest weld pulse).
+						if (Spawn.IsEmpty()) { Pawn->Fire(); }
+						else if (!Spawn.StartsWith(TEXT("os."))) { GEngine->Exec(World, *(TEXT("os.Gas.Spawn ") + Spawn)); }
+						else if (NearShots == 1) { GEngine->Exec(World, *Spawn); }
+						Clock->Y = T;
+					}
+				}
+				// os.Gas.Capture 1: every frame 0.2-3.2 s saved (ScreenShot*.png) - a self-check at -FPS=30.
+				static uint64 CaptureFrame = 0;
+				if (CaptureFrame != GFrameCounter && T >= 0.2f && T <= 3.2f && IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.Capture"))->GetInt() > 0)
+				{
+					CaptureFrame = GFrameCounter;
+					FScreenshotRequest::RequestScreenshot(false);
+				}
+				// Once a frame (the timer may fire several times in one): a screenshot of the frame to the delegate below.
+				static uint64 AlphaFrame = 0;
+				if (AlphaFrame != GFrameCounter && IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.DebugAlpha"))->GetInt() == 1)
+				{
+					AlphaFrame = GFrameCounter;
+					FScreenshotRequest::RequestScreenshot(false);
+				}
+				const FVector Now = Pawn->Body->GetPhysicsLinearVelocity();
+				Pawn->Body->SetPhysicsLinearVelocity(FVector(Velocity.X, Velocity.Y, Now.Z));
+				Controller->SetControlRotation(View);
+				// Measuring the opacity, nothing waits for the steps (the probes below do): the steps late as in play.
+				const bool bAlphaMode = IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.DebugAlpha"))->GetInt() > 0;
+				if (!bAlphaMode)
+				{
+					FVector C, B;
+					int32 N = 0, Behind = 0;
+					float Sp = 0.0f, Hf = 0.0f, Gc = 0.0f, Old = 0.0f;
+					if (Gas->ProbeYoungest(C, N, Behind, B, Sp, Hf, Gc, Old))
+					{
+						if (*LastN > 0 && FMath::Abs(N - *LastN) < FMath::Max(3, *LastN / 10))
+						{
+							Jumps->X = FMath::Max(Jumps->X, FVector::Dist(C, *LastC));
+							Jumps->Y = FMath::Max(Jumps->Y, FVector::Dist(B, *LastB));
+						}
+						if (!First->IsZero())
+						{
+							// Toward the pawn's start (the shooter walks back from there): + is toward him.
+							Jumps->Z = FMath::Max(Jumps->Z, (C - *First) | (Home - *First).GetSafeNormal2D());
+						}
+						*LastC = C;
+						*LastB = B;
+						*LastN = N;
+					}
+				}
+				const int32 Tick = FMath::FloorToInt(T / 0.25f);
+				if (Tick != *Logged && !bAlphaMode)
+				{
+					*Logged = Tick;
+					FVector Centroid, Box;
+					int32 Parcels = 0, Behind = 0;
+					float Spread = 0.0f, Half = 0.0f, GridCell = 0.0f, OldSpeed = 0.0f;
+					if (Tick == 2 || Tick == 3 || Tick == 4 || Tick == 8)
+					{
+						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s,%s"), T, *Gas->DescribeClouds());
+					}
+					if (Gas->ProbeYoungest(Centroid, Parcels, Behind, Box, Spread, Half, GridCell, OldSpeed))
+					{
+						if (First->IsZero())
+						{
+							*First = Centroid;
+						}
+						const FVector P = Pawn->Body->GetComponentLocation();
+						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s, centroid %s (%.0f cm from the first), box %s half %.0f cm, grid cell %.0f cm, spread %.0f cm, old gas %.0f cm/s, %d cloud(s), %d parcels, %d behind a plane, pawn %s at %.0f cm, |v| %.0f"),
+							T, *Centroid.ToCompactString(), FVector::Dist(Centroid, *First), *Box.ToCompactString(), Half, GridCell, Spread, OldSpeed, Gas->GetCloudCount(), Parcels, Behind, *P.ToCompactString(),
+							FVector::Dist(P, Centroid), Pawn->Body->GetPhysicsLinearVelocity().Size());
+					}
+					else
+					{
+						UE_LOG(LogMindKore, Log, TEXT("Walk probe: t %.2f s, no cloud"), T);
+					}
+				}
+				// near / space: a GPU profile at 3.2 s (the clouds alive then; M_OS_GasPost's line in the log).
+				static bool bProfiled = false;
+				if (T < 0.1f) { bProfiled = false; }
+				if (bNear && !bProfiled && T >= 3.2f)
+				{
+					bProfiled = true;
+					UE_LOG(LogMindKore, Log, TEXT("Walk probe: ProfileGPU with %d cloud(s)"), Gas->GetCloudCount());
+					Controller->ConsoleCommand(TEXT("ProfileGPU"));
+				}
+				// What came into the world since the probe began (at 0.6 s): a self-check of what draws near the shot.
+				static bool bListed = false;
+				if (T < 0.1f) { bListed = false; }
+				if (!bListed && T >= 0.6f)
+				{
+					bListed = true;
+					for (TActorIterator<AActor> It(World); It; ++It)
+					{
+						if (It->CreationTime >= Start - 0.01 && FVector::Dist(It->GetActorLocation(), Home) < 1500.0f)
+						{
+							TArray<UActorComponent*> Parts;
+							It->GetComponents(Parts);
+							FString Names;
+							for (const UActorComponent* Part : Parts)
+							{
+								Names += TEXT(" ") + Part->GetClass()->GetName();
+							}
+							UE_LOG(LogMindKore, Log, TEXT("Walk probe: new actor %s (%s) at %.0f cm:%s"), *It->GetName(), *It->GetClass()->GetName(), FVector::Dist(It->GetActorLocation(), Home), *Names);
+						}
+					}
+				}
+				static const float ShotAt[] = { 0.4f, 1.5f, 2.0f, 3.0f };
+				static const TCHAR* ShotName[] = { TEXT("0_shot"), TEXT("1_stopped_1s"), TEXT("2_mid_arc"), TEXT("3_after_arc") };
+				if (*Shots < 4 && T >= ShotAt[*Shots])
+				{
+					Controller->ConsoleCommand(FString::Printf(TEXT("HighResShot 1 filename=OSWalk_%s"), ShotName[*Shots]));
+					++*Shots;
+				}
+				// A late source (os.Gas.ProbeSpawnLate) once at 5 s.
+				static bool bLate = false;
+				if (T < 0.1f) { bLate = false; }
+				if (!bLate && T >= 5.0f)
+				{
+					bLate = true;
+					const FString Late = IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSpawnLate"))->GetString();
+					if (!Late.IsEmpty())
+					{
+						// A preset, or a whole command (os.Gas.TestShaft 600).
+						GEngine->Exec(World, *(Late.StartsWith(TEXT("os.")) ? Late : TEXT("os.Gas.Spawn ") + Late));
+					}
+				}
+				const bool bLongRun = !IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSpawn"))->GetString().IsEmpty();
+				const float RunFor = IConsoleManager::Get().FindConsoleVariable(TEXT("os.Gas.ProbeSeconds"))->GetFloat();
+				static bool bEndShot = false;
+				if (T < 0.1f) { bEndShot = false; }
+				if (RunFor > 0.0f && !bEndShot && T >= RunFor - 0.5f)
+				{
+					bEndShot = true;
+					Controller->ConsoleCommand(TEXT("HighResShot 1 filename=OSWalk_4_end"));
+				}
+				// The cost 2 s before the end (in the screenshot's frame it profiled the shot's own pass).
+				static bool bEndProfile = false;
+				if (T < 0.1f) { bEndProfile = false; }
+				if (RunFor > 0.0f && !bEndProfile && T >= RunFor - 2.0f)
+				{
+					bEndProfile = true;
+					Controller->ConsoleCommand(TEXT("ProfileGPU"));
+				}
+				if (T > (RunFor > 0.0f ? RunFor : bLongRun ? 24.0f : 8.0f))
+				{
+					UE_LOG(LogMindKore, Log, TEXT("Walk probe: the drawn set changed %d time(s)"), Gas->DrawnSetChanges);
+					UE_LOG(LogMindKore, Log, TEXT("Walk probe: the gas's opacity - the largest jump a frame in a block %.3f, %d of %d frame(s) over 0.25 (the gun's corner left out; the muzzle's jet in its first 0.25 s apart: up to %.2f); %s"),
+						Alpha->X, int32(Alpha->Y), int32(Alpha->Z), Alpha->W, *Gas->TakeCostLine());
+					UE_LOG(LogMindKore, Log, TEXT("Walk probe: largest jump a frame - centroid %.1f cm, box %.1f cm; the centroid came %.0f cm toward the shooter's start"), Jumps->X, Jumps->Y, Jumps->Z);
+					UE_LOG(LogMindKore, Log, TEXT("Walk probe: done"));
+					if (GEngine->GameViewport)
+					{
+						GEngine->GameViewport->OnScreenshotCaptured().Clear();
+					}
+					// Last: clearing the timer frees this lambda and its captures.
+					World->GetTimerManager().ClearTimer(*Handle);
+					return;
+				}
+			}), 0.001f, true);
+			}), Delay, false);
+		}));
+
 	/** os.Fx.TunnelStill: waits for a cloud 0.6 s old, carves a 3 x 3 grid of tunnels along the view through it, shoots it carved, at +1 s and +2 s (healing). */
 	FAutoConsoleCommandWithWorldAndArgs GTunnelStill(
 		TEXT("os.Fx.TunnelStill"),

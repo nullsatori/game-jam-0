@@ -489,6 +489,59 @@ void FOSSmokeSim::Step(float Dt, float Age, const FOSSmokeParams& K)
 	});
 }
 
+void FOSSmokeSim::StepGrid(float Dt, const FOSSmokeParams& K, float GravityScale)
+{
+	Jacobi = K.Jacobi;
+	Time += Dt;
+	UpdateBox();
+	if (Hi.X < Lo.X)
+	{
+		return;
+	}
+	if (bAir)
+	{
+		const float Drag = FMath::Exp(-Dt / K.DragSeconds);
+		const FVector3f Lift = -Down * (K.Buoyancy * GravityScale * Dt);
+		ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
+		{
+			const float Warm = Heat[I] + K.ResidualLift * FMath::Min(Rho[I], 1.0f);
+			Ux[I] = (Ux[I] + Lift.X * Warm) * Drag;
+			Uy[I] = (Uy[I] + Lift.Y * Warm) * Drag;
+			Uz[I] = (Uz[I] + Lift.Z * Warm) * Drag;
+		});
+		Churn(Dt, K.Turbulence, K.AmbientChurn);
+	}
+	Confine(Dt, bAir ? K.Vorticity : K.Vorticity * 0.5f);
+	for (const FMover& M : Movers)
+	{
+		ForBox([&](int32 X, int32 Y, int32 Z, int32 I)
+		{
+			float D;
+			if (M.Extent.IsZero())
+			{
+				D = FVector3f::Dist(CellCentre(X, Y, Z), M.Centre);
+			}
+			else
+			{
+				const FVector3f Q3 = M.Rotation.UnrotateVector(CellCentre(X, Y, Z) - M.Centre);
+				const FVector3f Q(FMath::Max(FMath::Abs(Q3.X) - M.Extent.X, 0.0f), FMath::Max(FMath::Abs(Q3.Y) - M.Extent.Y, 0.0f), FMath::Max(FMath::Abs(Q3.Z) - M.Extent.Z, 0.0f));
+				D = Q.IsZero() ? -1.0f : Q.Size() + M.RadiusCm;
+			}
+			if (D < M.RadiusCm + CellCm)
+			{
+				const float Share = D < M.RadiusCm ? 1.0f : 0.2f;
+				Ux[I] += (M.Velocity.X - Ux[I]) * Share;
+				Uy[I] += (M.Velocity.Y - Uy[I]) * Share;
+				Uz[I] += (M.Velocity.Z - Uz[I]) * Share;
+			}
+		});
+	}
+	if (bAir)
+	{
+		Project(0.0f);
+	}
+}
+
 void FOSSmokeSim::Shift(const FIntVector& D)
 {
 	if (D == FIntVector::ZeroValue)
