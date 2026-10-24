@@ -1,21 +1,29 @@
 """Import the approved RMB93 exports into a permanent game asset folder.
 
-The loading lid is its own mesh (SM_OS_RMB93_Lid, its origin on the hinge): run
-Scripts/blender/os_rmb93_split.py on ArtSource/Weapons/RMB93/v02 first. The first run after that
-re-imports ViewBody over the old one, which still had the lid joined into it.
+v03 includes ViewBody and a separate Lid with its origin on the hinge.
+Use build(replace=True) to update existing assets in place; Nixie is preserved.
+build(version='v02', replace=True) restores the previous local source package.
 """
 from pathlib import Path
 import unreal
 
 DEST = '/Game/OSArt/Weapons/RMB93'
 
-def build():
+def build(version='v03', replace=False):
     eal = unreal.EditorAssetLibrary
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     mel = unreal.MaterialEditingLibrary
     meshes = unreal.get_editor_subsystem(unreal.StaticMeshEditorSubsystem)
-    root = Path(unreal.Paths.project_dir())/'ArtSource/Weapons/RMB93/v02'
+    assert version in ('v02', 'v03'), version
+    root = Path(unreal.Paths.project_dir())/'ArtSource/Weapons/RMB93'/version
+    expected_triangles = 6976 if version == 'v03' else 11846
+    sources = [root/f'textures/T_OS_RMB93_{s}.png' for s in ('BC','N','ORM')]
+    sources += [root/f'exports/SM_OS_RMB93_{g}.fbx' for g in ('ViewBody','Action','Lid','World')]
+    assert all(p.is_file() for p in sources), 'Incomplete RMB93 source package'
     assert not unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).is_in_play_in_editor()
+    existing = unreal.load_asset(DEST+'/Meshes/SM_OS_RMB93_World')
+    if existing and not replace:
+        assert existing.get_num_triangles(0) == expected_triangles, 'Different RMB93 version installed; use replace=True'
 
     def imported(path, folder, options=None, replace=False):
         target = DEST+'/'+folder+'/'+path.stem
@@ -34,11 +42,12 @@ def build():
 
     texture = {}
     for suffix in ('BC','N','ORM'):
-        t = imported(root/f'textures/T_OS_RMB93_{suffix}.png','Textures')
+        t = imported(root/f'textures/T_OS_RMB93_{suffix}.png','Textures',replace=replace)
         t.set_editor_property('srgb',suffix=='BC')
         t.set_editor_property('compression_settings',getattr(unreal.TextureCompressionSettings,
             {'BC':'TC_DEFAULT','N':'TC_NORMALMAP','ORM':'TC_MASKS'}[suffix]))
         if suffix=='N': t.set_editor_property('flip_green_channel',False)
+        t.set_editor_property('filter', unreal.TextureFilter.TF_NEAREST if version == 'v03' else unreal.TextureFilter.TF_DEFAULT)
         assert eal.save_loaded_asset(t,False)
         texture[suffix]=t
     body = unreal.load_asset(DEST+'/Materials/M_OS_RMB93_Body')
@@ -77,9 +86,10 @@ def build():
                             import_rotation=unreal.Rotator(yaw=90),
                             normal_import_method=unreal.FBXNormalImportMethod.FBXNIM_IMPORT_NORMALS).items():
                 data.set_editor_property(k,v)
-            mesh=imported(root/f'exports/SM_OS_RMB93_{group}.fbx','Meshes',ui,replace=split and group=='ViewBody')
+            mesh=imported(root/f'exports/SM_OS_RMB93_{group}.fbx','Meshes',ui,replace=replace or (split and group=='ViewBody'))
             slots=mesh.get_editor_property('static_materials')
-            assert len(slots)==(1 if group in ('Action','Lid') else 2), (group,len(slots))
+            expected_slots = ['Body'] if group in ('Action','Lid') else ['Body','Counter']
+            assert [str(s.material_slot_name) for s in slots] == expected_slots, (group,slots)
             for i,slot in enumerate(slots):
                 mesh.set_material(i,counter if str(slot.material_slot_name)=='Counter' else body)
             if group=='ViewBody': assert str(slots[1].material_slot_name)=='Counter'
@@ -92,8 +102,8 @@ def build():
             assert eal.save_loaded_asset(mesh,False)
             result[group]={'path':mesh.get_path_name(),'triangles':mesh.get_num_triangles(0),'bounds':str(mesh.get_bounding_box())}
         # The lid cut out of the body: the three view parts together are the whole gun.
-        assert result['ViewBody']['triangles']+result['Action']['triangles']+result['Lid']['triangles']==11846,result
-        assert result['World']['triangles']==11846,result
+        assert result['ViewBody']['triangles']+result['Action']['triangles']+result['Lid']['triangles']==expected_triangles,result
+        assert result['World']['triangles']==expected_triangles,result
     finally:
         unreal.SystemLibrary.execute_console_command(None,flag+' '+str(int(old)))
     return result

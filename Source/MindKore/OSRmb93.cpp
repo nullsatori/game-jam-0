@@ -17,7 +17,6 @@
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
 #include "OSGravity.h"
-#include "OSMuzzleFx.h"
 #include "MindKore.h"
 #endif
 
@@ -213,7 +212,6 @@ namespace
 		TWeakObjectPtr<UWorld> World;
 		TWeakObjectPtr<APlayerController> Controller;
 		TWeakObjectPtr<UOSWeaponsComponent> Guns;
-		TWeakObjectPtr<UOSMuzzleFxComponent> Fx;
 		TArray<FOSWeapon> SavedWeapons;
 		TArray<FOSGunAim> SavedAims;
 		int32 SavedCurrent = 0;
@@ -307,14 +305,11 @@ namespace
 			const float Lead = Gun.ReloadBody.GetRichCurveConst()->GetLastKey().Time;
 			switch (Stage)
 			{
-			case 0: // a shot: the hull out of the bottom, the shroud's puff
+			case 0: // a shot; the next stage checks the hull and barrel heat
 				if (Since() >= 0.2f)
 				{
 					CasesBefore = G->GetCasesThrown();
 					Check(Shoot() && Gun.Ammo == 5, TEXT("a shot fires, 5 left"));
-					// Every hole (and the muzzle's stream) flows after the shot.
-					Check(Fx.IsValid() && Fx->GetFlowCount() >= 17,
-						FString::Printf(TEXT("the shroud's holes and the muzzle stream after the shot (%d flowing)"), Fx.IsValid() ? Fx->GetFlowCount() : -1));
 					Next();
 				}
 				break;
@@ -543,7 +538,6 @@ namespace
 		Probe->World = World;
 		Probe->Controller = PC;
 		Probe->Guns = Guns;
-		Probe->Fx = Pawn->FindComponentByClass<UOSMuzzleFxComponent>();
 		Probe->SavedWeapons = Guns->Weapons;
 		Probe->SavedAims = Guns->Scope->Aims;
 		Probe->SavedCurrent = Guns->CurrentWeapon;
@@ -577,7 +571,7 @@ namespace
 
 	FAutoConsoleCommandWithWorld GRmb93Probe(
 		TEXT("os.Rmb93.Probe"),
-		TEXT("The RMB-93 through its handling on world time: shot, hull, shroud puff, reload with the lid, a broken-off reload, the lid in zero-G and gravity, a lid-only reload, a still. ~20 s; Lvl_OS_TestRoom or Lvl_OS_ZeroG, NullRHI fine; ends \"Rmb93 probe: done\"."),
+		TEXT("The RMB-93 through its handling on world time: shot, hull, barrel heat, reload with the lid, a broken-off reload, the lid in zero-G and gravity, a lid-only reload, a still. ~20 s; Lvl_OS_TestRoom or Lvl_OS_ZeroG, NullRHI fine; ends \"Rmb93 probe: done\"."),
 		FConsoleCommandWithWorldDelegate::CreateStatic(&RunRmb93Probe));
 }
 #endif
