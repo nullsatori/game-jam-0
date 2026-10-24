@@ -43,6 +43,10 @@ namespace
 		TEXT("os.Fx.VolumetricSmoke"), 1,
 		TEXT("1: muzzle smoke as volumetric voxel clouds (heterogeneous volumes); 0: card puffs. Both live in the world."));
 
+	TAutoConsoleVariable<int32> CVarHoleWrap(
+		TEXT("os.Fx.HoleWrap"), 1,
+		TEXT("1 (v16): a shroud hole's pop rides with the gun 0.2 s, then every hole lets a slow wisp out and back along the shroud that climbs round it; the seep leaves along its hole and rises. 0: the pop left in the world at once, threads straight up out of 4 holes, the seep straight up."));
+
 	/** The exhaust's throw (relative to the cloud's centre of mass) dies down to its drift with this time constant, s. */
 	constexpr float GasSlowSeconds = 0.4f;
 
@@ -393,6 +397,37 @@ namespace
 		return R;
 	}
 
+	/**
+	 * A shroud hole's wrap after its pop (v16, owner: «плавно обволакивать оружие»): 3 small parcels over 0.45 s, out of
+	 * the hole and back along the shroud at 7-14 cm/s (a ring or two back in half a second), riding with the gun for
+	 * 0.3 s, then the air's; warm, so they climb round the barrel (a terminal rise of ~7 cm/s: FallCmPerS2 x 0.7 s) -
+	 * the holes under the bore send theirs up its sides. Let out of the hole as it moves: the wisps lie along its path.
+	 */
+	FOSGasRecipe HoleWrap()
+	{
+		FOSGasRecipe R;
+		R.BurstCount = 3;
+		R.BurstSeconds = 0.45f;
+		R.SpeedCm = 14.0f;
+		R.SpeedMin = 0.5f;
+		R.ConeDeg = 15.0f;
+		R.RadiusMinCm = 1.5f;
+		R.RadiusMaxCm = 2.5f;
+		R.MaxRadiusCm = 6.0f;
+		R.Mass = 1.0f;
+		R.Heat = 0.5f;
+		R.LifeSeconds = 2.2f;
+		R.ClingSeconds = 0.3f;
+		R.FallCmPerS2 = -10.0f;
+		return R;
+	}
+
+	/** Where a hole's wrap and seep go, in the vent's frame: out of the hole, Back of the way back along the bore. */
+	FVector HoleOut(const FOSGasVent& Vent, float Back)
+	{
+		return (Vent.Direction.GetSafeNormal() - FVector::ForwardVector * Back).GetSafeNormal();
+	}
+
 	FOSGasRecipe VentRecipe(const FOSGasVent& Vent)
 	{
 		FOSGasRecipe R;
@@ -439,10 +474,14 @@ namespace
 		else
 		{
 			// A shroud hole's pop at the shot, as real gas out of a shroud (owner 23.10: «списано с настоящего дыма»):
-			// 5 parcels of 2.5-3.5 cm in 0.03 s at 270-450 cm/s along the hole's normal, stopped by the air within
+			// 5 parcels of 2-3 cm in 0.03 s at 270-450 cm/s along the hole's normal, stopped by the air within
 			// ~12 cm (their own drag, tau 0.028 s) - a small puff at each hole (3 of 1.5-2.5 cm in 8 cm did not show:
 			// owner «незаметно»). The thin rising thread after it is the seep (Seep).
-			R.BurstCount = 5;
+			// v16 (os.Fx.HoleWrap): 4, and the pop rides with the gun for 0.2 s before the air takes it (left in the
+			// world at once, a walker's shroud outran its own puffs); the wrap (HoleWrap) follows it out of every hole.
+			const bool bWrap = CVarHoleWrap.GetValueOnGameThread() != 0;
+			R.BurstCount = bWrap ? 4 : 5;
+			R.ClingSeconds = bWrap ? 0.2f : 0.0f;
 			R.BurstSeconds = 0.03f;
 			R.SpeedCm = 450.0f;
 			R.SpeedMin = 0.6f;
@@ -552,8 +591,9 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 				}
 			}
 		}
-		// The shroud's threads: 4 holes at random let one out each, 24 parcels over 1.5 s - seen after a single shot
-		// (the heat's seep thickens it after a burst). From the hole as it moves; the gas itself is free.
+		// After the pops, the shroud's holes on the moving gun (Action): v16 (os.Fx.HoleWrap) every hole's wrap - out
+		// of it and back along the shroud, climbing round the barrel (HoleWrap); before it 4 holes at random let a
+		// thread straight up each, 24 parcels over 1.5 s (HoleThread; in zero-G its fallback pointed down).
 		if (Action)
 		{
 			TArray<const FOSGasVent*, TInlineAllocator<32>> Holes;
@@ -564,13 +604,23 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 					Holes.Add(&Vent);
 				}
 			}
-			const FTransform ActionFrame = Action->GetComponentTransform();
-			const FVector Up = -OSGravityAt(GetWorld(), ActionFrame.GetLocation()).Acceleration.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
-			for (int32 Index = 0; Index < 4 && !Holes.IsEmpty(); ++Index)
+			if (CVarHoleWrap.GetValueOnGameThread() != 0)
 			{
-				const FOSGasVent* Hole = Holes[FMath::RandHelper(Holes.Num())];
-				Holes.RemoveSingleSwap(Hole);
-				Gas->AddSource(HoleThread(), GunSmoke(), Hole->Location, ActionFrame.InverseTransformVectorNoScale(Up), FVector::ZeroVector, Action);
+				for (const FOSGasVent* Hole : Holes)
+				{
+					Gas->AddSource(HoleWrap(), GunSmoke(), Hole->Location, HoleOut(*Hole, 1.0f), GetOwner()->GetVelocity(), Action);
+				}
+			}
+			else
+			{
+				const FTransform ActionFrame = Action->GetComponentTransform();
+				const FVector Up = -OSGravityAt(GetWorld(), ActionFrame.GetLocation()).Acceleration.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+				for (int32 Index = 0; Index < 4 && !Holes.IsEmpty(); ++Index)
+				{
+					const FOSGasVent* Hole = Holes[FMath::RandHelper(Holes.Num())];
+					Holes.RemoveSingleSwap(Hole);
+					Gas->AddSource(HoleThread(), GunSmoke(), Hole->Location, ActionFrame.InverseTransformVectorNoScale(Up), FVector::ZeroVector, Action);
+				}
 			}
 		}
 		if (!OSGasCardsEnabled())
@@ -694,19 +744,25 @@ void UOSMuzzleFxComponent::Seep(const FOSWeapon& Def, const FTransform& Muzzle, 
 			// The hot barrel's thread: a small parcel rising out of the hole (20 cm/s against gravity, a narrow cone: a
 			// straight thread first, the flow curls it after), not carried by the gun - moved, the thread tears off and
 			// hangs. The heat (FOSPortSmoke) sets how many: one shot a faint thread, a burst a thicker, longer one.
+			// v16 (os.Fx.HoleWrap): out of its hole (a little back along the bore) at 6-12 cm/s and warm, so it rises
+			// round the barrel - a hole under the bore seeped straight up through it; in zero-G it leaves along the hole
+			// (the gravity fallback sent it into the barrel).
 			FOSGasRecipe R;
-			R.SpeedCm = 20.0f;
-			R.SpeedMin = 0.6f;
-			R.ConeDeg = 6.0f;
+			const bool bWrap = CVarHoleWrap.GetValueOnGameThread() != 0;
+			R.SpeedCm = bWrap ? 12.0f : 20.0f;
+			R.SpeedMin = bWrap ? 0.5f : 0.6f;
+			R.ConeDeg = bWrap ? 10.0f : 6.0f;
 			R.RadiusMinCm = 1.5f;
 			R.RadiusMaxCm = 2.0f;
 			R.MaxRadiusCm = 5.0f;
 			R.Mass = 0.7f;
 			R.Heat = 0.5f;
 			R.LifeSeconds = 2.5f;
+			R.FallCmPerS2 = bWrap ? -14.0f : 0.0f;
 			const FVector Where = Frame.TransformPosition(Vent.Location);
-			const FVector Up = -OSGravityAt(GetWorld(), Where).Acceleration.GetSafeNormal(UE_SMALL_NUMBER, Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()));
-			Gas->EmitNow(R, GunSmoke(), Where, Up, FVector::ZeroVector, 1, true);
+			const FVector Out = bWrap ? Frame.TransformVectorNoScale(HoleOut(Vent, 0.3f))
+				: -OSGravityAt(GetWorld(), Where).Acceleration.GetSafeNormal(UE_SMALL_NUMBER, Frame.TransformVectorNoScale(Vent.Direction.GetSafeNormal()));
+			Gas->EmitNow(R, GunSmoke(), Where, Out, FVector::ZeroVector, 1, true);
 		}
 		if (!OSGasCardsEnabled())
 		{

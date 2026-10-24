@@ -2859,7 +2859,13 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			P.Age += Dt;
 			if (P.Cling > 0.0f)
 			{
+				// Its own drag brakes the throw, not the carrier (a hole's pop stops by the shroud and rides on with the
+				// gun; drag on the whole velocity below would stop it dead in the world).
 				P.Cling -= Dt;
+				if (P.DragSeconds > 0.0f)
+				{
+					P.Throw *= FMath::Exp(-Dt / P.DragSeconds);
+				}
 				P.V = P.Carrier + P.Throw;
 			}
 			const FVector3f Before = P.P;
@@ -2970,7 +2976,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			}
 			// Its own drag, in a vacuum too (a hole's pop: 450 cm/s stopped within ~12 cm - without it a vacuum threw the
 			// 16 holes' puffs across the view as blobs).
-			if (P.DragSeconds > 0.0f)
+			if (P.DragSeconds > 0.0f && P.Cling <= 0.0f)
 			{
 				P.V *= FMath::Exp(-Dt / P.DragSeconds);
 			}
