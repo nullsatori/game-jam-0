@@ -201,4 +201,6 @@ private:
 	void SetState(EMKDoorState NewState);
 	/** The pawn the leaf would overlap at CandidateYaw, or null. */
 	AActor* FindPawnInLeafArc(float CandidateYaw) const;
+	/** A swing's draught through the doorway for the gas (v12 7c.5). */
+	void Draught();
 };

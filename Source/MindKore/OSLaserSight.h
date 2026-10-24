@@ -355,6 +355,8 @@ private:
 	FVector DotAxisU = FVector::ZeroVector;
 	FVector DotAxisV = FVector::ZeroVector;
 	float DotDrive = 1.0f;
+	/** The light through smoke from the lens to the dot (eased). */
+	float SmokeShare = 1.0f;
 	float ThreadLevel = 0.0f;
 	/** The camera the geometry was last worked out from; the speckle's boil (cm travelled + rest time). */
 	FTransform RefreshedView;

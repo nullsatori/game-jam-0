@@ -928,6 +928,7 @@ void UOSGasSubsystem::Emit(FCloud& Cloud, const FOSGasRecipe& R, const FVector& 
 		P.Mass = R.Mass;
 		P.Heat = R.Heat;
 		P.Warm = R.Heat;
+		P.Air = P.AirTarget = Cloud.bAir ? 1.0f : 0.0f;
 		P.Life = R.LifeSeconds * FMath::FRandRange(0.8f, 1.2f);
 		P.Cling = R.ClingSeconds;
 		P.MaxRadiusCm = R.MaxRadiusCm;
@@ -1252,6 +1253,58 @@ void UOSGasSubsystem::AddHeat(const FVector& Where, const FVector& Direction, in
 		H.Age = -0.05f * Index / FMath::Max(1, Count - 1);
 		H.Life = FMath::FRandRange(1.0f, 2.0f);
 	}
+}
+
+float UOSGasSubsystem::Transmittance(const FVector& A, const FVector& B, const UObject* Caller)
+{
+	const double Now = GetWorld()->GetTimeSeconds();
+	FSeenThrough* Cached = Caller ? SeenThrough.Find(Caller) : nullptr;
+	if (Cached && Now - Cached->At < 0.25)
+	{
+		return Cached->T;
+	}
+	const FVector Seg = B - A;
+	const double Length = Seg.Size();
+	float Tau = 0.0f;
+	if (Length > 1.0)
+	{
+		const FVector Dir = Seg / Length;
+		for (const FCloud& Cloud : Clouds)
+		{
+			if (!Cloud.IsAlive() || !Cloud.SnapBox.IsValid || !FMath::LineBoxIntersection(Cloud.SnapBox, A, B, Seg))
+			{
+				continue;
+			}
+			float CloudTau = 0.0f;
+			for (int32 I = 0; I < Cloud.Snap.Num(); ++I)
+			{
+				const FVector4f& S = Cloud.Snap[I];
+				const FVector M = FVector(S.X, S.Y, S.Z) - A;
+				const double Tc = M | Dir;
+				const double D2 = M.SizeSquared() - Tc * Tc;
+				const double R2 = double(S.W) * S.W;
+				if (D2 >= R2)
+				{
+					continue;
+				}
+				const double H = FMath::Sqrt(R2 - D2);
+				const double T0 = FMath::Max(Tc - H, 0.0), T1 = FMath::Min(Tc + H, Length);
+				if (T1 > T0)
+				{
+					CloudTau += Cloud.SnapDensity[I] * float(T1 - T0) * float(1.0 - D2 / R2);
+				}
+			}
+			Tau += CloudTau * Cloud.Look.Extinction * Cloud.DrawGain;
+		}
+	}
+	const float T = FMath::Exp(-Tau);
+	if (Caller)
+	{
+		FSeenThrough& Entry = SeenThrough.FindOrAdd(Caller);
+		Entry.At = Now;
+		Entry.T = T;
+	}
+	return T;
 }
 
 void UOSGasSubsystem::AddAirFlow(const FVector& Location, const FVector& Direction, float SpeedCm, float ReachCm, float Seconds)
@@ -1588,6 +1641,7 @@ void UOSGasSubsystem::UpdatePost()
 		const float FadeAt = Cloud.bHands ? FMath::Min(Cloud.FadeAge, HandFrom) : Cloud.FadeAge;
 		const float LifeFade = Cloud.bZone ? 1.0f : FMath::Cube(1.0f - FMath::SmoothStep(0.3f * Cloud.Look.LifeSeconds, Cloud.Look.LifeSeconds, FadeAt));
 		const float EvictFade = Cloud.Evict > 0.0f ? FMath::Cube(Cloud.Evict / EvictSeconds) : 1.0f;
+		Cloud.DrawGain = LifeFade * EvictFade;
 		// The key light in display terms (the post-process is after the tonemapper): a soft knee, never blown white.
 		const bool bNewLight = CVarGasLight.GetValueOnGameThread() > 0;
 		const FLinearColor K = Cloud.KeyColour;
@@ -1820,6 +1874,38 @@ void UOSGasSubsystem::LaunchStep(FCloud& Cloud, int32 Steps, float Dt)
 	if (Cloud.Parcels.IsEmpty())
 	{
 		return;
+	}
+	// Air or vacuum per parcel (v12 7c.4): an eighth of them each launch, round (the zones are the game thread's).
+	{
+		const int32 Num = Cloud.Parcels.Num();
+		const int32 Share = FMath::Max(1, (Num + 7) / 8);
+		for (int32 K = 0; K < Share && Num > 0; ++K)
+		{
+			Cloud.AirCursor = (Cloud.AirCursor + 1) % Num;
+			FOSGasParcel& P = Cloud.Parcels[Cloud.AirCursor];
+			P.AirTarget = OSAirZoneAt(GetWorld(), Cloud.Origin + FVector(P.P)) ? 1.0f : 0.0f;
+		}
+	}
+	// The snapshot Transmittance reads (the parcels are the step's until it is done).
+	{
+		Cloud.Snap.Reset();
+		Cloud.SnapDensity.Reset();
+		Cloud.SnapBox = FBox(ForceInit);
+		const float MassScale = Cloud.bAir ? AirMassScale : VacuumMassScale;
+		for (const FOSGasParcel& P : Cloud.Parcels)
+		{
+			const float Thin = Cloud.bAir ? FMath::Clamp(FMath::Square(3.0f / P.RadiusCm), 0.02f, 1.0f) : FMath::Clamp(5.0f / P.RadiusCm, 0.05f, 1.0f);
+			// The kernel's core density as the splat lays it, about half torn by the noise.
+			const float Density = FMath::Min(P.Mass * Thin * MassScale, 0.95f) * DensityGain * 0.5f;
+			if (Density < 1e-3f)
+			{
+				continue;
+			}
+			const FVector W = Cloud.Origin + FVector(P.P);
+			Cloud.Snap.Add(FVector4f(FVector3f(W), P.RadiusCm));
+			Cloud.SnapDensity.Add(Density);
+			Cloud.SnapBox += FBox(W - FVector(P.RadiusCm), W + FVector(P.RadiusCm));
+		}
 	}
 	FCloud* Ptr = &Cloud;
 	Cloud.PackedTime = Cloud.SimTime;
@@ -2112,7 +2198,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			for (FOSGasParcel& P : Parcels)
 			{
 				const FVector3f C = (P.P - GridCentre) / GridCell + FVector3f(0.5f * N - 0.5f);
-				if (C.GetMin() < 0.0f || C.GetMax() > N - 1.0f)
+				if (C.GetMin() < 0.0f || C.GetMax() > N - 1.0f || P.Air < 0.5f)
 				{
 					continue;
 				}
@@ -2147,13 +2233,15 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				P.V = P.Carrier + P.Throw;
 			}
 			const FVector3f Before = P.P;
-			if (Cloud.bAir)
+			// Air or vacuum where it is now, eased over 0.2 s at a zone's border (v12 7c.4).
+			P.Air = FMath::FInterpConstantTo(P.Air, P.AirTarget, Dt, 1.0f / 0.2f);
+			if (P.Air > 0.0f)
 			{
 				// The gun's velocity it inherited goes into the air in ~0.2 s (a shot on the walk stops with the walker);
 				// in a vacuum it keeps it.
 				if (P.Cling <= 0.0f)
 				{
-					const FVector3f Lost = P.Carrier * (1.0f - FMath::Exp(-Dt / CarrierSeconds));
+					const FVector3f Lost = P.Carrier * ((1.0f - FMath::Exp(-Dt / CarrierSeconds)) * P.Air);
 					P.Carrier -= Lost;
 					P.V -= Lost;
 				}
@@ -2182,7 +2270,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					{
 						Target -= Down * (WarmLiftCm * P.Warm * GScale);
 					}
-					P.V = Target + (P.V - Target) * FMath::Exp(-Dt / AirRestSeconds);
+					P.V = Target + (P.V - Target) * FMath::Exp(-Dt * P.Air / AirRestSeconds);
 				}
 				if (P.Age > 1.0f)
 				{
@@ -2204,7 +2292,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			const float Speed = P.V.Size();
 			P.P += P.V * Dt;
 			P.RadiusCm = Cloud.bZone ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Max(P.MaxRadiusCm, 1.5f * Cloud.PackedCellCm))
-				: Cloud.bAir ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, P.MaxRadiusCm) : P.RadiusCm + VacuumGrowPerCm * Speed * Dt;
+				: P.Air > 0.5f ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Max(P.MaxRadiusCm, P.RadiusCm)) : P.RadiusCm + VacuumGrowPerCm * Speed * Dt;
 			P.Heat *= FMath::Exp(-Dt / HeatSeconds);
 			// Bodies push it out of themselves (within two steps) at their own speed.
 			for (const FOSSmokeSim::FMover& M : Cloud.Movers)

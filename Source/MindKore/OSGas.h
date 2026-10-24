@@ -181,6 +181,9 @@ struct FOSGasParcel
 	float HandOut = -1.0f;
 	float HandIn = -1.0f;
 	bool bHanded = false;
+	/** Air (1) or vacuum (0) where it is (v12 7c.4: checked on the game thread, eased over 0.2 s): rest and the grid, or ballistic. */
+	float Air = 1.0f;
+	float AirTarget = 1.0f;
 };
 
 /**
@@ -221,6 +224,12 @@ public:
 	 * gravity, living 1-2 s - seen only as the air's shimmer behind them, never as gas.
 	 */
 	void AddHeat(const FVector& Where, const FVector& Direction, int32 Count, float Heat = 1.0f);
+
+	/**
+	 * How much light gets through the gas from A to B (v12 7c.1): every cloud's parcels' kernels along the segment, from
+	 * their last launched step; 1 clear. Kept 0.25 s for each Caller (a flyer's sight, the laser's dot).
+	 */
+	float Transmittance(const FVector& A, const FVector& B, const UObject* Caller);
 	static constexpr int32 MaxHeat = 64;
 
 	/** A projectile's tunnel (as UOSMuzzleFxComponent::CarveRay): drawn at once, healing; the parcels in it lose mass and are pushed out. */
@@ -307,6 +316,14 @@ private:
 		/** A shot's cloud hands its gas to its zone's haze (from FadeAge 3 s); when it began (world s, -1 not yet). */
 		bool bHands = false;
 		double HandStart = -1.0;
+		/** Its parcels as they were at the last launch (world centre + radius, a density): Transmittance reads these. */
+		TArray<FVector4f> Snap;
+		TArray<float> SnapDensity;
+		FBox SnapBox = FBox(ForceInit);
+		/** Its density's gain as drawn last frame (the life's fade, the eviction). */
+		float DrawGain = 1.0f;
+		/** The next parcel whose air or vacuum is checked (an eighth at each launch). */
+		int32 AirCursor = 0;
 		/** The haze's gas's mean age (its phase's g ages with it), s. */
 		float HazeAge = 0.0f;
 		/** The parcels' frame origin, world (fixed for the cloud's life: floats stay small). */
@@ -456,6 +473,12 @@ private:
 		float RadiusCm, Heat, Age, Life;
 	};
 	TArray<FHeatPuff> HeatPuffs;
+	struct FSeenThrough
+	{
+		double At = -1e9;
+		float T = 1.0f;
+	};
+	TMap<TObjectKey<UObject>, FSeenThrough> SeenThrough;
 	TArray<FSource> Sources;
 	TArray<FTunnel> Tunnels;
 	TArray<FAirFlow> AirFlows;

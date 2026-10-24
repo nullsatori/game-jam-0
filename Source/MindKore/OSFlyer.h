@@ -945,6 +945,8 @@ private:
 	double CalmUntil = 0.0;
 	double NextSenseSeconds = 0.0;
 	bool bSeesPlayer = false;
+	/** Noticing through smoke: each look adds the light through (1 clear: at once). */
+	float NoticeCharge = 0.0f;
 	float AimedSeconds = 0.0f;
 	int32 BiteCount = 0;
 	int32 CallScreeches = 0;

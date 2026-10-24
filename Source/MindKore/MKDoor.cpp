@@ -14,6 +14,7 @@
 #include "NavigationPath.h"
 #include "MKMechanismMotion.h"
 #include "MindKore.h"
+#include "OSGas.h"
 
 #define LOCTEXT_NAMESPACE "MKDoor"
 
@@ -150,6 +151,7 @@ void AMKDoor::OpenAwayFrom(const FVector& PusherLocation)
 	SwingAlpha = 0.0f;
 	MKReportMechanismNoise(this, GetActorLocation(), SwingNoiseLoudness, TEXT("MK_Door"));
 	SetState(EMKDoorState::Opening);
+	Draught();
 }
 
 void AMKDoor::Close()
@@ -163,6 +165,17 @@ void AMKDoor::Close()
 	SwingAlpha = 0.0f;
 	MKReportMechanismNoise(this, GetActorLocation(), SwingNoiseLoudness, TEXT("MK_Door"));
 	SetState(EMKDoorState::Closing);
+	Draught();
+}
+
+void AMKDoor::Draught()
+{
+	// The swinging leaf moves the room's air through the doorway (v12 7c.5): the gas within 1.5 m drawn to it for 0.6 s.
+	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+	{
+		const FVector At = Leaf ? FVector(Leaf->Bounds.Origin) : GetActorLocation();
+		Gas->AddAirFlow(At, GetActorForwardVector(), 60.0f, 150.0f, 0.6f);
+	}
 }
 
 void AMKDoor::Unlock()
