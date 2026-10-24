@@ -121,7 +121,7 @@ namespace
 		TEXT("os.Gas.ZoneAmbient"), 0.5f,
 		TEXT("The zone's haze: the room's light on it, x (it is seen by the lamps, not by the room)."));
 	TAutoConsoleVariable<float> CVarGasZoneDensity(
-		TEXT("os.Gas.ZoneDensity"), 0.4f,
+		TEXT("os.Gas.ZoneDensity"), 0.6f,
 		TEXT("The zone's haze: the gas handed to it, x its mass."));
 	TAutoConsoleVariable<float> CVarGasShimmer(
 		TEXT("os.Gas.Shimmer"), 2.0f,

@@ -137,7 +137,7 @@
 | `os.Gas.WarmLift` (переменная) | значение (умолч. `4.0f`) | Residual warmth's lift at full gravity, cm/s (4; try 10-15: the haze gathers under the ceiling sooner). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneAlbedo` (переменная) | значение (умолч. `0.8f`) | The haze's albedo it ages to over 20 s (old smoke coagulates and whitens: a light veil in the light, dark in the shade). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneAmbient` (переменная) | значение (умолч. `0.5f`) | The zone's haze: the room's light on it, x (it is seen by the lamps, not by the room). | `Source/MindKore/OSGas.cpp` |
-| `os.Gas.ZoneDensity` (переменная) | значение (умолч. `0.4f`) | The zone's haze: the gas handed to it, x its mass. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.ZoneDensity` (переменная) | значение (умолч. `0.6f`) | The zone's haze: the gas handed to it, x its mass. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneLamps` (переменная) | значение (умолч. `16`) | The haze's lamps a block chooses from (4-16). | `Source/MindKore/OSGas.cpp` |
 
 ## `os.Gravity`
