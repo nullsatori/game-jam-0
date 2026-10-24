@@ -186,6 +186,12 @@ namespace
 	TAutoConsoleVariable<int32> CVarGasSpreadLog(
 		TEXT("os.Gas.SpreadLog"), 0,
 		TEXT("1: every 5 s each haze logs its parcels, mass, spread across and up (mass-weighted sigma, cm), CentreT - the spreading's probe (v14)."));
+	TAutoConsoleVariable<int32> CVarGasHazeRoom(
+		TEXT("os.Gas.HazeRoom"), 1,
+		TEXT("1: the haze knows its room - a 25 cm grid flooded from the first shot by overlap tests: its walls hold it, open doors let it through, vacuum stops it (v14); 0: only the zone box's faces and the shots' planes."));
+	TAutoConsoleVariable<float> CVarGasHazeFillMs(
+		TEXT("os.Gas.HazeFillMs"), 0.15f,
+		TEXT("The haze rooms' flood: game thread time a frame, ms."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -1448,6 +1454,7 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 		}
 	}
 	UpdateTorchShadow(DeltaTime);
+	FloodRooms();
 	// Heat puffs: up 20-30 cm/s against gravity (none in zero-G), widening, cooling.
 	for (int32 Index = HeatPuffs.Num() - 1; Index >= 0; --Index)
 	{
@@ -1637,7 +1644,22 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 	const FVector Centre = Cloud.Origin + FVector(Cloud.DrawnCentre);
 	if (!bBusy && !Cloud.bZone)
 	{
+		// The room's flood starts with the first shot in an air zone (3 s ahead of the hand-over).
+		if (Cloud.bAir && CVarGasHazeRoom.GetValueOnGameThread() > 0)
+		{
+			if (const AOSGravityZone* Zone = OSAirZoneAt(World, Cloud.Origin); Zone && Zone->HazeHalfLifeSeconds > 0.0f)
+			{
+				RoomFor(Zone, Cloud.Origin);
+			}
+		}
 		HandOver(Cloud, Centre);
+	}
+	if (!bBusy && Cloud.bZone)
+	{
+		const AOSGravityZone* ZoneOf = Cloud.Zone.Get();
+		const TSharedPtr<FOSGasRoom>* Found = ZoneOf ? Rooms.Find(ZoneOf) : nullptr;
+		Cloud.Room = Found ? *Found : nullptr;
+		Cloud.bUseRoom = Cloud.Room.IsValid() && CVarGasHazeRoom.GetValueOnGameThread() > 0;
 	}
 	if (!bBusy && Cloud.bZone)
 	{
@@ -2646,6 +2668,50 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					if (In < 0.0f)
 					{
 						P.V -= Normal * In;
+					}
+					// The wander reflects off a wall (v14): nothing piles up against it, nothing leaks through.
+					const float WIn = P.Wander | Normal;
+					if (WIn < 0.0f)
+					{
+						P.Wander -= Normal * (2.0f * WIn);
+					}
+				}
+			}
+			// The room's walls (v14): a parcel that stepped into a solid cell goes back along the axes it crossed, its speed
+			// into the wall dropped and its wander reflected; one inside a solid cell (a door closed on it) is pushed to the
+			// nearest air at 60 cm/s at most - by velocity, not a jump.
+			if (Cloud.bUseRoom && Cloud.Room.IsValid())
+			{
+				const FOSGasRoom& Room = *Cloud.Room;
+				const FVector NowAt = Cloud.Origin + FVector(P.P);
+				if (Room.IsSolid(NowAt))
+				{
+					const FVector WasAt = Cloud.Origin + FVector(Before);
+					if (!Room.IsSolid(WasAt))
+					{
+						const FIntVector CN = Room.CellOf(NowAt), CW = Room.CellOf(WasAt);
+						for (int32 Axis = 0; Axis < 3; ++Axis)
+						{
+							if (CN[Axis] != CW[Axis])
+							{
+								P.P[Axis] = Before[Axis];
+								P.V[Axis] = 0.0f;
+								P.Wander[Axis] = -P.Wander[Axis];
+							}
+						}
+					}
+					else
+					{
+						const FIntVector C = Room.CellOf(NowAt);
+						for (const FIntVector& Way : { FIntVector(0, 0, 1), FIntVector(1, 0, 0), FIntVector(-1, 0, 0), FIntVector(0, 1, 0), FIntVector(0, -1, 0), FIntVector(0, 0, -1) })
+						{
+							const FIntVector Next = C + Way;
+							if (Room.Inside(Next) && Room.Cells[Room.Index(Next)] != 2)
+							{
+								P.V = FVector3f(Way) * 60.0f;
+								break;
+							}
+						}
 					}
 				}
 			}
@@ -3733,6 +3799,135 @@ void UOSGasSubsystem::UpdateTorchShadow(float DeltaTime)
 	FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, MaxTorchRes, MaxTorchRes);
 	TorchTexture->UpdateTextureRegions(0, 1, Region, MaxTorchRes * sizeof(FLinearColor), sizeof(FLinearColor), Bytes,
 		[](uint8* Src, const FUpdateTextureRegion2D* Regions) { FMemory::Free(Src); delete Regions; });
+}
+
+TSharedPtr<FOSGasRoom> UOSGasSubsystem::RoomFor(const AOSGravityZone* Zone, const FVector& Where)
+{
+	if (TSharedPtr<FOSGasRoom>* Found = Rooms.Find(Zone))
+	{
+		return *Found;
+	}
+	// The zone's box within 15 m of the first shot, 25 cm cells, 32768 at most (the radius shrunk to fit).
+	FVector Centre;
+	const FCollisionShape Shape = Zone->GetQueryShape(Centre);
+	const FVector Extent = Shape.IsSphere() ? FVector(Shape.GetSphereRadius()) : Shape.GetExtent();
+	const FBox ZoneBox(Centre - Extent, Centre + Extent);
+	TSharedPtr<FOSGasRoom> Room = MakeShared<FOSGasRoom>();
+	float Reach = 1500.0f;
+	FBox Box;
+	for (;;)
+	{
+		Box = ZoneBox.Overlap(FBox(Where - FVector(Reach), Where + FVector(Reach)));
+		const FVector Size = Box.GetSize();
+		Room->Dim = FIntVector(FMath::Max(1, FMath::CeilToInt(Size.X / Room->Cell)), FMath::Max(1, FMath::CeilToInt(Size.Y / Room->Cell)), FMath::Max(1, FMath::CeilToInt(Size.Z / Room->Cell)));
+		if (int64(Room->Dim.X) * Room->Dim.Y * Room->Dim.Z <= 32768 || Reach < 200.0f)
+		{
+			break;
+		}
+		Reach *= 0.85f;
+	}
+	Room->Lo = Box.Min;
+	Room->Cells.SetNumZeroed(Room->Dim.X * Room->Dim.Y * Room->Dim.Z);
+	const FIntVector Seed = Room->CellOf(Where);
+	if (Room->Inside(Seed))
+	{
+		Room->Cells[Room->Index(Seed)] = 3;
+		Room->Queue.Add(Room->Index(Seed));
+	}
+	Rooms.Add(Zone, Room);
+	UE_LOG(LogMindKore, Log, TEXT("Gas: the room of %s floods from %s (%dx%dx%d cells of %.0f cm)"), *Zone->GetName(), *Where.ToCompactString(), Room->Dim.X, Room->Dim.Y, Room->Dim.Z, Room->Cell);
+	return Room;
+}
+
+void UOSGasSubsystem::FloodRooms()
+{
+	if (CVarGasHazeRoom.GetValueOnGameThread() == 0 || Rooms.IsEmpty())
+	{
+		return;
+	}
+	const double Until = FPlatformTime::Seconds() + CVarGasHazeFillMs.GetValueOnGameThread() / 1000.0;
+	UWorld* World = GetWorld();
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(OSGasRoom), false);
+	if (const APlayerController* Controller = World->GetFirstPlayerController(); Controller && Controller->GetPawn())
+	{
+		Params.AddIgnoredActor(Controller->GetPawn());
+		TArray<AActor*> Carried;
+		Controller->GetPawn()->GetAttachedActors(Carried, true, true);
+		Params.AddIgnoredActors(Carried);
+	}
+	FCollisionObjectQueryParams Types;
+	Types.AddObjectTypesToQuery(ECC_WorldStatic);
+	Types.AddObjectTypesToQuery(ECC_WorldDynamic);
+	for (auto& Pair : Rooms)
+	{
+		FOSGasRoom& Room = *Pair.Value;
+		// Written only while its haze takes no step (the step reads the cells).
+		const AOSGravityZone* Zone = Pair.Key.ResolveObjectPtr();
+		if (!Zone || Room.Head >= Room.Queue.Num() || Clouds.ContainsByPredicate([Zone](const FCloud& C) { return C.bZone && C.IsAlive() && C.Zone.Get() == Zone && C.IsBusy(); }))
+		{
+			continue;
+		}
+		while (Room.Head < Room.Queue.Num() && FPlatformTime::Seconds() < Until)
+		{
+			const int32 I = Room.Queue[Room.Head++];
+			const FIntVector C(I % Room.Dim.X, (I / Room.Dim.X) % Room.Dim.Y, I / (Room.Dim.X * Room.Dim.Y));
+			const FVector At = Room.CentreOf(C);
+			// Solid: something static in the cell (a box 0.4 of it: a jamb does not close a doorway), or no air there.
+			const bool bSolid = World->OverlapAnyTestByObjectType(At, FQuat::Identity, Types, FCollisionShape::MakeBox(FVector(0.4f * Room.Cell)), Params)
+				|| OSAirZoneAt(World, At) != Zone;
+			Room.Cells[I] = bSolid ? 2 : 1;
+			if (bSolid)
+			{
+				continue;
+			}
+			for (const FIntVector& Step : { FIntVector(1, 0, 0), FIntVector(-1, 0, 0), FIntVector(0, 1, 0), FIntVector(0, -1, 0), FIntVector(0, 0, 1), FIntVector(0, 0, -1) })
+			{
+				const FIntVector N = C + Step;
+				if (Room.Inside(N) && Room.Cells[Room.Index(N)] == 0)
+				{
+					Room.Cells[Room.Index(N)] = 3;
+					Room.Queue.Add(Room.Index(N));
+				}
+			}
+		}
+		if (Room.Head >= Room.Queue.Num())
+		{
+			int32 Air = 0, Solid = 0;
+			for (const uint8 Each : Room.Cells)
+			{
+				Air += Each == 1 ? 1 : 0;
+				Solid += Each == 2 ? 1 : 0;
+			}
+			UE_LOG(LogMindKore, Log, TEXT("Gas: the room of %s flooded - %d air cells (%.1f m3), %d walls"), *Zone->GetName(), Air, Air * FMath::Cube(Room.Cell / 100.0f), Solid);
+			// Done: the queue's memory back.
+			Room.Queue.Empty();
+			Room.Head = 0;
+		}
+	}
+}
+
+void UOSGasSubsystem::RoomChanged(const FBox& Bounds)
+{
+	for (auto& Pair : Rooms)
+	{
+		FOSGasRoom& Room = *Pair.Value;
+		const FIntVector A = Room.CellOf(Bounds.Min), B = Room.CellOf(Bounds.Max);
+		for (int32 Z = FMath::Max(A.Z, 0); Z <= FMath::Min(B.Z, Room.Dim.Z - 1); ++Z)
+		{
+			for (int32 Y = FMath::Max(A.Y, 0); Y <= FMath::Min(B.Y, Room.Dim.Y - 1); ++Y)
+			{
+				for (int32 X = FMath::Max(A.X, 0); X <= FMath::Min(B.X, Room.Dim.X - 1); ++X)
+				{
+					const int32 I = Room.Index(FIntVector(X, Y, Z));
+					if (Room.Cells[I] != 3)
+					{
+						Room.Cells[I] = 3;
+						Room.Queue.Add(I);
+					}
+				}
+			}
+		}
+	}
 }
 
 float UOSGasSubsystem::LampSees(FCloud& Cloud, const ULightComponent* Lamp, const FVector& Where, const FVector& Toward, bool bDirectional, const FBox* Points)

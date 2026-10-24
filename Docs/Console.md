@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 110 команд, 56 переменных.
+Всего: 110 команд, 58 переменных.
 
 ## `os.Attach`
 
@@ -114,7 +114,9 @@
 | `os.Gas.HazeDiffuseZ` (переменная) | значение (умолч. `0.33f`) | The haze's wander: its vertical share (warm air over cool is stable). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.HazeDiffuseZeroG` (переменная) | значение (умолч. `0.5f`) | The haze's wander in zero-G, x (isotropic: no convection mixes it). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.HazeEddySeconds` (переменная) | значение (умолч. `10.0f`) | The haze's wander: how long a parcel keeps its eddy's velocity, s. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.HazeFillMs` (переменная) | значение (умолч. `0.15f`) | The haze rooms' flood: game thread time a frame, ms. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.HazeRadius` (переменная) | значение (умолч. `60.0f`) | The haze's parcels diffuse up to this radius, cm (60: a veil; 20: as before 24.10). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.HazeRoom` (переменная) | значение (умолч. `1`) | 1: the haze knows its room - a 25 cm grid flooded from the first shot by overlap tests: its walls hold it, open doors let it through, vacuum stops it (v14); 0: only the zone box's faces and the shots' planes. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Light` (переменная) | значение (умолч. `1`) | 1: the gas lit by the room (the frame before it, 1/32 and blurred) and the key lamp's full colour, a darker albedo (v11 stage 6); 0: the light before stage 6 (A/B). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.LightScale` (переменная) | значение (умолч. `2.0f`) | os.Gas.Light 1: the lamps' light on the gas, x. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.LowRes` (переменная) | значение (умолч. `1`) | 1: the gas drawn once per screen block by its own pass after the tonemapper (v11 stage 5); 0: by M_OS_GasPost in every pixel (the old way, kept until the merge). | `Source/MindKore/OSGas.cpp` |

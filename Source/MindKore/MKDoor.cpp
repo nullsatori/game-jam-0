@@ -123,6 +123,14 @@ void AMKDoor::SetState(EMKDoorState NewState)
 	UE_LOG(LogMindKore, Log, TEXT("Door %s: %s -> %s (yaw %.0f)"), *GetName(),
 		*UEnum::GetValueAsString(State), *UEnum::GetValueAsString(NewState), CurrentYaw);
 	State = NewState;
+	// The swing done: the haze's room tests the doorway as it now stands (v14).
+	if (State == EMKDoorState::Open || State == EMKDoorState::Closed || State == EMKDoorState::Ajar)
+	{
+		if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+		{
+			Gas->RoomChanged(Leaf ? Leaf->Bounds.GetBox().ExpandBy(40.0f) : FBox(GetActorLocation() - FVector(100.0f), GetActorLocation() + FVector(100.0f)));
+		}
+	}
 }
 
 void AMKDoor::OpenAwayFrom(const FVector& PusherLocation)
@@ -175,6 +183,8 @@ void AMKDoor::Draught()
 	{
 		const FVector At = Leaf ? FVector(Leaf->Bounds.Origin) : GetActorLocation();
 		Gas->AddAirFlow(At, GetActorForwardVector(), 60.0f, 150.0f, 0.6f);
+		// The haze's room tests the doorway again (v14): closed it walls the haze in, open it lets it through.
+		Gas->RoomChanged(Leaf ? Leaf->Bounds.GetBox().ExpandBy(40.0f) : FBox(At - FVector(100.0f), At + FVector(100.0f)));
 	}
 }
 

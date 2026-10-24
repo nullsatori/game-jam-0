@@ -149,6 +149,30 @@ struct FOSGasRecipe
 	float FallCmPerS2 = 0.0f;
 };
 
+/**
+ * A zone's room for its haze (v14): a grid of 25 cm cells - unknown (air), air, solid - flooded from the first shot by
+ * overlap tests on the game thread within a time budget; the haze stays inside its walls and flows through open doors.
+ */
+struct FOSGasRoom
+{
+	FVector Lo = FVector::ZeroVector;
+	float Cell = 25.0f;
+	FIntVector Dim = FIntVector(0);
+	/** 0 unknown (taken as air), 1 air, 2 solid, 3 queued. */
+	TArray<uint8> Cells;
+	TArray<int32> Queue;
+	int32 Head = 0;
+	int32 Index(const FIntVector& C) const { return (C.Z * Dim.Y + C.Y) * Dim.X + C.X; }
+	bool Inside(const FIntVector& C) const { return C.X >= 0 && C.Y >= 0 && C.Z >= 0 && C.X < Dim.X && C.Y < Dim.Y && C.Z < Dim.Z; }
+	FIntVector CellOf(const FVector& World) const { return FIntVector(FMath::FloorToInt((World.X - Lo.X) / Cell), FMath::FloorToInt((World.Y - Lo.Y) / Cell), FMath::FloorToInt((World.Z - Lo.Z) / Cell)); }
+	FVector CentreOf(const FIntVector& C) const { return Lo + (FVector(C) + FVector(0.5)) * Cell; }
+	bool IsSolid(const FVector& World) const
+	{
+		const FIntVector C = CellOf(World);
+		return Inside(C) && Cells[Index(C)] == 2;
+	}
+};
+
 /** One parcel of gas, box... cloud-origin frame (cm, world axes). */
 struct FOSGasParcel
 {
@@ -332,6 +356,9 @@ private:
 		float HazeDiffuse = 0.0f, HazeDiffuseZ = 0.33f, HazeEddy = 10.0f, HazeZeroG = 0.5f;
 		/** Steps taken (the wander's random draws go by it: the same at any frame rate). */
 		uint32 StepIndex = 0;
+		/** Its zone's room (v14), read by its step; written by the game thread only while no step runs. */
+		TSharedPtr<FOSGasRoom> Room;
+		bool bUseRoom = false;
 		/** World time = SimTime + this (set at each launch: the hand-over's ramps go by world time in both clouds). */
 		double SimToWorld = 0.0;
 		/** A shot's cloud hands its gas to its zone's haze (from FadeAge 3 s); when it began (world s, -1 not yet). */
@@ -527,6 +554,16 @@ private:
 	TArray<TWeakObjectPtr<ULightComponent>> KeyLights;
 	/** The player's own lamps (the torch, the muzzle's flash, the Nixie's glow): gathered every frame, never waiting for KeyLights' second. */
 	TArray<TWeakObjectPtr<ULightComponent>> PlayerLights;
+	/** The zones' rooms for their haze (v14), from their first shot. */
+	TMap<TObjectKey<AOSGravityZone>, TSharedPtr<FOSGasRoom>> Rooms;
+	/** The zone's room, made with its flood seeded at Where if it has none. */
+	TSharedPtr<FOSGasRoom> RoomFor(const AOSGravityZone* Zone, const FVector& Where);
+	/** The rooms' floods for this frame within os.Gas.HazeFillMs. */
+	void FloodRooms();
+public:
+	/** A door swung (v14): the rooms' cells in Bounds are tested again (a closed door walls the haze in, an open one lets it through). */
+	void RoomChanged(const FBox& Bounds);
+private:
 	/**
 	 * The torch's shadow map for the gas (v13 13a): a square of traces round its outer cone from the lamp (distance to
 	 * the first hit, eased), a few texels a frame in turn, re-sampled into the lamp's new frame as it turns.
