@@ -47,6 +47,8 @@ BEGIN_SHADER_PARAMETER_STRUCT(FOSGasCommonParameters, )
 	SHADER_PARAMETER(float, GasBands)
 	SHADER_PARAMETER(float, GasDitherPx)
 	SHADER_PARAMETER(float, GasSmoothAlpha)
+	SHADER_PARAMETER(float, GasDitherHold)
+	SHADER_PARAMETER(float, GasDitherGrain)
 	SHADER_PARAMETER_TEXTURE(Texture2D<float4>, GasHeat)
 	SHADER_PARAMETER(float, GasHeatCount)
 	SHADER_PARAMETER(float, GasShimmer)
@@ -151,6 +153,28 @@ public:
 };
 IMPLEMENT_GLOBAL_SHADER(FOSGasAmbientMeanCS, "/MindKoreShaders/OSGas.usf", "AmbientMeanCS", SF_Compute);
 
+/** v13 13e: a block's opacity held against its last frame's (through the camera's turn). */
+class FOSGasHoldCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FOSGasHoldCS);
+	SHADER_USE_PARAMETER_STRUCT(FOSGasHoldCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_STRUCT_INCLUDE(FOSGasCommonParameters, Common)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float4>, HoldBlocks)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float>, HoldHistory)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, OutHeld)
+		SHADER_PARAMETER(float, HoldHasHistory)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+};
+IMPLEMENT_GLOBAL_SHADER(FOSGasHoldCS, "/MindKoreShaders/OSGas.usf", "HoldCS", SF_Compute);
+
 class FOSGasBlockCS : public FGlobalShader
 {
 public:
@@ -163,6 +187,7 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, OutEdge)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, OutLamp)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, OutHeatNear)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, OutFirst)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -187,6 +212,8 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float4>, BlockLamp)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float>, BlockHeatNear)
 		SHADER_PARAMETER_SAMPLER(SamplerState, BlockSampler)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float>, BlockHeld)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float>, BlockFirst)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -198,7 +225,7 @@ public:
 IMPLEMENT_GLOBAL_SHADER(FOSGasCompositePS, "/MindKoreShaders/OSGas.usf", "MainCompositePS", SF_Pixel);
 
 FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& View, const FPostProcessMaterialInputs& Inputs, const FOSGasRenderData& Data,
-	TRefCountPtr<IPooledRenderTarget>& AmbientHistory)
+	TRefCountPtr<IPooledRenderTarget>& AmbientHistory, TRefCountPtr<IPooledRenderTarget>& HoldHistory)
 {
 	const FSceneTextureUniformParameters* SceneTextures = Inputs.SceneTextures.SceneTextures ? Inputs.SceneTextures.SceneTextures->GetContents() : nullptr;
 	// No clouds, nothing to draw - unless a debug view, which shows its (empty) opacity, not the scene.
@@ -308,6 +335,8 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 		C.GasBands = Data.Bands;
 		C.GasDitherPx = Data.DitherPx;
 		C.GasSmoothAlpha = Data.SmoothAlpha;
+		C.GasDitherHold = Data.DitherHold;
+		C.GasDitherGrain = Data.DitherGrain;
 		C.GasHeat = RHIOf(Data.Heat);
 		C.GasHeatCount = float(Data.HeatCount);
 		C.GasShimmer = Data.Shimmer;
@@ -329,15 +358,30 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 	FRDGTextureRef BlockLamp = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_FloatRGBA, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.BlockLamp"));
 	FRDGTextureRef BlockHeatNear = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_R32_FLOAT, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.HeatNear"));
 	FRDGTextureRef BlockEdge = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_R32_FLOAT, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.Edge"));
+	FRDGTextureRef BlockFirst = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_R32_FLOAT, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.First"));
+	FRDGTextureRef BlockHeld = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_R16F, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.Held"));
 	{
 		FOSGasBlockCS::FParameters* P = GraphBuilder.AllocParameters<FOSGasBlockCS::FParameters>();
 		FillCommon(P->Common);
 		P->OutBlock = GraphBuilder.CreateUAV(BlockResult);
 		P->OutEdge = GraphBuilder.CreateUAV(BlockEdge);
+		P->OutFirst = GraphBuilder.CreateUAV(BlockFirst);
 		P->OutLamp = GraphBuilder.CreateUAV(BlockLamp);
 		P->OutHeatNear = GraphBuilder.CreateUAV(BlockHeatNear);
 		TShaderMapRef<FOSGasBlockCS> Shader(ShaderMap);
 		FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("OSGas.Blocks %dx%d", Blocks.X, Blocks.Y), Shader, P, FComputeShaderUtils::GetGroupCount(Blocks, FIntPoint(8, 8)));
+	}
+	// The hold (v13 13e): this frame's block opacity against the last frame's, through the camera's turn.
+	{
+		const bool bHistory = HoldHistory.IsValid() && HoldHistory->GetDesc().Extent == Blocks;
+		FOSGasHoldCS::FParameters* P = GraphBuilder.AllocParameters<FOSGasHoldCS::FParameters>();
+		FillCommon(P->Common);
+		P->HoldBlocks = BlockResult;
+		P->HoldHistory = bHistory ? GraphBuilder.RegisterExternalTexture(HoldHistory) : GSystemTextures.GetBlackDummy(GraphBuilder);
+		P->OutHeld = GraphBuilder.CreateUAV(BlockHeld);
+		P->HoldHasHistory = bHistory ? 1.0f : 0.0f;
+		FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("OSGas.Hold"), TShaderMapRef<FOSGasHoldCS>(ShaderMap), P, FComputeShaderUtils::GetGroupCount(Blocks, FIntPoint(8, 8)));
+		GraphBuilder.QueueTextureExtraction(BlockHeld, &HoldHistory);
 	}
 	FScreenPassRenderTarget Output = Inputs.OverrideOutput;
 	if (!Output.IsValid())
@@ -351,6 +395,8 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 		P->SceneColorSampler = TStaticSamplerState<SF_Point>::GetRHI();
 		P->BlockResult = BlockResult;
 		P->BlockEdge = BlockEdge;
+		P->BlockHeld = BlockHeld;
+		P->BlockFirst = BlockFirst;
 		P->BlockLamp = BlockLamp;
 		P->BlockHeatNear = BlockHeatNear;
 		P->BlockSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();

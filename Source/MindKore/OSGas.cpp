@@ -138,8 +138,14 @@ namespace
 		TEXT("os.Gas.ZoneAlbedo"), 0.8f,
 		TEXT("The haze's albedo it ages to over 20 s (old smoke coagulates and whitens: a light veil in the light, dark in the shade)."));
 	TAutoConsoleVariable<int32> CVarGasDither(
-		TEXT("os.Gas.Dither"), 1,
-		TEXT("1: the gas's opacity bands thresholded by an ordered 4x4 Bayer over the screen blocks (thin gas a sparse even lattice, not snow), the tail from 0.03; 0: a hash per block, the tail from 0.12 (before v12)."));
+		TEXT("os.Gas.Dither"), 2,
+		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
+	TAutoConsoleVariable<float> CVarGasDitherHold(
+		TEXT("os.Gas.DitherHold"), 0.125f,
+		TEXT("os.Gas.Dither 2: a block keeps its last frame's opacity while the new one is within this (0.5 / bands)."));
+	TAutoConsoleVariable<float> CVarGasDitherGrain(
+		TEXT("os.Gas.DitherGrain"), 0.5f,
+		TEXT("os.Gas.Dither 2: the world grain's nudge of the threshold, x half a level."));
 	TAutoConsoleVariable<int32> CVarGasBands(
 		TEXT("os.Gas.Bands"), 4,
 		TEXT("The gas's opacity levels (4; 8 a finer variant)."));
@@ -225,11 +231,13 @@ private:
 			FScopeLock Lock(&DataLock);
 			Now = Data;
 		}
-		return OSAddGasPasses(GraphBuilder, View, Inputs, Now, AmbientHistory);
+		return OSAddGasPasses(GraphBuilder, View, Inputs, Now, AmbientHistory, HoldHistory);
 	}
 
 	/** The room's light last frame (render thread only). */
 	TRefCountPtr<IPooledRenderTarget> AmbientHistory;
+	/** The blocks' held opacity last frame (v13 13e). */
+	TRefCountPtr<IPooledRenderTarget> HoldHistory;
 	FCriticalSection DataLock;
 	FOSGasRenderData Data;
 };
@@ -668,6 +676,9 @@ void UOSGasSubsystem::InitCloud(FCloud& Cloud, const FOSGasLook& Look, const FVe
 	Cloud.Origin = Where;
 	Cloud.bHands = false;
 	Cloud.HandStart = -1.0;
+	Cloud.FaintFor = 0.0f;
+	Cloud.MaxDensity = 1.0f;
+	Cloud.HazeAge = 0.0f;
 	Cloud.SimToWorld = World->GetTimeSeconds();
 	Cloud.DrawnCentre = Cloud.PackedCentre = FVector3f::ZeroVector;
 	Cloud.Parcels.Reset();
@@ -1351,6 +1362,20 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 			continue;
 		}
 	}
+	// The world's lamps, once a second for every cloud (PickKey ran it a cloud each and twice with the lamps' set).
+	KeyLightsAge += DeltaTime;
+	if (KeyLightsAge > 1.0f)
+	{
+		KeyLightsAge = 0.0f;
+		KeyLights.Reset();
+		for (TObjectIterator<ULightComponent> It; It; ++It)
+		{
+			if (It->GetWorld() == GetWorld())
+			{
+				KeyLights.Add(*It);
+			}
+		}
+	}
 	// Heat puffs: up 20-30 cm/s against gravity (none in zero-G), widening, cooling.
 	for (int32 Index = HeatPuffs.Num() - 1; Index >= 0; --Index)
 	{
@@ -1418,6 +1443,17 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 	// brought its old gas back up in a frame).
 	const float Hold = 0.3f * Cloud.Look.LifeSeconds;
 	Cloud.FadeAge = !bFed ? Cloud.FadeAge + DeltaTime : Cloud.FadeAge > Hold ? FMath::Max(Hold, Cloud.FadeAge - DeltaTime) : FMath::Min(Cloud.FadeAge + DeltaTime, Hold);
+	// The haze ends once it is no longer seen - its drawn opacity under 0.03 for 5 s, faded out as an eviction - not by
+	// its parcels' mass (it held its two slots ~5 minutes: a third zone got none).
+	if (Cloud.bZone && !bBusy && Cloud.bDrawable && Cloud.Evict <= 0.0f)
+	{
+		const float Seen = FMath::Max(1.0f - Cloud.CentreT, 1.0f - FMath::Exp(-Cloud.MaxDensity * Cloud.Look.Extinction * Cloud.PackedCellCm * 3.0f));
+		Cloud.FaintFor = Seen < 0.03f ? Cloud.FaintFor + DeltaTime : 0.0f;
+		if (Cloud.FaintFor >= 5.0f)
+		{
+			Cloud.Evict = EvictSeconds;
+		}
+	}
 	const bool bEvicted = Cloud.Evict > 0.0f && (Cloud.Evict -= DeltaTime) <= 0.0f;
 	// The haze waits 2 s for its first gas (the copies come ahead of their ramps).
 	const bool bEmpty = !bBusy && Cloud.Parcels.IsEmpty() && Cloud.Incoming.IsEmpty() && Cloud.Age > (Cloud.bZone ? 2.0f : 0.3f);
@@ -1849,6 +1885,8 @@ void UOSGasSubsystem::UpdatePost()
 		Frame.BlockPx = BlockPx;
 		Frame.DitherPx = CVarGasDitherPx.GetValueOnGameThread() > 0.0f ? CVarGasDitherPx.GetValueOnGameThread() : FMath::Max(1.0f, FMath::RoundToFloat(BlockPx * 0.5f));
 		Frame.SmoothAlpha = float(CVarGasSmoothAlpha.GetValueOnGameThread());
+		Frame.DitherHold = CVarGasDitherHold.GetValueOnGameThread();
+		Frame.DitherGrain = CVarGasDitherGrain.GetValueOnGameThread();
 		Frame.EyeClear = EyeClearCm;
 #if !UE_BUILD_SHIPPING
 		Frame.DebugMode = float(CVarGasDebugAlpha.GetValueOnGameThread());
@@ -2921,6 +2959,22 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		}
 		Cloud.CentreT = FMath::Exp(-Tau);
 	}
+	// The densest drawn cell (the haze's end, TickCloud).
+	if (Cloud.bZone)
+	{
+		float Most = 0.0f;
+		for (int32 Z = Lo.Z; Z <= Hi.Z; ++Z)
+		{
+			for (int32 Y = Lo.Y; Y <= Hi.Y; ++Y)
+			{
+				for (int32 X = Lo.X; X <= Hi.X; ++X)
+				{
+					Most = FMath::Max(Most, D[(Z * N + Y) * N + X]);
+				}
+			}
+		}
+		Cloud.MaxDensity = FMath::Min(Most * DensityGain, 1.0f);
+	}
 	Cloud.PackedCentre = Centre;
 	Cloud.PackedCellCm = Cell;
 	Cloud.bHasGas = bAny;
@@ -3084,10 +3138,7 @@ bool OSGasLampCone(const ULightComponent* L, FVector& OutAxis, float& OutCosOute
 void UOSGasSubsystem::UpdateLamps(FCloud& Cloud, const FVector& Centre, float DeltaTime, FVector3f& OutKeyDir)
 {
 	UWorld* World = GetWorld();
-	// The world's lamps as PickKey keeps them (refreshed once a second); their brightness read now.
-	FVector3f Unused;
-	FLinearColor UnusedColour;
-	PickKey(Centre, Unused, UnusedColour);
+	// The world's lamps (KeyLights, refreshed once a second in Tick); their brightness read now.
 	const APawn* Player = World->GetFirstPlayerController() ? World->GetFirstPlayerController()->GetPawn() : nullptr;
 	const FVector Half(0.5f * RenderCells * Cloud.RenderCellCm);
 	const FBox Box(Centre - Half, Centre + Half);
@@ -3229,20 +3280,6 @@ float UOSGasSubsystem::LampSees(FCloud& Cloud, const ULightComponent* Lamp, cons
 
 void UOSGasSubsystem::PickKey(const FVector& Where, FVector3f& OutDir, FLinearColor& OutColour)
 {
-	UWorld* World = GetWorld();
-	KeyLightsAge += World->GetDeltaSeconds();
-	if (KeyLightsAge > 1.0f)
-	{
-		KeyLightsAge = 0.0f;
-		KeyLights.Reset();
-		for (TObjectIterator<ULightComponent> It; It; ++It)
-		{
-			if (It->GetWorld() == World)
-			{
-				KeyLights.Add(*It);
-			}
-		}
-	}
 	float Best = 0.0f;
 	FVector Dir = FVector::UpVector;
 	FLinearColor Colour = FLinearColor(0.6f, 0.65f, 0.75f);

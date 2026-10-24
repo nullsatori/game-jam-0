@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 109 команд, 37 переменных.
+Всего: 109 команд, 39 переменных.
 
 ## `os.Attach`
 
@@ -103,7 +103,9 @@
 | `os.Gas.Cards` (переменная) | значение (умолч. `0`) | 1: the old card wisps (shroud, muzzle stream) are drawn too; 0 (v11): the gas is parcels only. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Debug` (переменная) | значение (умолч. `0`) | 1: draw every cloud's box (white), parcels (points, red heavy to blue light), bodies (yellow, velocity arrow), tunnels (cyan), wall/floor planes (green) and sources (magenta); 2: also each cloud's key lamp in the log once a second. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DebugAlpha` (переменная) | значение (умолч. `0`) | 1: the gas post-process draws only its opacity, grey (os.Gas.WalkProbe measures its jumps a frame); 3: the block less the pixel's own march; 4: the room's light the gas takes (os.Gas.Light 1). | `Source/MindKore/OSGas.cpp` |
-| `os.Gas.Dither` (переменная) | значение (умолч. `1`) | 1: the gas's opacity bands thresholded by an ordered 4x4 Bayer over the screen blocks (thin gas a sparse even lattice, not snow), the tail from 0.03; 0: a hash per block, the tail from 0.12 (before v12). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.Dither` (переменная) | значение (умолч. `2`) | 2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.DitherGrain` (переменная) | значение (умолч. `0.5f`) | os.Gas.Dither 2: the world grain's nudge of the threshold, x half a level. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.DitherHold` (переменная) | значение (умолч. `0.125f`) | os.Gas.Dither 2: a block keeps its last frame's opacity while the new one is within this (0.5 / bands). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DitherPx` (переменная) | значение (умолч. `0.0f`) | The Bayer threshold's cell, px (0: half a block, 1 px at least) - a finer lattice inside a block; the opacity is still the block's. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DriftCm` (переменная) | значение (умолч. `3.0f`) | The zone's air drift (v12 7a.3): a slow divergence-free field, 1.5 m across, changing over ~20 s - its top speed, cm/s. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Forward` (переменная) | значение (умолч. `0.7f`) | os.Gas.Light 1: the forward-scattering share of the lamps' light (Henyey-Greenstein g 0.55; the rest isotropic) - smoke against a lamp glows at its rim. | `Source/MindKore/OSGas.cpp` |

@@ -324,6 +324,9 @@ private:
 		float DrawGain = 1.0f;
 		/** The next parcel whose air or vacuum is checked (an eighth at each launch). */
 		int32 AirCursor = 0;
+		/** The haze's densest drawn cell and how long it has been unseen (it ends after 5 s). */
+		float MaxDensity = 1.0f;
+		float FaintFor = 0.0f;
 		/** The haze's gas's mean age (its phase's g ages with it), s. */
 		float HazeAge = 0.0f;
 		/** The parcels' frame origin, world (fixed for the cloud's life: floats stay small). */

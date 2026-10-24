@@ -31,6 +31,9 @@ float GasBands;
 // v12 7d: the Bayer cell, px (finer than a block); 1: the block's result read bilinearly between the blocks' centres.
 float GasDitherPx;
 float GasSmoothAlpha;
+// v13 13e (os.Gas.Dither 2): the hold of a block's opacity against its last frame's, the world grain's strength.
+float GasDitherHold;
+float GasDitherGrain;
 // v12 7b: heat puffs (row 0 position + radius, row 1 heat), the shimmer's strength; the laser's beam (lens, dot, light);
 // a screen pixel's angle (rad) for the beam's block-wide glow.
 Texture2D<float4> GasHeat;
@@ -168,6 +171,56 @@ float3 PixelRay(float2 OutPx, out float SceneDist)
 		SceneDist = length(Hit.xyz / Hit.w - View.TranslatedWorldCameraOrigin);
 	}
 	return Dir;
+}
+
+// An output pixel's ray without the depth (the dither's sphere).
+float3 DirOf(float2 OutPx)
+{
+	float2 DepthPx = DepthMin + (OutPx - OutMin) * DepthScale;
+	float4 Far = mul(float4(DepthPx, 0.5, 1), View.SVPositionToTranslatedWorld);
+	return normalize(Far.xyz / Far.w - View.TranslatedWorldCameraOrigin);
+}
+
+// A cell of the view sphere (v13 13e): world-anchored, so turning the camera moves neither the dither nor the jitter.
+// Pitch in cells of CellRad; yaw in cells widened by bands of latitude (k doubles them toward the poles: no sub-pixel
+// cells looking up at a ceiling's haze), a multiple of 4 round the circle (no seam at +-pi). z: the band.
+int3 SphereCell(float3 dir, float CellRad)
+{
+	float yaw = atan2(dir.y, dir.x) + PI;
+	float pitch = asin(clamp(dir.z, -1.0, 1.0));
+	float k = floor(log2(1.0 / max(cos(pitch), 0.02)));
+	float n = 4.0 * max(1.0, round(2.0 * PI / (4.0 * CellRad * exp2(k))));
+	return int3(floor(yaw / (2.0 * PI / n)), floor((pitch + 0.5 * PI) / CellRad), (int)k);
+}
+
+float SphereHash(int3 C)
+{
+	uint h = uint(C.x) * 0x8DA6B343u ^ uint(C.y) * 0xD8163841u ^ uint(C.z) * 0xCB1AB31Fu;
+	h ^= h >> 13;
+	h *= 0x5BD1E995u;
+	h ^= h >> 15;
+	return float(h & 0xFFFF) / 65535.0;
+}
+
+// Value noise in [0, 1] (8 hashed corners): the dither's world grain.
+float GasNoise3(float3 P)
+{
+	float3 I = floor(P), F = P - I;
+	float3 S = F * F * (3.0 - 2.0 * F);
+	int3 c = int3(I);
+	float v000 = SphereHash(c), v100 = SphereHash(c + int3(1, 0, 0)), v010 = SphereHash(c + int3(0, 1, 0)), v110 = SphereHash(c + int3(1, 1, 0));
+	float v001 = SphereHash(c + int3(0, 0, 1)), v101 = SphereHash(c + int3(1, 0, 1)), v011 = SphereHash(c + int3(0, 1, 1)), v111 = SphereHash(c + int3(1, 1, 1));
+	return lerp(lerp(lerp(v000, v100, S.x), lerp(v010, v110, S.x), S.y), lerp(lerp(v001, v101, S.x), lerp(v011, v111, S.x), S.y), S.z);
+}
+
+// The march's jitter for a block: by its centre's sphere cell (os.Gas.Dither 2), or by its screen block (before v13).
+float BlockJitter(float2 Centre, float B)
+{
+	if (GasDither > 1.5)
+	{
+		return SphereHash(SphereCell(DirOf(Centre), GasPixelAngle * B) + int3(17, 31, 7));
+	}
+	return frac(sin(dot(floor(Centre / B), float2(12.9898, 78.233))) * 43758.5453);
 }
 
 float3 RayDir(float2 OutPx)
@@ -445,6 +498,8 @@ RWTexture2D<float4> OutLamp;
 RWTexture2D<float> OutHeatNear;
 // An edge block's first gas along its ray (cm, a step early), -1 a block taken whole.
 RWTexture2D<float> OutEdge;
+// The block's first gas along its ray (cm; 1e9 none): the dither's world grain is read there.
+RWTexture2D<float> OutFirst;
 
 [numthreads(8, 8, 1)]
 void MainBlockCS(uint3 Id : SV_DispatchThreadID)
@@ -471,7 +526,7 @@ void MainBlockCS(uint3 Id : SV_DispatchThreadID)
 			Far = max(Far, D);
 		}
 	}
-	float jit = frac(sin(dot(floor(Centre / B), float2(12.9898, 78.233))) * 43758.5453);
+	float jit = BlockJitter(Centre, B);
 	float3 acc;
 	float T;
 	float firstT;
@@ -486,6 +541,43 @@ void MainBlockCS(uint3 Id : SV_DispatchThreadID)
 	// depth; its first gas kept (a pixel nearer than that has no gas in front of it).
 	bool Edge = Far - Near > max(0.03 * min(Far, 1e5), 10.0) && T < 0.999 && firstT < Far;
 	OutEdge[Id.xy] = Edge ? firstT : -1.0;
+	OutFirst[Id.xy] = firstT;
+}
+
+// v13 13e: a block's opacity held against its last frame's - the block's centre taken back through the camera's turn
+// (a far point: the step of the camera over a frame is under a block at 1-5 m), its held opacity there; within the hold
+// the last one stays (no level flicking back and forth on a still haze). Blocks with no history take their own.
+Texture2D<float4> HoldBlocks;
+Texture2D<float> HoldHistory;
+RWTexture2D<float> OutHeld;
+float HoldHasHistory;
+
+[numthreads(8, 8, 1)]
+void HoldCS(uint3 Id : SV_DispatchThreadID)
+{
+	float B = max(GasBlockPx, 1.0);
+	int2 Blocks = int2(ceil(OutSize / B));
+	if (any(int2(Id.xy) >= Blocks))
+	{
+		return;
+	}
+	float a = 1.0 - HoldBlocks.Load(int3(Id.xy, 0)).a;
+	float held = a;
+	if (HoldHasHistory > 0.5 && a > 0.03)
+	{
+		float2 Centre = floor(OutMin / B) * B + Id.xy * B + 0.5 * B;
+		float2 Ndc = float2((Centre.x - OutMin.x) / OutSize.x * 2.0 - 1.0, 1.0 - (Centre.y - OutMin.y) / OutSize.y * 2.0);
+		float4 Prev = mul(float4(Ndc, 1e-6, 1.0), View.ClipToPrevClip);
+		float2 PrevNdc = Prev.xy / max(Prev.w, 1e-6);
+		float2 PrevPx = OutMin + float2(PrevNdc.x * 0.5 + 0.5, 0.5 - PrevNdc.y * 0.5) * OutSize;
+		int2 PrevBlock = int2(floor(PrevPx / B) - floor(OutMin / B));
+		if (all(PrevBlock >= 0) && all(PrevBlock < Blocks))
+		{
+			float p = HoldHistory.Load(int3(PrevBlock, 0));
+			held = p > 0.0 && abs(a - p) < GasDitherHold ? p : a;
+		}
+	}
+	OutHeld[Id.xy] = held;
 }
 
 Texture2D SceneColor;
@@ -495,6 +587,8 @@ Texture2D<float> BlockEdge;
 Texture2D<float4> BlockLamp;
 Texture2D<float> BlockHeatNear;
 SamplerState BlockSampler;
+Texture2D<float> BlockHeld;
+Texture2D<float> BlockFirst;
 
 // The inputs as FScreenPassVS writes them (TEXCOORD0 then SV_POSITION: a pixel shader reading SV_POSITION alone did not
 // link with it on D3D12).
@@ -512,8 +606,12 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 		float2 BlocksN = ceil(OutSize / B) + 1.0;
 		float2 uv = (px - floor(OutMin / B) * B) / (B * BlocksN);
 		float2 du = float2(1.0 / BlocksN.x, 0.0), dv = float2(0.0, 1.0 / BlocksN.y);
-		float2 grad = float2(BlockLamp.SampleLevel(BlockSampler, uv + du, 0).a - BlockLamp.SampleLevel(BlockSampler, uv - du, 0).a,
-			BlockLamp.SampleLevel(BlockSampler, uv + dv, 0).a - BlockLamp.SampleLevel(BlockSampler, uv - dv, 0).a) * 0.5;
+		// The gradient over three blocks across (v13: one block's read as rings round each puff).
+		float Hpp = BlockLamp.SampleLevel(BlockSampler, uv + du + dv, 0).a, Hpm = BlockLamp.SampleLevel(BlockSampler, uv + du - dv, 0).a;
+		float Hmp = BlockLamp.SampleLevel(BlockSampler, uv - du + dv, 0).a, Hmm = BlockLamp.SampleLevel(BlockSampler, uv - du - dv, 0).a;
+		float Hp0 = BlockLamp.SampleLevel(BlockSampler, uv + du, 0).a, Hm0 = BlockLamp.SampleLevel(BlockSampler, uv - du, 0).a;
+		float H0p = BlockLamp.SampleLevel(BlockSampler, uv + dv, 0).a, H0m = BlockLamp.SampleLevel(BlockSampler, uv - dv, 0).a;
+		float2 grad = float2(Hpp + Hp0 + Hpm - Hmp - Hm0 - Hmm, Hpp + H0p + Hmp - Hpm - H0m - Hmm) / 6.0;
 		if (any(grad != 0.0))
 		{
 			float phase = sin(px.x * 0.05 + px.y * 0.031) * 3.0 + cos(px.y * 0.043 - px.x * 0.017) * 3.0;
@@ -563,7 +661,7 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 		else
 		{
 			float2 Centre = floor(px / B) * B + 0.5 * B;
-			float jit = frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453);
+			float jit = BlockJitter(Centre, B);
 			float Unused;
 			float3 NoLamps;
 			GasMarch(GasCamera, RayDir(Centre), D, jit, RoomAt(Centre), false, acc, T, Unused, NoLamps);
@@ -588,13 +686,31 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 		float T2;
 		float Unused2;
 		float3 NoLamps2;
-		GasMarch(GasCamera, RayDir(Centre), D, frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453), RoomAt(Centre), false, acc2, T2, Unused2, NoLamps2);
+		GasMarch(GasCamera, RayDir(Centre), D, BlockJitter(Centre, B), RoomAt(Centre), false, acc2, T2, Unused2, NoLamps2);
 		float Diff = saturate(abs(T2 - T) * 4.0);
 		OutColor = float4(Diff, Diff, Diff, 1);
 		return;
 	}
 	float aq;
-	if (GasDither > 0.5)
+	if (GasDither > 1.5)
+	{
+		// v13 13e: the dither on the smoke, not on the glass. The Bayer cell is a cell of the view sphere (a turn of the
+		// camera leaves the dots on the gas); the block's opacity held against its last frame's; a world grain (12 cm
+		// value noise at the block's first gas) nudges the threshold so the lattice is not a printed screen.
+		const float Bayer[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+		float3 dirPx = DirOf(px);
+		int2 Q = SphereCell(dirPx, GasPixelAngle * max(GasDitherPx, 1.0)).xy & 3;
+		float hb = (Bayer[Q.y * 4 + Q.x] + 0.5) / 16.0;
+		float Levels = max(GasBands, 1.0);
+		float aUse = FirstGas < 0.0 && GasSmoothAlpha < 0.5 ? BlockHeld.Load(int3(Block, 0)) : alpha;
+		float First = BlockFirst.Load(int3(Block, 0));
+		if (First < 1e8)
+		{
+			hb += (GasNoise3((GasCamera + dirPx * First) / 12.0) - 0.5) * GasDitherGrain / (aUse < 0.25 ? 8.0 : Levels);
+		}
+		aq = aUse < 0.03 ? 0.0 : aUse < 0.25 ? saturate(floor(aUse * 8.0 + hb) / 8.0) : saturate(floor(aUse * Levels + hb) / Levels);
+	}
+	else if (GasDither > 0.5)
 	{
 		// An ordered 4x4 Bayer over the screen blocks, the threshold's full spread: thin gas (from 0.03) a sparse even
 		// lattice whose mean is its opacity, not snow (v12 7a.6).

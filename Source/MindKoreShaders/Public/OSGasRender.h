@@ -38,6 +38,9 @@ struct FOSGasRenderData
 	/** v12 7d: the Bayer threshold's cell, px; 1: the block's result read bilinearly between the blocks' centres. */
 	float DitherPx = 2.0f;
 	float SmoothAlpha = 0.0f;
+	/** v13 13e: os.Gas.DitherHold, os.Gas.DitherGrain. */
+	float DitherHold = 0.125f;
+	float DitherGrain = 0.5f;
 	/** v12 7b: the heat puffs (shimmer) and the laser's beam (lens, dot, light; black: off). */
 	FTextureResource* Heat = nullptr;
 	int32 HeatCount = 0;
@@ -55,4 +58,4 @@ struct FOSGasRenderData
  * pixel in a flagged block. Returns the frame with the gas over it.
  */
 MINDKORESHADERS_API FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& View, const FPostProcessMaterialInputs& Inputs,
-	const FOSGasRenderData& Data, TRefCountPtr<IPooledRenderTarget>& AmbientHistory);
+	const FOSGasRenderData& Data, TRefCountPtr<IPooledRenderTarget>& AmbientHistory, TRefCountPtr<IPooledRenderTarget>& HoldHistory);
