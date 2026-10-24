@@ -1,6 +1,6 @@
 # Газ (дым v11)
 
-Как устроен дым и как поставить его на уровень. Общая картина и решения с причинами — [Smoke](Smoke.md). Замысел и история этапов — [RecoilWeapons-SmokeV11](RecoilWeapons-SmokeV11.md);
+Как устроен дым и как поставить его на уровень. Общая картина, теория и оптимизация — [Smoke](Smoke.md). Замысел и история этапов — [RecoilWeapons-SmokeV11](RecoilWeapons-SmokeV11.md);
 дым оружия — [RecoilWeapons-Fx](RecoilWeapons-Fx.md).
 
 ## Как это работает
