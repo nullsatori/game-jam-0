@@ -173,8 +173,26 @@ namespace
 		TEXT("os.Gas.WarmLift"), 4.0f,
 		TEXT("Residual warmth's lift at full gravity, cm/s (4; try 10-15: the haze gathers under the ceiling sooner)."));
 	TAutoConsoleVariable<float> CVarGasHazeDiffuse(
-		TEXT("os.Gas.HazeDiffuse"), 250.0f,
+		TEXT("os.Gas.HazeDiffuse"), 350.0f,
 		TEXT("The haze spreads through the room by a slow turbulent wander (v14), cm^2/s: 200 denser and slower, 400 faster and paler; 0: stays where it was (cb97b4e)."));
+	TAutoConsoleVariable<float> CVarGasHazeRadiusMax(
+		TEXT("os.Gas.HazeRadiusMax"), 250.0f,
+		TEXT("A spreading haze parcel's radius grows with the haze's spread up to this, cm (overlapping into a veil, not round puffs); its matter kept."));
+	TAutoConsoleVariable<float> CVarGasHazeEddyCm(
+		TEXT("os.Gas.HazeEddyCm"), 80.0f,
+		TEXT("The haze's wander comes mostly from a world-anchored eddy field this size, cm (neighbours move together: strands, not puffs)."));
+	TAutoConsoleVariable<float> CVarGasHazeWanderOwn(
+		TEXT("os.Gas.HazeWanderOwn"), 0.25f,
+		TEXT("The share of the haze's wander that is each parcel's own (1: all its own, the round puffs of v14)."));
+	TAutoConsoleVariable<float> CVarGasHazeDriftCm(
+		TEXT("os.Gas.HazeDriftCm"), 6.0f,
+		TEXT("The haze rides the room's slow currents: their top speed, cm/s (shots' gas keeps os.Gas.DriftCm)."));
+	TAutoConsoleVariable<float> CVarGasHazeDriftScaleCm(
+		TEXT("os.Gas.HazeDriftScaleCm"), 300.0f,
+		TEXT("The room's currents for the haze: their size, cm."));
+	TAutoConsoleVariable<float> CVarGasHazeNoiseCut(
+		TEXT("os.Gas.HazeNoiseCut"), 0.15f,
+		TEXT("The haze's noise threshold (0.3: as a shot's gas, holes at the kernels' rims)."));
 	TAutoConsoleVariable<float> CVarGasHazeDiffuseZ(
 		TEXT("os.Gas.HazeDiffuseZ"), 0.33f,
 		TEXT("The haze's wander: its vertical share (warm air over cool is stable)."));
@@ -317,7 +335,7 @@ namespace
 	 * 1.5 m across, each wave's phase turning over ~20 s (no jerks), world-anchored; the velocity and its gradient
 	 * (dV_i/dx_j in OutGrad[i]) at a world point. Speed at most SpeedCm.
 	 */
-	void DriftAt(const FVector3f& World, float Time, uint32 Seed, float SpeedCm, FVector3f& OutV, FVector3f OutGrad[3])
+	void DriftAt(const FVector3f& World, float Time, uint32 Seed, float SpeedCm, FVector3f& OutV, FVector3f OutGrad[3], float ScaleCm = 150.0f, float PeriodS = 20.0f)
 	{
 		constexpr int32 Waves = 5;
 		OutV = FVector3f::ZeroVector;
@@ -333,8 +351,8 @@ namespace
 			// A direction on the sphere, a wavelength round 1.5 m, a rate round 20 s, a phase; the potential across it.
 			const float Z = R(0) * 2.0f - 1.0f, A = R(1) * UE_TWO_PI;
 			const FVector3f Dir(FMath::Sqrt(1.0f - Z * Z) * FMath::Cos(A), FMath::Sqrt(1.0f - Z * Z) * FMath::Sin(A), Z);
-			const float K = UE_TWO_PI / (150.0f * (0.75f + 0.5f * R(2)));
-			const float Omega = UE_TWO_PI / (20.0f * (0.7f + 0.6f * R(3)));
+			const float K = UE_TWO_PI / (ScaleCm * (0.75f + 0.5f * R(2)));
+			const float Omega = UE_TWO_PI / (PeriodS * (0.7f + 0.6f * R(3)));
 			FVector3f U, V;
 			Dir.FindBestAxisVectors(U, V);
 			const float B = R(4) * UE_TWO_PI;
@@ -355,6 +373,8 @@ namespace
 		}
 	}
 
+	/** A haze parcel's spreading radius grows past this share of the diffusivity (r^2 = r0^2 + 2 x share x D x t). */
+	constexpr float HazeSpreadShare = 0.5f;
 	/** How long residual warmth lasts, s (its lift: os.Gas.WarmLift). */
 	constexpr float WarmSeconds = 20.0f;
 	/** The haze's strands: the longest stretch, its relaxing, s. */
@@ -364,6 +384,26 @@ namespace
 	constexpr float HandFrom = 3.0f;
 	constexpr float HandSpread = 1.0f;
 	constexpr float HandRamp = 0.5f;
+}
+
+/**
+ * The same matter in more room: a parcel's kernel's density by its radius. Air (3 cm / r)^2, vacuum 5 cm / r; a haze
+ * past its HazeRadius (it spreads to metres, v14) by the cube - its matter kept as it grows (the square grew it).
+ */
+float UOSGasSubsystem::ParcelThin(const FCloud& Cloud, float RadiusCm)
+{
+	if (!Cloud.bAir)
+	{
+		return FMath::Clamp(5.0f / RadiusCm, 0.05f, 1.0f);
+	}
+	if (!Cloud.bZone)
+	{
+		return FMath::Clamp(FMath::Square(3.0f / RadiusCm), 0.02f, 1.0f);
+	}
+	const float Reach = FMath::Max(Cloud.HazeRadius, 1.0f);
+	const float Near = FMath::Min(RadiusCm, Reach);
+	const float Thin = FMath::Clamp(FMath::Square(3.0f / Near), 0.005f, 1.0f);
+	return RadiusCm > Reach ? Thin * FMath::Cube(Reach / RadiusCm) : Thin;
 }
 
 UOSGasSubsystem* UOSGasSubsystem::Get(const UObject* WorldContext)
@@ -1735,6 +1775,12 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 			Cloud.WarmLift = CVarGasWarmLift.GetValueOnGameThread();
 			Cloud.HazeRadius = CVarGasHazeRadius.GetValueOnGameThread();
 			Cloud.HazeDiffuse = CVarGasHazeDiffuse.GetValueOnGameThread();
+			Cloud.HazeRadiusMax = CVarGasHazeRadiusMax.GetValueOnGameThread();
+			Cloud.HazeEddyCm = FMath::Max(CVarGasHazeEddyCm.GetValueOnGameThread(), 10.0f);
+			Cloud.HazeOwn = FMath::Clamp(CVarGasHazeWanderOwn.GetValueOnGameThread(), 0.0f, 1.0f);
+			Cloud.HazeDriftCm = CVarGasHazeDriftCm.GetValueOnGameThread();
+			Cloud.HazeDriftScale = FMath::Max(CVarGasHazeDriftScaleCm.GetValueOnGameThread(), 30.0f);
+			Cloud.HazeNoiseCut = CVarGasHazeNoiseCut.GetValueOnGameThread();
 			Cloud.HazeDiffuseZ = CVarGasHazeDiffuseZ.GetValueOnGameThread();
 			Cloud.HazeEddy = FMath::Max(CVarGasHazeEddySeconds.GetValueOnGameThread(), 0.1f);
 			Cloud.HazeZeroG = CVarGasHazeDiffuseZeroG.GetValueOnGameThread();
@@ -2173,7 +2219,7 @@ void UOSGasSubsystem::LaunchStep(FCloud& Cloud, int32 Steps, float Dt)
 		const float MassScale = Cloud.bAir ? AirMassScale : VacuumMassScale;
 		for (const FOSGasParcel& P : Cloud.Parcels)
 		{
-			const float Thin = Cloud.bAir ? FMath::Clamp(FMath::Square(3.0f / P.RadiusCm), Cloud.bZone ? 0.005f : 0.02f, 1.0f) : FMath::Clamp(5.0f / P.RadiusCm, 0.05f, 1.0f);
+			const float Thin = ParcelThin(Cloud, P.RadiusCm);
 			// The kernel's core density as the splat lays it, about half torn by the noise.
 			const float Density = FMath::Min(P.Mass * Thin * MassScale, 0.95f) * DensityGain * 0.5f;
 			if (Density < 1e-3f)
@@ -2586,7 +2632,16 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					if (DriftShare > 0.0f && Cloud.DriftSeed != 0u)
 					{
 						FVector3f Drift, Grad[3];
-						DriftAt(Origin + P.P, float(Cloud.SimToWorld + Cloud.SimTime), Cloud.DriftSeed, Cloud.DriftCm, Drift, Grad);
+						// The haze rides the room's own slow currents (v14b: room-sized, 6 cm/s - carried across the room in
+						// about a minute); a shot's gas the room's drift as before.
+						if (Cloud.bZone)
+						{
+							DriftAt(Origin + P.P, float(Cloud.SimToWorld + Cloud.SimTime), Cloud.DriftSeed, Cloud.HazeDriftCm, Drift, Grad, Cloud.HazeDriftScale);
+						}
+						else
+						{
+							DriftAt(Origin + P.P, float(Cloud.SimToWorld + Cloud.SimTime), Cloud.DriftSeed, Cloud.DriftCm, Drift, Grad);
+						}
 						Target += Drift * DriftShare;
 						if (Cloud.bZone)
 						{
@@ -2622,7 +2677,14 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 						}
 						const FVector3f GUp = Down * (Gauss | Down);
 						P.Wander = P.Wander * Keep + ((Gauss - GUp) * Across + GUp * Up) * Kick;
-						Target += P.Wander;
+						// Neighbours wander together (v14b): most of the wander is a world-anchored eddy field (80 cm, its
+						// eddy time) so the haze stretches into strands and sleeves instead of breaking into round puffs; a
+						// share is each parcel's own.
+						FVector3f Eddy, EddyGrad[3];
+						DriftAt(Origin + P.P, float(Cloud.SimToWorld + Cloud.SimTime), Cloud.DriftSeed ^ 0x9E3779B9u, 2.0f * Across, Eddy, EddyGrad, Cloud.HazeEddyCm, Cloud.HazeEddy);
+						const FVector3f EddyUp = Down * (Eddy | Down);
+						Eddy = (Eddy - EddyUp) + EddyUp * (Up / FMath::Max(Across, 1e-3f));
+						Target += P.Wander * Cloud.HazeOwn + Eddy * (1.0f - Cloud.HazeOwn);
 					}
 					P.V = Target + (P.V - Target) * FMath::Exp(-Dt * P.Air / AirRestSeconds);
 				}
@@ -2646,7 +2708,11 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			const float Speed = P.V.Size();
 			P.P += P.V * Dt;
 			// The haze diffuses on (to 60 cm over ~15 s): a veil, not lumps (merged parcels at 20 cm read as dark blots, owner 24.10).
-			P.RadiusCm = Cloud.bZone ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Max3(P.MaxRadiusCm, 1.5f * Cloud.PackedCellCm, Cloud.HazeRadius))
+			// A haze parcel spreads as the haze does (v14: parcels wandering apart at a fixed 60 cm read as round puffs):
+			// r^2 grows by 2 x share x D a second, to os.Gas.HazeRadiusMax; its density keeps its matter (ParcelThin).
+			P.RadiusCm = Cloud.bZone && Cloud.HazeDiffuse > 0.0f
+				? FMath::Min(FMath::Max(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Sqrt(P.RadiusCm * P.RadiusCm + 2.0f * HazeSpreadShare * Cloud.HazeDiffuse * Dt)), FMath::Max(Cloud.HazeRadiusMax, Cloud.HazeRadius))
+				: Cloud.bZone ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Max3(P.MaxRadiusCm, 1.5f * Cloud.PackedCellCm, Cloud.HazeRadius))
 				: P.Air > 0.5f ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Max(P.MaxRadiusCm, P.RadiusCm)) : P.RadiusCm + VacuumGrowPerCm * Speed * Dt;
 			P.Heat *= FMath::Exp(-Dt / HeatSeconds);
 			// Bodies push it out of themselves (within two steps) at their own speed.
@@ -2986,7 +3052,8 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		Light[I] = FMath::Exp(-KeyShadow * Sum);
 	});
 	// A vacuum's edges torn a little harder (0.18), as the holes' threads; more tore the thin streamers into dots.
-	const float Cut = Cloud.bAir ? NoiseCut + 0.1f : 0.18f;
+	// The haze's noise cut lower (v14b): its overlapping kernels read as one veil, no holes at their rims.
+	const float Cut = Cloud.bZone ? Cloud.HazeNoiseCut : Cloud.bAir ? NoiseCut + 0.1f : 0.18f;
 	// The haze: a coarse noise (~40 cm) on its coarse cells.
 	const float Scale = Cloud.bZone ? 40.0f : Cloud.bAir ? NoiseCm : 12.0f;
 	const uint32 CloudSeed = Cloud.Seed;
@@ -3101,7 +3168,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			}
 			const FVector3f Travelled = P.P - P.Birth;
 			// The same matter in more room: a parcel thins as it grows (air: (3 cm / r)^2; vacuum: 5 cm / r, it spreads metres).
-			const float Thin = Cloud.bAir ? FMath::Clamp(FMath::Square(3.0f / P.RadiusCm), Cloud.bZone ? 0.005f : 0.02f, 1.0f) : FMath::Clamp(5.0f / P.RadiusCm, 0.05f, 1.0f);
+			const float Thin = ParcelThin(Cloud, P.RadiusCm);
 			const float M = P.Mass * Weight[Index] * Fade * Thin;
 			const int32 X0 = FMath::Max(0, FMath::FloorToInt((P.P.X - Ext.X - Centre.X + Half) / Cell));
 			const int32 X1 = FMath::Min(N - 1, FMath::FloorToInt((P.P.X + Ext.X - Centre.X + Half) / Cell));

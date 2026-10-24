@@ -356,6 +356,9 @@ private:
 		float HazeRadius = 60.0f;
 		/** The haze's spreading (v14, read at each launch): diffusivity cm^2/s, its vertical share, the eddies' time, zero-G's share. */
 		float HazeDiffuse = 0.0f, HazeDiffuseZ = 0.33f, HazeEddy = 10.0f, HazeZeroG = 0.5f;
+		float HazeRadiusMax = 250.0f;
+		/** v14b: the eddy field's size and the wander's own share; the room's currents (speed, size); the haze's noise cut. */
+		float HazeEddyCm = 80.0f, HazeOwn = 0.25f, HazeDriftCm = 6.0f, HazeDriftScale = 300.0f, HazeNoiseCut = 0.15f;
 		/** A body's turbulent wake in the haze (os.Gas.HazeWake); the vents near it (GasVent: where its last gas goes). */
 		float HazeWake = 0.15f;
 		TArray<FVector3f> Vents;
@@ -649,6 +652,7 @@ private:
 	/** The step off the game thread: commands, the velocity grid (air), the parcels' motion, the splat and the atlas. */
 	static void StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArray<FAirFlow>& FlowsNow);
 	static void Splat(FCloud& Cloud);
+	static float ParcelThin(const FCloud& Cloud, float RadiusCm);
 
 	/** os.Fx.SmokeCost. */
 	double CostStepUs = 0.0, CostMaxStepUs = 0.0, CostFrameUs = 0.0, CostMaxFrameUs = 0.0;
