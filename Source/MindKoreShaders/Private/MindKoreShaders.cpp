@@ -58,6 +58,12 @@ BEGIN_SHADER_PARAMETER_STRUCT(FOSGasCommonParameters, )
 	SHADER_PARAMETER(float, GasAlbedo)
 	SHADER_PARAMETER_RDG_TEXTURE(Texture2D, GasAmbient)
 	SHADER_PARAMETER_SAMPLER(SamplerState, GasAmbientSampler)
+	SHADER_PARAMETER(float, GasForward)
+	SHADER_PARAMETER(float, GasFilmSlope)
+	SHADER_PARAMETER(float, GasFilmToe)
+	SHADER_PARAMETER(float, GasFilmShoulder)
+	SHADER_PARAMETER(float, GasFilmBlackClip)
+	SHADER_PARAMETER(float, GasFilmWhiteClip)
 END_SHADER_PARAMETER_STRUCT()
 
 /** The room's light (stage 6): the frame before the gas to 1/32, weighted by depth. */
@@ -121,6 +127,7 @@ public:
 		SHADER_PARAMETER_STRUCT_INCLUDE(FOSGasCommonParameters, Common)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, OutBlock)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, OutEdge)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, OutLamp)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -142,6 +149,7 @@ public:
 		SHADER_PARAMETER_SAMPLER(SamplerState, SceneColorSampler)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float4>, BlockResult)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float>, BlockEdge)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float4>, BlockLamp)
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -249,15 +257,24 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 		C.GasAlbedo = Data.Albedo;
 		C.GasAmbient = Ambient;
 		C.GasAmbientSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+		C.GasForward = Data.Forward;
+		const FFinalPostProcessSettings& Film = View.FinalPostProcessSettings;
+		C.GasFilmSlope = Film.FilmSlope;
+		C.GasFilmToe = Film.FilmToe;
+		C.GasFilmShoulder = Film.FilmShoulder;
+		C.GasFilmBlackClip = Film.FilmBlackClip;
+		C.GasFilmWhiteClip = Film.FilmWhiteClip;
 	};
 
 	FRDGTextureRef BlockResult = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_FloatRGBA, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.Block"));
+	FRDGTextureRef BlockLamp = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_FloatRGBA, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.BlockLamp"));
 	FRDGTextureRef BlockEdge = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_R32_FLOAT, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.Edge"));
 	{
 		FOSGasBlockCS::FParameters* P = GraphBuilder.AllocParameters<FOSGasBlockCS::FParameters>();
 		FillCommon(P->Common);
 		P->OutBlock = GraphBuilder.CreateUAV(BlockResult);
 		P->OutEdge = GraphBuilder.CreateUAV(BlockEdge);
+		P->OutLamp = GraphBuilder.CreateUAV(BlockLamp);
 		TShaderMapRef<FOSGasBlockCS> Shader(ShaderMap);
 		FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("OSGas.Blocks %dx%d", Blocks.X, Blocks.Y), Shader, P, FComputeShaderUtils::GetGroupCount(Blocks, FIntPoint(8, 8)));
 	}
@@ -273,6 +290,7 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 		P->SceneColorSampler = TStaticSamplerState<SF_Point>::GetRHI();
 		P->BlockResult = BlockResult;
 		P->BlockEdge = BlockEdge;
+		P->BlockLamp = BlockLamp;
 		P->RenderTargets[0] = Output.GetRenderTargetBinding();
 		TShaderMapRef<FScreenPassVS> VS(ShaderMap);
 		TShaderMapRef<FOSGasCompositePS> PS(ShaderMap);

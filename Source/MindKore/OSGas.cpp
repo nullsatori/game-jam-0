@@ -8,6 +8,10 @@
 #include "Engine/GameViewportClient.h"
 #include "Engine/Engine.h"
 #include "Components/PointLightComponent.h"
+#include "Components/RectLightComponent.h"
+#include "Components/SpotLightComponent.h"
+#include "Algo/AnyOf.h"
+#include "Algo/Find.h"
 #include "Components/LocalLightComponent.h"
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
@@ -95,11 +99,14 @@ namespace
 		TEXT("os.Gas.Light"), 1,
 		TEXT("1: the gas lit by the room (the frame before it, 1/32 and blurred) and the key lamp's full colour, a darker albedo (v11 stage 6); 0: the light before stage 6 (A/B)."));
 	TAutoConsoleVariable<float> CVarGasAmbientScale(
-		TEXT("os.Gas.AmbientScale"), 1.4f,
+		TEXT("os.Gas.AmbientScale"), 0.75f,
 		TEXT("os.Gas.Light 1: the room's light on the gas, x (unlit gas about 0.5-0.6 of the walls round it)."));
 	TAutoConsoleVariable<float> CVarGasLightScale(
-		TEXT("os.Gas.LightScale"), 1.6f,
+		TEXT("os.Gas.LightScale"), 2.0f,
 		TEXT("os.Gas.Light 1: the lamps' light on the gas, x."));
+	TAutoConsoleVariable<float> CVarGasForward(
+		TEXT("os.Gas.Forward"), 0.7f,
+		TEXT("os.Gas.Light 1: the forward-scattering share of the lamps' light (Henyey-Greenstein g 0.55; the rest isotropic) - smoke against a lamp glows at its rim."));
 	TAutoConsoleVariable<float> CVarGasAlbedo(
 		TEXT("os.Gas.Albedo"), 1.0f,
 		TEXT("os.Gas.Light 1: the gas's albedo, x its look's colour."));
@@ -634,14 +641,12 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	EnsureRender(Cloud);
 	PickKey(Where, Cloud.KeyDir, Cloud.KeyColour);
 	Cloud.LampsSeen.Reset();
-	if (CVarGasLight.GetValueOnGameThread() > 0)
+	for (FCloud::FLampSlot& Each : Cloud.Lamps)
 	{
-		PickKey(Where, Cloud.KeyDir, Cloud.KeyFull, &Cloud);
+		Each = FCloud::FLampSlot();
 	}
-	else
-	{
-		Cloud.KeyFull = Cloud.KeyColour;
-	}
+	Cloud.KeyLamp = INDEX_NONE;
+	Cloud.bLampsFresh = true;
 	return Slot;
 }
 
@@ -1180,17 +1185,10 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		FLinearColor Colour;
 		PickKey(Centre, Dir, Colour);
 		const float Ease = 1.0f - FMath::Exp(-DeltaTime / 0.25f);
-		// os.Gas.Light 1: the strongest lamp that sees the cloud, its colour in full (a sun behind the roof does not light
-		// a room's smoke - TestRoom's blue directional turned it cold).
+		// os.Gas.Light 1: four lamps that see the cloud; the self-shadow baked toward the strongest (eased below: 0.25 s).
 		if (CVarGasLight.GetValueOnGameThread() > 0)
 		{
-			FLinearColor Full;
-			PickKey(Centre, Dir, Full, &Cloud);
-			Cloud.KeyFull = Cloud.KeyFull + (Full - Cloud.KeyFull) * Ease;
-		}
-		else
-		{
-			Cloud.KeyFull = Cloud.KeyFull + (Colour - Cloud.KeyFull) * Ease;
+			UpdateLamps(Cloud, Centre, DeltaTime, Dir);
 		}
 		// os.Gas.Light 0: 80% white: a saturated lamp (the planetoid's red rock light) barely tints the gas (it turned it brown).
 		Colour = FMath::Lerp(Colour, FLinearColor(Colour.GetLuminance(), Colour.GetLuminance(), Colour.GetLuminance()), 0.8f);
@@ -1286,7 +1284,7 @@ void UOSGasSubsystem::UpdatePost()
 		const float EvictFade = Cloud.Evict > 0.0f ? FMath::Cube(Cloud.Evict / EvictSeconds) : 1.0f;
 		// The key light in display terms (the post-process is after the tonemapper): a soft knee, never blown white.
 		const bool bNewLight = CVarGasLight.GetValueOnGameThread() > 0;
-		const FLinearColor K = bNewLight ? Cloud.KeyFull : Cloud.KeyColour;
+		const FLinearColor K = Cloud.KeyColour;
 		const FLinearColor Key(1.0f - FMath::Exp(-K.R * 0.8f), 1.0f - FMath::Exp(-K.G * 0.8f), 1.0f - FMath::Exp(-K.B * 0.8f));
 		FLinearColor Top, Bottom;
 		AmbientFor(Cloud.bAir, Top, Bottom);
@@ -1312,6 +1310,33 @@ void UOSGasSubsystem::UpdatePost()
 		Data[10 * MaxDrawn + Index] = FLinearColor(A1.X, A1.Y, A1.Z, 0.0f);
 		Data[11 * MaxDrawn + Index] = FLinearColor(B0.X, B0.Y, B0.Z, 0.0f);
 		Data[12 * MaxDrawn + Index] = FLinearColor(B1.X, B1.Y, B1.Z, 0.0f);
+		// 13-28 (os.Gas.Light 1), a lamp in 4 rows: its position (or the direction to a sun) + radius (0 a sun); its light
+		// (colour x brightness, the renderer's units, x the crossfade x whether it sees the cloud - read every frame, not
+		// eased: a flicker and the muzzle's flash reach the smoke) + falloff exponent (0 inverse square); the cone's axis +
+		// cos outer (-2 none); cos inner + 1 for the key (its baked self-shadow; the others the ambient occlusion).
+		for (int32 Lamp = 0; bNewLight && Lamp < MaxLamps; ++Lamp)
+		{
+			const FCloud::FLampSlot& Slot = Cloud.Lamps[Lamp];
+			const ULightComponent* L = Slot.Lamp.Get();
+			if (!L || !L->IsVisible() || Slot.Weight <= 0.0f)
+			{
+				continue;
+			}
+			const FCloud::FLampSeen* Seen = Cloud.LampsSeen.Find(L);
+			const FLinearColor Light = L->GetLightColor() * (L->ComputeLightBrightness() * Slot.Weight * (Seen ? Seen->Seen : 0.0f));
+			const bool bSun = L->IsA<UDirectionalLightComponent>();
+			const FVector At = bSun ? -L->GetDirection() : L->GetComponentLocation();
+			const ULocalLightComponent* Local = Cast<ULocalLightComponent>(L);
+			const UPointLightComponent* Point = Cast<UPointLightComponent>(L);
+			FVector Axis = FVector::ZeroVector;
+			float CosOuter = -2.0f, CosInner = -1.0f;
+			OSGasLampCone(L, Axis, CosOuter, CosInner) ? void() : void(Axis = FVector::ZeroVector);
+			const int32 Row = 13 + 4 * Lamp;
+			Data[(Row + 0) * MaxDrawn + Index] = FLinearColor(At.X, At.Y, At.Z, bSun || !Local ? 0.0f : Local->AttenuationRadius);
+			Data[(Row + 1) * MaxDrawn + Index] = FLinearColor(Light.R, Light.G, Light.B, Point && !Point->bUseInverseSquaredFalloff ? Point->LightFalloffExponent : 0.0f);
+			Data[(Row + 2) * MaxDrawn + Index] = FLinearColor(Axis.X, Axis.Y, Axis.Z, CosOuter);
+			Data[(Row + 3) * MaxDrawn + Index] = FLinearColor(CosInner, Lamp == Cloud.KeyLamp ? 1.0f : 0.0f, 0.0f, 0.0f);
+		}
 		if (BoundGrids[Index] != Cloud.Texture)
 		{
 			BoundGrids[Index] = Cloud.Texture;
@@ -1393,6 +1418,7 @@ void UOSGasSubsystem::UpdatePost()
 		Frame.AmbientScale = CVarGasAmbientScale.GetValueOnGameThread();
 		Frame.LightScale = CVarGasLightScale.GetValueOnGameThread();
 		Frame.Albedo = CVarGasAlbedo.GetValueOnGameThread();
+		Frame.Forward = CVarGasForward.GetValueOnGameThread();
 		Frame.DeltaSeconds = World->GetDeltaSeconds();
 		GasView->SetData(Frame);
 		if (bLowRes)
@@ -2391,6 +2417,187 @@ void UOSGasSubsystem::FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey
 	}
 }
 
+namespace
+{
+	/**
+	 * A lamp's light at P in the renderer's units (colour x brightness x falloff x cone, as the deferred light shader:
+	 * inverse square windowed by the radius, or (1 - d^2/R^2)^exponent; a spot's cone, a rect's cosine to its normal),
+	 * its luminance - and Toward, P to the lamp. 0 out of its reach.
+	 */
+	float LampAt(const ULightComponent* L, const FVector& P, FVector& Toward, const FVector& Centre)
+	{
+		if (L->IsA<UDirectionalLightComponent>())
+		{
+			Toward = -L->GetDirection();
+			return L->ComputeLightBrightness() * L->GetLightColor().GetLuminance();
+		}
+		const ULocalLightComponent* Local = Cast<ULocalLightComponent>(L);
+		if (!Local)
+		{
+			return 0.0f;
+		}
+		const FVector Offset = L->GetComponentLocation() - P;
+		const double D2 = Offset.SizeSquared();
+		const double R = Local->AttenuationRadius;
+		if (D2 >= R * R)
+		{
+			return 0.0f;
+		}
+		// A lamp inside the box (the torch, the muzzle's flash): its way is toward the box's centre (P is the lamp itself).
+		Toward = D2 > 1.0 ? Offset * FMath::InvSqrt(D2) : (L->GetComponentLocation() - Centre).GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+		const UPointLightComponent* Point = Cast<UPointLightComponent>(L);
+		float Falloff = Point && !Point->bUseInverseSquaredFalloff
+			? FMath::Pow(1.0f - float(D2 / (R * R)), Point->LightFalloffExponent)
+			: FMath::Square(FMath::Clamp(1.0f - float(FMath::Square(D2 / (R * R))), 0.0f, 1.0f)) / float(D2 + 1.0);
+		float CosOuter, CosInner;
+		FVector Axis;
+		if (OSGasLampCone(L, Axis, CosOuter, CosInner))
+		{
+			Falloff *= FMath::SmoothStep(CosOuter, CosInner, float(FVector::DotProduct(-Toward, Axis)));
+		}
+		return L->ComputeLightBrightness() * L->GetLightColor().GetLuminance() * Falloff;
+	}
+}
+
+bool OSGasLampCone(const ULightComponent* L, FVector& OutAxis, float& OutCosOuter, float& OutCosInner)
+{
+	OutAxis = L->GetDirection();
+	if (const USpotLightComponent* Spot = Cast<USpotLightComponent>(L))
+	{
+		const float Outer = FMath::Clamp(Spot->OuterConeAngle, 1.0f, 89.0f);
+		OutCosOuter = FMath::Cos(FMath::DegreesToRadians(Outer));
+		OutCosInner = FMath::Cos(FMath::DegreesToRadians(FMath::Min(Spot->InnerConeAngle, Outer - 0.5f)));
+		return true;
+	}
+	if (L->IsA<URectLightComponent>())
+	{
+		// A rect as a point with the cosine to its normal (contract 6, 1.3).
+		OutCosOuter = 0.0f;
+		OutCosInner = 1.0f;
+		return true;
+	}
+	return false;
+}
+
+void UOSGasSubsystem::UpdateLamps(FCloud& Cloud, const FVector& Centre, float DeltaTime, FVector3f& OutKeyDir)
+{
+	UWorld* World = GetWorld();
+	// The world's lamps as PickKey keeps them (refreshed once a second); their brightness read now.
+	FVector3f Unused;
+	FLinearColor UnusedColour;
+	PickKey(Centre, Unused, UnusedColour);
+	const APawn* Player = World->GetFirstPlayerController() ? World->GetFirstPlayerController()->GetPawn() : nullptr;
+	const FVector Half(0.5f * RenderCells * Cloud.RenderCellCm);
+	const FBox Box(Centre - Half, Centre + Half);
+	// Each lamp scored at the box's point nearest it (a lamp at the edge of a big cloud counts as it lights that edge).
+	struct FCandidate
+	{
+		const ULightComponent* Lamp;
+		float Score;
+		FVector Toward;
+		bool bPlayers;
+	};
+	TArray<FCandidate, TInlineAllocator<16>> Candidates;
+	for (const TWeakObjectPtr<ULightComponent>& Each : KeyLights)
+	{
+		const ULightComponent* L = Each.Get();
+		if (!L || !L->IsVisible() || !L->bAffectsWorld || L->Intensity <= 0.0f)
+		{
+			continue;
+		}
+		const FVector Near = L->IsA<UDirectionalLightComponent>() ? Centre : Box.GetClosestPointTo(L->GetComponentLocation());
+		FVector Toward;
+		const float Score = LampAt(L, Near, Toward, Centre);
+		if (Score > 0.0f)
+		{
+			const AActor* Owner = L->GetOwner();
+			const bool bPlayers = Player && Owner && (Owner == Player || Owner->GetAttachParentActor() == Player || Owner->GetOwner() == Player);
+			Candidates.Add({ L, Score, Toward, bPlayers });
+		}
+	}
+	// The strongest six traced (each every 0.25 s from the centre), the best four of them that see it kept.
+	Candidates.Sort([](const FCandidate& A, const FCandidate& B) { return A.Score > B.Score; });
+	Candidates.SetNum(FMath::Min(Candidates.Num(), 6));
+	for (FCandidate& Each : Candidates)
+	{
+		const FVector Toward = Each.Lamp->IsA<UDirectionalLightComponent>() ? Each.Toward : (Each.Lamp->GetComponentLocation() - Centre).GetSafeNormal();
+		Each.Score *= LampSees(Cloud, Each.Lamp, Centre, Toward, Each.Lamp->IsA<UDirectionalLightComponent>());
+	}
+	Candidates.Sort([](const FCandidate& A, const FCandidate& B) { return A.Score > B.Score; });
+	while (Candidates.Num() > 0 && Candidates.Last().Score <= 0.0f)
+	{
+		Candidates.Pop();
+	}
+	Candidates.SetNum(FMath::Min(Candidates.Num(), MaxLamps));
+	// The crossfade: a lamp out of the set fades over 0.25 s, a new one comes in from 0 (the player's own at once; a new
+	// cloud's first set at once too - it was born dimmer than the cloud beside it).
+	const float Step = DeltaTime / 0.25f;
+	const bool bFresh = Cloud.bLampsFresh;
+	Cloud.bLampsFresh = false;
+	for (FCloud::FLampSlot& Slot : Cloud.Lamps)
+	{
+		const FCandidate* In = Candidates.FindByPredicate([&Slot](const FCandidate& C) { return Slot.Lamp.Get() == C.Lamp; });
+		Slot.Weight = In ? FMath::Min(1.0f, Slot.Weight + Step) : Slot.Weight - Step;
+		Slot.Score = In ? In->Score : Slot.Score;
+		if (Slot.Weight <= 0.0f || !Slot.Lamp.IsValid())
+		{
+			Slot = FCloud::FLampSlot();
+		}
+	}
+	for (const FCandidate& C : Candidates)
+	{
+		if (Algo::AnyOf(Cloud.Lamps, [&C](const FCloud::FLampSlot& S) { return S.Lamp.Get() == C.Lamp; }))
+		{
+			continue;
+		}
+		FCloud::FLampSlot* Free = Algo::FindByPredicate(Cloud.Lamps, [](const FCloud::FLampSlot& S) { return !S.Lamp.IsValid(); });
+		if (!Free && C.bPlayers)
+		{
+			// The flash cannot wait for a slot: the faintest goes.
+			Free = &Cloud.Lamps[0];
+			for (FCloud::FLampSlot& S : Cloud.Lamps)
+			{
+				Free = S.Weight * S.Score < Free->Weight * Free->Score ? &S : Free;
+			}
+		}
+		if (Free)
+		{
+			Free->Lamp = C.Lamp;
+			Free->Weight = C.bPlayers || bFresh ? 1.0f : 0.0f;
+			Free->Score = C.Score;
+		}
+	}
+	// The key: the strongest (weighted); its direction from the centre.
+	Cloud.KeyLamp = INDEX_NONE;
+	float Best = 0.0f;
+	for (int32 Index = 0; Index < MaxLamps; ++Index)
+	{
+		const FCloud::FLampSlot& S = Cloud.Lamps[Index];
+		if (const ULightComponent* L = S.Lamp.Get(); L && S.Weight * S.Score > Best)
+		{
+			Best = S.Weight * S.Score;
+			Cloud.KeyLamp = Index;
+			OutKeyDir = FVector3f(L->IsA<UDirectionalLightComponent>() ? -L->GetDirection() : (L->GetComponentLocation() - Centre).GetSafeNormal());
+		}
+	}
+#if !UE_BUILD_SHIPPING
+	// os.Gas.Debug 2: the cloud's lamps in the log once a second.
+	if (CVarGasDebug.GetValueOnGameThread() > 1 && FMath::FloorToInt(World->GetTimeSeconds()) != FMath::FloorToInt(World->GetTimeSeconds() - World->GetDeltaSeconds()))
+	{
+		FString Line;
+		for (int32 Index = 0; Index < MaxLamps; ++Index)
+		{
+			const FCloud::FLampSlot& S = Cloud.Lamps[Index];
+			if (const ULightComponent* L = S.Lamp.Get())
+			{
+				Line += FString::Printf(TEXT(" %s%s w%.2f s%.3g;"), Index == Cloud.KeyLamp ? TEXT("*") : TEXT(""), *L->GetOwner()->GetName(), S.Weight, S.Score);
+			}
+		}
+		UE_LOG(LogMindKore, Log, TEXT("Gas: lamps%s"), Line.IsEmpty() ? TEXT(" none") : *Line);
+	}
+#endif
+}
+
 float UOSGasSubsystem::LampSees(FCloud& Cloud, const ULightComponent* Lamp, const FVector& Where, const FVector& Toward, bool bDirectional)
 {
 	UWorld* World = GetWorld();
@@ -2418,7 +2625,7 @@ float UOSGasSubsystem::LampSees(FCloud& Cloud, const ULightComponent* Lamp, cons
 	return Seen.Seen;
 }
 
-void UOSGasSubsystem::PickKey(const FVector& Where, FVector3f& OutDir, FLinearColor& OutColour, FCloud* Seeing)
+void UOSGasSubsystem::PickKey(const FVector& Where, FVector3f& OutDir, FLinearColor& OutColour)
 {
 	UWorld* World = GetWorld();
 	KeyLightsAge += World->GetDeltaSeconds();
@@ -2437,9 +2644,6 @@ void UOSGasSubsystem::PickKey(const FVector& Where, FVector3f& OutDir, FLinearCo
 	float Best = 0.0f;
 	FVector Dir = FVector::UpVector;
 	FLinearColor Colour = FLinearColor(0.6f, 0.65f, 0.75f);
-#if !UE_BUILD_SHIPPING
-	const ULightComponent* Picked = nullptr;
-#endif
 	for (const TWeakObjectPtr<ULightComponent>& Each : KeyLights)
 	{
 		const ULightComponent* L = Each.Get();
@@ -2470,29 +2674,16 @@ void UOSGasSubsystem::PickKey(const FVector& Where, FVector3f& OutDir, FLinearCo
 				? Brightness * FMath::Pow(1.0f - Cm / Local->AttenuationRadius, Point->LightFalloffExponent) * 10.0f
 				: Brightness / FMath::Max(FMath::Square(Cm / 100.0f), 0.1f);
 		}
-		if (Seeing && Score > Best)
-		{
-			Score *= LampSees(*Seeing, L, Where, Toward, L->IsA<UDirectionalLightComponent>());
-		}
 		if (Score > Best)
 		{
 			Best = Score;
 			Dir = Toward;
 			Colour = L->GetLightColor();
-#if !UE_BUILD_SHIPPING
-			Picked = L;
-#endif
 		}
 	}
 	OutDir = FVector3f(Dir);
 	OutColour = Colour * FMath::Min(Best / UE_PI * KeyStrength, KeyMax);
-#if !UE_BUILD_SHIPPING
-	// os.Gas.Debug 2: a cloud's key lamp in the log once a second.
-	if (Seeing && CVarGasDebug.GetValueOnGameThread() > 1 && FMath::FloorToInt(World->GetTimeSeconds()) != FMath::FloorToInt(World->GetTimeSeconds() - World->GetDeltaSeconds()))
-	{
-		UE_LOG(LogMindKore, Log, TEXT("Gas: key lamp %s (%s), colour %s"), Picked ? *Picked->GetOwner()->GetName() : TEXT("none"), Picked ? *Picked->GetClass()->GetName() : TEXT("-"), *OutColour.ToString());
-	}
-#endif
+
 }
 
 bool OSGasCardsEnabled()

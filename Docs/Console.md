@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 109 команд, 24 переменных.
+Всего: 109 команд, 25 переменных.
 
 ## `os.Attach`
 
@@ -96,13 +96,14 @@
 | Команда | Аргументы | Что делает | Файл |
 |---|---|---|---|
 | `os.Gas.Albedo` (переменная) | значение (умолч. `1.0f`) | os.Gas.Light 1: the gas's albedo, x its look's colour. | `Source/MindKore/OSGas.cpp` |
-| `os.Gas.AmbientScale` (переменная) | значение (умолч. `1.4f`) | os.Gas.Light 1: the room's light on the gas, x (unlit gas about 0.5-0.6 of the walls round it). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.AmbientScale` (переменная) | значение (умолч. `0.75f`) | os.Gas.Light 1: the room's light on the gas, x (unlit gas about 0.5-0.6 of the walls round it). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Capture` (переменная) | значение (умолч. `0`) | 1: os.Gas.WalkProbe saves every frame from 0.2 to 3.2 s (a self-check). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.Cards` (переменная) | значение (умолч. `0`) | 1: the old card wisps (shroud, muzzle stream) are drawn too; 0 (v11): the gas is parcels only. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Debug` (переменная) | значение (умолч. `0`) | 1: draw every cloud's box (white), parcels (points, red heavy to blue light), bodies (yellow, velocity arrow), tunnels (cyan), wall/floor planes (green) and sources (magenta); 2: also each cloud's key lamp in the log once a second. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DebugAlpha` (переменная) | значение (умолч. `0`) | 1: the gas post-process draws only its opacity, grey (os.Gas.WalkProbe measures its jumps a frame); 3: the block less the pixel's own march; 4: the room's light the gas takes (os.Gas.Light 1). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.Forward` (переменная) | значение (умолч. `0.7f`) | os.Gas.Light 1: the forward-scattering share of the lamps' light (Henyey-Greenstein g 0.55; the rest isotropic) - smoke against a lamp glows at its rim. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Light` (переменная) | значение (умолч. `1`) | 1: the gas lit by the room (the frame before it, 1/32 and blurred) and the key lamp's full colour, a darker albedo (v11 stage 6); 0: the light before stage 6 (A/B). | `Source/MindKore/OSGas.cpp` |
-| `os.Gas.LightScale` (переменная) | значение (умолч. `1.6f`) | os.Gas.Light 1: the lamps' light on the gas, x. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.LightScale` (переменная) | значение (умолч. `2.0f`) | os.Gas.Light 1: the lamps' light on the gas, x. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.LowRes` (переменная) | значение (умолч. `1`) | 1: the gas drawn once per screen block by its own pass after the tonemapper (v11 stage 5); 0: by M_OS_GasPost in every pixel (the old way, kept until the merge). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ProbeSpawn` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot, and runs 24 s. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSpawnLate` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe spawns it once at 5 s (after its shots). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |

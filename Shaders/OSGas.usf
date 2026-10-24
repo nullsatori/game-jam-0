@@ -36,6 +36,93 @@ float GasLightScale;
 float GasAlbedo;
 Texture2D GasAmbient;
 SamplerState GasAmbientSampler;
+// Stage 6b: the lamps' light in scene units x the frame's exposure (View.PreExposure: the last frame's eye adaptation -
+// the adaptation buffer is the renderer's own; a frame late on a jump), through the scene's film curve (its parameters).
+float GasForward;
+float GasFilmSlope;
+float GasFilmToe;
+float GasFilmShoulder;
+float GasFilmBlackClip;
+float GasFilmWhiteClip;
+
+// UE's filmic curve (TonemapCommon.ush FilmToneMap) in linear sRGB, not ACEScg, without the grading LUT (deviation):
+// the lamps' light on the gas reaches the screen as it reaches the walls.
+float3 GasFilm(float3 x)
+{
+	const float3 Y = float3(0.2126, 0.7152, 0.0722);
+	x = max(lerp(dot(x, Y), x, 0.96), 1e-10);
+	float ToeScale = 1 + GasFilmBlackClip - GasFilmToe;
+	float ShoulderScale = 1 + GasFilmWhiteClip - GasFilmShoulder;
+	float InMatch = 0.18, OutMatch = 0.18;
+	float ToeMatch;
+	if (GasFilmToe > 0.8)
+	{
+		ToeMatch = (1 - GasFilmToe - OutMatch) / GasFilmSlope + log10(InMatch);
+	}
+	else
+	{
+		float bt = (OutMatch + GasFilmBlackClip) / ToeScale - 1;
+		ToeMatch = log10(InMatch) - 0.5 * log((1 + bt) / (1 - bt)) * (ToeScale / GasFilmSlope);
+	}
+	float StraightMatch = (1 - GasFilmToe) / GasFilmSlope - ToeMatch;
+	float ShoulderMatch = GasFilmShoulder / GasFilmSlope - StraightMatch;
+	float3 LogColor = log10(x);
+	float3 StraightColor = GasFilmSlope * (LogColor + StraightMatch);
+	float3 ToeColor = (-GasFilmBlackClip) + (2 * ToeScale) / (1 + exp((-2 * GasFilmSlope / ToeScale) * (LogColor - ToeMatch)));
+	float3 ShoulderColor = (1 + GasFilmWhiteClip) - (2 * ShoulderScale) / (1 + exp((2 * GasFilmSlope / ShoulderScale) * (LogColor - ShoulderMatch)));
+	ToeColor = select(LogColor < ToeMatch, ToeColor, StraightColor);
+	ShoulderColor = select(LogColor > ShoulderMatch, ShoulderColor, StraightColor);
+	float3 t = saturate((LogColor - ToeMatch) / (ShoulderMatch - ToeMatch));
+	t = ShoulderMatch < ToeMatch ? 1 - t : t;
+	t = (3 - 2 * t) * t * t;
+	float3 Tone = lerp(ToeColor, ShoulderColor, t);
+	return max(0, lerp(dot(Tone, Y), Tone, 0.93));
+}
+
+float3 GasToLinear(float3 c)
+{
+	return select(c <= 0.04045, c / 12.92, pow((max(c, 0) + 0.055) / 1.055, 2.4));
+}
+
+float3 GasToSrgb(float3 c)
+{
+	c = max(c, 0);
+	return select(c <= 0.0031308, c * 12.92, 1.055 * pow(c, 1.0 / 2.4) - 0.055);
+}
+
+// The four lamps' light scattered at pw toward the eye (scene units): UE's falloff (inverse square windowed by the
+// radius, or (1 - d^2/R^2)^exponent), a spot's cone (smoothstep of the cosines), Henyey-Greenstein g 0.55 with
+// 1 - GasForward isotropic (1 = isotropic's level), the key's baked self-shadow, the others' ambient occlusion.
+// The cloud's lamps are loaded once a cloud (LA position + radius, LL light + exponent, LC cone, LD cos inner + key);
+// nl > 0: any lit.
+float3 GasLamps(int nl, float4 LA[4], float4 LL[4], float4 LC[4], float4 LD[4], float3 pw, float3 dir, float4 v)
+{
+	float3 Sum = 0;
+	[unroll] for (int k = 0; k < 4; k++)
+	{
+		float4 A = LA[k], L = LL[k], Cone = LC[k], D = LD[k];
+		if (L.r + L.g + L.b <= 0.0) continue;
+		float3 Ld = A.xyz;
+		float Att = 1.0;
+		if (A.w > 0.0)
+		{
+			float3 V = A.xyz - pw;
+			float D2 = dot(V, V);
+			Ld = V * rsqrt(max(D2, 1.0));
+			float R2 = A.w * A.w;
+			Att = L.w > 0.0 ? pow(1.0 - saturate(D2 / R2), L.w) : Square(saturate(1.0 - Square(D2 / R2))) / (D2 + 1.0);
+			Att *= Cone.w > -1.5 ? smoothstep(Cone.w, D.x, dot(-Ld, Cone.xyz)) : 1.0;
+		}
+		// The scattering angle: the light's way (-Ld) against the way to the eye (-dir).
+		const float g = 0.55;
+		float CosT = dot(Ld, dir);
+		float HG = (1.0 - g * g) / pow(max(1.0 + g * g - 2.0 * g * CosT, 1e-4), 1.5);
+		float Phase = (1.0 - GasForward) + GasForward * HG;
+		float Shadow = D.y > 0.5 ? v.b : 0.35 + 0.65 * v.a;
+		Sum += L.rgb * (Att * Phase * Shadow);
+	}
+	return Sum;
+}
 // The output's rect (post-upscale pixels) and the depth's (render pixels): a pixel's depth texel is
 // DepthMin + (Px - OutMin) * DepthScale.
 int2 OutMin;
@@ -68,7 +155,8 @@ float3 RayDir(float2 OutPx)
 	return PixelRay(OutPx, Unused);
 }
 
-void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, out float3 acc, out float T, out float firstT)
+// bLamps false: the lamps left out (an edge pixel takes its block's); lampAcc the lamps' filmed light, premultiplied.
+void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, bool bLamps, out float3 acc, out float T, out float firstT, out float3 lampAcc)
 {
 	firstT = 1e9;
 	// The tunnels this ray crosses: (t of the closest approach, its distance, sin of the angle, radius), the stretch
@@ -112,6 +200,7 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, o
 	}
 	T = 1.0;
 	acc = 0;
+	float3 accL = 0;
 	int nc = (int)(GasCloudCount + 0.5);
 	float3 inv = 1.0 / dir;
 	[loop] for (int c = 0; c < nc; c++)
@@ -158,6 +247,18 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, o
 	    float rows = ceil(n / 8.0) * n;
 	    float2 atlas = float2(8.0 * n, 2.0 * rows);
 	    float vC0 = curHalf * rows, vP0 = (1.0 - curHalf) * rows;
+	    // os.Gas.Light 1: the cloud's lit lamps, once (not per sample).
+	    // Static indices only (a dynamically indexed array went to scratch memory).
+	    float4 LA[4], LL[4], LC[4], LD[4];
+	    int nl = 0;
+	    [unroll] for (int k = 0; k < 4; k++)
+	    {
+	        LL[k] = GasLight > 0.5 && bLamps ? GasData.Load(int3(c, 14 + 4 * k, 0)) : 0;
+	        LA[k] = GasData.Load(int3(c, 13 + 4 * k, 0));
+	        LC[k] = GasData.Load(int3(c, 15 + 4 * k, 0));
+	        LD[k] = GasData.Load(int3(c, 16 + 4 * k, 0));
+	        nl += LL[k].r + LL[k].g + LL[k].b > 0.0 ? 1 : 0;
+	    }
 	    [loop] for (int s = 0; s < ns; s++)
 	    {
 	        t += adv;
@@ -224,7 +325,13 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, o
 	        float3 col;
 	        if (GasLight > 0.5)
 	        {
-	            col = base * GasAlbedo * (room * GasAmbientScale * (0.35 + 0.65 * v.a) + key * GasLightScale * v.b) + warm * v.g * v.g;
+	            // Linear display light (the composite encodes it): the room (the graded frame, decoded) by the occlusion;
+	            // the lamps' scene light gathered apart and filmed once a ray (below).
+	            col = base * GasAlbedo * room * GasAmbientScale * (0.35 + 0.65 * v.a) + warm * v.g * v.g;
+	            if (nl > 0)
+	            {
+	                accL += T * aStep * base * GasLamps(nl, LA, LL, LC, LD, pw, dir, v);
+	            }
 	        }
 	        else
 	        {
@@ -237,15 +344,25 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, o
 	        if (T < 0.05) break;
 	    }
 	}
+	// The lamps on the gas (albedo x light x phase / pi, as a grey wall's albedo x light / pi) at the frame's exposure,
+	// through the film curve once a ray (the ray's mean lamp light filmed, not each sample: cheaper).
+	float alphaL = 1.0 - T;
+	lampAcc = 0;
+	if (GasLight > 0.5 && alphaL > 1e-4 && any(accL > 0.0))
+	{
+	    lampAcc = GasFilm(accL / alphaL * (GasAlbedo * GasLightScale * View.PreExposure / PI)) * alphaL;
+	}
 }
 
 // The room's light round an output pixel (os.Gas.Light 1): the frame before the gas, 1/32 and blurred.
 float3 RoomAt(float2 OutPx)
 {
-	return GasAmbient.SampleLevel(GasAmbientSampler, (OutPx - OutMin) / max(float2(OutSize), 1.0), 0).rgb;
+	return GasToLinear(GasAmbient.SampleLevel(GasAmbientSampler, (OutPx - OutMin) / max(float2(OutSize), 1.0), 0).rgb);
 }
 
 RWTexture2D<float4> OutBlock;
+// The block's lamp light (filmed, premultiplied): an edge pixel's own march leaves the lamps out and takes this.
+RWTexture2D<float4> OutLamp;
 // An edge block's first gas along its ray (cm, a step early), -1 a block taken whole.
 RWTexture2D<float> OutEdge;
 
@@ -278,8 +395,10 @@ void MainBlockCS(uint3 Id : SV_DispatchThreadID)
 	float3 acc;
 	float T;
 	float firstT;
-	GasMarch(GasCamera, dir, Far, jit, RoomAt(Centre), acc, T, firstT);
-	OutBlock[Id.xy] = float4(acc, T);
+	float3 lampAcc;
+	GasMarch(GasCamera, dir, Far, jit, RoomAt(Centre), true, acc, T, firstT, lampAcc);
+	OutBlock[Id.xy] = float4(acc + lampAcc, T);
+	OutLamp[Id.xy] = float4(lampAcc, 0);
 	// An edge: the block's depths differ by more than 3% of the far one or 10 cm, gas in it reached in front of the far
 	// depth; its first gas kept (a pixel nearer than that has no gas in front of it).
 	bool Edge = Far - Near > max(0.03 * min(Far, 1e5), 10.0) && T < 0.999 && firstT < Far;
@@ -290,6 +409,7 @@ Texture2D SceneColor;
 SamplerState SceneColorSampler;
 Texture2D<float4> BlockResult;
 Texture2D<float> BlockEdge;
+Texture2D<float4> BlockLamp;
 
 // The inputs as FScreenPassVS writes them (TEXCOORD0 then SV_POSITION: a pixel shader reading SV_POSITION alone did not
 // link with it on D3D12).
@@ -321,14 +441,17 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 			float2 Centre = floor(px / B) * B + 0.5 * B;
 			float jit = frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453);
 			float Unused;
-			GasMarch(GasCamera, RayDir(Centre), D, jit, RoomAt(Centre), acc, T, Unused);
+			float3 NoLamps;
+			GasMarch(GasCamera, RayDir(Centre), D, jit, RoomAt(Centre), false, acc, T, Unused, NoLamps);
+			// The block's lamp light, by this pixel's opacity against the block's.
+			acc += BlockLamp.Load(int3(Block, 0)).rgb * min((1.0 - T) / max(1.0 - R.a, 1e-3), 2.0);
 		}
 	}
 	float alpha = 1.0 - T;
 	// os.Gas.DebugAlpha 4: the room's light the gas takes (os.Gas.Light 1).
 	if (GasDebugAlpha > 3.5)
 	{
-		OutColor = float4(RoomAt(px), 1);
+		OutColor = float4(GasToSrgb(RoomAt(px)), 1);
 		return;
 	}
 	// os.Gas.DebugAlpha 3: how far the block's opacity is from the pixel's own march (x4, grey; 0 in a flagged block).
@@ -340,7 +463,8 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 		float3 acc2;
 		float T2;
 		float Unused2;
-		GasMarch(GasCamera, RayDir(Centre), D, frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453), RoomAt(Centre), acc2, T2, Unused2);
+		float3 NoLamps2;
+		GasMarch(GasCamera, RayDir(Centre), D, frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453), RoomAt(Centre), false, acc2, T2, Unused2, NoLamps2);
 		float Diff = saturate(abs(T2 - T) * 4.0);
 		OutColor = float4(Diff, Diff, Diff, 1);
 		return;
@@ -354,6 +478,7 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 		return;
 	}
 	float3 smoke = alpha > 1e-3 ? acc / alpha : float3(0, 0, 0);
+	smoke = GasLight > 0.5 ? GasToSrgb(smoke) : smoke;
 	OutColor = float4(lerp(Col.rgb, smoke, aq), Col.a);
 }
 

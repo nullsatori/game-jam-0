@@ -12,6 +12,8 @@ class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UTexture2D;
 class ULightComponent;
+/** A spot's cone (axis, cos of outer and inner) or a rect's cosine to its normal (0, 1); false for others. */
+bool OSGasLampCone(const ULightComponent* L, FVector& OutAxis, float& OutCosOuter, float& OutCosInner);
 class USceneComponent;
 class UPrimitiveComponent;
 
@@ -246,7 +248,9 @@ public:
 	/** A cloud's parcels: the Рысь's shot is 160 from the muzzle, 80 from its 16 shroud holes, its thread and seep. */
 	static constexpr int32 MaxParcels = 300;
 	/** GasData's rows a cloud (Scripts/os_muzzle_fx.py, GAS_POST_HLSL). */
-	static constexpr int32 DataRows = 13;
+	/** GasData's rows: 0-12 a cloud's atlases and look, 13-28 its four lamps (4 rows each, os.Gas.Light 1). */
+	static constexpr int32 MaxLamps = 4;
+	static constexpr int32 DataRows = 13 + 4 * MaxLamps;
 	/** The velocity grid (air): 20 cells of 6 cm; the render grid: 48 of 2 cm (3 cm in a vacuum), same centre. */
 	static constexpr int32 VelocityCells = 20;
 	static constexpr float VelocityCellCm = 6.0f;
@@ -339,8 +343,19 @@ private:
 		float CentreT = 1.0f;
 		FVector3f KeyDir = FVector3f::UpVector;
 		FLinearColor KeyColour = FLinearColor::White;
-		/** The key lamp's colour in full (os.Gas.Light 1); KeyColour is 80% grey (os.Gas.Light 0, the look before stage 6). */
-		FLinearColor KeyFull = FLinearColor::White;
+		/**
+		 * Its lamps (os.Gas.Light 1): the four strongest at the box's point nearest each, crossfaded over 0.25 s as the set
+		 * changes (the player's own - the muzzle's flash, the torch - at once); Key the one whose baked self-shadow it takes.
+		 */
+		struct FLampSlot
+		{
+			TWeakObjectPtr<const ULightComponent> Lamp;
+			float Weight = 0.0f;
+			float Score = 0.0f;
+		};
+		FLampSlot Lamps[MaxLamps];
+		int32 KeyLamp = INDEX_NONE;
+		bool bLampsFresh = true;
 		/** Whether each lamp near the cloud sees it (os.Gas.Light 1): a trace from the centre every 0.25 s, eased 0.15 s. */
 		struct FLampSeen
 		{
@@ -442,8 +457,9 @@ private:
 	void TickCloud(FCloud& Cloud, float DeltaTime);
 	void LaunchStep(FCloud& Cloud, int32 Steps, float Dt);
 	void FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey<UPrimitiveComponent>>& Seen);
-	/** The strongest lamp at Where; with a cloud, only lamps that see its centre count (os.Gas.Light 1). */
-	void PickKey(const FVector& Where, FVector3f& OutDir, FLinearColor& OutColour, FCloud* Seeing = nullptr);
+	void PickKey(const FVector& Where, FVector3f& OutDir, FLinearColor& OutColour);
+	/** os.Gas.Light 1: the cloud's four lamps for this frame (the set, the crossfade, the key's direction). */
+	void UpdateLamps(FCloud& Cloud, const FVector& Centre, float DeltaTime, FVector3f& OutKeyDir);
 	/** How much a lamp sees Where (0-1, traced every 0.25 s, eased 0.15 s), by the cloud's record. */
 	float LampSees(FCloud& Cloud, const ULightComponent* Lamp, const FVector& Where, const FVector& Toward, bool bDirectional);
 	void EnsureRender(FCloud& Cloud);

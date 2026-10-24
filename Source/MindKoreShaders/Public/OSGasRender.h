@@ -30,6 +30,8 @@ struct FOSGasRenderData
 	float AmbientScale = 1.0f;
 	float LightScale = 1.0f;
 	float Albedo = 1.0f;
+	/** The Henyey-Greenstein share of the lamps' phase (os.Gas.Forward; the rest isotropic). */
+	float Forward = 0.7f;
 	/** The game's frame time, s: the room's light follows the frame over 0.1 s. */
 	float DeltaSeconds = 1.0f / 60.0f;
 };
