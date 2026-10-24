@@ -3,7 +3,8 @@
 // cloud, to the block's farthest scene depth, and flags a block whose depths differ (a gun's edge, a wall's rim);
 // MainCompositePS takes the block's result, or marches its own pixel's depth in a flagged block (crisp edges).
 // The march is M_OS_GasPost's (Scripts/os_muzzle_fx.py, GAS_POST_HLSL), kept the same: two atlases per cloud blended
-// by the step's phase, soft tunnels, the eye's and the box faces' fades, the light and colour, the 4 bands.
+// by the step's phase, soft tunnels, the eye's and the box faces' fades, the 4 bands; its light is the material's under
+// os.Gas.Light 0 and stage 6's under os.Gas.Light 1 (the room's light from the frame, the key lamp's full colour).
 
 #include "/Engine/Private/Common.ush"
 
@@ -27,6 +28,14 @@ float GasBlockPx;
 float GasEyeClear;
 float GasDebugAlpha;
 float3 GasCamera;
+// Stage 6 (os.Gas.Light 1): the room's light from the frame (GasAmbient, the scene before the gas, 1/32 and blurred),
+// a darker albedo, the key lamp's full colour. 0: the light as before (the map's ambient constants, base x1.5).
+float GasLight;
+float GasAmbientScale;
+float GasLightScale;
+float GasAlbedo;
+Texture2D GasAmbient;
+SamplerState GasAmbientSampler;
 // The output's rect (post-upscale pixels) and the depth's (render pixels): a pixel's depth texel is
 // DepthMin + (Px - OutMin) * DepthScale.
 int2 OutMin;
@@ -59,7 +68,7 @@ float3 RayDir(float2 OutPx)
 	return PixelRay(OutPx, Unused);
 }
 
-void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, out float3 acc, out float T, out float firstT)
+void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, out float3 acc, out float T, out float firstT)
 {
 	firstT = 1e9;
 	// The tunnels this ray crosses: (t of the closest approach, its distance, sin of the angle, radius), the stretch
@@ -212,14 +221,28 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, out float3 acc
 	        float dens = v.r * gain * keep * near;
 	        if (dens < 0.01) continue;
 	        float aStep = 1.0 - exp(-ext * dens * stepCm);
-	        float3 amb = lerp(bot, top, saturate(0.5 + 0.5 * (pw.z - C.z) / H));
-	        float3 col = base * 1.5 * (amb * (0.35 + 0.65 * v.a) + key * v.b) + warm * v.g * v.g;
+	        float3 col;
+	        if (GasLight > 0.5)
+	        {
+	            col = base * GasAlbedo * (room * GasAmbientScale * (0.35 + 0.65 * v.a) + key * GasLightScale * v.b) + warm * v.g * v.g;
+	        }
+	        else
+	        {
+	            float3 amb = lerp(bot, top, saturate(0.5 + 0.5 * (pw.z - C.z) / H));
+	            col = base * 1.5 * (amb * (0.35 + 0.65 * v.a) + key * v.b) + warm * v.g * v.g;
+	        }
 	        firstT = min(firstT, t - stepCm);
 	        acc += T * aStep * col;
 	        T *= 1.0 - aStep;
 	        if (T < 0.05) break;
 	    }
 	}
+}
+
+// The room's light round an output pixel (os.Gas.Light 1): the frame before the gas, 1/32 and blurred.
+float3 RoomAt(float2 OutPx)
+{
+	return GasAmbient.SampleLevel(GasAmbientSampler, (OutPx - OutMin) / max(float2(OutSize), 1.0), 0).rgb;
 }
 
 RWTexture2D<float4> OutBlock;
@@ -255,7 +278,7 @@ void MainBlockCS(uint3 Id : SV_DispatchThreadID)
 	float3 acc;
 	float T;
 	float firstT;
-	GasMarch(GasCamera, dir, Far, jit, acc, T, firstT);
+	GasMarch(GasCamera, dir, Far, jit, RoomAt(Centre), acc, T, firstT);
 	OutBlock[Id.xy] = float4(acc, T);
 	// An edge: the block's depths differ by more than 3% of the far one or 10 cm, gas in it reached in front of the far
 	// depth; its first gas kept (a pixel nearer than that has no gas in front of it).
@@ -298,10 +321,16 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 			float2 Centre = floor(px / B) * B + 0.5 * B;
 			float jit = frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453);
 			float Unused;
-			GasMarch(GasCamera, RayDir(Centre), D, jit, acc, T, Unused);
+			GasMarch(GasCamera, RayDir(Centre), D, jit, RoomAt(Centre), acc, T, Unused);
 		}
 	}
 	float alpha = 1.0 - T;
+	// os.Gas.DebugAlpha 4: the room's light the gas takes (os.Gas.Light 1).
+	if (GasDebugAlpha > 3.5)
+	{
+		OutColor = float4(RoomAt(px), 1);
+		return;
+	}
 	// os.Gas.DebugAlpha 3: how far the block's opacity is from the pixel's own march (x4, grey; 0 in a flagged block).
 	if (GasDebugAlpha > 2.5)
 	{
@@ -311,7 +340,7 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 		float3 acc2;
 		float T2;
 		float Unused2;
-		GasMarch(GasCamera, RayDir(Centre), D, frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453), acc2, T2, Unused2);
+		GasMarch(GasCamera, RayDir(Centre), D, frac(sin(dot(floor(px / B), float2(12.9898, 78.233))) * 43758.5453), RoomAt(Centre), acc2, T2, Unused2);
 		float Diff = saturate(abs(T2 - T) * 4.0);
 		OutColor = float4(Diff, Diff, Diff, 1);
 		return;
@@ -326,4 +355,76 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 	}
 	float3 smoke = alpha > 1e-3 ? acc / alpha : float3(0, 0, 0);
 	OutColor = float4(lerp(Col.rgb, smoke, aq), Col.a);
+}
+
+// The room's light (stage 6): the frame before the gas at 1/32 - a thread a 32x32 tile, every 4th pixel, weighted by
+// depth so the gun and the hands (nearer than 50 cm) do not darken the smoke at the muzzle; then a blur each way, the
+// second blended into the last frame's (<= 0.1 s) with a floor (a shadow in space is not pure black).
+Texture2D AmbientSceneColor;
+Texture2D AmbientDepth;
+RWTexture2D<float4> AmbientOut;
+int2 AmbientSize;
+
+[numthreads(8, 8, 1)]
+void AmbientDownCS(uint3 Id : SV_DispatchThreadID)
+{
+	if (any(int2(Id.xy) >= AmbientSize))
+	{
+		return;
+	}
+	float3 Sum = 0;
+	float W = 0;
+	for (int y = 2; y < 32; y += 4)
+	{
+		for (int x = 2; x < 32; x += 4)
+		{
+			int2 P = min(OutMin + int2(Id.xy) * 32 + int2(x, y), OutMin + OutSize - 1);
+			float2 DepthPx = DepthMin + (P - OutMin) * DepthScale;
+			float DeviceZ = AmbientDepth.Load(int3(DepthPx, 0)).r;
+			float Depth = DeviceZ <= 0.0 ? 1e7 : ConvertFromDeviceZ(DeviceZ);
+			float w = smoothstep(40.0, 60.0, Depth);
+			Sum += AmbientSceneColor.Load(int3(P, 0)).rgb * w;
+			W += w;
+		}
+	}
+	AmbientOut[Id.xy] = float4(W > 0.0 ? Sum / W : 0.0, W / 64.0);
+}
+
+Texture2D<float4> AmbientIn;
+Texture2D<float4> AmbientHistory;
+int2 AmbientDir;
+float AmbientBlend;
+float AmbientFloor;
+float AmbientHasHistory;
+
+[numthreads(8, 8, 1)]
+void AmbientBlurCS(uint3 Id : SV_DispatchThreadID)
+{
+	if (any(int2(Id.xy) >= AmbientSize))
+	{
+		return;
+	}
+	static const float K[5] = { 0.0625, 0.25, 0.375, 0.25, 0.0625 };
+	float3 Sum = 0;
+	float W = 0;
+	for (int i = -2; i <= 2; i++)
+	{
+		int2 P = clamp(int2(Id.xy) + AmbientDir * i * 2, 0, AmbientSize - 1);
+		float4 S = AmbientIn.Load(int3(P, 0));
+		Sum += S.rgb * S.a * K[i + 2];
+		W += S.a * K[i + 2];
+	}
+	float3 Now = W > 1e-4 ? Sum / W : 0.0;
+	float Valid = saturate(W * 8.0);
+	if (AmbientBlend >= 0.0)
+	{
+		// The second pass: into the last frame's, a texel with nothing behind it (the gun over the tile) keeps the last.
+		float3 Last = AmbientHasHistory > 0.5 ? AmbientHistory.Load(int3(Id.xy, 0)).rgb : Now;
+		Now = lerp(Last, max(Now, AmbientFloor), AmbientBlend * Valid);
+		AmbientOut[Id.xy] = float4(max(Now, AmbientFloor), 1.0);
+	}
+	else
+	{
+		AmbientOut[Id.xy] = float4(Now, W);
+	}
 }

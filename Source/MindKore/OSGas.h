@@ -29,7 +29,8 @@ struct FOSGasLook
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
-	FLinearColor Colour = FLinearColor(0.50f, 0.52f, 0.56f);
+	/** The gas's albedo: neutral grey, darker than the walls round it unlit (powder smoke; stage 6). */
+	FLinearColor Colour = FLinearColor(0.40f, 0.40f, 0.40f);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
 	FLinearColor WarmColour = FLinearColor(0.62f, 0.50f, 0.38f);
@@ -338,6 +339,16 @@ private:
 		float CentreT = 1.0f;
 		FVector3f KeyDir = FVector3f::UpVector;
 		FLinearColor KeyColour = FLinearColor::White;
+		/** The key lamp's colour in full (os.Gas.Light 1); KeyColour is 80% grey (os.Gas.Light 0, the look before stage 6). */
+		FLinearColor KeyFull = FLinearColor::White;
+		/** Whether each lamp near the cloud sees it (os.Gas.Light 1): a trace from the centre every 0.25 s, eased 0.15 s. */
+		struct FLampSeen
+		{
+			float Seen = 0.0f;
+			float Target = 0.0f;
+			double Traced = -1e9;
+		};
+		TMap<TWeakObjectPtr<const ULightComponent>, FLampSeen> LampsSeen;
 		TObjectPtr<UTexture2D> Texture = nullptr;
 		/** An atlas has been uploaded (the post-process may draw it). */
 		bool bDrawable = false;
@@ -431,7 +442,10 @@ private:
 	void TickCloud(FCloud& Cloud, float DeltaTime);
 	void LaunchStep(FCloud& Cloud, int32 Steps, float Dt);
 	void FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey<UPrimitiveComponent>>& Seen);
-	void PickKey(const FVector& Where, FVector3f& OutDir, FLinearColor& OutColour);
+	/** The strongest lamp at Where; with a cloud, only lamps that see its centre count (os.Gas.Light 1). */
+	void PickKey(const FVector& Where, FVector3f& OutDir, FLinearColor& OutColour, FCloud* Seeing = nullptr);
+	/** How much a lamp sees Where (0-1, traced every 0.25 s, eased 0.15 s), by the cloud's record. */
+	float LampSees(FCloud& Cloud, const ULightComponent* Lamp, const FVector& Where, const FVector& Toward, bool bDirectional);
 	void EnsureRender(FCloud& Cloud);
 	void WaitAll() const;
 

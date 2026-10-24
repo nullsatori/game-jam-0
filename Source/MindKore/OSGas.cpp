@@ -13,6 +13,7 @@
 #include "DrawDebugHelpers.h"
 #include "Misc/ScopeExit.h"
 #include "OSGasRender.h"
+#include "RendererInterface.h"
 #include "RenderingThread.h"
 #include "PostProcess/PostProcessMaterialInputs.h"
 #include "SceneViewExtension.h"
@@ -49,7 +50,7 @@ namespace
 	constexpr float AirGrowCmPerSecond = 3.0f;
 	/** FLIP share of the grid-to-parcel transfer (the rest PIC). */
 	constexpr float Flip = 0.9f;
-	/** A parcel's extra drag toward the flow, 1/s per cm² of radius, at most MaxDrag (the ring lives >= 0.5 s). */
+	/** A parcel's extra drag toward the flow, 1/s per cmВІ of radius, at most MaxDrag (the ring lives >= 0.5 s). */
 	constexpr float DragPerCm2 = 0.02f;
 	constexpr float MaxDrag = 1.8f;
 	constexpr float HeatSeconds = 0.5f;
@@ -88,11 +89,24 @@ namespace
 
 	TAutoConsoleVariable<int32> CVarGasDebugAlpha(
 		TEXT("os.Gas.DebugAlpha"), 0,
-		TEXT("1: the gas post-process draws only its opacity, grey (os.Gas.WalkProbe measures its jumps a frame)."));
+		TEXT("1: the gas post-process draws only its opacity, grey (os.Gas.WalkProbe measures its jumps a frame); 3: the block less the pixel's own march; 4: the room's light the gas takes (os.Gas.Light 1)."));
+
+	TAutoConsoleVariable<int32> CVarGasLight(
+		TEXT("os.Gas.Light"), 1,
+		TEXT("1: the gas lit by the room (the frame before it, 1/32 and blurred) and the key lamp's full colour, a darker albedo (v11 stage 6); 0: the light before stage 6 (A/B)."));
+	TAutoConsoleVariable<float> CVarGasAmbientScale(
+		TEXT("os.Gas.AmbientScale"), 1.4f,
+		TEXT("os.Gas.Light 1: the room's light on the gas, x (unlit gas about 0.5-0.6 of the walls round it)."));
+	TAutoConsoleVariable<float> CVarGasLightScale(
+		TEXT("os.Gas.LightScale"), 1.6f,
+		TEXT("os.Gas.Light 1: the lamps' light on the gas, x."));
+	TAutoConsoleVariable<float> CVarGasAlbedo(
+		TEXT("os.Gas.Albedo"), 1.0f,
+		TEXT("os.Gas.Light 1: the gas's albedo, x its look's colour."));
 
 	TAutoConsoleVariable<int32> CVarGasDebug(
 		TEXT("os.Gas.Debug"), 0,
-		TEXT("1: draw every cloud's box (white), parcels (points, red heavy to blue light), bodies (yellow, velocity arrow), tunnels (cyan), wall/floor planes (green) and sources (magenta)."));
+		TEXT("1: draw every cloud's box (white), parcels (points, red heavy to blue light), bodies (yellow, velocity arrow), tunnels (cyan), wall/floor planes (green) and sources (magenta); 2: also each cloud's key lamp in the log once a second."));
 
 	/** os.Fx.SmokeCost: the splat's share of the steps. */
 	std::atomic<int64> GSplatUs{0}, GSplats{0};
@@ -168,9 +182,11 @@ private:
 			FScopeLock Lock(&DataLock);
 			Now = Data;
 		}
-		return OSAddGasPasses(GraphBuilder, View, Inputs, Now);
+		return OSAddGasPasses(GraphBuilder, View, Inputs, Now, AmbientHistory);
 	}
 
+	/** The room's light last frame (render thread only). */
+	TRefCountPtr<IPooledRenderTarget> AmbientHistory;
 	FCriticalSection DataLock;
 	FOSGasRenderData Data;
 };
@@ -476,7 +492,7 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	UWorld* World = GetWorld();
 	// The youngest of this look with room, its gas close, young enough (a new shot never joins: JoinAge < 0). The
 	// youngest: a shot's hole puffs went into the shot before it (the first match), stretching that cloud's box to
-	// the new muzzle - it jumped (owner 23.10: «рывком склеиваются»).
+	// the new muzzle - it jumped (owner 23.10: В«СЂС‹РІРєРѕРј СЃРєР»РµРёРІР°СЋС‚СЃСЏВ»).
 	int32 Join = INDEX_NONE;
 	for (int32 Index = 0; Index < Clouds.Num() && JoinAge >= 0.0f; ++Index)
 	{
@@ -617,6 +633,15 @@ int32 UOSGasSubsystem::CloudFor(const FOSGasLook& Look, const FVector& Where, fl
 	}
 	EnsureRender(Cloud);
 	PickKey(Where, Cloud.KeyDir, Cloud.KeyColour);
+	Cloud.LampsSeen.Reset();
+	if (CVarGasLight.GetValueOnGameThread() > 0)
+	{
+		PickKey(Where, Cloud.KeyDir, Cloud.KeyFull, &Cloud);
+	}
+	else
+	{
+		Cloud.KeyFull = Cloud.KeyColour;
+	}
 	return Slot;
 }
 
@@ -755,7 +780,7 @@ void UOSGasSubsystem::EmitNow(const FOSGasRecipe& Recipe, const FOSGasLook& Look
 	}
 	// A seep or a hot case's puff goes only into the last shot's cloud while it is well inside its box, or (a barrel's
 	// seep) into the barrel's own small cloud, started while 4 slots are free - never into an older stranger: the old
-	// clouds keep still (owner 23.10: «рывком склеиваются»); as clouds of their own, one each, they evicted the shots'.
+	// clouds keep still (owner 23.10: В«СЂС‹РІРєРѕРј СЃРєР»РµРёРІР°СЋС‚СЃСЏВ»); as clouds of their own, one each, they evicted the shots'.
 	const auto Takes = [this, &Look, &Where](int32 Slot, uint32 Serial, float Share)
 	{
 		if (!Clouds.IsValidIndex(Slot))
@@ -1154,9 +1179,21 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 		FVector3f Dir;
 		FLinearColor Colour;
 		PickKey(Centre, Dir, Colour);
-		// 80% white: a saturated lamp (the planetoid's red rock light) barely tints the gas (it turned it brown).
-		Colour = FMath::Lerp(Colour, FLinearColor(Colour.GetLuminance(), Colour.GetLuminance(), Colour.GetLuminance()), 0.8f);
 		const float Ease = 1.0f - FMath::Exp(-DeltaTime / 0.25f);
+		// os.Gas.Light 1: the strongest lamp that sees the cloud, its colour in full (a sun behind the roof does not light
+		// a room's smoke - TestRoom's blue directional turned it cold).
+		if (CVarGasLight.GetValueOnGameThread() > 0)
+		{
+			FLinearColor Full;
+			PickKey(Centre, Dir, Full, &Cloud);
+			Cloud.KeyFull = Cloud.KeyFull + (Full - Cloud.KeyFull) * Ease;
+		}
+		else
+		{
+			Cloud.KeyFull = Cloud.KeyFull + (Colour - Cloud.KeyFull) * Ease;
+		}
+		// os.Gas.Light 0: 80% white: a saturated lamp (the planetoid's red rock light) barely tints the gas (it turned it brown).
+		Colour = FMath::Lerp(Colour, FLinearColor(Colour.GetLuminance(), Colour.GetLuminance(), Colour.GetLuminance()), 0.8f);
 		Cloud.KeyDir = (Cloud.KeyDir + (Dir - Cloud.KeyDir) * Ease).GetSafeNormal(UE_SMALL_NUMBER, Dir);
 		Cloud.KeyColour = Cloud.KeyColour + (Colour - Cloud.KeyColour) * Ease;
 	}
@@ -1165,7 +1202,7 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 
 void UOSGasSubsystem::AmbientFor(bool bAir, FLinearColor& OutTop, FLinearColor& OutBottom) const
 {
-	// ponytail: by the map's name until the zones carry their own (stage 4: a field on the air zone).
+	// os.Gas.Light 0 only (the A/B): by the map's name. os.Gas.Light 1 takes the room's light from the frame.
 	if (!bAir)
 	{
 		OutTop = FLinearColor(0.30f, 0.32f, 0.38f);
@@ -1228,7 +1265,7 @@ void UOSGasSubsystem::UpdatePost()
 		LastDrawnSet = MoveTemp(Set);
 	}
 	// Composited oldest first, a stable order: by distance, two overlapping clouds swapped places as their centres
-	// moved and the overlap's colour jumped (owner 23.10: «рывком склеиваются и подергиваются»).
+	// moved and the overlap's colour jumped (owner 23.10: В«СЂС‹РІРєРѕРј СЃРєР»РµРёРІР°СЋС‚СЃСЏ Рё РїРѕРґРµСЂРіРёРІР°СЋС‚СЃСЏВ»).
 	Drawn.Sort([](const FCloud& A, const FCloud& B) { return A.Age > B.Age; });
 	// GasData: a column a cloud, DataRows rows (Scripts/os_muzzle_fx.py, GAS_POST_HLSL): 0 the current atlas's centre
 	// and half, 1 cells + its cell + gain + extinction, 2 key light + the phase, 3 colour + birth (world s), 4 warm +
@@ -1248,7 +1285,8 @@ void UOSGasSubsystem::UpdatePost()
 		const float LifeFade = FMath::Cube(1.0f - FMath::SmoothStep(0.3f * Cloud.Look.LifeSeconds, Cloud.Look.LifeSeconds, Cloud.FadeAge));
 		const float EvictFade = Cloud.Evict > 0.0f ? FMath::Cube(Cloud.Evict / EvictSeconds) : 1.0f;
 		// The key light in display terms (the post-process is after the tonemapper): a soft knee, never blown white.
-		const FLinearColor K = Cloud.KeyColour;
+		const bool bNewLight = CVarGasLight.GetValueOnGameThread() > 0;
+		const FLinearColor K = bNewLight ? Cloud.KeyFull : Cloud.KeyColour;
 		const FLinearColor Key(1.0f - FMath::Exp(-K.R * 0.8f), 1.0f - FMath::Exp(-K.G * 0.8f), 1.0f - FMath::Exp(-K.B * 0.8f));
 		FLinearColor Top, Bottom;
 		AmbientFor(Cloud.bAir, Top, Bottom);
@@ -1258,7 +1296,9 @@ void UOSGasSubsystem::UpdatePost()
 		Data[0 * MaxDrawn + Index] = FLinearColor(Centre.X, Centre.Y, Centre.Z, Half);
 		Data[1 * MaxDrawn + Index] = FLinearColor(float(RenderCells), Cloud.RenderCellCm, LifeFade * EvictFade, Cloud.Look.Extinction);
 		Data[2 * MaxDrawn + Index] = FLinearColor(Key.R, Key.G, Key.B, Phase);
-		Data[3 * MaxDrawn + Index] = FLinearColor(Cloud.Look.Colour.R, Cloud.Look.Colour.G, Cloud.Look.Colour.B, Cloud.BirthWorld);
+		// ponytail: os.Gas.Light 0 shows the default look's old blue-grey (the A/B); goes with the old light after the merge.
+		const FLinearColor Albedo = !bNewLight && Cloud.Look.Colour == FOSGasLook().Colour ? FLinearColor(0.50f, 0.52f, 0.56f) : Cloud.Look.Colour;
+		Data[3 * MaxDrawn + Index] = FLinearColor(Albedo.R, Albedo.G, Albedo.B, Cloud.BirthWorld);
 		const FLinearColor Warm = Cloud.Look.bEmbers ? Cloud.Look.WarmColour : FLinearColor::Black;
 		Data[4 * MaxDrawn + Index] = FLinearColor(Warm.R, Warm.G, Warm.B, float(Cloud.CurHalf));
 		Data[5 * MaxDrawn + Index] = Top;
@@ -1349,6 +1389,11 @@ void UOSGasSubsystem::UpdatePost()
 #if !UE_BUILD_SHIPPING
 		Frame.DebugMode = float(CVarGasDebugAlpha.GetValueOnGameThread());
 #endif
+		Frame.Light = float(CVarGasLight.GetValueOnGameThread());
+		Frame.AmbientScale = CVarGasAmbientScale.GetValueOnGameThread();
+		Frame.LightScale = CVarGasLightScale.GetValueOnGameThread();
+		Frame.Albedo = CVarGasAlbedo.GetValueOnGameThread();
+		Frame.DeltaSeconds = World->GetDeltaSeconds();
 		GasView->SetData(Frame);
 		if (bLowRes)
 		{
@@ -1607,14 +1652,14 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				if (Cloud.bAir && P.Age > 0.5f)
 				{
 					// Old gas in air takes a little of the flow (PIC, 15% a step), not the young jet's changes (FLIP
-					// handed the jet's push to all of it: the whole cloud went in one piece, «магнитит»).
+					// handed the jet's push to all of it: the whole cloud went in one piece, В«РјР°РіРЅРёС‚РёС‚В»).
 					P.V += (New - P.V) * 0.15f;
 				}
 				else
 				{
 					P.V = (P.V + New - Old) * Share + New * (1.0f - Share);
 				}
-				// One drag in air: the grid's (tau 0.6 s); none of the parcel's own (it stopped the ring dead, «тормозит»).
+				// One drag in air: the grid's (tau 0.6 s); none of the parcel's own (it stopped the ring dead, В«С‚РѕСЂРјРѕР·РёС‚В»).
 				const float Hold = 0.0f;
 				P.V += (New - P.V) * Hold;
 			}
@@ -1640,7 +1685,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					P.Carrier -= Lost;
 					P.V -= Lost;
 				}
-				// Old gas relaxes to the still room's air (it moved forever: «уезжает хрен пойми куда»); the young
+				// Old gas relaxes to the still room's air (it moved forever: В«СѓРµР·Р¶Р°РµС‚ С…СЂРµРЅ РїРѕР№РјРё РєСѓРґР°В»); the young
 				// keep their ring.
 				if (P.Age > 0.3f)
 				{
@@ -1804,7 +1849,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	}
 	Spread /= FMath::Max(Mass, 1e-3f);
 	// The box: the frame round every parcel with its reach, 10% more; it grows and shrinks with the gas, never jumps
-	// (owner 23.10: «респавнится у оружия», «кубом обрезается»). Its cell: the size over 48, 2 to 8 cm.
+	// (owner 23.10: В«СЂРµСЃРїР°РІРЅРёС‚СЃСЏ Сѓ РѕСЂСѓР¶РёСЏВ», В«РєСѓР±РѕРј РѕР±СЂРµР·Р°РµС‚СЃСЏВ»). Its cell: the size over 48, 2 to 8 cm.
 	// An outlier (farther than 3x the mean spread) does not set the box; its gas fades at the box's faces (the shader).
 	const float FarCm = FMath::Max(3.0f * Spread, 40.0f);
 	const float MaxCell = 8.0f;
@@ -1830,7 +1875,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	// The box: kept while the gas fits it; grown at once with 15% to spare when it does not (the gas is never cut);
 	// shrunk (by a fifth at most) only once the gas has filled less than 60% of it for 0.5 s and 0.5 s after the last
 	// re-box. Each atlas is drawn in its own box and the two are blended: a re-box shows no jump (owner 23.10:
-	// «скачками расширяется» - a re-box each step).
+	// В«СЃРєР°С‡РєР°РјРё СЂР°СЃС€РёСЂСЏРµС‚СЃСЏВ» - a re-box each step).
 	{
 		const float OldCell = Cloud.PackedCellCm;
 		const FVector3f OldCentre = Cloud.PackedCentre;
@@ -2007,12 +2052,12 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		{
 			const FOSGasParcel& P = Parcels[Index];
 			// An ellipsoid: semi-axis max(radius, |v| x 0.08 s) along the velocity, the radius across - a fast parcel
-			// draws a streak of jet, not a ball (owner 23.10: «в невесомости дым вылетает как будто дробинками»).
+			// draws a streak of jet, not a ball (owner 23.10: В«РІ РЅРµРІРµСЃРѕРјРѕСЃС‚Рё РґС‹Рј РІС‹Р»РµС‚Р°РµС‚ РєР°Рє Р±СѓРґС‚Рѕ РґСЂРѕР±РёРЅРєР°РјРёВ»).
 			const float Speed = P.V.Size();
 			const FVector3f Along = Speed > 1.0f ? P.V / Speed : FVector3f::ZeroVector;
 			// The streak along the velocity joins a streamer's parcels into a thread; in a vacuum half of it (0.04 s) and
-			// 4 radii at most - a full streak of fast parcels drew bright comets (owner 23.10: «у пистолета какие-то
-			// кометы»), and merged across into a cylinder before the jet became a fan.
+			// 4 radii at most - a full streak of fast parcels drew bright comets (owner 23.10: В«Сѓ РїРёСЃС‚РѕР»РµС‚Р° РєР°РєРёРµ-С‚Рѕ
+			// РєРѕРјРµС‚С‹В»), and merged across into a cylinder before the jet became a fan.
 			const float Long = Cloud.bAir ? FMath::Max(P.RadiusCm, Speed * 0.08f) : FMath::Clamp(Speed * 0.04f, P.RadiusCm, 4.0f * P.RadiusCm);
 			const float InvAcross2 = 1.0f / (P.RadiusCm * P.RadiusCm);
 			const float InvLong2 = 1.0f / (Long * Long);
@@ -2210,7 +2255,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 				// The warm core only while the gas is hot (heat over 0.3: its first 0.3-0.5 s), not a brown tint after.
 				const float Heat = W[I] > 1e-4f ? FMath::Clamp((H[I] / W[I] - 0.3f) / 0.7f, 0.0f, 1.0f) : 0.0f;
 				// The key light's shadow through the drawn gas itself (1-12 cells toward it, as the old grid's Pack): a
-				// lit flank and a dark belly - the relief (owner 23.10: «недостаточно рельефным»). The parcels' own
+				// lit flank and a dark belly - the relief (owner 23.10: В«РЅРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ СЂРµР»СЊРµС„РЅС‹РјВ»). The parcels' own
 				// light (L / W) shades it further.
 				float Toward = 0.0f;
 				for (int32 S = 0; S < KeySteps; ++S)
@@ -2310,7 +2355,7 @@ void UOSGasSubsystem::FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey
 		LastMoverAt.Add(Key, At);
 		Seen.Add(Key);
 		// A pawn (the player included) is a sphere of its capsule's radius, never its bounds' box: that box (68 x 68 x
-		// 176 cm) swept the whole cloud along with the walking player (owner 23.10: «облако следует за пушкой»).
+		// 176 cm) swept the whole cloud along with the walking player (owner 23.10: В«РѕР±Р»Р°РєРѕ СЃР»РµРґСѓРµС‚ Р·Р° РїСѓС€РєРѕР№В»).
 		if (const APawn* PawnOwner = Cast<APawn>(Body->GetOwner()); PawnOwner && Body == PawnOwner->GetRootComponent())
 		{
 			float CapsuleRadius = 0.0f, CapsuleHalf = 0.0f;
@@ -2346,7 +2391,34 @@ void UOSGasSubsystem::FindMovers(FCloud& Cloud, float DeltaTime, TSet<TObjectKey
 	}
 }
 
-void UOSGasSubsystem::PickKey(const FVector& Where, FVector3f& OutDir, FLinearColor& OutColour)
+float UOSGasSubsystem::LampSees(FCloud& Cloud, const ULightComponent* Lamp, const FVector& Where, const FVector& Toward, bool bDirectional)
+{
+	UWorld* World = GetWorld();
+	const double Now = World->GetTimeSeconds();
+	const bool bNew = !Cloud.LampsSeen.Contains(Lamp);
+	FCloud::FLampSeen& Seen = Cloud.LampsSeen.FindOrAdd(Lamp);
+	if (Now - Seen.Traced >= 0.25)
+	{
+		Seen.Traced = Now;
+		// To the lamp (30 cm short of it: its own shade) or 200 m toward a sun; the player and what they carry left out.
+		const FVector End = bDirectional ? Where + Toward * 20000.0 : Lamp->GetComponentLocation() - Toward * 30.0;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(OSGasLampSees), false);
+		if (const APlayerController* Controller = World->GetFirstPlayerController(); Controller && Controller->GetPawn())
+		{
+			const APawn* Pawn = Controller->GetPawn();
+			Params.AddIgnoredActor(Pawn);
+			TArray<AActor*> Carried;
+			Pawn->GetAttachedActors(Carried, true, true);
+			Params.AddIgnoredActors(Carried);
+		}
+		Params.AddIgnoredActor(Lamp->GetOwner());
+		Seen.Target = World->LineTraceTestByChannel(Where, End, ECC_Visibility, Params) ? 0.0f : 1.0f;
+	}
+	Seen.Seen = bNew ? Seen.Target : Seen.Seen + (Seen.Target - Seen.Seen) * (1.0f - FMath::Exp(-World->GetDeltaSeconds() / 0.15f));
+	return Seen.Seen;
+}
+
+void UOSGasSubsystem::PickKey(const FVector& Where, FVector3f& OutDir, FLinearColor& OutColour, FCloud* Seeing)
 {
 	UWorld* World = GetWorld();
 	KeyLightsAge += World->GetDeltaSeconds();
@@ -2365,6 +2437,9 @@ void UOSGasSubsystem::PickKey(const FVector& Where, FVector3f& OutDir, FLinearCo
 	float Best = 0.0f;
 	FVector Dir = FVector::UpVector;
 	FLinearColor Colour = FLinearColor(0.6f, 0.65f, 0.75f);
+#if !UE_BUILD_SHIPPING
+	const ULightComponent* Picked = nullptr;
+#endif
 	for (const TWeakObjectPtr<ULightComponent>& Each : KeyLights)
 	{
 		const ULightComponent* L = Each.Get();
@@ -2395,15 +2470,29 @@ void UOSGasSubsystem::PickKey(const FVector& Where, FVector3f& OutDir, FLinearCo
 				? Brightness * FMath::Pow(1.0f - Cm / Local->AttenuationRadius, Point->LightFalloffExponent) * 10.0f
 				: Brightness / FMath::Max(FMath::Square(Cm / 100.0f), 0.1f);
 		}
+		if (Seeing && Score > Best)
+		{
+			Score *= LampSees(*Seeing, L, Where, Toward, L->IsA<UDirectionalLightComponent>());
+		}
 		if (Score > Best)
 		{
 			Best = Score;
 			Dir = Toward;
 			Colour = L->GetLightColor();
+#if !UE_BUILD_SHIPPING
+			Picked = L;
+#endif
 		}
 	}
 	OutDir = FVector3f(Dir);
 	OutColour = Colour * FMath::Min(Best / UE_PI * KeyStrength, KeyMax);
+#if !UE_BUILD_SHIPPING
+	// os.Gas.Debug 2: a cloud's key lamp in the log once a second.
+	if (Seeing && CVarGasDebug.GetValueOnGameThread() > 1 && FMath::FloorToInt(World->GetTimeSeconds()) != FMath::FloorToInt(World->GetTimeSeconds() - World->GetDeltaSeconds()))
+	{
+		UE_LOG(LogMindKore, Log, TEXT("Gas: key lamp %s (%s), colour %s"), Picked ? *Picked->GetOwner()->GetName() : TEXT("none"), Picked ? *Picked->GetClass()->GetName() : TEXT("-"), *OutColour.ToString());
+	}
+#endif
 }
 
 bool OSGasCardsEnabled()

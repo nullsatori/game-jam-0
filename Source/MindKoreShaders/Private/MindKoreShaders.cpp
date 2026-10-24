@@ -6,6 +6,7 @@
 #include "Modules/ModuleManager.h"
 #include "PostProcess/PostProcessMaterialInputs.h"
 #include "RenderGraphUtils.h"
+#include "SystemTextures.h"
 #include "SceneTexturesConfig.h"
 #include "SceneView.h"
 #include "ScreenPass.h"
@@ -51,7 +52,64 @@ BEGIN_SHADER_PARAMETER_STRUCT(FOSGasCommonParameters, )
 	SHADER_PARAMETER(FIntPoint, OutSize)
 	SHADER_PARAMETER(FIntPoint, DepthMin)
 	SHADER_PARAMETER(FVector2f, DepthScale)
+	SHADER_PARAMETER(float, GasLight)
+	SHADER_PARAMETER(float, GasAmbientScale)
+	SHADER_PARAMETER(float, GasLightScale)
+	SHADER_PARAMETER(float, GasAlbedo)
+	SHADER_PARAMETER_RDG_TEXTURE(Texture2D, GasAmbient)
+	SHADER_PARAMETER_SAMPLER(SamplerState, GasAmbientSampler)
 END_SHADER_PARAMETER_STRUCT()
+
+/** The room's light (stage 6): the frame before the gas to 1/32, weighted by depth. */
+class FOSGasAmbientDownCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FOSGasAmbientDownCS);
+	SHADER_USE_PARAMETER_STRUCT(FOSGasAmbientDownCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AmbientSceneColor)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AmbientDepth)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, AmbientOut)
+		SHADER_PARAMETER(FIntPoint, AmbientSize)
+		SHADER_PARAMETER(FIntPoint, OutMin)
+		SHADER_PARAMETER(FIntPoint, OutSize)
+		SHADER_PARAMETER(FIntPoint, DepthMin)
+		SHADER_PARAMETER(FVector2f, DepthScale)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+};
+IMPLEMENT_GLOBAL_SHADER(FOSGasAmbientDownCS, "/MindKoreShaders/OSGas.usf", "AmbientDownCS", SF_Compute);
+
+/** A blur one way; the second into the last frame's (AmbientBlend >= 0). */
+class FOSGasAmbientBlurCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FOSGasAmbientBlurCS);
+	SHADER_USE_PARAMETER_STRUCT(FOSGasAmbientBlurCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float4>, AmbientIn)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float4>, AmbientHistory)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, AmbientOut)
+		SHADER_PARAMETER(FIntPoint, AmbientSize)
+		SHADER_PARAMETER(FIntPoint, AmbientDir)
+		SHADER_PARAMETER(float, AmbientBlend)
+		SHADER_PARAMETER(float, AmbientFloor)
+		SHADER_PARAMETER(float, AmbientHasHistory)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+};
+IMPLEMENT_GLOBAL_SHADER(FOSGasAmbientBlurCS, "/MindKoreShaders/OSGas.usf", "AmbientBlurCS", SF_Compute);
 
 class FOSGasBlockCS : public FGlobalShader
 {
@@ -94,7 +152,8 @@ public:
 };
 IMPLEMENT_GLOBAL_SHADER(FOSGasCompositePS, "/MindKoreShaders/OSGas.usf", "MainCompositePS", SF_Pixel);
 
-FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& View, const FPostProcessMaterialInputs& Inputs, const FOSGasRenderData& Data)
+FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& View, const FPostProcessMaterialInputs& Inputs, const FOSGasRenderData& Data,
+	TRefCountPtr<IPooledRenderTarget>& AmbientHistory)
 {
 	const FSceneTextureUniformParameters* SceneTextures = Inputs.SceneTextures.SceneTextures ? Inputs.SceneTextures.SceneTextures->GetContents() : nullptr;
 	// No clouds, nothing to draw - unless a debug view, which shows its (empty) opacity, not the scene.
@@ -119,6 +178,49 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 	const float Block = FMath::Max(Data.BlockPx, 1.0f);
 	const FIntPoint Blocks(FMath::CeilToInt(OutRect.Width() / Block) + 1, FMath::CeilToInt(OutRect.Height() / Block) + 1);
 
+	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
+	// The room's light (os.Gas.Light 1): the frame before the gas, 1/32, blurred each way, into the last frame's.
+	const FIntPoint AmbientSize(FMath::Max(1, FMath::DivideAndRoundUp(OutRect.Width(), 32)), FMath::Max(1, FMath::DivideAndRoundUp(OutRect.Height(), 32)));
+	FRDGTextureRef Ambient = GSystemTextures.GetBlackDummy(GraphBuilder);
+	if (Data.Light > 0.5f)
+	{
+		const FRDGTextureDesc Desc = FRDGTextureDesc::Create2D(AmbientSize, PF_FloatRGBA, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV);
+		FRDGTextureRef Down = GraphBuilder.CreateTexture(Desc, TEXT("OSGas.AmbientDown"));
+		FRDGTextureRef Across = GraphBuilder.CreateTexture(Desc, TEXT("OSGas.AmbientAcross"));
+		Ambient = GraphBuilder.CreateTexture(Desc, TEXT("OSGas.Ambient"));
+		{
+			FOSGasAmbientDownCS::FParameters* P = GraphBuilder.AllocParameters<FOSGasAmbientDownCS::FParameters>();
+			P->View = View.ViewUniformBuffer;
+			P->AmbientSceneColor = SceneColor.Texture;
+			P->AmbientDepth = SceneTextures->SceneDepthTexture;
+			P->AmbientOut = GraphBuilder.CreateUAV(Down);
+			P->AmbientSize = AmbientSize;
+			P->OutMin = OutRect.Min;
+			P->OutSize = OutRect.Size();
+			P->DepthMin = DepthRect.Min;
+			P->DepthScale = FVector2f(float(DepthRect.Width()) / FMath::Max(OutRect.Width(), 1), float(DepthRect.Height()) / FMath::Max(OutRect.Height(), 1));
+			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("OSGas.AmbientDown %dx%d", AmbientSize.X, AmbientSize.Y), TShaderMapRef<FOSGasAmbientDownCS>(ShaderMap), P,
+				FComputeShaderUtils::GetGroupCount(AmbientSize, FIntPoint(8, 8)));
+		}
+		const bool bHistory = AmbientHistory.IsValid() && AmbientHistory->GetDesc().Extent == AmbientSize;
+		FRDGTextureRef History = bHistory ? GraphBuilder.RegisterExternalTexture(AmbientHistory) : GSystemTextures.GetBlackDummy(GraphBuilder);
+		for (int32 Pass = 0; Pass < 2; ++Pass)
+		{
+			FOSGasAmbientBlurCS::FParameters* P = GraphBuilder.AllocParameters<FOSGasAmbientBlurCS::FParameters>();
+			P->AmbientIn = Pass == 0 ? Down : Across;
+			P->AmbientHistory = History;
+			P->AmbientOut = GraphBuilder.CreateUAV(Pass == 0 ? Across : Ambient);
+			P->AmbientSize = AmbientSize;
+			P->AmbientDir = Pass == 0 ? FIntPoint(1, 0) : FIntPoint(0, 1);
+			P->AmbientBlend = Pass == 0 ? -1.0f : 1.0f - FMath::Exp(-FMath::Max(Data.DeltaSeconds, 0.0f) / 0.1f);
+			P->AmbientFloor = 0.02f;
+			P->AmbientHasHistory = bHistory ? 1.0f : 0.0f;
+			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("OSGas.AmbientBlur"), TShaderMapRef<FOSGasAmbientBlurCS>(ShaderMap), P,
+				FComputeShaderUtils::GetGroupCount(AmbientSize, FIntPoint(8, 8)));
+		}
+		GraphBuilder.QueueTextureExtraction(Ambient, &AmbientHistory);
+	}
+
 	const auto FillCommon = [&](FOSGasCommonParameters& C)
 	{
 		C.View = View.ViewUniformBuffer;
@@ -141,11 +243,16 @@ FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& V
 		C.OutSize = OutRect.Size();
 		C.DepthMin = DepthRect.Min;
 		C.DepthScale = FVector2f(float(DepthRect.Width()) / FMath::Max(OutRect.Width(), 1), float(DepthRect.Height()) / FMath::Max(OutRect.Height(), 1));
+		C.GasLight = Data.Light;
+		C.GasAmbientScale = Data.AmbientScale;
+		C.GasLightScale = Data.LightScale;
+		C.GasAlbedo = Data.Albedo;
+		C.GasAmbient = Ambient;
+		C.GasAmbientSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 	};
 
 	FRDGTextureRef BlockResult = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_FloatRGBA, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.Block"));
 	FRDGTextureRef BlockEdge = GraphBuilder.CreateTexture(FRDGTextureDesc::Create2D(Blocks, PF_R32_FLOAT, FClearValueBinding::None, TexCreate_ShaderResource | TexCreate_UAV), TEXT("OSGas.Edge"));
-	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
 	{
 		FOSGasBlockCS::FParameters* P = GraphBuilder.AllocParameters<FOSGasBlockCS::FParameters>();
 		FillCommon(P->Common);

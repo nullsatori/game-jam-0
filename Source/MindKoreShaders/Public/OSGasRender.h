@@ -3,12 +3,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Templates/RefCounting.h"
 
 class FRDGBuilder;
 class FSceneView;
 struct FPostProcessMaterialInputs;
 struct FScreenPassTexture;
 class FTextureResource;
+struct IPooledRenderTarget;
 
 /** One frame's gas for the pass: UOSGasSubsystem's textures and counts (the same as M_OS_GasPost's parameters). */
 struct FOSGasRenderData
@@ -23,6 +25,13 @@ struct FOSGasRenderData
 	float EyeClear = 30.0f;
 	/** os.Gas.DebugAlpha: 1-2 the gas's opacity alone; 3 the block's opacity less the pixel's own march, x4 (an A/B check). */
 	float DebugMode = 0.0f;
+	/** Stage 6: os.Gas.Light (1 the room's light from the frame, the key lamp's full colour; 0 as before) and its tuning. */
+	float Light = 1.0f;
+	float AmbientScale = 1.0f;
+	float LightScale = 1.0f;
+	float Albedo = 1.0f;
+	/** The game's frame time, s: the room's light follows the frame over 0.1 s. */
+	float DeltaSeconds = 1.0f / 60.0f;
 };
 
 /**
@@ -31,4 +40,4 @@ struct FOSGasRenderData
  * pixel in a flagged block. Returns the frame with the gas over it.
  */
 MINDKORESHADERS_API FScreenPassTexture OSAddGasPasses(FRDGBuilder& GraphBuilder, const FSceneView& View, const FPostProcessMaterialInputs& Inputs,
-	const FOSGasRenderData& Data);
+	const FOSGasRenderData& Data, TRefCountPtr<IPooledRenderTarget>& AmbientHistory);
