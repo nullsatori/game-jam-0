@@ -253,6 +253,9 @@ namespace
 	TAutoConsoleVariable<int32> CVarGasHazeSamples(
 		TEXT("os.Gas.HazeSamples"), 32,
 		TEXT("The haze's march samples at most."));
+	TAutoConsoleVariable<int32> CVarGasFogSplit(
+		TEXT("os.Gas.FogSplit"), 1,
+		TEXT("1: the zone's haze is marched in two goes round the other clouds - in front of a puff over it, behind it under it (v15d); 0: in one go."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -2050,7 +2053,9 @@ void UOSGasSubsystem::UpdatePost()
 		const float AgeShare = FMath::Clamp(Cloud.HazeAge / 20.0f, 0.0f, 1.0f);
 		Data[8 * MaxDrawn + Index] = Cloud.bZone
 			? FLinearColor(Cloud.PrevCellCm, FMath::Lerp(CVarGasZoneAmbient.GetValueOnGameThread(), CVarGasFogAmbient.GetValueOnGameThread(), Cloud.FogShare),
-				FMath::Lerp(FMath::Lerp(0.55f, 0.3f, AgeShare), CVarGasFogG.GetValueOnGameThread(), Cloud.FogShare), float(FMath::Clamp(CVarGasHazeSamples.GetValueOnGameThread(), 8, 96)))
+				FMath::Lerp(FMath::Lerp(0.55f, 0.3f, AgeShare), CVarGasFogG.GetValueOnGameThread(), Cloud.FogShare),
+				// Negative: the shader marches the haze in two goes round the other clouds (os.Gas.FogSplit, v15d).
+				float(FMath::Clamp(CVarGasHazeSamples.GetValueOnGameThread(), 8, 96)) * (CVarGasFogSplit.GetValueOnGameThread() > 0 ? -1.0f : 1.0f))
 			: FLinearColor(Cloud.PrevCellCm, 1.0f, 0.55f, 96.0f);
 		// 9-12: where each atlas holds gas (world): the march goes through these, not the whole boxes.
 		const FVector O(Cloud.Origin);
@@ -4385,8 +4390,10 @@ void UOSGasSubsystem::TickFog(float DeltaTime)
 		}
 		const FOSGasRoom& Room = **RoomRef;
 		const bool bFloor = Fog.Fog == EOSZoneFog::Floor && Zone->bWalk && Zone->GravityCm > 0.0f;
-		const float Radius = bFloor ? FMath::Min(Cloud.HazeRadius, 0.8f * Fog.HeightCm) : FMath::Min(Cloud.HazeRadius, 1.2f * Fog.Spacing);
-		const float Mass = Fog.Density * CVarGasFogMass.GetValueOnGameThread();
+		// A haze's parcels 0.65 of the lattice wide (neighbours ~1.5 radii apart; the haze's 60 cm left round blotches).
+		const float Radius = bFloor ? FMath::Min(Cloud.HazeRadius, 0.8f * Fog.HeightCm) : FMath::Min(CVarGasHazeRadiusMax.GetValueOnGameThread(), 0.65f * Fog.Spacing);
+		// A haze half a floor layer's mass a parcel (calibrated: TestRoom 0.5 - a floor CentreT ~0.35, a haze ~0.6).
+		const float Mass = Fog.Density * CVarGasFogMass.GetValueOnGameThread() * (bFloor ? 1.0f : 0.5f);
 		const float Fall = bFloor ? 0.33f * CVarGasHazeDiffuse.GetValueOnGameThread() / FMath::Max(Fog.HeightCm, 10.0f) / AirRestSeconds * CVarGasFogFallScale.GetValueOnGameThread() : 0.0f;
 		while (Fog.SeedHead < Fog.SeedQueue.Num() && FPlatformTime::Seconds() < Until && Cloud.Parcels.Num() + Cloud.Incoming.Num() < MaxZoneParcels)
 		{
