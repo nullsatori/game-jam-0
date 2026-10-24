@@ -110,6 +110,45 @@ FOSGasPresetDef OSGasPreset(EOSGasPreset Preset)
 		L.LifeSeconds = 6.0f;
 		D.Count = 40;
 		break;
+	case EOSGasPreset::Fog:
+		// A coolant's cold fog: a slow wide flow straight into the haze, settling (~2 cm/s) into a layer on the floor.
+		R.SpeedCm = 60.0f;
+		R.SpeedMin = 0.5f;
+		R.ConeDeg = 25.0f;
+		R.RadiusMinCm = 4.0f;
+		R.RadiusMaxCm = 8.0f;
+		R.MaxRadiusCm = 60.0f;
+		R.Mass = 1.0f;
+		R.Heat = 0.0f;
+		R.FallCmPerS2 = 3.0f;
+		R.bIntoHaze = true;
+		R.LifeSeconds = 1e9f;
+		L.Colour = FLinearColor(0.84f, 0.88f, 0.94f);
+		L.Extinction = 0.045f;
+		L.bEmbers = false;
+		D.Mode = EOSGasMode::Continuous;
+		D.Rate = 4.0f;
+		break;
+	case EOSGasPreset::Steam:
+		// Steam: a jet straight into the haze rising (~28 cm/s) into a tongue under the ceiling, gone in ~40 s (12 s half-life).
+		R.SpeedCm = 150.0f;
+		R.SpeedMin = 0.6f;
+		R.ConeDeg = 12.0f;
+		R.RadiusMinCm = 3.0f;
+		R.RadiusMaxCm = 6.0f;
+		R.MaxRadiusCm = 60.0f;
+		R.Mass = 0.5f;
+		R.Heat = 1.0f;
+		R.FallCmPerS2 = -40.0f;
+		R.bIntoHaze = true;
+		R.HazeHalfLifeSeconds = 12.0f;
+		R.LifeSeconds = 1e9f;
+		L.Colour = FLinearColor(0.92f, 0.90f, 0.88f);
+		L.Extinction = 0.045f;
+		L.bEmbers = false;
+		D.Mode = EOSGasMode::Continuous;
+		D.Rate = 10.0f;
+		break;
 	default:
 		break;
 	}
@@ -119,7 +158,8 @@ FOSGasPresetDef OSGasPreset(EOSGasPreset Preset)
 EOSGasPreset OSGasPresetByName(const FString& Name)
 {
 	static const TPair<const TCHAR*, EOSGasPreset> Names[] = { { TEXT("muzzle"), EOSGasPreset::Muzzle }, { TEXT("port"), EOSGasPreset::Port },
-		{ TEXT("weld"), EOSGasPreset::Weld }, { TEXT("breach"), EOSGasPreset::Breach }, { TEXT("rcs"), EOSGasPreset::Rcs }, { TEXT("dust"), EOSGasPreset::Dust } };
+		{ TEXT("weld"), EOSGasPreset::Weld }, { TEXT("breach"), EOSGasPreset::Breach }, { TEXT("rcs"), EOSGasPreset::Rcs }, { TEXT("dust"), EOSGasPreset::Dust },
+		{ TEXT("fog"), EOSGasPreset::Fog }, { TEXT("steam"), EOSGasPreset::Steam } };
 	for (const TPair<const TCHAR*, EOSGasPreset>& Each : Names)
 	{
 		if (Name.Equals(Each.Key, ESearchCase::IgnoreCase))
@@ -258,6 +298,15 @@ void UOSGasSourceComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 			Carry -= Number;
 			Let(Number, true);
 		}
+		// Steam's heat shimmers over its outlet (v15): 2 puffs a second.
+		if (Preset == EOSGasPreset::Steam && (BreachFlowAge -= DeltaTime) <= 0.0f)
+		{
+			BreachFlowAge = 0.5f;
+			if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this))
+			{
+				Gas->AddHeat(GetComponentLocation(), GetForwardVector(), 1, 0.5f, 0.0f, 1.5f);
+			}
+		}
 		// A breach in air also draws the room's air to the hole (UOSGasSubsystem::AddAirFlow, refreshed every 0.5 s).
 		if (Preset == EOSGasPreset::Breach && (BreachFlowAge -= DeltaTime) <= 0.0f && OSAirZoneAt(GetWorld(), GetComponentLocation()))
 		{
@@ -342,12 +391,12 @@ namespace
 	/** os.Gas.Spawn <preset> [x y z]: a source of a preset at a point (1.5 m along the view by default), os.Gas.SpawnSeconds. */
 	FAutoConsoleCommandWithWorldAndArgs GGasSpawn(
 		TEXT("os.Gas.Spawn"),
-		TEXT("<muzzle|port|weld|breach|rcs|dust|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for 4 s, along the view."),
+		TEXT("<muzzle|port|weld|breach|rcs|dust|fog|steam|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for os.Gas.SpawnSeconds, along the view."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
 		{
 			if (Args.IsEmpty() || Args[0].Equals(TEXT("list"), ESearchCase::IgnoreCase))
 			{
-				UE_LOG(LogMindKore, Log, TEXT("os.Gas.Spawn presets: muzzle (burst 60, ring), port (burst 12, a puff), weld (25/s, warm, rising), breach (60/s, a jet; in air a draw to the hole), rcs (burst 20, cold, short), dust (burst 40, heavy, settles)"));
+				UE_LOG(LogMindKore, Log, TEXT("os.Gas.Spawn presets: muzzle (burst 60, ring), port (burst 12, a puff), weld (25/s, warm, rising), breach (60/s, a jet; in air a draw to the hole), rcs (burst 20, cold, short), dust (burst 40, heavy, settles), fog (4/s straight into the haze, a cold layer on the floor), steam (10/s into the haze, rises under the ceiling, gone in ~40 s)"));
 				return;
 			}
 			const EOSGasPreset Preset = OSGasPresetByName(Args[0]);

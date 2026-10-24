@@ -220,6 +220,9 @@ namespace
 	TAutoConsoleVariable<float> CVarGasHazeVentScale(
 		TEXT("os.Gas.HazeVentScale"), 1.0f,
 		TEXT("The zones' haze half-life x (1: as set on the zone, 45 s; 2: 90 s)."));
+	TAutoConsoleVariable<int32> CVarGasFogSource(
+		TEXT("os.Gas.FogSource"), 1,
+		TEXT("1: a source with bIntoHaze (the fog and steam presets) lets its gas straight into the zone's haze (v15); 0: through a cloud slot of its own, as a weld."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -1018,14 +1021,14 @@ void UOSGasSubsystem::HandOver(FCloud& Cloud, const FVector& Centre)
 	Haze.LastFed = Now;
 }
 
-void UOSGasSubsystem::Emit(FCloud& Cloud, const FOSGasRecipe& R, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count)
+void UOSGasSubsystem::Emit(FCloud& Cloud, const FOSGasRecipe& R, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count, int32 Cap)
 {
 	Cloud.LastFed = GetWorld()->GetTimeSeconds();
 	const FVector3f At(Where - Cloud.Origin);
 	const FVector3f Axis = FVector3f(Direction.GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector));
 	FVector3f U, W;
 	Axis.FindBestAxisVectors(U, W);
-	for (int32 Index = 0; Index < Count && Cloud.Parcels.Num() + Cloud.Incoming.Num() < MaxParcels; ++Index)
+	for (int32 Index = 0; Index < Count && Cloud.Parcels.Num() + Cloud.Incoming.Num() < Cap; ++Index)
 	{
 		FOSGasParcel& P = Cloud.Incoming.AddDefaulted_GetRef();
 		const FVector3f Dir = FVector3f(FMath::VRandCone(FVector(Axis), FMath::DegreesToRadians(FMath::Max(R.ConeDeg, 0.5f))));
@@ -1354,6 +1357,39 @@ int32 UOSGasSubsystem::EmitForSource(const FOSGasRecipe& Recipe, const FOSGasLoo
 	if (Count <= 0)
 	{
 		return 0;
+	}
+	// Straight into the zone's haze (v15: a fog, steam): its pool's slot, the haze's own cap; it lives as haze.
+	if (Recipe.bIntoHaze && CVarGasFogSource.GetValueOnGameThread() > 0)
+	{
+		const AOSGravityZone* Zone = OSAirZoneAt(GetWorld(), Where);
+		if (Zone && Zone->HazeHalfLifeSeconds > 0.0f && CVarGasHazeRoom.GetValueOnGameThread() > 0)
+		{
+			RoomFor(Zone, Where);
+		}
+		const int32 Slot = ZoneCloudFor(Zone);
+		if (Slot == INDEX_NONE)
+		{
+			UE_LOG(LogMindKore, Log, TEXT("Gas: a haze source refused - no air zone with haze here or no free haze slot"));
+			return 0;
+		}
+		FCloud& Haze = Clouds[Slot];
+		InOutCloud = Slot;
+		InOutSerial = Haze.Serial;
+		const int32 Before = Haze.Incoming.Num();
+		Emit(Haze, Recipe, Where, Direction, Carrier, Count, 4 * MaxZoneParcels);
+		const float Gain = Look.Extinction / FMath::Max(Haze.Look.Extinction, 1e-4f);
+		for (int32 I = Before; I < Haze.Incoming.Num(); ++I)
+		{
+			FOSGasParcel& P = Haze.Incoming[I];
+			P.Life = 1e9f;
+			P.Cling = 0.0f;
+			P.bInstant = false;
+			P.bFog = true;
+			P.Mass *= Gain;
+			P.Vent = Recipe.HazeHalfLifeSeconds > 0.0f ? UE_LN2 / Recipe.HazeHalfLifeSeconds : 0.0f;
+		}
+		Haze.LastFed = Now;
+		return Haze.Incoming.Num() - Before;
 	}
 	if (!Clouds.IsValidIndex(InOutCloud) || !Clouds[InOutCloud].IsAlive() || Clouds[InOutCloud].Serial != InOutSerial || Clouds[InOutCloud].Evict > 0.0f
 		|| !Clouds[InOutCloud].TakesGas() || Clouds[InOutCloud].Parcels.Num() + Clouds[InOutCloud].Incoming.Num() + Count > MaxParcels)
@@ -2695,7 +2731,8 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 
 			}
 			// Heavy matter settles (dust): in air against the drag above, in a vacuum freely; in zero-G |g| = 0 holds it.
-			if (P.Fall > 0.0f)
+			// Heavy matter settles, steam (negative) rises - against the air's rest: a terminal speed of Fall x 0.7 s.
+			if (P.Fall != 0.0f)
 			{
 				P.V += Down * (P.Fall * GScale * Dt);
 			}
@@ -2710,7 +2747,9 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			// The haze diffuses on (to 60 cm over ~15 s): a veil, not lumps (merged parcels at 20 cm read as dark blots, owner 24.10).
 			// A haze parcel spreads as the haze does (v14: parcels wandering apart at a fixed 60 cm read as round puffs):
 			// r^2 grows by 2 x share x D a second, to os.Gas.HazeRadiusMax; its density keeps its matter (ParcelThin).
-			P.RadiusCm = Cloud.bZone && Cloud.HazeDiffuse > 0.0f
+			// A fog's parcel keeps its own size (v15: a 2.5 m kernel would erase a floor layer and a steam tongue).
+			P.RadiusCm = Cloud.bZone && P.bFog ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Max(P.MaxRadiusCm, P.RadiusCm))
+				: Cloud.bZone && Cloud.HazeDiffuse > 0.0f
 				? FMath::Min(FMath::Max(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Sqrt(P.RadiusCm * P.RadiusCm + 2.0f * HazeSpreadShare * Cloud.HazeDiffuse * Dt)), FMath::Max(Cloud.HazeRadiusMax, Cloud.HazeRadius))
 				: Cloud.bZone ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Max3(P.MaxRadiusCm, 1.5f * Cloud.PackedCellCm, Cloud.HazeRadius))
 				: P.Air > 0.5f ? FMath::Min(P.RadiusCm + AirGrowCmPerSecond * Dt, FMath::Max(P.MaxRadiusCm, P.RadiusCm)) : P.RadiusCm + VacuumGrowPerCm * Speed * Dt;
@@ -2854,7 +2893,8 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				{
 					Rate = FVector3f::DistSquared(P.P, Vent) < 2500.0f ? 4.0f : Rate;
 				}
-				P.Mass *= FMath::Exp(-Dt * Rate * UE_LN2 / Cloud.HazeHalfLife);
+				// A parcel's own ventilation (v15: steam goes in 12 s) or the zone's.
+				P.Mass *= FMath::Exp(-Dt * Rate * (P.Vent > 0.0f ? P.Vent : UE_LN2 / Cloud.HazeHalfLife));
 			}
 			// A parcel handed over goes when its ramp is done (not by its age: the haze has it at full weight by then).
 			const bool bGone = P.HandOut >= 0.0f ? Cloud.SimToWorld + Cloud.SimTime >= P.HandOut + HandRamp : P.Age >= P.Life;

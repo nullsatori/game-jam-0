@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 110 команд, 67 переменных.
+Всего: 110 команд, 68 переменных.
 
 ## `os.Attach`
 
@@ -109,6 +109,7 @@
 | `os.Gas.DitherPx` (переменная) | значение (умолч. `0.0f`) | The Bayer threshold's cell, px (0: half a block, 1 px at least) - a finer lattice inside a block; the opacity is still the block's. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DriftCm` (переменная) | значение (умолч. `3.0f`) | The zone's air drift (v12 7a.3): a slow divergence-free field, 1.5 m across, changing over ~20 s - its top speed, cm/s. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.FlashReach` (переменная) | значение (умолч. `2.5f`) | The muzzle's flash for the gas reaches this x its radius (v13 13b: the whole room's haze shows on the shot's frames); 1: as the lamp (80e4fec). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.FogSource` (переменная) | значение (умолч. `1`) | 1: a source with bIntoHaze (the fog and steam presets) lets its gas straight into the zone's haze (v15); 0: through a cloud slot of its own, as a weld. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Forward` (переменная) | значение (умолч. `0.7f`) | os.Gas.Light 1: the forward-scattering share of the lamps' light (Henyey-Greenstein g 0.55; the rest isotropic) - smoke against a lamp glows at its rim. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.HazeDiffuse` (переменная) | значение (умолч. `350.0f`) | The haze spreads through the room by a slow turbulent wander (v14), cm^2/s: 200 denser and slower, 400 faster and paler; 0: stays where it was (cb97b4e). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.HazeDiffuseZ` (переменная) | значение (умолч. `0.33f`) | The haze's wander: its vertical share (warm air over cool is stable). | `Source/MindKore/OSGas.cpp` |
@@ -138,7 +139,7 @@
 | `os.Gas.Shimmer` (переменная) | значение (умолч. `2.0f`) | The air's shimmer behind heat (v12 7b.3), x; 0 off. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.SmoothAlpha` (переменная) | значение (умолч. `0`) | 1: the block's result (light and opacity) read bilinearly between the blocks' centres (edge blocks as before) - finer still. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.SourceTest` | `<preset> <pulse\|burst\|rate1>` | <preset> <pulse\|burst\|rate1>: a gas source 1.5 m along the view run by a pattern (on/off, bursts every 2.5 s, 1 a second). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
-| `os.Gas.Spawn` | `<muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]` | <muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for 4 s, along the view. *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
+| `os.Gas.Spawn` | `<muzzle\|port\|weld\|breach\|rcs\|dust\|fog\|steam\|list> [x y z]` | <muzzle\|port\|weld\|breach\|rcs\|dust\|fog\|steam\|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for os.Gas.SpawnSeconds, along the view. *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.SpawnSeconds` (переменная) | значение (умолч. `4.0f`) | How long an os.Gas.Spawn source lives, s (4). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.SpreadLog` (переменная) | значение (умолч. `0`) | 1: every 5 s each haze logs its parcels, mass, spread across and up (mass-weighted sigma, cm), CentreT - the spreading's probe (v14). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.TestShaft` | `[distance cm]` | [distance cm]: a transient GasShaft spot lamp that far ahead of the view, aimed back (the haze's shafts on a map without a sun in its windows). *не в Shipping* | `Source/MindKore/OSGas.cpp` |

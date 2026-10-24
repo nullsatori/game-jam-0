@@ -25,6 +25,10 @@ enum class EOSGasPreset : uint8
 	Rcs,
 	/** Dust: heavy, it settles in gravity and hangs in zero-G. */
 	Dust,
+	/** A cold fog (a coolant): straight into the room's haze, it settles into a layer on the floor. */
+	Fog,
+	/** Steam: straight into the haze, it rises into a tongue under the ceiling and is gone in ~40 s; heat shimmers over it. */
+	Steam,
 };
 
 UENUM(BlueprintType)

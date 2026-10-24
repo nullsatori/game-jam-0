@@ -144,9 +144,20 @@ struct FOSGasRecipe
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
 	bool bShotCloud = false;
 
-	/** Heavy matter (dust): it falls along gravity at this, cm/s^2 (the air's drag gives it a terminal speed); 0 gas. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.0"))
+	/**
+	 * Heavy matter (dust, a cold fog): it falls along gravity at this, cm/s^2 (the air's drag gives it a terminal speed);
+	 * negative rises against it (steam); 0 gas.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
 	float FallCmPerS2 = 0.0f;
+
+	/** Straight into the zone's haze (v15: a fog, steam), not a cloud slot of its own. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas")
+	bool bIntoHaze = false;
+
+	/** Its parcels' half-life in the haze, s (0: the zone's). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "OS|Gas", meta = (ClampMin = "0.0"))
+	float HazeHalfLifeSeconds = 0.0f;
 };
 
 /**
@@ -215,6 +226,10 @@ struct FOSGasParcel
 	float Dissolve = 0.0f;
 	/** A haze parcel's own turbulent velocity (v14: an Ornstein-Uhlenbeck wander - the haze spreads through the room), cm/s. */
 	FVector3f Wander = FVector3f::ZeroVector;
+	/** v15: a fog's background mass held against the ventilation (0: none); its own ventilation rate, 1/s (0: the zone's); fog (its look's share). */
+	float Base = 0.0f;
+	float Vent = 0.0f;
+	bool bFog = false;
 };
 
 /**
@@ -630,7 +645,7 @@ private:
 	 * none free, the youngest of the look within 1.5 m, else INDEX_NONE (a slot is never taken from a living cloud).
 	 */
 	int32 CloudFor(const FOSGasLook& Look, const FVector& Where, float JoinAge = 1e9f, bool bFreeSlotOnly = false);
-	void Emit(FCloud& Cloud, const FOSGasRecipe& Recipe, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count);
+	void Emit(FCloud& Cloud, const FOSGasRecipe& Recipe, const FVector& Where, const FVector& Direction, const FVector& Carrier, int32 Count, int32 Cap = MaxParcels);
 	void TickSources(float DeltaTime);
 	void TickCloud(FCloud& Cloud, float DeltaTime);
 	void LaunchStep(FCloud& Cloud, int32 Steps, float Dt);
