@@ -216,6 +216,13 @@ public:
 	void EmitNow(const FOSGasRecipe& Recipe, const FOSGasLook& Look, const FVector& Where, const FVector& Direction, const FVector& CarrierVelocity, int32 Count,
 		bool bMayStartCloud = false);
 
+	/**
+	 * Heat without smoke (v12 7b.1): Count warm puffs out of Where along Direction over 50 ms, rising 20-30 cm/s against
+	 * gravity, living 1-2 s - seen only as the air's shimmer behind them, never as gas.
+	 */
+	void AddHeat(const FVector& Where, const FVector& Direction, int32 Count, float Heat = 1.0f);
+	static constexpr int32 MaxHeat = 64;
+
 	/** A projectile's tunnel (as UOSMuzzleFxComponent::CarveRay): drawn at once, healing; the parcels in it lose mass and are pushed out. */
 	void CarveRay(const FVector& Start, const FVector& End, float RadiusCm);
 	/** A radial blow (as UOSMuzzleFxComponent::Burst), half again in a vacuum. */
@@ -442,6 +449,13 @@ private:
 	};
 
 	TArray<FCloud> Clouds;
+	/** Heat puffs (world): where, velocity, radius, heat, age, life; a negative age waits (the shot's 50 ms). */
+	struct FHeatPuff
+	{
+		FVector P, V;
+		float RadiusCm, Heat, Age, Life;
+	};
+	TArray<FHeatPuff> HeatPuffs;
 	TArray<FSource> Sources;
 	TArray<FTunnel> Tunnels;
 	TArray<FAirFlow> AirFlows;
@@ -464,6 +478,9 @@ private:
 	TObjectPtr<UTexture2D> DataTexture = nullptr;
 	UPROPERTY()
 	TObjectPtr<UTexture2D> TunnelTexture = nullptr;
+	/** The heat puffs for the shimmer: two rows - position + radius, heat. */
+	UPROPERTY()
+	TObjectPtr<UTexture2D> HeatTexture = nullptr;
 	TArray<TObjectPtr<UTexture2D>> BoundGrids;
 	/** The screen-block pass (v11 stage 5, os.Gas.LowRes 1): fed each frame with what M_OS_GasPost would get. */
 	TSharedPtr<class FOSGasViewExtension, ESPMode::ThreadSafe> GasView;

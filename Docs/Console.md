@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 109 команд, 32 переменных.
+Всего: 109 команд, 33 переменных.
 
 ## `os.Attach`
 
@@ -103,7 +103,7 @@
 | `os.Gas.Debug` (переменная) | значение (умолч. `0`) | 1: draw every cloud's box (white), parcels (points, red heavy to blue light), bodies (yellow, velocity arrow), tunnels (cyan), wall/floor planes (green) and sources (magenta); 2: also each cloud's key lamp in the log once a second. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.DebugAlpha` (переменная) | значение (умолч. `0`) | 1: the gas post-process draws only its opacity, grey (os.Gas.WalkProbe measures its jumps a frame); 3: the block less the pixel's own march; 4: the room's light the gas takes (os.Gas.Light 1). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Dither` (переменная) | значение (умолч. `1`) | 1: the gas's opacity bands thresholded by an ordered 4x4 Bayer over the screen blocks (thin gas a sparse even lattice, not snow), the tail from 0.03; 0: a hash per block, the tail from 0.12 (before v12). | `Source/MindKore/OSGas.cpp` |
-| `os.Gas.DriftCm` (переменная) | значение (умолч. `6.0f`) | The zone's air drift (v12 7a.3): a slow divergence-free field, 1.5 m across, changing over ~20 s - its top speed, cm/s. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.DriftCm` (переменная) | значение (умолч. `3.0f`) | The zone's air drift (v12 7a.3): a slow divergence-free field, 1.5 m across, changing over ~20 s - its top speed, cm/s. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Forward` (переменная) | значение (умолч. `0.7f`) | os.Gas.Light 1: the forward-scattering share of the lamps' light (Henyey-Greenstein g 0.55; the rest isotropic) - smoke against a lamp glows at its rim. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.Light` (переменная) | значение (умолч. `1`) | 1: the gas lit by the room (the frame before it, 1/32 and blurred) and the key lamp's full colour, a darker albedo (v11 stage 6); 0: the light before stage 6 (A/B). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.LightScale` (переменная) | значение (умолч. `2.0f`) | os.Gas.Light 1: the lamps' light on the gas, x. | `Source/MindKore/OSGas.cpp` |
@@ -112,6 +112,7 @@
 | `os.Gas.ProbeSpawn` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe near spawns it (os.Gas.Spawn) instead of each shot, and runs 24 s. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSpawnLate` (переменная) | значение (умолч. `TEXT("")`) | A preset: os.Gas.WalkProbe spawns it once at 5 s (after its shots). *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
 | `os.Gas.ProbeSuppressor` (переменная) | значение (умолч. `0`) | 1: os.Gas.WalkProbe mounts the suppressor first. *не в Shipping* | `Source/MindKore/OSMuzzleFx.cpp` |
+| `os.Gas.Shimmer` (переменная) | значение (умолч. `1.0f`) | The air's shimmer behind heat (v12 7b.3), x; 0 off. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.SourceTest` | `<preset> <pulse\|burst\|rate1>` | <preset> <pulse\|burst\|rate1>: a gas source 1.5 m along the view run by a pattern (on/off, bursts every 2.5 s, 1 a second). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.Spawn` | `<muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]` | <muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for 4 s, along the view. *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.SpawnSeconds` (переменная) | значение (умолч. `4.0f`) | How long an os.Gas.Spawn source lives, s (4). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |

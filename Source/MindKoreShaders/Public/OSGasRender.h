@@ -35,6 +35,13 @@ struct FOSGasRenderData
 	/** The composite (v12 7a.6): os.Gas.Dither, os.Gas.Bands. */
 	float Dither = 1.0f;
 	float Bands = 4.0f;
+	/** v12 7b: the heat puffs (shimmer) and the laser's beam (lens, dot, light; black: off). */
+	FTextureResource* Heat = nullptr;
+	int32 HeatCount = 0;
+	float Shimmer = 1.0f;
+	FVector3f LaserFrom = FVector3f::ZeroVector;
+	FVector3f LaserTo = FVector3f::ZeroVector;
+	FLinearColor LaserLight = FLinearColor::Black;
 	/** The game's frame time, s: the room's light follows the frame over 0.1 s. */
 	float DeltaSeconds = 1.0f / 60.0f;
 };

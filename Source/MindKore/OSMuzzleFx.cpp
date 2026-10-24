@@ -470,6 +470,8 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 		// The gun's velocity the gas takes: whole in a vacuum, a quarter in air - the still air takes the rest at once
 		// (walking back while shooting, the whole jet flew back at the shooter: owner 23.10).
 		const FVector Carrier = GetOwner()->GetVelocity() * (OSAirZoneAt(GetWorld(), Muzzle.GetLocation()) ? 0.25f : 1.0f);
+		// Heat without smoke out of the muzzle (v12 7b.1): the air's shimmer over 50 ms - pistol 6, RMB-93 12, SV-98 16.
+		Gas->AddHeat(Muzzle.GetLocation(), Muzzle.GetRotation().GetForwardVector(), Def.Id == TEXT("Pistol") ? 6 : Def.Id == TEXT("Sniper") ? 16 : 12);
 		for (const FOSGasVent& Vent : Def.GasVents)
 		{
 			if (!Vent.bJet && !Vent.bCling)
@@ -524,18 +526,27 @@ void UOSMuzzleFxComponent::Vents(const FOSWeapon& Def, const FTransform& Muzzle,
 			}
 			// A clinging hole's wisps ride with the gun whole (a hold, not an inherited velocity); a jet takes Carrier.
 			Gas->AddSource(Recipe, GunSmoke(), Where, Axis, Vent.bCling && !Vent.bJet ? GetOwner()->GetVelocity() : Carrier);
-			// A narrow muzzle's lingering wisp: up out of the muzzle for a second, following the gun.
-			if (Vent.bJet && Vent.WidthCm < 3.0f)
+			// A narrow muzzle's lingering wisp: up out of the muzzle for a second, following the gun; a suppressor's
+			// (JetScale < 1) lazier, 1.5 s, out of its end (v12 7b.5).
+			const bool bSuppressed = JetScale < 1.0f && Vent.Space == EOSVentSpace::Muzzle;
+			if (Vent.bJet && (Vent.WidthCm < 3.0f || bSuppressed))
 			{
+				FOSGasRecipe Wisp = PistolWisp();
+				if (bSuppressed)
+				{
+					Wisp.BurstSeconds = 1.5f;
+					Wisp.BurstCount = 12;
+					Wisp.SpeedCm = 8.0f;
+				}
 				const FVector Up = -OSGravityAt(GetWorld(), Frame.GetLocation()).Acceleration.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
 				if (Action)
 				{
 					const FTransform ActionFrame = Action->GetComponentTransform();
-					Gas->AddSource(PistolWisp(), GunSmoke(), ActionFrame.InverseTransformPosition(Frame.TransformPosition(Vent.Location)), ActionFrame.InverseTransformVectorNoScale(Up), FVector::ZeroVector, Action);
+					Gas->AddSource(Wisp, GunSmoke(), ActionFrame.InverseTransformPosition(Frame.TransformPosition(Vent.Location)), ActionFrame.InverseTransformVectorNoScale(Up), FVector::ZeroVector, Action);
 				}
 				else
 				{
-					Gas->AddSource(PistolWisp(), GunSmoke(), Frame.TransformPosition(Vent.Location), Up, FVector::ZeroVector);
+					Gas->AddSource(Wisp, GunSmoke(), Frame.TransformPosition(Vent.Location), Up, FVector::ZeroVector);
 				}
 			}
 		}
@@ -670,6 +681,8 @@ void UOSMuzzleFxComponent::Seep(const FOSWeapon& Def, const FTransform& Muzzle, 
 	}
 	if (UOSGasSubsystem* Gas = UOSGasSubsystem::Get(this); Gas && !Seeping.IsEmpty())
 	{
+		// The hot barrel's heat as its seep (v12 7b.1): a puff for each wisp.
+		Gas->AddHeat(Muzzle.GetLocation(), FVector::UpVector, Count, 0.6f);
 		// v11: the seep is small parcels out of a random seeping hole, a tenth of its speed.
 		for (int32 Index = 0; Index < Count; ++Index)
 		{

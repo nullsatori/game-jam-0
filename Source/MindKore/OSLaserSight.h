@@ -289,6 +289,14 @@ public:
 	bool HasDot() const { return bLit && bDotHit; }
 	bool IsThreadShown() const;
 	FVector GetDotLocation() const { return DotAt; }
+	/** The beam for the gas (v12 7b.4): lens to dot (world) and its light (the beam's colour x the diode's drive); false unlit. */
+	bool GetGasBeam(FVector& OutFrom, FVector& OutTo, FLinearColor& OutLight) const
+	{
+		OutFrom = LensAt;
+		OutTo = DotAt;
+		OutLight = BeamColour * (DotDrive * TintBeamScale);
+		return bLit;
+	}
 	/** Traces since play began (os.Attach.Cost: three or more a lit frame - the round's line, the beam's for glass, the eye's sight of the dot; one more for each pane passed). */
 	int32 GetTraceCount() const { return Traces; }
 

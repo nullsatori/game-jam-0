@@ -28,6 +28,17 @@ SamplerState GasSampler;
 // The composite (v12 7a.6): 1 an ordered 4x4 Bayer threshold over the blocks and the tail from 0.03, 0 a hash; levels.
 float GasDither;
 float GasBands;
+// v12 7b: heat puffs (row 0 position + radius, row 1 heat), the shimmer's strength; the laser's beam (lens, dot, light);
+// a screen pixel's angle (rad) for the beam's block-wide glow.
+Texture2D<float4> GasHeat;
+float GasHeatCount;
+float GasShimmer;
+float3 GasLaserFrom;
+float3 GasLaserTo;
+float4 GasLaserLight;
+float GasPixelAngle;
+// The frame's mean light (1x1): 30% of the room's light is it, not only what is behind the gas.
+Texture2D GasAmbientMean;
 float GasCloudCount;
 float GasTunnelCount;
 float GasBlockPx;
@@ -162,6 +173,31 @@ float3 RayDir(float2 OutPx)
 	return PixelRay(OutPx, Unused);
 }
 
+// The heat along a ray to sceneDist (v12 7b.2): each puff's chord through its sphere, weighted to its core (an analytic
+// integral - the march's empty-space skipping cannot miss it); firstHeat where it begins.
+float GasHeatAlong(float3 Cam, float3 dir, float sceneDist, out float firstHeat)
+{
+	float H = 0.0;
+	firstHeat = 1e9;
+	int n = (int)(GasHeatCount + 0.5);
+	for (int k = 0; k < n; k++)
+	{
+		float4 A = GasHeat.Load(int3(k, 0, 0));
+		float heat = GasHeat.Load(int3(k, 1, 0)).x;
+		float3 m = A.xyz - Cam;
+		float tc = dot(m, dir);
+		float d2 = dot(m, m) - tc * tc;
+		float r2 = A.w * A.w;
+		if (d2 >= r2 || heat <= 0.0) continue;
+		float h = sqrt(r2 - d2);
+		float t0 = max(tc - h, 0.0), t1 = min(tc + h, sceneDist);
+		if (t1 <= t0) continue;
+		H += heat * (t1 - t0) * (1.0 - d2 / r2);
+		firstHeat = min(firstHeat, t0);
+	}
+	return H;
+}
+
 // bLamps false: the lamps left out (an edge pixel takes its block's); lampAcc the lamps' filmed light, premultiplied.
 void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, bool bLamps, out float3 acc, out float T, out float firstT, out float3 lampAcc)
 {
@@ -260,6 +296,25 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, b
 	    float2 atlas = float2(8.0 * n, 2.0 * rows);
 	    float vC0 = curHalf * rows, vP0 = (1.0 - curHalf) * rows;
 	    // os.Gas.Light 1: the cloud's lit lamps, once (not per sample).
+	    // The laser's beam (v12 7b.4): where this ray passes it closest, within a block's width there - a glow by the gas.
+	    float tLaser = -1.0, wLaser = 0.0;
+	    if (GasLaserLight.a > 0.0)
+	    {
+	        float3 v = GasLaserTo - GasLaserFrom;
+	        float3 w0 = Cam - GasLaserFrom;
+	        float bb = dot(dir, v), cc = dot(v, v), dd = dot(dir, w0), ee = dot(v, w0);
+	        float den = cc - bb * bb;
+	        float q = den > 1e-6 ? saturate((ee - bb * dd) / den) : 0.0;
+	        float3 onBeam = GasLaserFrom + v * q;
+	        float sL = dot(onBeam - Cam, dir);
+	        float dist = length(Cam + dir * sL - onBeam);
+	        float width = max(sL, 1.0) * GasPixelAngle * max(GasBlockPx, 1.0);
+	        if (sL > a && sL < b && dist < width)
+	        {
+	            tLaser = sL;
+	            wLaser = 1.0 - dist / width;
+	        }
+	    }
 	    // Static indices only (a dynamically indexed array went to scratch memory).
 	    float4 LA[4], LL[4], LC[4], LD[4];
 	    int nl = 0;
@@ -354,6 +409,11 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, b
 	        }
 	        firstT = min(firstT, t - stepCm);
 	        acc += T * aStep * col;
+	        // The beam's glow where this sample's step holds its nearest point.
+	        if (tLaser > 0.0 && abs(t - tLaser) <= 0.5 * stepCm)
+	        {
+	            acc += T * GasLaserLight.rgb * (saturate(dens * 2.0) * wLaser);
+	        }
 	        T *= 1.0 - aStep;
 	        if (T < 0.05) break;
 	    }
@@ -371,12 +431,15 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, b
 // The room's light round an output pixel (os.Gas.Light 1): the frame before the gas, 1/32 and blurred.
 float3 RoomAt(float2 OutPx)
 {
-	return GasToLinear(GasAmbient.SampleLevel(GasAmbientSampler, (OutPx - OutMin) / max(float2(OutSize), 1.0), 0).rgb);
+	float3 Local = GasAmbient.SampleLevel(GasAmbientSampler, (OutPx - OutMin) / max(float2(OutSize), 1.0), 0).rgb;
+	return GasToLinear(lerp(Local, GasAmbientMean.Load(int3(0, 0, 0)).rgb, 0.3));
 }
 
 RWTexture2D<float4> OutBlock;
 // The block's lamp light (filmed, premultiplied): an edge pixel's own march leaves the lamps out and takes this.
 RWTexture2D<float4> OutLamp;
+// The block's first heat along its ray (cm; 1e9 none): a pixel nearer (the gun before the shimmer) is not shifted.
+RWTexture2D<float> OutHeatNear;
 // An edge block's first gas along its ray (cm, a step early), -1 a block taken whole.
 RWTexture2D<float> OutEdge;
 
@@ -412,7 +475,10 @@ void MainBlockCS(uint3 Id : SV_DispatchThreadID)
 	float3 lampAcc;
 	GasMarch(GasCamera, dir, Far, jit, RoomAt(Centre), true, acc, T, firstT, lampAcc);
 	OutBlock[Id.xy] = float4(acc + lampAcc, T);
-	OutLamp[Id.xy] = float4(lampAcc, 0);
+	float firstHeat;
+	float H = GasHeatCount > 0.5 ? GasHeatAlong(GasCamera, dir, Far, firstHeat) : 0.0;
+	OutLamp[Id.xy] = float4(lampAcc, H);
+	OutHeatNear[Id.xy] = H > 0.0 ? firstHeat : 1e9;
 	// An edge: the block's depths differ by more than 3% of the far one or 10 cm, gas in it reached in front of the far
 	// depth; its first gas kept (a pixel nearer than that has no gas in front of it).
 	bool Edge = Far - Near > max(0.03 * min(Far, 1e5), 10.0) && T < 0.999 && firstT < Far;
@@ -424,6 +490,8 @@ SamplerState SceneColorSampler;
 Texture2D<float4> BlockResult;
 Texture2D<float> BlockEdge;
 Texture2D<float4> BlockLamp;
+Texture2D<float> BlockHeatNear;
+SamplerState BlockSampler;
 
 // The inputs as FScreenPassVS writes them (TEXCOORD0 then SV_POSITION: a pixel shader reading SV_POSITION alone did not
 // link with it on D3D12).
@@ -433,6 +501,38 @@ void MainCompositePS(noperspective float4 UVAndScreenPos : TEXCOORD0, float4 SvP
 	float2 px = SvPosition.xy;
 	int2 Block = int2(floor(px / B) - floor(OutMin / B));
 	float4 Col = SceneColor.Load(int3(px, 0));
+	// The shimmer (v12 7b.3): the frame behind heat shifted by its gradient - the block's heat field read bilinearly
+	// between the blocks' centres (no seams on a door's jamb), wobbling 8-12 Hz, at most a block; a pixel nearer than
+	// the heat (the gun in front) stays.
+	if (GasHeatCount > 0.5 && GasShimmer > 0.0)
+	{
+		float2 BlocksN = ceil(OutSize / B) + 1.0;
+		float2 uv = (px - floor(OutMin / B) * B) / (B * BlocksN);
+		float2 du = float2(1.0 / BlocksN.x, 0.0), dv = float2(0.0, 1.0 / BlocksN.y);
+		float2 grad = float2(BlockLamp.SampleLevel(BlockSampler, uv + du, 0).a - BlockLamp.SampleLevel(BlockSampler, uv - du, 0).a,
+			BlockLamp.SampleLevel(BlockSampler, uv + dv, 0).a - BlockLamp.SampleLevel(BlockSampler, uv - dv, 0).a) * 0.5;
+		if (any(grad != 0.0))
+		{
+			float phase = sin(px.x * 0.05 + px.y * 0.031) * 3.0 + cos(px.y * 0.043 - px.x * 0.017) * 3.0;
+			float wob = 0.55 + 0.45 * sin(View.GameTime * 6.2832 * 10.0 + phase);
+			float2 off = clamp(grad * (0.08 * B * GasShimmer) * wob, -B, B);
+			float D;
+			PixelRay(px, D);
+			// The nearest heat round this block (3x3): a block next to the heat shifts with it (no seam at its rim).
+			float nearH = 1e9;
+			for (int j = -1; j <= 1; j++)
+			{
+				for (int i = -1; i <= 1; i++)
+				{
+					nearH = min(nearH, BlockHeatNear.Load(int3(max(Block + int2(i, j), 0), 0)));
+				}
+			}
+			if (D > nearH && any(abs(off) >= 0.5))
+			{
+				Col = SceneColor.Load(int3(clamp(px + round(off), OutMin, OutMin + OutSize - 1), 0));
+			}
+		}
+	}
 	float3 acc;
 	float T;
 	float4 R = BlockResult.Load(int3(Block, 0));
@@ -579,5 +679,31 @@ void AmbientBlurCS(uint3 Id : SV_DispatchThreadID)
 	else
 	{
 		AmbientOut[Id.xy] = float4(Now, W);
+	}
+}
+
+// The frame's mean light (v12 7b): the room's light texture summed by one group into 1x1.
+RWTexture2D<float4> MeanOut;
+groupshared float3 MeanSum[64];
+
+[numthreads(64, 1, 1)]
+void AmbientMeanCS(uint3 Id : SV_GroupThreadID)
+{
+	float3 Sum = 0;
+	int Count = AmbientSize.x * AmbientSize.y;
+	for (int I = (int)Id.x; I < Count; I += 64)
+	{
+		Sum += AmbientIn.Load(int3(I % AmbientSize.x, I / AmbientSize.x, 0)).rgb;
+	}
+	MeanSum[Id.x] = Sum;
+	GroupMemoryBarrierWithGroupSync();
+	if (Id.x == 0)
+	{
+		float3 All = 0;
+		for (int K = 0; K < 64; K++)
+		{
+			All += MeanSum[K];
+		}
+		MeanOut[int2(0, 0)] = float4(All / max(Count, 1), 1);
 	}
 }

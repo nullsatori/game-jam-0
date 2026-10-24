@@ -32,6 +32,7 @@
 #include "MindKore.h"
 #include "OSGravity.h"
 #include "OSShip.h"
+#include "OSLaserSight.h"
 #include "UObject/UObjectIterator.h"
 
 namespace
@@ -113,7 +114,7 @@ namespace
 		TEXT("os.Gas.Light 1: the gas's albedo, x its look's colour."));
 
 	TAutoConsoleVariable<float> CVarGasDriftCm(
-		TEXT("os.Gas.DriftCm"), 6.0f,
+		TEXT("os.Gas.DriftCm"), 3.0f,
 		TEXT("The zone's air drift (v12 7a.3): a slow divergence-free field, 1.5 m across, changing over ~20 s - its top speed, cm/s."));
 	TAutoConsoleVariable<float> CVarGasZoneAmbient(
 		TEXT("os.Gas.ZoneAmbient"), 0.5f,
@@ -121,6 +122,9 @@ namespace
 	TAutoConsoleVariable<float> CVarGasZoneDensity(
 		TEXT("os.Gas.ZoneDensity"), 0.4f,
 		TEXT("The zone's haze: the gas handed to it, x its mass."));
+	TAutoConsoleVariable<float> CVarGasShimmer(
+		TEXT("os.Gas.Shimmer"), 1.0f,
+		TEXT("The air's shimmer behind heat (v12 7b.3), x; 0 off."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 1,
 		TEXT("1: the gas's opacity bands thresholded by an ordered 4x4 Bayer over the screen blocks (thin gas a sparse even lattice, not snow), the tail from 0.03; 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -320,6 +324,7 @@ void UOSGasSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		};
 		DataTexture = FloatTexture(MaxDrawn, DataRows);
 		TunnelTexture = FloatTexture(MaxTunnels, 3);
+		HeatTexture = FloatTexture(MaxHeat, 2);
 		Post = UMaterialInstanceDynamic::Create(Material, this);
 		Post->SetTextureParameterValue(TEXT("GasData"), DataTexture);
 		Post->SetTextureParameterValue(TEXT("Tunnels"), TunnelTexture);
@@ -1224,6 +1229,31 @@ int32 UOSGasSubsystem::EmitForSource(const FOSGasRecipe& Recipe, const FOSGasLoo
 	return Count;
 }
 
+void UOSGasSubsystem::AddHeat(const FVector& Where, const FVector& Direction, int32 Count, float Heat)
+{
+	// No air, no shimmer.
+	if (!OSAirZoneAt(GetWorld(), Where))
+	{
+		return;
+	}
+	const FVector Axis = Direction.GetSafeNormal(UE_SMALL_NUMBER, FVector::ForwardVector);
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		if (HeatPuffs.Num() >= MaxHeat)
+		{
+			HeatPuffs.RemoveAt(0);
+		}
+		FHeatPuff& H = HeatPuffs.AddDefaulted_GetRef();
+		H.P = Where;
+		H.V = FMath::VRandCone(Axis, FMath::DegreesToRadians(15.0f)) * FMath::FRandRange(20.0f, 60.0f);
+		H.RadiusCm = FMath::FRandRange(2.0f, 3.5f);
+		H.Heat = Heat;
+		// Over 50 ms: a negative age waits.
+		H.Age = -0.05f * Index / FMath::Max(1, Count - 1);
+		H.Life = FMath::FRandRange(1.0f, 2.0f);
+	}
+}
+
 void UOSGasSubsystem::AddAirFlow(const FVector& Location, const FVector& Direction, float SpeedCm, float ReachCm, float Seconds)
 {
 	AirFlows.Add({ Location, Direction.GetSafeNormal(), SpeedCm, ReachCm, Seconds });
@@ -1234,7 +1264,7 @@ void UOSGasSubsystem::AddAirFlow(const FVector& Location, const FVector& Directi
 void UOSGasSubsystem::Tick(float DeltaTime)
 {
 	const double FrameStart = FPlatformTime::Seconds();
-	const bool bAny = GetCloudCount() > 0 || !Sources.IsEmpty();
+	const bool bAny = GetCloudCount() > 0 || !Sources.IsEmpty() || !HeatPuffs.IsEmpty();
 	TickSources(DeltaTime);
 	for (int32 Index = Tunnels.Num() - 1; Index >= 0; --Index)
 	{
@@ -1255,6 +1285,26 @@ void UOSGasSubsystem::Tick(float DeltaTime)
 			AirFlows.RemoveAt(Index);
 			continue;
 		}
+	}
+	// Heat puffs: up 20-30 cm/s against gravity (none in zero-G), widening, cooling.
+	for (int32 Index = HeatPuffs.Num() - 1; Index >= 0; --Index)
+	{
+		FHeatPuff& H = HeatPuffs[Index];
+		H.Age += DeltaTime;
+		if (H.Age >= H.Life)
+		{
+			HeatPuffs.RemoveAt(Index);
+			continue;
+		}
+		if (H.Age < 0.0f)
+		{
+			continue;
+		}
+		const FVector G = OSGravityAt(GetWorld(), H.P).Acceleration;
+		const FVector Rise = -G.GetSafeNormal() * (25.0f * FMath::Min(G.Size() / 980.0f, 1.0f));
+		H.V = Rise + (H.V - Rise) * FMath::Exp(-DeltaTime / 0.3f);
+		H.P += H.V * DeltaTime;
+		H.RadiusCm = FMath::Min(H.RadiusCm + 4.0f * DeltaTime, 9.0f);
 	}
 	TSet<TObjectKey<UPrimitiveComponent>> Seen;
 	for (FCloud& Cloud : Clouds)
@@ -1691,6 +1741,42 @@ void UOSGasSubsystem::UpdatePost()
 		Frame.Tunnels = TunnelTexture->GetResource();
 		Frame.CloudCount = bLowRes ? Drawn.Num() : 0;
 		Frame.TunnelCount = Count;
+		// The heat puffs (shimmer) and the laser's beam (its glow in the gas).
+		{
+			TArray<FLinearColor> HRows;
+			HRows.SetNumZeroed(MaxHeat * 2);
+			int32 Heats = 0;
+			for (const FHeatPuff& H : HeatPuffs)
+			{
+				if (H.Age < 0.0f)
+				{
+					continue;
+				}
+				const float Fade = FMath::Square(1.0f - H.Age / H.Life) * FMath::SmoothStep(0.0f, 0.05f, H.Age);
+				HRows[Heats] = FLinearColor(H.P.X, H.P.Y, H.P.Z, H.RadiusCm);
+				HRows[MaxHeat + Heats] = FLinearColor(H.Heat * Fade, 0.0f, 0.0f, 0.0f);
+				++Heats;
+			}
+			uint8* Bytes = static_cast<uint8*>(FMemory::Malloc(HRows.Num() * sizeof(FLinearColor)));
+			FMemory::Memcpy(Bytes, HRows.GetData(), HRows.Num() * sizeof(FLinearColor));
+			FUpdateTextureRegion2D* Region = new FUpdateTextureRegion2D(0, 0, 0, 0, MaxHeat, 2);
+			HeatTexture->UpdateTextureRegions(0, 1, Region, MaxHeat * sizeof(FLinearColor), sizeof(FLinearColor), Bytes,
+				[](uint8* Src, const FUpdateTextureRegion2D* Regions) { FMemory::Free(Src); delete Regions; });
+			Frame.Heat = HeatTexture->GetResource();
+			Frame.HeatCount = CVarGasShimmer.GetValueOnGameThread() > 0.0f ? Heats : 0;
+			Frame.Shimmer = CVarGasShimmer.GetValueOnGameThread();
+		}
+		if (const APlayerController* Controller = World->GetFirstPlayerController(); Controller && Controller->GetPawn())
+		{
+			FVector From, To;
+			FLinearColor Light;
+			if (const UOSLaserSightComponent* Laser = Controller->GetPawn()->FindComponentByClass<UOSLaserSightComponent>(); Laser && Laser->GetGasBeam(From, To, Light))
+			{
+				Frame.LaserFrom = FVector3f(From);
+				Frame.LaserTo = FVector3f(To);
+				Frame.LaserLight = Light;
+			}
+		}
 		Frame.BlockPx = FMath::Max(1.0f, FMath::RoundToFloat(float(View.Y) / 270.0f));
 		Frame.EyeClear = EyeClearCm;
 #if !UE_BUILD_SHIPPING
