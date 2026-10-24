@@ -231,6 +231,8 @@ struct FOSGasParcel
 	float Base = 0.0f;
 	float Vent = 0.0f;
 	bool bFog = false;
+	/** v14c: the kernel squashed along gravity - vertical semi-axis R x Flat, horizontal R / sqrt(Flat), volume kept (1: a ball). */
+	float Flat = 1.0f;
 };
 
 /**
@@ -375,6 +377,10 @@ private:
 		float HazeRadiusMax = 250.0f;
 		/** v15: the fog's ramp in (0 -> 1 over 1 s at its seeding and waking, out as it sleeps); a floor layer (its vertical stirred less). */
 		float FogIn = 1.0f;
+		/** v14c: the haze spreads as a layer (os.Gas.HazeSlump, cm/s), its kernels squashed (os.Gas.HazeFlat), its room currents' vertical x HazeDriftZ;
+		 * each layer's (haze, fog) thickness reference, eased over 2 s. */
+		float HazeSlump = 0.0f, HazeFlat = 1.0f, HazeDriftZ = 1.0f;
+		float SlumpRef[2] = { 0.0f, 0.0f };
 		/** v15c: the fog's share of the haze's mass and its colour (both eased over 0.5 s): the look mixes toward the fog's. */
 		float FogShare = 0.0f;
 		FLinearColor FogColour = FLinearColor(0.88f, 0.88f, 0.88f);

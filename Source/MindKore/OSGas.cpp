@@ -173,7 +173,7 @@ namespace
 		TEXT("os.Gas.WarmLift"), 4.0f,
 		TEXT("Residual warmth's lift at full gravity, cm/s (4; try 10-15: the haze gathers under the ceiling sooner)."));
 	TAutoConsoleVariable<float> CVarGasHazeDiffuse(
-		TEXT("os.Gas.HazeDiffuse"), 350.0f,
+		TEXT("os.Gas.HazeDiffuse"), 500.0f,
 		TEXT("The haze spreads through the room by a slow turbulent wander (v14), cm^2/s: 200 denser and slower, 400 faster and paler; 0: stays where it was (cb97b4e)."));
 	TAutoConsoleVariable<float> CVarGasHazeRadiusMax(
 		TEXT("os.Gas.HazeRadiusMax"), 250.0f,
@@ -194,7 +194,7 @@ namespace
 		TEXT("os.Gas.HazeNoiseCut"), 0.15f,
 		TEXT("The haze's noise threshold (0.3: as a shot's gas, holes at the kernels' rims)."));
 	TAutoConsoleVariable<float> CVarGasHazeDiffuseZ(
-		TEXT("os.Gas.HazeDiffuseZ"), 0.33f,
+		TEXT("os.Gas.HazeDiffuseZ"), 0.2f,
 		TEXT("The haze's wander: its vertical share (warm air over cool is stable)."));
 	TAutoConsoleVariable<float> CVarGasHazeEddySeconds(
 		TEXT("os.Gas.HazeEddySeconds"), 10.0f,
@@ -256,6 +256,15 @@ namespace
 	TAutoConsoleVariable<int32> CVarGasFogSplit(
 		TEXT("os.Gas.FogSplit"), 1,
 		TEXT("1: a zone's haze with a fog in it is marched in two goes round the other clouds - in front of a puff over it, behind it under it (v15d; smoke alone as before); 0: in one go."));
+	TAutoConsoleVariable<float> CVarGasHazeSlump(
+		TEXT("os.Gas.HazeSlump"), 10.0f,
+		TEXT("The haze (and a fog) spreads as a layer in gravity (v14c): the thick flows to the thin at up to this, cm/s, and stops as it thins; 0 off."));
+	TAutoConsoleVariable<float> CVarGasHazeFlat(
+		TEXT("os.Gas.HazeFlat"), 0.6f,
+		TEXT("The haze's and a fog's kernels in gravity are squashed along it (v14c): vertical x this, horizontal / its root, volume kept; 1 balls."));
+	TAutoConsoleVariable<float> CVarGasHazeDriftZ(
+		TEXT("os.Gas.HazeDriftZ"), 0.4f,
+		TEXT("The vertical of the room's currents for the haze in gravity x this (v14c; a floor fog: the least of this and os.Gas.FogStir); 1 off."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -827,6 +836,7 @@ void UOSGasSubsystem::InitCloud(FCloud& Cloud, const FOSGasLook& Look, const FVe
 	Cloud.FogIn = 1.0f;
 	Cloud.bFogFloor = false;
 	Cloud.FogShare = 0.0f;
+	Cloud.SlumpRef[0] = Cloud.SlumpRef[1] = 0.0f;
 	Cloud.HazeAge = 0.0f;
 	Cloud.SimToWorld = World->GetTimeSeconds();
 	Cloud.DrawnCentre = Cloud.PackedCentre = FVector3f::ZeroVector;
@@ -1863,6 +1873,9 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 				const FFogZone* Fog = Cloud.bZone && Cloud.Zone.IsValid() ? FogZones.Find(Cloud.Zone.Get()) : nullptr;
 				Cloud.bFogFloor = Fog && Fog->Fog == EOSZoneFog::Floor && Cloud.Gravity.SizeSquared() > 1.0;
 				Cloud.FogStir = CVarGasFogStir.GetValueOnGameThread();
+				Cloud.HazeSlump = FMath::Max(CVarGasHazeSlump.GetValueOnGameThread(), 0.0f);
+				Cloud.HazeFlat = FMath::Clamp(CVarGasHazeFlat.GetValueOnGameThread(), 0.2f, 1.0f);
+				Cloud.HazeDriftZ = FMath::Clamp(CVarGasHazeDriftZ.GetValueOnGameThread(), 0.0f, 1.0f);
 			}
 			Cloud.HazeDiffuseZ = CVarGasHazeDiffuseZ.GetValueOnGameThread();
 			Cloud.HazeEddy = FMath::Max(CVarGasHazeEddySeconds.GetValueOnGameThread(), 0.1f);
@@ -2451,6 +2464,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 			A.V = (A.V * A.Mass + B.V * B.Mass) / M;
 			A.Birth = (A.Birth * A.Mass + B.Birth * B.Mass) / M;
 			A.Warm = (A.Warm * A.Mass + B.Warm * B.Mass) / M;
+			A.Flat = (A.Flat * A.Mass + B.Flat * B.Mass) / M;
 			// By volume, never below the larger of the two, up to the haze's own reach (v14: two 60 cm parcels became one of
 			// 20 cm with twice the mass - the core's density x9 in a step).
 			A.MaxRadiusCm = FMath::Max3(A.MaxRadiusCm, B.MaxRadiusCm, HazeRadius);
@@ -2572,6 +2586,143 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 	const FOSSmokeParams K = GridParams();
 	FOSSmokeSim& G = *Cloud.Grid;
 	const int32 N = G.N;
+	// The haze spreads as a layer (v14c): cooled smoke in a layered room flows out thin - the thick runs to the thin, its
+	// front slows as it thins. A flat grid across gravity over the zone's box, a layer each for the haze and the fog (the
+	// ceiling's and the floor's mass do not push each other): the parcels' mass in air, blurred twice, over its maximum
+	// eased over 2 s (a new shot does not jump it); a parcel goes down that thickness's slope, across gravity, at most S.
+	const float SlumpS = Cloud.bZone && GScale >= 0.05f ? Cloud.HazeSlump * FMath::Min(1.0f, GScale) : 0.0f;
+	FVector3f SlumpT1 = FVector3f::ZeroVector, SlumpT2 = FVector3f::ZeroVector;
+	float SlumpU0 = 0.0f, SlumpV0 = 0.0f, SlumpCs = 50.0f;
+	int32 SlumpNx = 0, SlumpNy = 0;
+	TArray<float> SlumpGx[2], SlumpGy[2];
+	if (SlumpS > 0.0f && !Parcels.IsEmpty())
+	{
+		SlumpT1 = FVector3f::CrossProduct(Down, FMath::Abs(Down.Z) < 0.9f ? FVector3f::UnitZ() : FVector3f::UnitX()).GetSafeNormal();
+		SlumpT2 = FVector3f::CrossProduct(Down, SlumpT1);
+		FVector3f Lo3(1e9f), Hi3(-1e9f);
+		if (Cloud.bUseRoom && Cloud.Room.IsValid())
+		{
+			Lo3 = FVector3f(Cloud.Room->Lo) - Origin;
+			Hi3 = Lo3 + FVector3f(Cloud.Room->Dim) * Cloud.Room->Cell;
+		}
+		else
+		{
+			for (const FOSGasParcel& P : Parcels)
+			{
+				Lo3 = Lo3.ComponentMin(P.P);
+				Hi3 = Hi3.ComponentMax(P.P);
+			}
+			Lo3 -= FVector3f(200.0f);
+			Hi3 += FVector3f(200.0f);
+		}
+		float U1 = -1e9f, V1 = -1e9f;
+		SlumpU0 = SlumpV0 = 1e9f;
+		for (int32 Corner = 0; Corner < 8; ++Corner)
+		{
+			const FVector3f C(Corner & 1 ? Hi3.X : Lo3.X, Corner & 2 ? Hi3.Y : Lo3.Y, Corner & 4 ? Hi3.Z : Lo3.Z);
+			SlumpU0 = FMath::Min(SlumpU0, C | SlumpT1);
+			SlumpV0 = FMath::Min(SlumpV0, C | SlumpT2);
+			U1 = FMath::Max(U1, C | SlumpT1);
+			V1 = FMath::Max(V1, C | SlumpT2);
+		}
+		SlumpCs = FMath::Max(50.0f, FMath::Max(U1 - SlumpU0, V1 - SlumpV0) / 64.0f);
+		SlumpNx = FMath::Clamp(FMath::CeilToInt((U1 - SlumpU0) / SlumpCs) + 1, 2, 64);
+		SlumpNy = FMath::Clamp(FMath::CeilToInt((V1 - SlumpV0) / SlumpCs) + 1, 2, 64);
+		const int32 Cells = SlumpNx * SlumpNy;
+		TArray<float> Hh[2];
+		for (int32 Layer = 0; Layer < 2; ++Layer)
+		{
+			Hh[Layer].SetNumZeroed(Cells);
+		}
+		for (const FOSGasParcel& P : Parcels)
+		{
+			if (P.Air <= 0.5f)
+			{
+				continue;
+			}
+			const float Fx = FMath::Clamp(((P.P | SlumpT1) - SlumpU0) / SlumpCs - 0.5f, 0.0f, SlumpNx - 1.001f);
+			const float Fy = FMath::Clamp(((P.P | SlumpT2) - SlumpV0) / SlumpCs - 0.5f, 0.0f, SlumpNy - 1.001f);
+			const int32 X = int32(Fx), Y = int32(Fy);
+			const float Ax = Fx - X, Ay = Fy - Y;
+			TArray<float>& Hl = Hh[P.bFog ? 1 : 0];
+			Hl[Y * SlumpNx + X] += P.Mass * (1.0f - Ax) * (1.0f - Ay);
+			Hl[Y * SlumpNx + X + 1] += P.Mass * Ax * (1.0f - Ay);
+			Hl[(Y + 1) * SlumpNx + X] += P.Mass * (1.0f - Ax) * Ay;
+			Hl[(Y + 1) * SlumpNx + X + 1] += P.Mass * Ax * Ay;
+		}
+		TArray<float> Tmp;
+		Tmp.SetNumUninitialized(Cells);
+		for (int32 Layer = 0; Layer < 2; ++Layer)
+		{
+			TArray<float>& Hl = Hh[Layer];
+			// Two 3x3 blurs (1 2 1 each way), the edges clamped.
+			for (int32 Pass = 0; Pass < 2; ++Pass)
+			{
+				for (int32 Y = 0; Y < SlumpNy; ++Y)
+				{
+					for (int32 X = 0; X < SlumpNx; ++X)
+					{
+						const int32 Xm = FMath::Max(X - 1, 0), Xp = FMath::Min(X + 1, SlumpNx - 1);
+						Tmp[Y * SlumpNx + X] = 0.25f * (Hl[Y * SlumpNx + Xm] + 2.0f * Hl[Y * SlumpNx + X] + Hl[Y * SlumpNx + Xp]);
+					}
+				}
+				for (int32 Y = 0; Y < SlumpNy; ++Y)
+				{
+					const int32 Ym = FMath::Max(Y - 1, 0), Yp = FMath::Min(Y + 1, SlumpNy - 1);
+					for (int32 X = 0; X < SlumpNx; ++X)
+					{
+						Hl[Y * SlumpNx + X] = 0.25f * (Tmp[Ym * SlumpNx + X] + 2.0f * Tmp[Y * SlumpNx + X] + Tmp[Yp * SlumpNx + X]);
+					}
+				}
+			}
+			float Max = 0.0f;
+			for (const float V : Hl)
+			{
+				Max = FMath::Max(Max, V);
+			}
+			float& Ref = Cloud.SlumpRef[Layer];
+			Ref = Ref <= 0.0f ? Max : Ref + (Max - Ref) * (1.0f - FMath::Exp(-Steps * Dt / 2.0f));
+			// The slope of h / HRef per cm, a central difference (one-sided at the edges).
+			SlumpGx[Layer].SetNumZeroed(Cells);
+			SlumpGy[Layer].SetNumZeroed(Cells);
+			if (Ref > 1e-6f)
+			{
+				const float Scale = 1.0f / (Ref * SlumpCs);
+				for (int32 Y = 0; Y < SlumpNy; ++Y)
+				{
+					const int32 Ym = FMath::Max(Y - 1, 0), Yp = FMath::Min(Y + 1, SlumpNy - 1);
+					for (int32 X = 0; X < SlumpNx; ++X)
+					{
+						const int32 Xm = FMath::Max(X - 1, 0), Xp = FMath::Min(X + 1, SlumpNx - 1);
+						SlumpGx[Layer][Y * SlumpNx + X] = (Hl[Y * SlumpNx + Xp] - Hl[Y * SlumpNx + Xm]) * Scale / FMath::Max(Xp - Xm, 1);
+						SlumpGy[Layer][Y * SlumpNx + X] = (Hl[Yp * SlumpNx + X] - Hl[Ym * SlumpNx + X]) * Scale / FMath::Max(Yp - Ym, 1);
+					}
+				}
+			}
+		}
+	}
+	const auto SlumpAt = [&](const FOSGasParcel& P) -> FVector3f
+	{
+		if (SlumpNx == 0)
+		{
+			return FVector3f::ZeroVector;
+		}
+		const float Fx = FMath::Clamp(((P.P | SlumpT1) - SlumpU0) / SlumpCs - 0.5f, 0.0f, SlumpNx - 1.001f);
+		const float Fy = FMath::Clamp(((P.P | SlumpT2) - SlumpV0) / SlumpCs - 0.5f, 0.0f, SlumpNy - 1.001f);
+		const int32 X = int32(Fx), Y = int32(Fy);
+		const float Ax = Fx - X, Ay = Fy - Y;
+		const int32 Layer = P.bFog ? 1 : 0;
+		const auto Bi = [&](const TArray<float>& A)
+		{
+			return FMath::Lerp(FMath::Lerp(A[Y * SlumpNx + X], A[Y * SlumpNx + X + 1], Ax), FMath::Lerp(A[(Y + 1) * SlumpNx + X], A[(Y + 1) * SlumpNx + X + 1], Ax), Ay);
+		};
+		FVector2f V = -SlumpS * 100.0f * FVector2f(Bi(SlumpGx[Layer]), Bi(SlumpGy[Layer]));
+		const float Len = V.Size();
+		V *= Len > SlumpS ? SlumpS / Len : 1.0f;
+		return SlumpT1 * V.X + SlumpT2 * V.Y;
+	};
+	// The kernels' squash eases to its target over 6 s (in zero-G back to a ball).
+	const float FlatTarget = GScale >= 0.05f ? Cloud.HazeFlat : 1.0f;
 	TArray<float> OldX, OldY, OldZ;
 	for (int32 Step = 0; Step < Steps; ++Step)
 	{
@@ -2740,11 +2891,10 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 						if (Cloud.bZone)
 						{
 							DriftAt(Origin + P.P, float(Cloud.SimToWorld + Cloud.SimTime), Cloud.DriftSeed, Cloud.HazeDriftCm, Drift, Grad, Cloud.HazeDriftScale);
-							// A floor fog's layer stays down (v15): its vertical currents stirred less.
-							if (P.bFog && Cloud.bFogFloor)
-							{
-								Drift -= Down * ((Drift | Down) * (1.0f - Cloud.FogStir));
-							}
+							// The currents' vertical spent on mixing the height (v14c: x HazeDriftZ in gravity); a floor fog's
+							// layer stays down (v15: the least of that and its stir).
+							const float DriftZ = P.bFog && Cloud.bFogFloor ? FMath::Min(Cloud.HazeDriftZ, Cloud.FogStir) : GScale >= 0.05f ? Cloud.HazeDriftZ : 1.0f;
+							Drift -= Down * ((Drift | Down) * (1.0f - DriftZ));
 						}
 						else
 						{
@@ -2798,6 +2948,11 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 							Wanders -= Down * ((Wanders | Down) * (1.0f - Cloud.FogStir));
 						}
 						Target += Wanders;
+					}
+					if (Cloud.bZone)
+					{
+						Target += SlumpAt(P);
+						P.Flat += (FlatTarget - P.Flat) * (1.0f - FMath::Exp(-Dt / 6.0f));
 					}
 					P.V = Target + (P.V - Target) * FMath::Exp(-Dt * P.Air / AirRestSeconds);
 				}
@@ -3062,7 +3217,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 		{
 			continue;
 		}
-		const float Reach = FMath::Max3(P.RadiusCm, P.V.Size() * 0.08f, Cloud.bZone ? P.RadiusCm * FMath::Pow(P.Stretch, 2.0f / 3.0f) : 0.0f);
+		const float Reach = FMath::Max3(P.RadiusCm, P.V.Size() * 0.08f, Cloud.bZone ? P.RadiusCm * FMath::Pow(P.Stretch, 2.0f / 3.0f) : 0.0f) * (Cloud.bZone && P.Flat < 1.0f ? FMath::InvSqrt(P.Flat) : 1.0f);
 		BoxLo = BoxLo.ComponentMin(P.P - FVector3f(Reach));
 		BoxHi = BoxHi.ComponentMax(P.P + FVector3f(Reach));
 	}
@@ -3240,7 +3395,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	FIntVector Lo(N - 1), Hi(0);
 	for (const FOSGasParcel& P : Parcels)
 	{
-		const float Reach = FMath::Max3(P.RadiusCm, P.V.Size() * 0.08f, Cloud.bZone ? P.RadiusCm * FMath::Pow(P.Stretch, 2.0f / 3.0f) : 0.0f);
+		const float Reach = FMath::Max3(P.RadiusCm, P.V.Size() * 0.08f, Cloud.bZone ? P.RadiusCm * FMath::Pow(P.Stretch, 2.0f / 3.0f) : 0.0f) * (Cloud.bZone && P.Flat < 1.0f ? FMath::InvSqrt(P.Flat) : 1.0f);
 		for (int32 Axis = 0; Axis < 3; ++Axis)
 		{
 			Lo[Axis] = FMath::Min(Lo[Axis], FMath::Max(0, FMath::FloorToInt((P.P[Axis] - Reach - Centre[Axis] + Half) / Cell) - 3));
@@ -3255,6 +3410,7 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 	Scratch.Lo = Lo;
 	Scratch.Hi = Hi;
 	const int32 Slices = FMath::Max(0, Hi.Z - Lo.Z + 1);
+	const FVector3f SquashDown = FVector3f(Cloud.Gravity.GetSafeNormal());
 	GasFor(Slices, [&](int32 K)
 	{
 		const int32 Z = Lo.Z + K;
@@ -3283,8 +3439,22 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 			// The ellipsoid's own bounds per axis (a streak along X is long in X only): its sphere's box made a fast
 			// parcel visit ~14000 cells a splat.
 			const float Stretch = Long * Long - Across * Across;
-			const FVector3f Ext(FMath::Sqrt(Stretch * Along.X * Along.X + Across * Across), FMath::Sqrt(Stretch * Along.Y * Along.Y + Across * Across),
+			FVector3f Ext(FMath::Sqrt(Stretch * Along.X * Along.X + Across * Across), FMath::Sqrt(Stretch * Along.Y * Along.Y + Across * Across),
 				FMath::Sqrt(Stretch * Along.Z * Along.Z + Across * Across));
+			// The squash along gravity (v14c): the offset taken through S = sqrt(F)(I - dd') + dd'/F before the strand's
+			// quadric (det 1: the volume kept); the box per axis through u = S^-1 e = e/sqrt(F) + d d_i (F - 1/sqrt(F)).
+			const float Fl = Cloud.bZone && P.Flat < 0.999f && !SquashDown.IsZero() ? P.Flat : 1.0f;
+			const float RootF = FMath::Sqrt(Fl);
+			if (Fl < 1.0f)
+			{
+				for (int32 Axis = 0; Axis < 3; ++Axis)
+				{
+					FVector3f E = FVector3f::ZeroVector;
+					E[Axis] = 1.0f;
+					const FVector3f U = E / RootF + SquashDown * (SquashDown[Axis] * (Fl - 1.0f / RootF));
+					Ext[Axis] = FMath::Sqrt(Stretch * FMath::Square(Along | U) + Across * Across * U.SizeSquared());
+				}
+			}
 			if (FMath::Abs(P.P.Z - CZ) >= Ext.Z || P.Mass * Weight[Index] < 1e-4f)
 			{
 				continue;
@@ -3304,7 +3474,12 @@ void UOSGasSubsystem::Splat(FCloud& Cloud)
 				for (int32 X = X0; X <= X1; ++X)
 				{
 					const FVector3f At(Centre.X + (X + 0.5f - 0.5f * N) * Cell, CY, CZ);
-					const FVector3f Off = At - P.P;
+					FVector3f Off = At - P.P;
+					if (Fl < 1.0f)
+					{
+						const float Dn = Off | SquashDown;
+						Off = (Off - SquashDown * Dn) * RootF + SquashDown * (Dn / Fl);
+					}
 					const float A = Off | Along;
 					const float Q = A * A * InvLong2 + (Off.SizeSquared() - A * A) * InvAcross2;
 					if (Q >= 1.0f)
@@ -4394,7 +4569,7 @@ void UOSGasSubsystem::TickFog(float DeltaTime)
 		const float Radius = bFloor ? FMath::Min(Cloud.HazeRadius, 0.8f * Fog.HeightCm) : FMath::Min(CVarGasHazeRadiusMax.GetValueOnGameThread(), 0.65f * Fog.Spacing);
 		// A haze half a floor layer's mass a parcel (calibrated: TestRoom 0.5 - a floor CentreT ~0.35, a haze ~0.6).
 		const float Mass = Fog.Density * CVarGasFogMass.GetValueOnGameThread() * (bFloor ? 1.0f : 0.5f);
-		const float Fall = bFloor ? 0.33f * CVarGasHazeDiffuse.GetValueOnGameThread() / FMath::Max(Fog.HeightCm, 10.0f) / AirRestSeconds * CVarGasFogFallScale.GetValueOnGameThread() : 0.0f;
+		const float Fall = bFloor ? CVarGasHazeDiffuseZ.GetValueOnGameThread() * CVarGasHazeDiffuse.GetValueOnGameThread() / FMath::Max(Fog.HeightCm, 10.0f) / AirRestSeconds * CVarGasFogFallScale.GetValueOnGameThread() : 0.0f;
 		while (Fog.SeedHead < Fog.SeedQueue.Num() && FPlatformTime::Seconds() < Until && Cloud.Parcels.Num() + Cloud.Incoming.Num() < MaxZoneParcels)
 		{
 			const int32 I = Fog.SeedQueue[Fog.SeedHead++];
@@ -4430,6 +4605,7 @@ void UOSGasSubsystem::TickFog(float DeltaTime)
 			P.Fall = Fall;
 			P.Seed = FMath::Rand();
 			P.Air = P.AirTarget = 1.0f;
+			P.Flat = Zone->GravityCm >= 0.05f * 980.0f ? FMath::Clamp(CVarGasHazeFlat.GetValueOnGameThread(), 0.2f, 1.0f) : 1.0f;
 		}
 	}
 }
