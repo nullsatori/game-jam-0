@@ -171,6 +171,21 @@ namespace
 	TAutoConsoleVariable<float> CVarGasWarmLift(
 		TEXT("os.Gas.WarmLift"), 4.0f,
 		TEXT("Residual warmth's lift at full gravity, cm/s (4; try 10-15: the haze gathers under the ceiling sooner)."));
+	TAutoConsoleVariable<float> CVarGasHazeDiffuse(
+		TEXT("os.Gas.HazeDiffuse"), 250.0f,
+		TEXT("The haze spreads through the room by a slow turbulent wander (v14), cm^2/s: 200 denser and slower, 400 faster and paler; 0: stays where it was (cb97b4e)."));
+	TAutoConsoleVariable<float> CVarGasHazeDiffuseZ(
+		TEXT("os.Gas.HazeDiffuseZ"), 0.33f,
+		TEXT("The haze's wander: its vertical share (warm air over cool is stable)."));
+	TAutoConsoleVariable<float> CVarGasHazeEddySeconds(
+		TEXT("os.Gas.HazeEddySeconds"), 10.0f,
+		TEXT("The haze's wander: how long a parcel keeps its eddy's velocity, s."));
+	TAutoConsoleVariable<float> CVarGasHazeDiffuseZeroG(
+		TEXT("os.Gas.HazeDiffuseZeroG"), 0.5f,
+		TEXT("The haze's wander in zero-G, x (isotropic: no convection mixes it)."));
+	TAutoConsoleVariable<int32> CVarGasSpreadLog(
+		TEXT("os.Gas.SpreadLog"), 0,
+		TEXT("1: every 5 s each haze logs its parcels, mass, spread across and up (mass-weighted sigma, cm), CentreT - the spreading's probe (v14)."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -1511,6 +1526,32 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 			Cloud.Evict = EvictSeconds;
 		}
 	}
+#if !UE_BUILD_SHIPPING
+	// os.Gas.SpreadLog 1: the haze's spread every 5 s (v14's probe).
+	if (Cloud.bZone && !bBusy && CVarGasSpreadLog.GetValueOnGameThread() > 0 && !Cloud.Parcels.IsEmpty()
+		&& FMath::FloorToInt(Cloud.Age / 5.0f) != FMath::FloorToInt((Cloud.Age - DeltaTime) / 5.0f))
+	{
+		FVector3f C = FVector3f::ZeroVector;
+		float M = 0.0f;
+		for (const FOSGasParcel& P : Cloud.Parcels)
+		{
+			C += P.P * P.Mass;
+			M += P.Mass;
+		}
+		C /= FMath::Max(M, 1e-6f);
+		const FVector3f Down = FVector3f(Cloud.Gravity.GetSafeNormal(UE_SMALL_NUMBER, FVector(0, 0, -1)));
+		double H2 = 0.0, Z2 = 0.0;
+		for (const FOSGasParcel& P : Cloud.Parcels)
+		{
+			const FVector3f D = P.P - C;
+			const float Z = D | Down;
+			Z2 += P.Mass * Z * Z;
+			H2 += P.Mass * ((D - Down * Z).SizeSquared() * 0.5f);
+		}
+		UE_LOG(LogMindKore, Log, TEXT("Gas: haze spread at %.0f s - %d parcels, mass %.2f, sigma across %.0f cm, up %.0f cm, CentreT %.2f"), Cloud.Age, Cloud.Parcels.Num(), M,
+			FMath::Sqrt(H2 / FMath::Max(M, 1e-6f)), FMath::Sqrt(Z2 / FMath::Max(M, 1e-6f)), Cloud.CentreT);
+	}
+#endif
 	const bool bEvicted = Cloud.Evict > 0.0f && (Cloud.Evict -= DeltaTime) <= 0.0f;
 	// The haze waits 2 s for its first gas (the copies come ahead of their ramps).
 	const bool bEmpty = !bBusy && Cloud.Parcels.IsEmpty() && Cloud.Incoming.IsEmpty() && Cloud.Age > (Cloud.bZone ? 2.0f : 0.3f);
@@ -1632,6 +1673,10 @@ void UOSGasSubsystem::TickCloud(FCloud& Cloud, float DeltaTime)
 			Cloud.DriftCm = CVarGasDriftCm.GetValueOnGameThread();
 			Cloud.WarmLift = CVarGasWarmLift.GetValueOnGameThread();
 			Cloud.HazeRadius = CVarGasHazeRadius.GetValueOnGameThread();
+			Cloud.HazeDiffuse = CVarGasHazeDiffuse.GetValueOnGameThread();
+			Cloud.HazeDiffuseZ = CVarGasHazeDiffuseZ.GetValueOnGameThread();
+			Cloud.HazeEddy = FMath::Max(CVarGasHazeEddySeconds.GetValueOnGameThread(), 0.1f);
+			Cloud.HazeZeroG = CVarGasHazeDiffuseZeroG.GetValueOnGameThread();
 			if (!Cloud.bZone)
 			{
 				const AOSGravityZone* Zone = OSAirZoneAt(World, Centre);
@@ -2180,14 +2225,18 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 		// The haze: parcels within 8 cm of each other become one (mass summed, radius by volume) - only those fully in.
 		const double Now = Cloud.SimToWorld + Cloud.SimTime;
 		const auto Settled = [Now](const FOSGasParcel& P) { return P.HandIn < 0.0f || Now >= P.HandIn + HandRamp + 0.5; };
-		const auto Merge = [](FOSGasParcel& A, const FOSGasParcel& B)
+		const float HazeRadius = Cloud.HazeRadius;
+		const auto Merge = [HazeRadius](FOSGasParcel& A, const FOSGasParcel& B)
 		{
 			const float M = FMath::Max(A.Mass + B.Mass, 1e-6f);
 			A.P = (A.P * A.Mass + B.P * B.Mass) / M;
 			A.V = (A.V * A.Mass + B.V * B.Mass) / M;
 			A.Birth = (A.Birth * A.Mass + B.Birth * B.Mass) / M;
 			A.Warm = (A.Warm * A.Mass + B.Warm * B.Mass) / M;
-			A.RadiusCm = FMath::Min(FMath::Pow(FMath::Cube(A.RadiusCm) + FMath::Cube(B.RadiusCm), 1.0f / 3.0f), FMath::Max(A.MaxRadiusCm, B.MaxRadiusCm));
+			// By volume, never below the larger of the two, up to the haze's own reach (v14: two 60 cm parcels became one of
+			// 20 cm with twice the mass - the core's density x9 in a step).
+			A.MaxRadiusCm = FMath::Max3(A.MaxRadiusCm, B.MaxRadiusCm, HazeRadius);
+			A.RadiusCm = FMath::Max(FMath::Max(A.RadiusCm, B.RadiusCm), FMath::Min(FMath::Pow(FMath::Cube(A.RadiusCm) + FMath::Cube(B.RadiusCm), 1.0f / 3.0f), A.MaxRadiusCm));
 			if (B.Mass > A.Mass)
 			{
 				A.StretchAxis = B.StretchAxis;
@@ -2199,7 +2248,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 		TMap<FIntVector, int32> Cells;
 		for (int32 I = Parcels.Num() - 1; I >= 0; --I)
 		{
-			if (!Settled(Parcels[I]))
+			if (!Settled(Parcels[I]) || Parcels[I].Dissolve > 0.0f)
 			{
 				continue;
 			}
@@ -2219,35 +2268,80 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 				Cells.Add(Key, I);
 			}
 		}
-		// Still too many: the lightest settled one into its nearest.
-		while (Parcels.Num() > MaxZoneParcels)
+		// Still too many: the lightest settled one into its nearest - only one within twice its radius (a merge across the
+		// room teleported its mass), else it waits a step.
+		const auto Nearest = [&Parcels](int32 Of)
 		{
-			int32 Light = INDEX_NONE;
-			for (int32 I = 0; I < Parcels.Num(); ++I)
-			{
-				Light = Settled(Parcels[I]) && (Light == INDEX_NONE || Parcels[I].Mass < Parcels[Light].Mass) ? I : Light;
-			}
-			if (Light == INDEX_NONE)
-			{
-				break;
-			}
 			int32 Near = INDEX_NONE;
 			float Best = 1e30f;
 			for (int32 I = 0; I < Parcels.Num(); ++I)
 			{
-				const float D2 = I == Light ? 1e30f : FVector3f::DistSquared(Parcels[I].P, Parcels[Light].P);
+				const float D2 = I == Of || Parcels[I].Dissolve > 0.0f ? 1e30f : FVector3f::DistSquared(Parcels[I].P, Parcels[Of].P);
 				if (D2 < Best)
 				{
 					Best = D2;
 					Near = I;
 				}
 			}
-			if (Near == INDEX_NONE)
+			return TPair<int32, float>(Near, Best);
+		};
+		TSet<int32> Waiting;
+		while (Parcels.Num() > MaxZoneParcels)
+		{
+			int32 Light = INDEX_NONE;
+			for (int32 I = 0; I < Parcels.Num(); ++I)
+			{
+				Light = Settled(Parcels[I]) && Parcels[I].Dissolve <= 0.0f && !Waiting.Contains(I) && (Light == INDEX_NONE || Parcels[I].Mass < Parcels[Light].Mass) ? I : Light;
+			}
+			if (Light == INDEX_NONE)
 			{
 				break;
 			}
-			Merge(Parcels[Near], Parcels[Light]);
+			const TPair<int32, float> Near = Nearest(Light);
+			if (Near.Key == INDEX_NONE || Near.Value > FMath::Square(2.0f * Parcels[Light].RadiusCm))
+			{
+				Waiting.Add(Light);
+				continue;
+			}
+			Merge(Parcels[Near.Key], Parcels[Light]);
 			Parcels.RemoveAtSwap(Light, EAllowShrinking::No);
+			Waiting.Reset();
+		}
+		// A hard cap: past it the lightest dissolve - their mass goes into their nearest neighbour over 1 s, no jump.
+		int32 Going = 0;
+		for (const FOSGasParcel& P : Parcels)
+		{
+			Going += P.Dissolve > 0.0f ? 1 : 0;
+		}
+		while (Parcels.Num() - Going > HardZoneParcels)
+		{
+			int32 Light = INDEX_NONE;
+			for (int32 I = 0; I < Parcels.Num(); ++I)
+			{
+				Light = Settled(Parcels[I]) && Parcels[I].Dissolve <= 0.0f && (Light == INDEX_NONE || Parcels[I].Mass < Parcels[Light].Mass) ? I : Light;
+			}
+			if (Light == INDEX_NONE)
+			{
+				break;
+			}
+			Parcels[Light].Dissolve = FMath::Max(Parcels[Light].Mass, 1e-4f);
+			++Going;
+		}
+		const float StepsDt = Steps * Dt;
+		for (int32 I = 0; I < Parcels.Num() && Going > 0; ++I)
+		{
+			FOSGasParcel& P = Parcels[I];
+			if (P.Dissolve <= 0.0f)
+			{
+				continue;
+			}
+			const int32 Near = Nearest(I).Key;
+			const float Share = FMath::Min(P.Dissolve * StepsDt, P.Mass);
+			if (Near != INDEX_NONE)
+			{
+				Parcels[Near].Mass += Share;
+			}
+			P.Mass -= Share;
 		}
 	}
 	const float GScale = Cloud.Gravity.Size() / 980.0f;
@@ -2258,6 +2352,7 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 	TArray<float> OldX, OldY, OldZ;
 	for (int32 Step = 0; Step < Steps; ++Step)
 	{
+		++Cloud.StepIndex;
 		ApplyCommands();
 		FVector3f GridCentre = FVector3f::ZeroVector;
 		{
@@ -2431,6 +2526,29 @@ void UOSGasSubsystem::StepCloud(FCloud& Cloud, int32 Steps, float Dt, const TArr
 					if (P.Age > 1.0f)
 					{
 						Target -= Down * (Cloud.WarmLift * P.Warm * GScale);
+					}
+					// The haze's own wander (v14): an Ornstein-Uhlenbeck velocity per parcel - sigma^2 = 2 D t past its eddy
+					// time - the haze spreads and thins through the room instead of sitting where it was. Exact for any step,
+					// its draws by the step's number (the same at any frame rate); vertical damped by the stable layering,
+					// isotropic and slower in zero-G.
+					if (Cloud.bZone && Cloud.HazeDiffuse > 0.0f)
+					{
+						const bool bZeroG = GScale < 0.05f;
+						const float D = Cloud.HazeDiffuse * (bZeroG ? Cloud.HazeZeroG : 1.0f);
+						const float Across = FMath::Sqrt(D / Cloud.HazeEddy);
+						const float Up = bZeroG ? Across : FMath::Sqrt(D * Cloud.HazeDiffuseZ / Cloud.HazeEddy);
+						const float Keep = FMath::Exp(-Dt / Cloud.HazeEddy);
+						const float Kick = FMath::Sqrt(FMath::Max(0.0f, 1.0f - Keep * Keep));
+						FVector3f Gauss;
+						for (int32 Axis = 0; Axis < 3; ++Axis)
+						{
+							const float U1 = (float(Hash3(int32(P.Seed), int32(Cloud.StepIndex), Axis * 2, 0x5EEDu)) + 1.0f) / 4294967297.0f;
+							const float U2 = float(Hash3(int32(P.Seed), int32(Cloud.StepIndex), Axis * 2 + 1, 0x5EEDu)) / 4294967296.0f;
+							Gauss[Axis] = FMath::Sqrt(-2.0f * FMath::Loge(U1)) * FMath::Cos(UE_TWO_PI * U2);
+						}
+						const FVector3f GUp = Down * (Gauss | Down);
+						P.Wander = P.Wander * Keep + ((Gauss - GUp) * Across + GUp * Up) * Kick;
+						Target += P.Wander;
 					}
 					P.V = Target + (P.V - Target) * FMath::Exp(-Dt * P.Air / AirRestSeconds);
 				}

@@ -187,6 +187,10 @@ struct FOSGasParcel
 	/** A haze's parcel in a shaft source's light (v13 13c: a sun or a GasShaft lamp through a window), eased over 0.25 s. */
 	float Shaft = 1.0f;
 	float ShaftTarget = 1.0f;
+	/** A haze parcel past the hard cap (v14): its mass at the start, handed over 1 s into its nearest neighbour; 0 none. */
+	float Dissolve = 0.0f;
+	/** A haze parcel's own turbulent velocity (v14: an Ornstein-Uhlenbeck wander - the haze spreads through the room), cm/s. */
+	FVector3f Wander = FVector3f::ZeroVector;
 };
 
 /**
@@ -277,6 +281,8 @@ public:
 	/** The zones' haze clouds (v12 7a): their own pool after the shots' slots. */
 	static constexpr int32 MaxZones = 2;
 	static constexpr int32 MaxZoneParcels = 400;
+	/** Past this a haze's lightest parcels dissolve into their neighbours over 1 s (v14: the merges never jump). */
+	static constexpr int32 HardZoneParcels = 500;
 	/** Clouds the post-process draws: all of them (a set picked by distance swapped clouds in and out whole). */
 	static constexpr int32 MaxDrawn = MaxClouds + MaxZones;
 	/** A cloud's parcels: the Рысь's shot is 160 from the muzzle, 80 from its 16 shroud holes, its thread and seep. */
@@ -322,6 +328,10 @@ private:
 		float WarmLift = 4.0f;
 		/** The haze's parcels diffuse up to this radius (os.Gas.HazeRadius, read at each launch), cm. */
 		float HazeRadius = 60.0f;
+		/** The haze's spreading (v14, read at each launch): diffusivity cm^2/s, its vertical share, the eddies' time, zero-G's share. */
+		float HazeDiffuse = 0.0f, HazeDiffuseZ = 0.33f, HazeEddy = 10.0f, HazeZeroG = 0.5f;
+		/** Steps taken (the wander's random draws go by it: the same at any frame rate). */
+		uint32 StepIndex = 0;
 		/** World time = SimTime + this (set at each launch: the hand-over's ramps go by world time in both clouds). */
 		double SimToWorld = 0.0;
 		/** A shot's cloud hands its gas to its zone's haze (from FadeAge 3 s); when it began (world s, -1 not yet). */
