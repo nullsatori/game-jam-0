@@ -34,6 +34,8 @@ float GasSmoothAlpha;
 // v13 13e (os.Gas.Dither 2): the hold of a block's opacity against its last frame's, the world grain's strength.
 float GasDitherHold;
 float GasDitherGrain;
+// v13 13d: the zone's lamps a screen block takes (4-6).
+float GasTileSlots;
 // v13 13a: the torch's shadow map (R: distance to the first hit per texel) and its frame.
 Texture2D<float4> GasTorchShadow;
 float GasTorchOn;
@@ -152,31 +154,45 @@ float3 GasToSrgb(float3 c)
 // 1 - GasForward isotropic (1 = isotropic's level), the key's baked self-shadow, the others' ambient occlusion.
 // The cloud's lamps are loaded once a cloud (LA position + radius, LL light + exponent, LC cone, LD cos inner + key);
 // nl > 0: any lit.
-float3 GasLamps(int nl, float4 LA[4], float4 LL[4], float4 LC[4], float4 LD[4], float3 pw, float3 dir, float4 v, float g, float T)
+// A lamp's falloff and cone at pw (UE's: inverse square windowed by the radius, or (1 - d^2/R^2)^exponent; a spot's cone
+// by the smoothstep of the cosines); Ld the way from pw to it.
+float GasLampAtt(float4 A, float4 L, float4 Cone, float4 D, float3 pw, out float3 Ld)
+{
+	Ld = A.xyz;
+	float Att = 1.0;
+	if (A.w > 0.0)
+	{
+		float3 V = A.xyz - pw;
+		float D2 = dot(V, V);
+		Ld = V * rsqrt(max(D2, 1.0));
+		float R2 = A.w * A.w;
+		Att = L.w > 0.0 ? pow(1.0 - saturate(D2 / R2), L.w) : Square(saturate(1.0 - Square(D2 / R2))) / (D2 + 1.0);
+		Att *= Cone.w > -1.5 ? smoothstep(Cone.w, D.x, dot(-Ld, Cone.xyz)) : 1.0;
+	}
+	return Att;
+}
+
+// The ray's lamps: up to 8 base rows in GasData (-1 none; read per sample - the texture is tiny and cached, an array of
+// 8 lamps was 32 registers), the one at Soft weighted by SoftW.
+float3 GasLamps(int c, int lr[8], int Soft, float SoftW, float3 pw, float3 dir, float4 v, float g, float T)
 {
 	float3 Sum = 0;
-	[unroll] for (int k = 0; k < 4; k++)
+	[unroll] for (int k = 0; k < 8; k++)
 	{
-		float4 A = LA[k], L = LL[k], Cone = LC[k], D = LD[k];
-		if (L.r + L.g + L.b <= 0.0) continue;
-		float3 Ld = A.xyz;
-		float Att = 1.0;
-		if (A.w > 0.0)
-		{
-			float3 V = A.xyz - pw;
-			float D2 = dot(V, V);
-			Ld = V * rsqrt(max(D2, 1.0));
-			float R2 = A.w * A.w;
-			Att = L.w > 0.0 ? pow(1.0 - saturate(D2 / R2), L.w) : Square(saturate(1.0 - Square(D2 / R2))) / (D2 + 1.0);
-			Att *= Cone.w > -1.5 ? smoothstep(Cone.w, D.x, dot(-Ld, Cone.xyz)) : 1.0;
-		}
+		if (lr[k] < 0) continue;
+		float4 A = GasData.Load(int3(c, lr[k], 0));
+		float4 L = GasData.Load(int3(c, lr[k] + 1, 0));
+		float4 Cone = GasData.Load(int3(c, lr[k] + 2, 0));
+		float4 D = GasData.Load(int3(c, lr[k] + 3, 0));
+		float3 Ld;
+		float Att = GasLampAtt(A, L, Cone, D, pw, Ld) * (k == Soft ? SoftW : 1.0);
 		// The scattering angle: the light's way (-Ld) against the way to the eye (-dir).
 		float CosT = dot(Ld, dir);
 		float HG = (1.0 - g * g) / pow(max(1.0 + g * g - 2.0 * g * CosT, 1e-4), 1.5);
 		float Phase = (1.0 - GasForward) + GasForward * HG;
-		// The key: its baked self-shadow; the player's own lamp (by the eye): the march's transmittance so far - the near
-		// face lit, the depth dark (v12, a review's point); the others the ambient occlusion.
-		float Shadow = D.y > 0.5 ? v.b : D.z > 0.5 ? T : 0.35 + 0.65 * v.a;
+		// The key's share (D.y, 0 -> 1 over 0.25 s as the key moves) of its baked self-shadow; the rest: the player's own
+		// lamp (by the eye) the march's transmittance so far (the near face lit, the depth dark), the others the occlusion.
+		float Shadow = lerp(D.z > 0.5 ? T : 0.35 + 0.65 * v.a, v.b, saturate(D.y));
 		// The torch (the player's lamp with a cone): what stands in its beam shades the smoke behind (v13 13a).
 		// GasTorchOn is the shadow's share: 0 until its map's first round is traced, then up over 0.1 s.
 		if (GasTorchOn > 0.0 && D.z > 0.5 && Cone.w > -1.5)
@@ -371,7 +387,8 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, b
 	    float3 top = GasData.Load(int3(c, 5, 0)).rgb;
 	    float3 bot = GasData.Load(int3(c, 6, 0)).rgb;
 	    // Where both atlases hold gas (rows 9-12, the cells they wrote): the march over their union, not the boxes.
-	    float3 qa0 = GasData.Load(int3(c, 9, 0)).xyz, qa1 = GasData.Load(int3(c, 10, 0)).xyz;
+	    float4 d9 = GasData.Load(int3(c, 9, 0));
+	    float3 qa0 = d9.xyz, qa1 = GasData.Load(int3(c, 10, 0)).xyz;
 	    float3 qb0 = GasData.Load(int3(c, 11, 0)).xyz, qb1 = GasData.Load(int3(c, 12, 0)).xyz;
 	    float3 t0 = (qa0 - Cam) * inv, t1 = (qa1 - Cam) * inv;
 	    float3 tn = min(t0, t1), tf = max(t0, t1);
@@ -411,17 +428,75 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, b
 	            wLaser = 1.0 - dist / width;
 	        }
 	    }
-	    // Static indices only (a dynamically indexed array went to scratch memory).
-	    float4 LA[4], LL[4], LC[4], LD[4];
+	    // The ray's lamps (os.Gas.Light 1): a cloud's 4 slots; a haze with tile lamps (v13 13d): its 2 player slots and the
+	    // GasTileSlots strongest of its zone's lamps at the middle of this ray's stretch through it - each screen block its
+	    // own pool of light - the last one soft (its share down to 0 where it and the next swap: no seam between tiles).
+	    int lr[8];
+	    [unroll] for (int k = 0; k < 8; k++) { lr[k] = -1; }
+	    int Soft = -1;
+	    float SoftW = 1.0;
 	    int nl = 0;
-	    [unroll] for (int k = 0; k < 4; k++)
+	    int nTile = (int)(d9.w + 0.5);
+	    if (GasLight > 0.5 && bLamps && nTile > 0)
 	    {
-	        LL[k] = GasLight > 0.5 && bLamps ? GasData.Load(int3(c, 14 + 4 * k, 0)) : 0;
-	        LA[k] = GasData.Load(int3(c, 13 + 4 * k, 0));
-	        LC[k] = GasData.Load(int3(c, 15 + 4 * k, 0));
-	        LD[k] = GasData.Load(int3(c, 16 + 4 * k, 0));
-	        nl += LL[k].r + LL[k].g + LL[k].b > 0.0 ? 1 : 0;
+	        [unroll] for (int k = 0; k < 2; k++)
+	        {
+	            float4 L = GasData.Load(int3(c, 14 + 4 * k, 0));
+	            lr[k] = L.r + L.g + L.b > 0.0 ? 13 + 4 * k : -1;
+	        }
+	        float3 pm = Cam + dir * (0.5 * (a + b));
+	        float sc[16];
+	        [unroll] for (int j = 0; j < 16; j++)
+	        {
+	            sc[j] = -1.0;
+	            if (j < nTile)
+	            {
+	                int r = 13 + 4 * (2 + j);
+	                float4 A = GasData.Load(int3(c, r, 0)), L = GasData.Load(int3(c, r + 1, 0));
+	                float4 Cn = GasData.Load(int3(c, r + 2, 0)), Dd = GasData.Load(int3(c, r + 3, 0));
+	                float3 Ld;
+	                sc[j] = L.r + L.g + L.b > 0.0 ? dot(L.rgb, float3(0.3, 0.59, 0.11)) * GasLampAtt(A, L, Cn, Dd, pm, Ld) : -1.0;
+	            }
+	        }
+	        int K = clamp((int)(GasTileSlots + 0.5), 4, 6);
+	        int pick[7];
+	        float best7[7];
+	        [unroll] for (int p = 0; p < 7; p++)
+	        {
+	            float best = 0.0;
+	            int bi = -1;
+	            [unroll] for (int j = 0; j < 16; j++)
+	            {
+	                bool used = false;
+	                [unroll] for (int q = 0; q < p; q++) { used = used || pick[q] == j; }
+	                if (!used && sc[j] > best) { best = sc[j]; bi = j; }
+	            }
+	            pick[p] = bi;
+	            best7[p] = best;
+	        }
+	        [unroll] for (int p2 = 0; p2 < 6; p2++)
+	        {
+	            lr[2 + p2] = p2 < K && pick[p2] >= 0 ? 13 + 4 * (2 + pick[p2]) : -1;
+	        }
+	        // The soft last: the K-th's share by its lead over the next.
+	        float sK = 0.0, sN = 0.0;
+	        [unroll] for (int p3 = 0; p3 < 7; p3++)
+	        {
+	            sK = p3 == K - 1 ? best7[p3] : sK;
+	            sN = p3 == K ? best7[p3] : sN;
+	        }
+	        Soft = 2 + K - 1;
+	        SoftW = sK > 0.0 ? saturate((sK - sN) / (0.25 * sK)) : 1.0;
 	    }
+	    else if (GasLight > 0.5 && bLamps)
+	    {
+	        [unroll] for (int k = 0; k < 4; k++)
+	        {
+	            float4 L = GasData.Load(int3(c, 14 + 4 * k, 0));
+	            lr[k] = L.r + L.g + L.b > 0.0 ? 13 + 4 * k : -1;
+	        }
+	    }
+	    [unroll] for (int k2 = 0; k2 < 8; k2++) { nl += lr[k2] >= 0 ? 1 : 0; }
 	    [loop] for (int s = 0; s < ns; s++)
 	    {
 	        t += adv;
@@ -495,7 +570,7 @@ void GasMarch(float3 Cam, float3 dir, float sceneDist, float jit, float3 room, b
 	            col = base * GasAlbedo * room * GasAmbientScale * ambMul * (0.35 + 0.65 * v.a) + warm * v.g * v.g;
 	            if (nl > 0)
 	            {
-	                accL += T * aStep * base * GasLamps(nl, LA, LL, LC, LD, pw, dir, v, hg, T);
+	                accL += T * aStep * base * GasLamps(c, lr, Soft, SoftW, pw, dir, v, hg, T);
 	            }
 	        }
 	        else

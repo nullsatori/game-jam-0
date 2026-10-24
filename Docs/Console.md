@@ -11,7 +11,7 @@
 
 Что проверяет каждая проба и на какой карте её гонять — [Probes](Probes.md).
 
-Всего: 109 команд, 45 переменных.
+Всего: 109 команд, 48 переменных.
 
 ## `os.Attach`
 
@@ -124,6 +124,8 @@
 | `os.Gas.Spawn` | `<muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]` | <muzzle\|port\|weld\|breach\|rcs\|dust\|list> [x y z]: a gas source of the preset at the point (1.5 m along the view by default) for 4 s, along the view. *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.SpawnSeconds` (переменная) | значение (умолч. `4.0f`) | How long an os.Gas.Spawn source lives, s (4). *не в Shipping* | `Source/MindKore/OSGasSource.cpp` |
 | `os.Gas.TickHz` (переменная) | значение (умолч. `0.0f`) | > 0: the gas's own evolution shown in steps of 1/TickHz s (stop motion); its place and the camera stay smooth. 0: off. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.TileLamps` (переменная) | значение (умолч. `1`) | 1: a haze takes up to os.Gas.ZoneLamps of the zone's lamps and each screen block its own strongest at its gas (v13 13d), the player's lamps apart; 0: 4 lamps for the whole haze (80e4fec). | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.TileSlots` (переменная) | значение (умолч. `4`) | The zone's lamps a screen block takes (4-6; the last one soft - no seam where the 4th and 5th swap). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.TorchShadow` (переменная) | значение (умолч. `1`) | 1: the torch's cone cuts the smoke with the shadows of what stands in it (a map of traces, v13 13a); 0: off (80e4fec). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.TorchShadowEase` (переменная) | значение (умолч. `0.08f`) | The torch's shadow map: each texel's distance eases to its trace over this, s. | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.TorchShadowRes` (переменная) | значение (умолч. `16`) | The torch's shadow map for the gas, texels a side (16, up to 32). | `Source/MindKore/OSGas.cpp` |
@@ -132,6 +134,7 @@
 | `os.Gas.ZoneAlbedo` (переменная) | значение (умолч. `0.8f`) | The haze's albedo it ages to over 20 s (old smoke coagulates and whitens: a light veil in the light, dark in the shade). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneAmbient` (переменная) | значение (умолч. `0.5f`) | The zone's haze: the room's light on it, x (it is seen by the lamps, not by the room). | `Source/MindKore/OSGas.cpp` |
 | `os.Gas.ZoneDensity` (переменная) | значение (умолч. `0.4f`) | The zone's haze: the gas handed to it, x its mass. | `Source/MindKore/OSGas.cpp` |
+| `os.Gas.ZoneLamps` (переменная) | значение (умолч. `16`) | The haze's lamps a block chooses from (4-16). | `Source/MindKore/OSGas.cpp` |
 
 ## `os.Gravity`
 

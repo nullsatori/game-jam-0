@@ -41,6 +41,8 @@ struct FOSGasRenderData
 	/** v13 13e: os.Gas.DitherHold, os.Gas.DitherGrain. */
 	float DitherHold = 0.125f;
 	float DitherGrain = 0.5f;
+	/** v13 13d: os.Gas.TileSlots (the zone's lamps a block takes, 4-6). */
+	float TileSlots = 4.0f;
 	/** v13 13a: the torch's shadow map (distance per texel), its frame, on/off. */
 	FTextureResource* TorchShadow = nullptr;
 	float TorchOn = 0.0f;

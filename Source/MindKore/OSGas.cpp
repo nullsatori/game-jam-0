@@ -155,6 +155,15 @@ namespace
 	TAutoConsoleVariable<float> CVarGasNixieLamp(
 		TEXT("os.Gas.NixieLamp"), 1.0f,
 		TEXT("The Nixie counter's orange glow on the smoke round the gun (a lamp for the gas only), x; 0 off."));
+	TAutoConsoleVariable<int32> CVarGasTileLamps(
+		TEXT("os.Gas.TileLamps"), 1,
+		TEXT("1: a haze takes up to os.Gas.ZoneLamps of the zone's lamps and each screen block its own strongest at its gas (v13 13d), the player's lamps apart; 0: 4 lamps for the whole haze (80e4fec)."));
+	TAutoConsoleVariable<int32> CVarGasZoneLamps(
+		TEXT("os.Gas.ZoneLamps"), 16,
+		TEXT("The haze's lamps a block chooses from (4-16)."));
+	TAutoConsoleVariable<int32> CVarGasTileSlots(
+		TEXT("os.Gas.TileSlots"), 4,
+		TEXT("The zone's lamps a screen block takes (4-6; the last one soft - no seam where the 4th and 5th swap)."));
 	TAutoConsoleVariable<int32> CVarGasDither(
 		TEXT("os.Gas.Dither"), 2,
 		TEXT("2 (v13): the Bayer dither on the view sphere (a turn leaves the dots on the smoke), the block's opacity held against its last frame's, a world grain; 1: an ordered 4x4 Bayer on the screen (v12); 0: a hash per block, the tail from 0.12 (before v12)."));
@@ -1785,7 +1794,11 @@ void UOSGasSubsystem::UpdatePost()
 		// (colour x brightness, the renderer's units, x the crossfade x whether it sees the cloud - read every frame, not
 		// eased: a flicker and the muzzle's flash reach the smoke) + falloff exponent (0 inverse square); the cone's axis +
 		// cos outer (-2 none); cos inner + 1 for the key (its baked self-shadow; the others the ambient occlusion).
-		for (int32 Lamp = 0; bNewLight && Lamp < MaxLamps; ++Lamp)
+		const bool bTiledCloud = Cloud.bZone && CVarGasTileLamps.GetValueOnGameThread() > 0;
+		const int32 TileWorld = bTiledCloud ? FMath::Clamp(CVarGasZoneLamps.GetValueOnGameThread(), 4, MaxZoneLamps) : 0;
+		// 9.w: a haze's tile lamps - how many of the zone's follow its 2 player slots (0: the 4 slots as before).
+		Data[9 * MaxDrawn + Index].A = float(TileWorld);
+		for (int32 Lamp = 0; bNewLight && Lamp < (bTiledCloud ? MaxPlayerSlots + TileWorld : MaxLamps); ++Lamp)
 		{
 			const FCloud::FLampSlot& Slot = Cloud.Lamps[Lamp];
 			const ULightComponent* L = Slot.Lamp.Get();
@@ -1814,7 +1827,7 @@ void UOSGasSubsystem::UpdatePost()
 			Data[(Row + 1) * MaxDrawn + Index] = FLinearColor(Light.R, Light.G, Light.B, Point && !Point->bUseInverseSquaredFalloff ? Point->LightFalloffExponent : 0.0f);
 			Data[(Row + 2) * MaxDrawn + Index] = FLinearColor(Axis.X, Axis.Y, Axis.Z, CosOuter);
 			// z: the player's own lamp (by the camera: its shadow in the gas is the march's own transmittance).
-			Data[(Row + 3) * MaxDrawn + Index] = FLinearColor(CosInner, Lamp == Cloud.KeyLamp ? 1.0f : 0.0f, bPlayers ? 1.0f : 0.0f, 0.0f);
+			Data[(Row + 3) * MaxDrawn + Index] = FLinearColor(CosInner, Slot.KeyShare, bPlayers ? 1.0f : 0.0f, 0.0f);
 		}
 		if (BoundGrids[Index] != Cloud.Texture)
 		{
@@ -1938,6 +1951,7 @@ void UOSGasSubsystem::UpdatePost()
 		Frame.DitherPx = CVarGasDitherPx.GetValueOnGameThread() > 0.0f ? CVarGasDitherPx.GetValueOnGameThread() : FMath::Max(1.0f, FMath::RoundToFloat(BlockPx * 0.5f));
 		Frame.SmoothAlpha = float(CVarGasSmoothAlpha.GetValueOnGameThread());
 		Frame.DitherHold = CVarGasDitherHold.GetValueOnGameThread();
+		Frame.TileSlots = float(FMath::Clamp(CVarGasTileSlots.GetValueOnGameThread(), 4, 6));
 		Frame.DitherGrain = CVarGasDitherGrain.GetValueOnGameThread();
 		Frame.EyeClear = EyeClearCm;
 #if !UE_BUILD_SHIPPING
@@ -3246,62 +3260,104 @@ void UOSGasSubsystem::UpdateLamps(FCloud& Cloud, const FVector& Centre, float De
 			Candidates.Add({ L, Score, Toward, bPlayers });
 		}
 	}
-	// The strongest six traced (each every 0.25 s from the centre), the best four of them that see it kept.
+	// A haze with tile lamps (v13 13d): the player's lamps in their own 2 slots, never against the zone's; the zone's
+	// strongest WorldSlots seen from 9 points of its box. Otherwise the strongest six traced from the centre, the best
+	// four that see it kept (the player's among them).
+	const bool bTiled = Cloud.bZone && CVarGasTileLamps.GetValueOnGameThread() > 0;
+	const int32 WorldSlots = bTiled ? FMath::Clamp(CVarGasZoneLamps.GetValueOnGameThread(), 4, MaxZoneLamps) : MaxLamps;
+	const int32 Used = bTiled ? MaxPlayerSlots + WorldSlots : MaxLamps;
 	Candidates.Sort([](const FCandidate& A, const FCandidate& B) { return A.Score > B.Score; });
-	Candidates.SetNum(FMath::Min(Candidates.Num(), 6));
-	for (FCandidate& Each : Candidates)
+	TArray<FCandidate, TInlineAllocator<16>> Players, Zone;
+	for (const FCandidate& C : Candidates)
 	{
-		const FVector Toward = Each.Lamp->IsA<UDirectionalLightComponent>() ? Each.Toward : (Each.Lamp->GetComponentLocation() - Centre).GetSafeNormal();
-		Each.Score *= LampSees(Cloud, Each.Lamp, Centre, Toward, Each.Lamp->IsA<UDirectionalLightComponent>());
+		(bTiled && C.bPlayers ? Players : Zone).Add(C);
 	}
-	Candidates.Sort([](const FCandidate& A, const FCandidate& B) { return A.Score > B.Score; });
-	while (Candidates.Num() > 0 && Candidates.Last().Score <= 0.0f)
+	const FBox Inset(Centre - Half * 0.8, Centre + Half * 0.8);
+	const auto See = [&](TArray<FCandidate, TInlineAllocator<16>>& List, int32 Traced, int32 Keep, bool bNine)
 	{
-		Candidates.Pop();
-	}
-	Candidates.SetNum(FMath::Min(Candidates.Num(), MaxLamps));
+		List.SetNum(FMath::Min(List.Num(), Traced));
+		for (FCandidate& Each : List)
+		{
+			const FVector Toward = Each.Lamp->IsA<UDirectionalLightComponent>() ? Each.Toward : (Each.Lamp->GetComponentLocation() - Centre).GetSafeNormal();
+			Each.Score *= LampSees(Cloud, Each.Lamp, Centre, Toward, Each.Lamp->IsA<UDirectionalLightComponent>(), bNine ? &Inset : nullptr);
+		}
+		List.Sort([](const FCandidate& A, const FCandidate& B) { return A.Score > B.Score; });
+		while (List.Num() > 0 && List.Last().Score <= 0.0f)
+		{
+			List.Pop();
+		}
+		List.SetNum(FMath::Min(List.Num(), Keep));
+	};
+	See(Zone, bTiled ? WorldSlots + 2 : 6, WorldSlots, bTiled);
+	See(Players, MaxPlayerSlots, MaxPlayerSlots, false);
 	// The crossfade: a lamp out of the set fades over 0.25 s, a new one comes in from 0 (the player's own at once; a new
 	// cloud's first set at once too - it was born dimmer than the cloud beside it).
 	const float Step = DeltaTime / 0.25f;
 	const bool bFresh = Cloud.bLampsFresh;
 	Cloud.bLampsFresh = false;
-	for (FCloud::FLampSlot& Slot : Cloud.Lamps)
+	const auto Assign = [&](int32 Begin, int32 End, const TArray<FCandidate, TInlineAllocator<16>>& List)
 	{
-		const FCandidate* In = Candidates.FindByPredicate([&Slot](const FCandidate& C) { return Slot.Lamp.Get() == C.Lamp; });
-		Slot.Weight = In ? FMath::Min(1.0f, Slot.Weight + Step) : Slot.Weight - Step;
-		Slot.Score = In ? In->Score : Slot.Score;
-		if (Slot.Weight <= 0.0f || !Slot.Lamp.IsValid())
+		for (int32 Index = Begin; Index < End; ++Index)
 		{
-			Slot = FCloud::FLampSlot();
-		}
-	}
-	for (const FCandidate& C : Candidates)
-	{
-		if (Algo::AnyOf(Cloud.Lamps, [&C](const FCloud::FLampSlot& S) { return S.Lamp.Get() == C.Lamp; }))
-		{
-			continue;
-		}
-		FCloud::FLampSlot* Free = Algo::FindByPredicate(Cloud.Lamps, [](const FCloud::FLampSlot& S) { return !S.Lamp.IsValid(); });
-		if (!Free && C.bPlayers)
-		{
-			// The flash cannot wait for a slot: the faintest goes.
-			Free = &Cloud.Lamps[0];
-			for (FCloud::FLampSlot& S : Cloud.Lamps)
+			FCloud::FLampSlot& Slot = Cloud.Lamps[Index];
+			const FCandidate* In = List.FindByPredicate([&Slot](const FCandidate& C) { return Slot.Lamp.Get() == C.Lamp; });
+			Slot.Weight = In ? FMath::Min(1.0f, Slot.Weight + Step) : Slot.Weight - Step;
+			Slot.Score = In ? In->Score : Slot.Score;
+			if (Slot.Weight <= 0.0f || !Slot.Lamp.IsValid())
 			{
-				Free = S.Weight * S.Score < Free->Weight * Free->Score ? &S : Free;
+				Slot = FCloud::FLampSlot();
 			}
 		}
-		if (Free)
+		for (const FCandidate& C : List)
 		{
-			Free->Lamp = C.Lamp;
-			Free->Weight = C.bPlayers || bFresh ? 1.0f : 0.0f;
-			Free->Score = C.Score;
+			bool bHas = false;
+			FCloud::FLampSlot* Free = nullptr;
+			for (int32 Index = Begin; Index < End; ++Index)
+			{
+				bHas |= Cloud.Lamps[Index].Lamp.Get() == C.Lamp;
+				Free = !Free && !Cloud.Lamps[Index].Lamp.IsValid() ? &Cloud.Lamps[Index] : Free;
+			}
+			if (bHas)
+			{
+				continue;
+			}
+			if (!Free && C.bPlayers)
+			{
+				// The flash cannot wait for a slot: the faintest goes.
+				Free = &Cloud.Lamps[Begin];
+				for (int32 Index = Begin; Index < End; ++Index)
+				{
+					FCloud::FLampSlot& S = Cloud.Lamps[Index];
+					Free = S.Weight * S.Score < Free->Weight * Free->Score ? &S : Free;
+				}
+			}
+			if (Free)
+			{
+				Free->Lamp = C.Lamp;
+				Free->Weight = C.bPlayers || bFresh ? 1.0f : 0.0f;
+				Free->Score = C.Score;
+				Free->KeyShare = 0.0f;
+			}
 		}
+	};
+	if (bTiled)
+	{
+		Assign(0, MaxPlayerSlots, Players);
+		Assign(MaxPlayerSlots, Used, Zone);
 	}
-	// The key: the strongest (weighted); its direction from the centre.
+	else
+	{
+		Assign(0, MaxLamps, Zone);
+	}
+	for (int32 Index = Used; Index < MaxSlots; ++Index)
+	{
+		Cloud.Lamps[Index] = FCloud::FLampSlot();
+	}
+	// The key: the strongest (weighted); its direction from the centre. Its share of the baked self-shadow moves over
+	// 0.25 s (the key changing flipped the shadow's model in a frame).
 	Cloud.KeyLamp = INDEX_NONE;
 	float Best = 0.0f;
-	for (int32 Index = 0; Index < MaxLamps; ++Index)
+	for (int32 Index = 0; Index < Used; ++Index)
 	{
 		const FCloud::FLampSlot& S = Cloud.Lamps[Index];
 		if (const ULightComponent* L = S.Lamp.Get(); L && S.Weight * S.Score > Best)
@@ -3311,12 +3367,17 @@ void UOSGasSubsystem::UpdateLamps(FCloud& Cloud, const FVector& Centre, float De
 			OutKeyDir = FVector3f(L->IsA<UDirectionalLightComponent>() ? -L->GetDirection() : (L->GetComponentLocation() - Centre).GetSafeNormal());
 		}
 	}
+	for (int32 Index = 0; Index < Used; ++Index)
+	{
+		FCloud::FLampSlot& S = Cloud.Lamps[Index];
+		S.KeyShare = FMath::Clamp(S.KeyShare + (Index == Cloud.KeyLamp ? Step : -Step), 0.0f, 1.0f);
+	}
 #if !UE_BUILD_SHIPPING
 	// os.Gas.Debug 2: the cloud's lamps in the log once a second.
 	if (CVarGasDebug.GetValueOnGameThread() > 1 && FMath::FloorToInt(World->GetTimeSeconds()) != FMath::FloorToInt(World->GetTimeSeconds() - World->GetDeltaSeconds()))
 	{
 		FString Line;
-		for (int32 Index = 0; Index < MaxLamps; ++Index)
+		for (int32 Index = 0; Index < MaxSlots; ++Index)
 		{
 			const FCloud::FLampSlot& S = Cloud.Lamps[Index];
 			if (const ULightComponent* L = S.Lamp.Get())
@@ -3460,13 +3521,49 @@ void UOSGasSubsystem::UpdateTorchShadow(float DeltaTime)
 		[](uint8* Src, const FUpdateTextureRegion2D* Regions) { FMemory::Free(Src); delete Regions; });
 }
 
-float UOSGasSubsystem::LampSees(FCloud& Cloud, const ULightComponent* Lamp, const FVector& Where, const FVector& Toward, bool bDirectional)
+float UOSGasSubsystem::LampSees(FCloud& Cloud, const ULightComponent* Lamp, const FVector& Where, const FVector& Toward, bool bDirectional, const FBox* Points)
 {
 	UWorld* World = GetWorld();
 	const double Now = World->GetTimeSeconds();
 	const bool bNew = !Cloud.LampsSeen.Contains(Lamp);
 	FCloud::FLampSeen& Seen = Cloud.LampsSeen.FindOrAdd(Lamp);
-	if (Now - Seen.Traced >= 0.25)
+	// A haze's lamp (v13 13d): the share of 9 points of its box that see it, one trace in turn (all 9 in 0.25 s) - a lamp
+	// behind a door no longer switched the whole haze on or off with one trace from its centre.
+	if (Points && Now - Seen.Traced >= 0.25 / 9.0)
+	{
+		Seen.Traced = Now;
+		const int32 K = Seen.Next;
+		Seen.Next = (Seen.Next + 1) % 9;
+		const FVector From = K == 0 ? Points->GetCenter() : FVector((K - 1) & 1 ? Points->Max.X : Points->Min.X, (K - 1) & 2 ? Points->Max.Y : Points->Min.Y, (K - 1) & 4 ? Points->Max.Z : Points->Min.Z);
+		const FVector Way = bDirectional ? Toward : (Lamp->GetComponentLocation() - From).GetSafeNormal();
+		const FVector End = bDirectional ? From + Way * 20000.0 : Lamp->GetComponentLocation() - Way * 30.0;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(OSGasLampSees), false);
+		if (const APlayerController* Controller = World->GetFirstPlayerController(); Controller && Controller->GetPawn())
+		{
+			const APawn* Pawn = Controller->GetPawn();
+			Params.AddIgnoredActor(Pawn);
+			TArray<AActor*> Carried;
+			Pawn->GetAttachedActors(Carried, true, true);
+			Params.AddIgnoredActors(Carried);
+		}
+		Params.AddIgnoredActor(Lamp->GetOwner());
+		const float Hit = World->LineTraceTestByChannel(From, End, ECC_Visibility, Params) ? 0.0f : 1.0f;
+		if (bNew)
+		{
+			for (float& Each : Seen.Hits)
+			{
+				Each = Hit;
+			}
+		}
+		Seen.Hits[K] = Hit;
+		float Sum = 0.0f;
+		for (const float Each : Seen.Hits)
+		{
+			Sum += Each;
+		}
+		Seen.Target = Sum / 9.0f;
+	}
+	else if (!Points && Now - Seen.Traced >= 0.25)
 	{
 		Seen.Traced = Now;
 		// To the lamp (30 cm short of it: its own shade) or 200 m toward a sun; the player and what they carry left out.

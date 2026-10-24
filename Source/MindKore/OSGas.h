@@ -281,7 +281,11 @@ public:
 	/** GasData's rows a cloud (Scripts/os_muzzle_fx.py, GAS_POST_HLSL). */
 	/** GasData's rows: 0-12 a cloud's atlases and look, 13-28 its four lamps (4 rows each, os.Gas.Light 1). */
 	static constexpr int32 MaxLamps = 4;
-	static constexpr int32 DataRows = 13 + 4 * MaxLamps;
+	/** v13 13d: a haze's slots - 2 for the player's lamps, up to 16 of the zone's (each screen block takes its own 4). */
+	static constexpr int32 MaxPlayerSlots = 2;
+	static constexpr int32 MaxZoneLamps = 16;
+	static constexpr int32 MaxSlots = MaxPlayerSlots + MaxZoneLamps;
+	static constexpr int32 DataRows = 13 + 4 * MaxSlots;
 	/** The velocity grid (air): 20 cells of 6 cm; the render grid: 48 of 2 cm (3 cm in a vacuum), same centre. */
 	static constexpr int32 VelocityCells = 20;
 	static constexpr float VelocityCellCm = 6.0f;
@@ -411,8 +415,10 @@ private:
 			TWeakObjectPtr<const ULightComponent> Lamp;
 			float Weight = 0.0f;
 			float Score = 0.0f;
+			/** How much its baked self-shadow it takes (the key's share, 0 -> 1 over 0.25 s as the key moves: no pop). */
+			float KeyShare = 0.0f;
 		};
-		FLampSlot Lamps[MaxLamps];
+		FLampSlot Lamps[MaxSlots];
 		int32 KeyLamp = INDEX_NONE;
 		bool bLampsFresh = true;
 		/** Whether each lamp near the cloud sees it (os.Gas.Light 1): a trace from the centre every 0.25 s, eased 0.15 s. */
@@ -421,6 +427,9 @@ private:
 			float Seen = 0.0f;
 			float Target = 0.0f;
 			double Traced = -1e9;
+			/** A haze's lamp (v13 13d): seen from 9 points - the centre and 8 corners of its box - one a trace in turn. */
+			float Hits[9] = { 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+			int32 Next = 0;
 		};
 		TMap<TWeakObjectPtr<const ULightComponent>, FLampSeen> LampsSeen;
 		TObjectPtr<UTexture2D> Texture = nullptr;
@@ -560,7 +569,7 @@ private:
 	/** os.Gas.Light 1: the cloud's four lamps for this frame (the set, the crossfade, the key's direction). */
 	void UpdateLamps(FCloud& Cloud, const FVector& Centre, float DeltaTime, FVector3f& OutKeyDir);
 	/** How much a lamp sees Where (0-1, traced every 0.25 s, eased 0.15 s), by the cloud's record. */
-	float LampSees(FCloud& Cloud, const ULightComponent* Lamp, const FVector& Where, const FVector& Toward, bool bDirectional);
+	float LampSees(FCloud& Cloud, const ULightComponent* Lamp, const FVector& Where, const FVector& Toward, bool bDirectional, const FBox* Points = nullptr);
 	void EnsureRender(FCloud& Cloud);
 	/** A cloud made new in its slot: the look, the origin, the clocks, the lamps; bTrace: its walls traced round Where. */
 	void InitCloud(FCloud& Cloud, const FOSGasLook& Look, const FVector& Where, bool bTrace);
